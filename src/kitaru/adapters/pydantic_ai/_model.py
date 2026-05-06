@@ -209,6 +209,37 @@ class KitaruModel(WrapperModel):
             ),
         )
 
+    def _record_cached_model_checkpoint_event(
+        self,
+        *,
+        response: ModelResponse,
+        model_request_parameters: ModelRequestParameters,
+        duration_ms: float,
+    ) -> None:
+        tracker = get_current_tracker()
+        if tracker is None or not self._capture.emit_child_events:
+            return
+
+        event_id, event_context = tracker.start_model_event()
+        if self._capture.correlate_otel_spans:
+            attach_model_correlation(event_id, event_context)
+        tracker.record_model_event(
+            event_id,
+            event_context,
+            status="completed",
+            duration_ms=duration_ms,
+            artifacts={},
+            model_name=response.model_name,
+            usage=response.usage,
+        )
+        self._reserve_tool_call_order(
+            tracker=tracker,
+            event_id=event_id,
+            event_context=event_context,
+            response=response,
+            model_request_parameters=model_request_parameters,
+        )
+
     async def request(
         self,
         messages: list[ModelMessage],
@@ -220,10 +251,14 @@ class KitaruModel(WrapperModel):
             and is_inside_flow()
             and not is_inside_checkpoint()
         ):
+            body_executed = False
+
             # `_in_checkpoint` closes over live `messages` / `self`; safe only for
             # inline runtime. `run_async_in_checkpoint` rejects `runtime='isolated'`
             # to stop these references from hitting a pickling boundary.
             async def _in_checkpoint() -> ModelResponse:
+                nonlocal body_executed
+                body_executed = True
                 return await self._tracked_request(
                     messages, model_settings, model_request_parameters
                 )
@@ -237,12 +272,20 @@ class KitaruModel(WrapperModel):
                         "model_request_parameters": model_request_parameters,
                     }
                 )
-            return await run_async_in_checkpoint(
+            started_at = time.perf_counter()
+            response = await run_async_in_checkpoint(
                 config=with_default_type(self._checkpoint_config, "llm_call"),
                 step_name=f"{self._agent_name}_model_request",
                 body=_in_checkpoint,
                 cache_key=cache_key,
             )
+            if not body_executed:
+                self._record_cached_model_checkpoint_event(
+                    response=response,
+                    model_request_parameters=model_request_parameters,
+                    duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                )
+            return response
         return await self._tracked_request(
             messages, model_settings, model_request_parameters
         )

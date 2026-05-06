@@ -166,7 +166,7 @@ def _context_artifact_namespace(
 def _allocate_artifact_namespace(agent_name: str, run_label: str) -> str | None:
     checkpoint = get_current_checkpoint()
     if checkpoint is None:
-        return None
+        return _tracker_artifact_namespace(agent_name, run_label, 1)
     checkpoint_key = _checkpoint_key(checkpoint)
 
     with _ARTIFACT_NAMESPACE_LOCK:

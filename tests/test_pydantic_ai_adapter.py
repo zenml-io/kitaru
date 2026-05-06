@@ -378,6 +378,155 @@ class TestModelToolCallReservations:
         ) == ["call_alpha_1", "call_alpha_2"]
 
 
+class TestCachedGranularModelCheckpoints:
+    def _tool_call_response(self) -> Any:
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="alpha",
+                    args={},
+                    tool_call_id="call_alpha",
+                ),
+                ToolCallPart(
+                    tool_name="beta",
+                    args={},
+                    tool_call_id="call_beta",
+                ),
+            ],
+            model_name="cached-test-model",
+        )
+
+    def _model_request_parameters(self) -> Any:
+        from pydantic_ai.models import ModelRequestParameters
+        from pydantic_ai.tools import ToolDefinition
+
+        return ModelRequestParameters(
+            function_tools=[ToolDefinition(name="alpha"), ToolDefinition(name="beta")]
+        )
+
+    @pytest.mark.anyio
+    async def test_cached_model_checkpoint_records_event_and_reserves_tool_order(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _flow_scope
+
+        cached_response = self._tool_call_response()
+        tracker = EventTracker(agent_name="cached_agent", run_label="cached")
+        checkpoint_called = False
+
+        async def fake_checkpoint(**_kwargs: Any) -> Any:
+            nonlocal checkpoint_called
+            checkpoint_called = True
+            return cached_response
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+        model = KitaruModel(
+            TestModel(),
+            capture=CapturePolicy(
+                save_prompts=False,
+                save_responses=False,
+                correlate_otel_spans=False,
+            ),
+            agent_name="cached_agent",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="cached_flow"):
+            response = await model.request(
+                [], None, self._model_request_parameters()
+            )
+
+        assert response is cached_response
+        assert checkpoint_called is True
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        assert model_events[0].model_name == "cached-test-model"
+        assert model_events[0].artifacts == {}
+
+        beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+
+        assert alpha_context.sequence_index < beta_context.sequence_index
+        assert alpha_id.endswith("_tool_call_2")
+        assert beta_id.endswith("_tool_call_3")
+        assert alpha_context.fan_out_from == model_events[0].event_id
+        assert beta_context.fan_out_from == model_events[0].event_id
+
+    @pytest.mark.anyio
+    async def test_executed_model_checkpoint_does_not_duplicate_reservations(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.models.function import FunctionModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        response = self._tool_call_response()
+        tracker = EventTracker(agent_name="body_agent", run_label="body")
+
+        def model_function(_messages: list[Any], _info: Any) -> Any:
+            return response
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "llm_call"),
+            ):
+                return await kwargs["body"]()
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+        model = KitaruModel(
+            FunctionModel(model_function),
+            capture=CapturePolicy(
+                save_prompts=False,
+                save_responses=False,
+                correlate_otel_spans=False,
+            ),
+            agent_name="body_agent",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="body_flow"):
+            actual = await model.request([], None, self._model_request_parameters())
+
+        assert actual is response
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        assert tracker._counter == 3
+
+        beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+
+        assert alpha_context.sequence_index < beta_context.sequence_index
+        assert alpha_id.endswith("_tool_call_2")
+        assert beta_id.endswith("_tool_call_3")
+
+
 class TestEventTrackerToolCallOrdering:
     def _record_completed_model(self, tracker: Any) -> tuple[str, Any]:
         event_id, event_context = tracker.start_model_event()

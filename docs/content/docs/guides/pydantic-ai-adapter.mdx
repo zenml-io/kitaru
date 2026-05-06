@@ -62,7 +62,9 @@ Best for prototyping, porting an existing agent, or single-turn interactions.
 
 For multi-turn workflows, named replay boundaries, or coordinated waits across turns, use `@kitaru.flow` and `@kitaru.checkpoint` yourself. Inside a checkpoint, `KitaruAgent` is a straight passthrough.
 
-### Approval (boolean gate)
+### Checkpoint an agent turn
+
+This example shows explicit flow/checkpoint boundaries. Human approval waits are covered in the next sections.
 
 ```python
 import kitaru

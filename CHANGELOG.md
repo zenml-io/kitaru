@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `kitaru.wait()` and adapter wait paths are flow-scope only. Waits created from checkpoint-contained tool bodies must move to flow scope, or those waiting tools must be opted out of granular tool checkpoints.
+
 ### Fixed
+- PydanticAI flow-scope trackers now allocate unique artifact namespaces to avoid cross-run artifact-name collisions.
+- Cached granular PydanticAI model responses now preserve model event/tool-call ordering for parallel tool calls.
 - OpenAI Agents adapter parallel tool-call events now keep assistant-emitted order in event logs and summaries, even when tools start or finish out of order. (#306)
 - PydanticAI adapter parallel tool-call events now keep assistant-emitted order in event logs, summaries, and fan-in metadata, even when tools start or finish out of order. (#306)
 - PydanticAI adapter checkpoint configs now accept `cache`, and granular model checkpoint cache keys ignore PydanticAI-generated per-run message metadata so identical logical prompts can cache across runs. (#279)
+- `KitaruAgent` now defaults to `granular_checkpoints=True`, so model, tool, and MCP calls are persisted as separate adapter checkpoints by default. Pass `granular_checkpoints=False` to keep the previous one-checkpoint-per-agent-run turn mode.
+- PydanticAI adapter observability artifact names now use shorter event-local suffixes inside readable tracker namespaces, avoiding collisions across flow-scope and checkpoint-scope trackers.
 
 ## [0.9.0] - 2026-05-05
 
@@ -31,10 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#270)
 - `examples/` is reorganized into `features/`, `integrations/`, and `end_to_end/` subdirectories. Existing example paths (e.g. `examples/basic_flow/...`) move under one of these categories — update any pinned references. (#242)
-
-### Changed
-- `KitaruAgent` now defaults to `granular_checkpoints=True`, so model, tool, and MCP calls are persisted as separate adapter checkpoints by default. Pass `granular_checkpoints=False` to keep the previous one-checkpoint-per-agent-run turn mode.
-- Shortened PydanticAI adapter observability artifact names by dropping redundant agent/run prefixes in normal cases, while adding readable namespaces when multiple adapter trackers write into the same checkpoint.
 
 ### Fixed
 - Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#252)

@@ -139,7 +139,7 @@ Durable waits need a stable Pydantic AI `tool_call_id`. The adapter uses that id
 
 In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call.
 
-Regular tool bodies are different. A normal tool in granular mode usually runs inside an adapter-created `*_tool` checkpoint, and `kitaru.wait()` is intentionally rejected from checkpoint scope. If a regular tool body raises `ApprovalRequired` / `CallDeferred` or calls `wait_for_input()` from inside that checkpoint, Kitaru fails early with guidance instead of creating a confusing checkpoint-contained wait.
+Regular tool bodies are different. A normal tool in granular mode usually runs inside an adapter-created `*_tool` checkpoint, and `kitaru.wait()` is intentionally rejected from checkpoint scope. `wait_for_input()` does not bypass this guard: if a regular tool body raises `ApprovalRequired` / `CallDeferred` or calls `wait_for_input()` from inside that checkpoint, Kitaru fails early with guidance instead of creating a confusing checkpoint-contained wait.
 
 Use one of these safe patterns for regular tool-body waits:
 
@@ -309,6 +309,7 @@ from kitaru.adapters.pydantic_ai import (
     CapturePolicy, CaptureMode,
     CheckpointConfig, CheckpointRuntime,
     hitl_tool,
+    wait_for_input,
     kitaruify_toolset,
 )
 ```

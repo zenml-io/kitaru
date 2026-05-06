@@ -327,15 +327,25 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
     artifact_names = _artifact_names(hydrated_run)
+    run_label = summary["run_label"]
     assert len(hydrated_run.steps) >= 2
-    assert "llm_call_1_prompt" in artifact_names
-    assert "llm_call_1_response" in artifact_names
+    assert "llm_call_1_prompt" not in artifact_names
+    assert "llm_call_1_response" not in artifact_names
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(
+            rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name
+        )
+        for name in artifact_names
+    )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
     assert "event_log" not in artifact_names
     assert "run_summary" not in artifact_names
     assert not any(name.endswith("_event_log") for name in artifact_names)
     assert not any(name.endswith("_run_summary") for name in artifact_names)
-    assert not any(summary["run_label"] in name for name in artifact_names)
 
 
 _AUTO_FLOW_AGENT: KitaruAgent[Any, str] | None = None
@@ -385,6 +395,50 @@ def test_phase17_tracker_namespace_allocation_is_checkpoint_shared(monkeypatch) 
         assert suffixes == [1, 2, 3, 4]
     finally:
         _tracking._reset_artifact_namespace_state(checkpoint_scope)
+
+
+def test_phase17_multiple_tracker_scopes_at_flow_scope_get_unique_namespaces(
+    primed_zenml,
+) -> None:
+    """Multiple flow-scope trackers should not collide on bare artifact names."""
+    first_agent = KitaruAgent(_make_test_agent(name_prefix="flow_first_agent"))
+    second_agent = KitaruAgent(_make_test_agent(name_prefix="flow_second_agent"))
+
+    @flow
+    def multi_agent_flow(prompt: str) -> str:
+        first = first_agent.run_sync(prompt).output
+        second = second_agent.run_sync(prompt).output
+        return f"{first}\n{second}"
+
+    handle = multi_agent_flow.run("use the add tool")
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    summary_map = hydrated_run.run_metadata["pydantic_ai_run_summaries"]
+    event_map = hydrated_run.run_metadata["pydantic_ai_events"]
+    artifact_names = _artifact_names(hydrated_run)
+    summaries = list(summary_map.values())
+    run_labels = {summary["run_label"] for summary in summaries}
+    assert len(run_labels) == 2
+
+    model_artifact_names = [
+        stored_name
+        for event in _events(event_map)
+        if event["kind"] == "llm_call"
+        for stored_name in event.get("artifacts", {}).values()
+    ]
+    assert model_artifact_names
+    assert len(model_artifact_names) == len(set(model_artifact_names))
+    assert all(stored_name in artifact_names for stored_name in model_artifact_names)
+    assert all(
+        any(run_label in stored_name for stored_name in model_artifact_names)
+        for run_label in run_labels
+    )
+    assert all("_tracker_1_" in stored_name for stored_name in model_artifact_names)
+    assert "llm_call_1_prompt" not in artifact_names
+    assert "llm_call_1_response" not in artifact_names
+    assert not any(name.endswith("_event_log") for name in artifact_names)
+    assert not any(name.endswith("_run_summary") for name in artifact_names)
+    _assert_event_artifacts_use_display_names(event_map, artifact_names)
 
 
 def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
