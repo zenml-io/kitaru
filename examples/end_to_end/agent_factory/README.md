@@ -64,7 +64,12 @@ What you see in the kitaru log lines:
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
 
-**Mode:** granular (default — every model request and every tool call gets its own checkpoint and its own cache key). The FORCE_FAILURE demo above works at this granularity: a flow that crashed after the third model request resumes by replaying only the calls after the third, everything before served from cache. Pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in to the aggregating turn-mode artifact instead.
+**Mode.** `KitaruAgent` has two checkpoint strategies:
+
+- `granular_checkpoints=True` — every model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request resumes by replaying only the calls after the third, everything before served from cache. Best for replay granularity and dashboard observability.
+- `granular_checkpoints=False` (today's default) — one aggregating checkpoint per `agent.run_sync()`. Best when you want a single artifact per run to inspect.
+
+The FORCE_FAILURE demo above works in either mode — turn mode caches the whole turn across the failure; granular mode caches each individual model + tool call. Pass `KitaruAgent(agent, granular_checkpoints=True)` to opt in to per-call caching today; the pydantic-ai adapter is moving toward granular as the default ([kitaru#280](https://github.com/zenml-io/kitaru/pull/280)).
 
 **Env-var toggles:**
 
