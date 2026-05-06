@@ -583,6 +583,21 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
     return values
 
 
+class _MultipleTerminalStepsOutputError(KitaruAmbiguousFlowResultError):
+    """Raised when fallback result extraction sees several terminal steps.
+
+    Subclasses :class:`KitaruAmbiguousFlowResultError` so external callers can
+    catch the public ambiguity error, while internal adapters (e.g. the
+    Pydantic AI auto-flow path) can detect this specific subtype to recover
+    via in-memory results instead of re-raising.
+    """
+
+
+def _is_multiple_terminal_steps_output_error(error: BaseException) -> bool:
+    """Return whether ``error`` came from ambiguous terminal-step extraction."""
+    return isinstance(error, _MultipleTerminalStepsOutputError)
+
+
 def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
     """Build a discoverable message when terminal-step extraction can't pick.
 
@@ -594,19 +609,19 @@ def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
     lines = [
         f"This flow's return value cannot be extracted automatically because {reason}.",
         "",
-        "This typically happens when a flow uses an agent adapter that "
-        "creates per-call checkpoints (e.g. `checkpoint_strategy='calls'`) "
-        "without a single sink. The per-checkpoint artifacts ARE persisted "
-        "and visible:",
+        "This typically happens when a flow's checkpoints fan out into "
+        "parallel branches without a single sink — for example, when an "
+        "agent adapter creates one checkpoint per model or tool call. The "
+        "per-checkpoint artifacts ARE persisted and visible:",
         f"  - View artifacts in the Kitaru UI for execution {execution_id}",
         f"  - Retrieve via the client: "
         f"`KitaruClient().executions.get('{execution_id}')` and inspect "
         "checkpoint outputs",
         "",
-        "To get a clean `.wait()` return value, either return a single "
-        "checkpoint's output from your flow, or use a coarser strategy "
-        "(e.g. `checkpoint_strategy='runner_call'` for the OpenAI Agents "
-        "adapter).",
+        "To get a clean `.wait()` return value, give the flow a single "
+        "sink: wrap the agent call in an explicit `@checkpoint`, or add a "
+        "final checkpoint that consumes the upstream result(s) and returns "
+        "the value you want.",
     ]
     return "\n".join(lines)
 
@@ -636,7 +651,7 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
         return []
     execution_id = str(hydrated_run.id)
     if len(terminal_step_names) > 1:
-        raise KitaruAmbiguousFlowResultError(
+        raise _MultipleTerminalStepsOutputError(
             _ambiguous_terminal_message(
                 execution_id,
                 reason=(
