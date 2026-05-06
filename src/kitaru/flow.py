@@ -609,19 +609,19 @@ def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
     lines = [
         f"This flow's return value cannot be extracted automatically because {reason}.",
         "",
-        "This typically happens when a flow uses an agent adapter that "
-        "creates per-call checkpoints (e.g. `checkpoint_strategy='calls'`) "
-        "without a single sink. The per-checkpoint artifacts ARE persisted "
-        "and visible:",
+        "This typically happens when a flow's checkpoints fan out into "
+        "parallel branches without a single sink — for example, when an "
+        "agent adapter creates one checkpoint per model or tool call. The "
+        "per-checkpoint artifacts ARE persisted and visible:",
         f"  - View artifacts in the Kitaru UI for execution {execution_id}",
         f"  - Retrieve via the client: "
         f"`KitaruClient().executions.get('{execution_id}')` and inspect "
         "checkpoint outputs",
         "",
-        "To get a clean `.wait()` return value, either return a single "
-        "checkpoint's output from your flow, or use a coarser strategy "
-        "(e.g. `checkpoint_strategy='runner_call'` for the OpenAI Agents "
-        "adapter).",
+        "To get a clean `.wait()` return value, give the flow a single "
+        "sink: wrap the agent call in an explicit `@checkpoint`, or add a "
+        "final checkpoint that consumes the upstream result(s) and returns "
+        "the value you want.",
     ]
     return "\n".join(lines)
 
