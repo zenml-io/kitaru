@@ -8,10 +8,10 @@
     <div class="arch-header" data-reveal>
       <span class="section-eyebrow">EXECUTION ARCHITECTURE</span>
       <h2 id="arch-heading" class="section-title arch-title">
-        Control flow isn&rsquo;t code execution. <em class="arch-italic">Kitaru separates the two.</em>
+        The brain and the hand should not have to share a process.
       </h2>
       <p class="arch-desc">
-        The Kitaru runtime owns the durable run &mdash; checkpoint order, state, retry, replay, resume, and wait. Execution targets do the work: inline in the runner, in an isolated job, inside a sandbox, or through an external tool. Checkpoints are the contract between them.
+        The runner owns durable control flow &mdash; checkpoint order, state, retry, replay, resume, and wait. Execution targets do the work: inline, in an isolated job, inside a sandbox, or through an external tool. Checkpoints are the contract between them.
       </p>
     </div>
 
@@ -21,7 +21,7 @@
       <div class="arch-left" data-reveal="fade-left">
         <div class="arch-stack">
           <div class="arch-layer arch-layer-agent">
-            <div class="arch-layer-label">Your Agent Code</div>
+            <div class="arch-layer-label">Inner Harness</div>
             <div class="arch-layer-pills">
               <span class="arch-pill">OpenAI Agents SDK</span>
               <span class="arch-pill">Anthropic Agent SDK</span>
@@ -29,7 +29,7 @@
               <span class="arch-pill">LangGraph</span>
               <span class="arch-pill">Raw Python</span>
             </div>
-            <div class="arch-layer-note">Any framework, any model</div>
+            <div class="arch-layer-note">Model loop</div>
           </div>
 
           <div class="arch-layer arch-layer-sdk">
@@ -45,7 +45,7 @@
               <span class="arch-pill">memory.*</span>
               <span class="arch-pill">configure()</span>
             </div>
-            <div class="arch-layer-note">Core primitives. Durable execution + memory.</div>
+            <div class="arch-layer-note">Outer runtime primitives</div>
           </div>
 
           <div class="arch-layer arch-layer-engine">
@@ -58,7 +58,7 @@
               <span class="arch-pill">Artifacts &amp; state</span>
               <span class="arch-pill">Versions</span>
             </div>
-            <div class="arch-layer-note">Durable control flow</div>
+            <div class="arch-layer-note">Durable brain</div>
           </div>
 
           <div class="arch-layer arch-layer-targets">
@@ -70,7 +70,7 @@
               <span class="arch-pill">External / MCP tool</span>
               <span class="arch-pill">Custom backend</span>
             </div>
-            <div class="arch-layer-note">Where code runs</div>
+            <div class="arch-layer-note">Hands that do work</div>
           </div>
 
           <div class="arch-layer arch-layer-infra">
@@ -81,7 +81,7 @@
               <span class="arch-pill">S3 / GCS</span>
               <span class="arch-pill">SQL Database</span>
             </div>
-            <div class="arch-layer-note">Self-hosted</div>
+            <div class="arch-layer-note">Self-hosted substrate</div>
           </div>
         </div>
       </div>

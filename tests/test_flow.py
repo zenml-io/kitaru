@@ -31,6 +31,7 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     FailureOrigin,
+    KitaruAmbiguousFlowResultError,
     KitaruBackendError,
     KitaruExecutionError,
     KitaruRuntimeError,
@@ -1921,9 +1922,47 @@ def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:
     handle = FlowHandle(_as_pipeline_run(completed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(KitaruRuntimeError, match="fallback extraction is ambiguous"),
+        pytest.raises(KitaruAmbiguousFlowResultError) as exc_info,
     ):
         handle.get()
+
+    message = str(exc_info.value)
+    assert "final_a" in message and "final_b" in message
+    assert "KitaruClient" in message
+
+
+def test_flow_handle_get_ambiguous_terminal_outputs_message_lists_outputs() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("final", "output_a", "a"),
+            ("final", "output_b", "b"),
+        ],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        pytest.raises(KitaruAmbiguousFlowResultError) as exc_info,
+    ):
+        handle.get()
+
+    message = str(exc_info.value)
+    assert "'final'" in message
+    assert "output_a" in message and "output_b" in message
+
+
+def test_flow_ambiguous_flow_result_error_subclasses_runtime_error() -> None:
+    """Callers using `except KitaruRuntimeError` continue to catch ambiguity,
+    but more specific code can target `KitaruAmbiguousFlowResultError` to
+    avoid swallowing real execution failures.
+    """
+    assert issubclass(KitaruAmbiguousFlowResultError, KitaruRuntimeError)
+    assert not issubclass(KitaruExecutionError, KitaruAmbiguousFlowResultError)
 
 
 def test_flow_handle_get_raises_when_step_metadata_is_missing() -> None:

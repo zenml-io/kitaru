@@ -6,7 +6,7 @@
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>SEE THE CODE</span>
     <h2 class="section-title showcase-title" data-reveal data-reveal-delay="1">
-      Core primitives. Full durability.
+      The outer runtime is just Python.
     </h2>
 
     <div class="showcase-grid">
@@ -25,15 +25,15 @@
           <pre class="showcase-code-pre code-syntax" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
 <span class="code-line"><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint</span>
 <span class="code-line"> </span>
-<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"kubernetes"</span>)</span>
+<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"prod-k8s"</span>)</span>
 <span class="code-line"> </span>
 <span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
 <span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">dict</span>:</span>
-<span class="code-line" data-primitive="checkpoint">    results <span class="op">=</span> <span class="fn">search_web</span>(topic)</span>
+<span class="code-line" data-primitive="checkpoint">    results <span class="op">=</span> <span class="fn">run_agent_search</span>(topic)</span>
 <span class="code-line" data-primitive="save">    kitaru.<span class="fn">save</span>(<span class="str">"sources"</span>, results)</span>
 <span class="code-line" data-primitive="checkpoint">    <span class="kw">return</span> <span class="fn">summarize</span>(results)</span>
 <span class="code-line"> </span>
-<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
+<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span>(runtime<span class="op">=</span><span class="str">"isolated"</span>)</span>
 <span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">write_draft</span>(context: <span class="var">str</span>, prev_id: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
 <span class="code-line" data-primitive="load">    prior <span class="op">=</span> kitaru.<span class="fn">load</span>(prev_id, <span class="str">"sources"</span>)</span>
 <span class="code-line" data-primitive="llm">    <span class="kw">return</span> kitaru.<span class="fn">llm</span>(</span>
@@ -60,7 +60,7 @@
       <div class="showcase-annotations" data-reveal="fade-right" data-reveal-delay="3">
         <div class="annotation" data-highlight="flow">
           <code class="annotation-label">@flow</code>
-          <p>Top-level orchestration boundary. Marks a function as a durable workflow.</p>
+          <p>Top-level durable boundary for the agent run.</p>
         </div>
         <div class="annotation" data-highlight="checkpoint">
           <code class="annotation-label">@checkpoint</code>
@@ -68,11 +68,11 @@
         </div>
         <div class="annotation" data-highlight="wait">
           <code class="annotation-label">kitaru.wait()</code>
-          <p>Suspends the process. Resume when a human responds, 30s or 3 days later.</p>
+          <p>Suspends the run. Resume when a human, webhook, or agent responds.</p>
         </div>
         <div class="annotation" data-highlight="llm">
           <code class="annotation-label">kitaru.llm()</code>
-          <p>Resolves the model alias and injects the API key.</p>
+          <p>Resolves the model alias, injects the key, and captures usage.</p>
         </div>
         <div class="annotation" data-highlight="log">
           <code class="annotation-label">kitaru.log()</code>
@@ -80,15 +80,15 @@
         </div>
         <div class="annotation" data-highlight="save">
           <code class="annotation-label">kitaru.save()</code>
-          <p>Persist any artifact by name inside a checkpoint.</p>
+          <p>Persist the real intermediate outputs your agent will need later.</p>
         </div>
         <div class="annotation" data-highlight="load">
           <code class="annotation-label">kitaru.load()</code>
-          <p>Retrieve saved artifacts from any prior execution by ID.</p>
+          <p>Retrieve saved artifacts from an earlier execution by ID.</p>
         </div>
         <div class="annotation" data-highlight="configure">
           <code class="annotation-label">kitaru.configure()</code>
-          <p>Set stack, project, and runtime defaults. Zero config locally.</p>
+          <p>Move the same flow from local dev to remote infrastructure.</p>
         </div>
       </div>
 

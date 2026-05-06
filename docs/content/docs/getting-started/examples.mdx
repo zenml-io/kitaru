@@ -100,7 +100,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `features/llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
 | `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
 | `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with Kitaru call-level or runner-call durability in a real API-backed support flow (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [OpenAI Agents Adapter](/guides/openai-agents-adapter) |
-| `end_to_end/openai_research_bot/research_bot.py` | Run a multi-agent OpenAI research bot with planner, parallel search checkpoints, and a writer report (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
+| `end_to_end/openai_research_bot/research_bot.py` | Run a multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and a published report (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
 | `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">

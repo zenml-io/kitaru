@@ -33,31 +33,32 @@ If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
 ## What to look for in Kitaru UI
 
-In `checkpoint_strategy="calls"` mode (default in this example), you should see
-multiple checkpoints for one request, typically in a pattern like:
-
-- model decides to call tool
-- `lookup_order(...)`
-- model decides to call tool
-- `shipping_policy(...)`
-- model writes final customer answer
-
-That gives you a clear model/tool/model/tool/model durability story.
+By default this example uses `checkpoint_strategy="runner_call"` — Kitaru
+places one checkpoint around the whole `Runner.run(...)` call, so the
+adapter's `OpenAIRunResult` becomes the flow's terminal artifact and
+`flow.run(...).wait()` returns it cleanly.
 
 ## `calls` vs `runner_call` (plain-language version)
 
-- `calls`: Kitaru places smaller checkpoints around each supported model/tool
-  call.
 - `runner_call`: Kitaru places one bigger checkpoint around the entire
-  `Runner.run(...)` call.
+  `Runner.run(...)` call. Single terminal artifact, clean `.wait()` return.
+- `calls`: Kitaru places smaller checkpoints around each supported model/tool
+  call. Finer replay units, but each call becomes a peer checkpoint with no
+  single sink — `.wait()` raises `KitaruAmbiguousFlowResultError` because
+  there is no "the" return value. The per-checkpoint artifacts are still
+  visible in the Kitaru UI.
 
-This example focuses on `calls` so the UI clearly shows each step.
-
-If you want a side-by-side comparison, run with:
+To see both side-by-side (the default `runner_call` run, then the `calls`
+run with the expected ambiguity error printed), use:
 
 ```bash
-OPENAI_AGENTS_COMPARE_RUNNER_CALL=1 uv run python openai_agents_adapter.py
+OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_adapter.py
 ```
+
+In that mode you'll see the `runner_call` model output first, then a
+`=== calls strategy output ===` section showing the new actionable error
+that names the terminal checkpoints, gives the execution ID, and points at
+the Kitaru UI / `KitaruClient` for per-checkpoint artifact retrieval.
 
 ## Why this example uses the real API
 
