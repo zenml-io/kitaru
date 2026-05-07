@@ -76,7 +76,7 @@ def test_suspend_checkpoint_scope_restores_state_after_exception() -> None:
 
 
 def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
-    """wait() should succeed once checkpoint scope is temporarily suspended."""
+    """Low-level suspension hides checkpoint scope before wait() is called."""
     flow_id = str(uuid4())
     execution_id, checkpoint_id = _scope_ids()
 

@@ -170,7 +170,16 @@ def demo_message_history() -> str:
 
 
 def demo_capture_policy() -> str:
-    """Metadata-only tool capture + a per-tool override that drops capture entirely."""
+    """Metadata-only tool capture + a per-tool override that drops capture entirely.
+
+    The agent calls a tool, so without an enclosing ``@checkpoint`` the
+    adapter would create three sibling checkpoints and the flow would have
+    no single sink for ``.wait()``. Wrapping the run in ``research_brief``
+    switches the adapter into passthrough mode: per-call work is recorded
+    as child events under the outer checkpoint while the flow keeps one
+    terminal output. The capture policy still applies to those child
+    events.
+    """
     policy = CapturePolicy(
         save_prompts=True,
         save_responses=True,
@@ -180,9 +189,13 @@ def demo_capture_policy() -> str:
     researcher = KitaruAgent(_make_str_agent("capture_agent"), capture=policy)
     deps = ResearchDeps(source_priority=["wiki"])
 
+    @checkpoint
+    def research_brief(topic: str) -> str:
+        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+
     @flow
     def capture_policy_flow(topic: str) -> str:
-        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+        return research_brief(topic)
 
     return capture_policy_flow.run("kitaru").wait()
 
@@ -212,7 +225,12 @@ def publish_brief_hitl(headline: str, sources: list[str]) -> str:
 
 
 def demo_hitl_wiring() -> str:
-    """Wire ``@hitl_tool``, ``ApprovalRequired``, and ``CallDeferred`` on one agent."""
+    """Wire explicit and native HITL patterns on one agent.
+
+    ``@hitl_tool`` is the safest default because the adapter routes it outside
+    granular tool checkpoints. Native ``ApprovalRequired`` / ``CallDeferred``
+    tools that may wait should be opted out of tool checkpointing.
+    """
     agent = Agent(
         TestModel(call_tools=[]),
         name=f"hitl_demo_{_RUN_TAG}",
@@ -228,7 +246,13 @@ def demo_hitl_wiring() -> str:
     def deferred_side_effect() -> str:
         raise CallDeferred("Queued for async completion.")
 
-    wired = KitaruAgent(agent)
+    wired = KitaruAgent(
+        agent,
+        tool_checkpoint_config_by_name={
+            "approval_required": False,
+            "deferred_side_effect": False,
+        },
+    )
 
     @flow
     def hitl_wiring_flow() -> str:

@@ -18,6 +18,3 @@ CVE-2025-66416  # mcp 1.19 -> 1.23 (transitively blocked: mcp >=1.20 needs pyjwt
 CVE-2025-67221  # orjson 3.10 -> 3.11
 CVE-2025-54121  # starlette 0.45 -> 0.47
 CVE-2025-62727  # starlette 0.45 -> 0.49
-
-# --- pip itself: tooling, not a runtime dependency for kitaru users. -------
-CVE-2026-3219   # pip 26.0.1 (no fix-version published yet)

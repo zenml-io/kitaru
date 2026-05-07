@@ -16,7 +16,7 @@ result = durable_agent.run_sync("Summarize quantum error correction.")
 print(result.output)
 ```
 
-No flow decorator, no checkpoint annotations. When called outside a flow, `KitaruAgent` auto-opens one for you and persists a checkpoint per turn. The dashboard shows every turn, tool call, model response, and wait point.
+No flow decorator, no checkpoint annotations. When called outside a flow, `KitaruAgent` auto-opens one for you. By default, model, tool, and MCP calls are persisted as separate granular checkpoints. The dashboard shows the run, tool calls, model responses, and wait points.
 
 ## Install
 
@@ -38,7 +38,7 @@ kitaru status
 
 ### Zero-config
 
-Wrap the agent and call it directly. The adapter auto-opens a flow and a turn checkpoint when you're outside of one.
+Wrap the agent and call it directly. The adapter auto-opens a flow and granular per-call checkpoints when you're outside of one.
 
 ```python
 from pydantic_ai import Agent
@@ -62,7 +62,9 @@ Best for prototyping, porting an existing agent, or single-turn interactions.
 
 For multi-turn workflows, named replay boundaries, or coordinated waits across turns, use `@kitaru.flow` and `@kitaru.checkpoint` yourself. Inside a checkpoint, `KitaruAgent` is a straight passthrough.
 
-### Approval (boolean gate)
+### Checkpoint an agent turn
+
+This example shows explicit flow/checkpoint boundaries. Human approval waits are covered in the next sections.
 
 ```python
 import kitaru
@@ -87,9 +89,11 @@ print(handle.wait())
 
 Replay the flow with the original run ID to serve cached outputs for completed checkpoints and re-execute only what changed. See [Replay and overrides](/guides/replay-and-overrides).
 
-### Ask the human from a tool body (recommended)
+### Ask the human from a tool body
 
-The simplest pattern is a regular PydanticAI tool that calls `kp.wait_for_input(...)`. The LLM picks the question, the tool returns the human's typed answer, and the agent continues with that value as the tool result — no decorator, no exception, no marker metadata.
+`kp.wait_for_input(...)` is a thin adapter-namespaced wrapper around `kitaru.wait(...)`. The LLM can pick the question, the tool can return the human's typed answer, and the agent can continue with that value as the tool result — but the wait still has to be created at flow scope.
+
+That detail matters in default granular mode. A regular tool body usually runs inside an adapter-created `*_tool` checkpoint, and `kitaru.wait()` is intentionally rejected from checkpoint scope. If a regular tool body needs to call `kp.wait_for_input(...)`, opt that tool out of granular checkpointing:
 
 ```python
 from typing import Literal
@@ -113,9 +117,18 @@ def collect_bug_report() -> BugReport:
     )
 ```
 
+Then construct the durable agent with a per-tool checkpoint opt-out:
+
+```python
+durable_agent = KitaruAgent(
+    agent,
+    tool_checkpoint_config_by_name={"ask_user": False, "collect_bug_report": False},
+)
+```
+
 Both `question` and `schema` are ordinary arguments, so the tool body can compute them, branch on agent state, prepend context, or call multiple waits. The adapter attaches identifying metadata (`adapter=pydantic_ai`, `source=tool_body`) so these waits are distinguishable from hand-written `kitaru.wait()` calls in flow code.
 
-`kp.wait_for_input` is a thin alias for `kitaru.wait(...)`, which now works from anywhere inside a flow — flow body, `@checkpoint` body, or a framework-wrapped tool body. Scope suspension is handled by the primitive.
+If you do not opt the tool out, the adapter fails early with an actionable `KitaruUsageError` rather than creating a checkpoint-contained wait that would be hard to resume safely. Another safe option is to move the human gate out of the tool body and call `kitaru.wait()` directly before or after the agent turn in your `@kitaru.flow` code.
 
 Running locally, Kitaru prompts in the terminal. Running against a deployed server, the execution pauses and can be resumed from anywhere:
 
@@ -150,7 +163,7 @@ def collect_bug_report() -> BugReport: ...
 
 ### Replay semantics
 
-A wait inside a checkpoint pauses the flow; on resume, the enclosing checkpoint re-runs from the top. That's cheap for tight checkpoints (one agent turn, one wait), but it means expensive work placed before the wait is repeated. If an agent turn has many model / tool calls before the wait, use `granular_checkpoints=True` so each call becomes its own cacheable unit — on resume, the pre-wait calls serve from cache and only the wait point re-executes.
+Waits belong at flow scope. `kitaru.wait()` is rejected inside `@checkpoint` bodies because the flow can pause while the enclosing checkpoint step is recorded as failed or incomplete. The default granular mode splits each top-level model, tool, and MCP call into its own checkpoint, which improves visibility and retry isolation, but it also means regular tool-body waits need an explicit per-tool opt-out as shown above.
 
 ## Runtime behavior and guardrails
 ### Human-in-the-loop tools
@@ -165,16 +178,19 @@ def publish_brief(headline: str, sources: list[str]) -> str:
     return f"published: {headline} ({len(sources)} sources)"
 ```
 
-Equivalent triggers that also route through `kitaru.wait()`:
+Other PydanticAI deferred patterns also route through `kitaru.wait()` **when they run at flow scope**:
 
 - `@agent.tool(requires_approval=True)` — PydanticAI's native approval flag
-- raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from any tool body
+- raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from a tool body
+- calling `kp.wait_for_input(...)` from a tool body
+
+In granular mode, `@hitl_tool` stays flow-scope safe because the adapter deliberately skips the synthetic `*_tool` checkpoint for that call. Regular tools that use native approval/deferred exceptions or `wait_for_input()` must either opt out with `tool_checkpoint_config_by_name={"tool_name": False}` or move the wait to explicit flow code.
 
 See [Wait, Input, and Resume](/guides/wait-and-resume) for how paused flows are resolved.
 
 ### MCP servers
 
-MCP servers attached to the agent are wrapped automatically. Their tool calls appear alongside native tools on the same checkpoint, and `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
+MCP servers attached to the agent are wrapped automatically. Their tool calls are tracked alongside native tools; in the default granular mode, each top-level MCP call gets its own adapter checkpoint. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
 
 ```python
 from pydantic_ai import Agent
@@ -196,21 +212,21 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 
 | Mode | How it maps | Replay unit | Best for |
 |---|---|---|---|
-| **Turn** (default) | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | Most agents — single aggregating artifact, clean run summary |
-| **Granular** | No turn checkpoint; each model/tool/MCP call becomes its own checkpoint | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
+| **Granular** (default) | No turn checkpoint; each model/tool/MCP call becomes its own checkpoint | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
+| **Turn** (`granular_checkpoints=False`) | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | Agents where one aggregated checkpoint and checkpoint artifacts like `event_log` / `run_summary` are more useful than per-call boundaries |
 
-**One-sentence replay semantics.** If a flow crashes on the 8th model call of a turn, turn mode re-runs all 7 completed calls from scratch on replay; granular mode serves those 7 from cache and resumes at call 8. Pick granular when wasted model spend on replay would hurt; pick turn when a single aggregated run artifact is more valuable than cache granularity.
+**Replay semantics in one sentence.** If a flow crashes on the 8th model call of a turn, turn mode re-runs the whole turn; granular mode gives the earlier calls their own completed checkpoint boundaries. If you set `cache=True` on adapter-created checkpoint configs, repeated runs can reuse completed checkpoints when the logical inputs are the same; changed prompts, message history, model settings, tool arguments, tool call IDs, or behavior-changing run options produce different cache keys and should miss cache.
 
-Granular mode trades the aggregating run artifact for per-call durability:
+Granular mode is the default. `granular_checkpoints=True` is shown here for clarity when setting per-call checkpoint configs:
 
 ```python
 durable_agent = KitaruAgent(
     agent,
     granular_checkpoints=True,
-    model_checkpoint_config={"retries": 3},
-    tool_checkpoint_config={"retries": 2},
+    model_checkpoint_config={"retries": 3, "cache": True},
+    tool_checkpoint_config={"retries": 2, "cache": True},
     tool_checkpoint_config_by_name={
-        "lookup_price": {"retries": 5},   # flaky external API
+        "lookup_price": {"retries": 5, "cache": True},   # flaky external API
         "fetch_secret": False,             # never checkpoint this tool
     },
     mcp_checkpoint_config={"retries": 3},
@@ -219,19 +235,26 @@ durable_agent = KitaruAgent(
 
 Each config is a `CheckpointConfig` TypedDict accepting:
 
+- `cache: bool | None` — passed through to `@kitaru.checkpoint(cache=...)`. Use `True` to opt adapter-created checkpoints into step caching, `False` to disable caching for that boundary, or omit it / use `None` to inherit the stack default.
 - `runtime: "inline"` — run in-process. `runtime="isolated"` is not yet supported on adapter-managed checkpoints and raises `KitaruUsageError`.
 - `retries: int` — auto-retry the call on failure.
 - `type: str` — dashboard grouping. Defaults to `"llm_call"`, `"tool_call"`, or `"mcp_call"` so adapter checkpoints group with native `kitaru.llm()` / `@kitaru.checkpoint(type="tool_call")` calls.
 
-The turn checkpoint itself is configured via `turn_checkpoint_config=` in turn mode.
+The turn checkpoint itself is configured via `turn_checkpoint_config=` in turn mode. To opt into the previous one-checkpoint-per-run behavior, pass `granular_checkpoints=False`:
+
+```python
+durable_agent = KitaruAgent(agent, granular_checkpoints=False)
+```
 
 <Callout type="info">
   **Streaming exception.** Granular mode cannot apply to streamed turns —
   per-call checkpointing around an async context manager would require draining
   and replaying the stream inside a sync checkpoint. When an
   `event_stream_handler` is supplied, `KitaruAgent` transparently falls back to
-  a turn checkpoint for that call. `run_stream()` and `iter()` always require
-  an explicit `@kitaru.checkpoint`.
+  a turn checkpoint for that call. That fallback disables turn-checkpoint
+  caching for the call, because a cached final result would skip the handler's
+  progress side effects. `run_stream()` and `iter()` always require an explicit
+  `@kitaru.checkpoint`.
 </Callout>
 
 ## Streaming
@@ -245,7 +268,7 @@ Stream transcripts are persisted as artifacts when `CapturePolicy.save_stream_tr
 
 ## Capture policy
 
-`CapturePolicy` controls what the adapter stores per run. Defaults favor full observability.
+`CapturePolicy` controls what the adapter stores per run. Defaults favor full observability. Wait records always keep minimal routing metadata (`adapter`, `tool_name`, `tool_call_id`), but tool args and exception payloads are only stored in wait metadata when `tool_capture="full"`.
 
 | Option | Default | Description |
 |---|---|---|
@@ -315,7 +338,8 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 - **"KitaruAgent requires the wrapped agent to define a concrete model"** — pass `model=` to the `Agent()` constructor, not to `run()`.
 - **"requires an explicit `@kitaru.checkpoint`"** — `run_stream()` and `iter()` return context managers; wrap them in a checkpoint yourself.
 - **Auto-flow fails on a remote stack** — the in-process registry doesn't cross process boundaries. Use `@kitaru.flow` explicitly.
-- **Replay re-runs every tool** — you're in turn mode. Switch to `granular_checkpoints=True` for per-call cache granularity.
+- **Too many per-call checkpoints** — pass `granular_checkpoints=False` to group a whole agent run into one turn checkpoint.
+- **Replay cost control** — granular mode gives per-call checkpoint boundaries, not a billing guarantee. Pair it with provider-side caching or idempotency for expensive calls.
 - **Checkpoints not appearing in the dashboard** — verify `kitaru status` shows a running server and that `kitaru init` has been run in the project root.
 
 ## Runnable example
