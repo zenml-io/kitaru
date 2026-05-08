@@ -62,15 +62,16 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
-      - uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2
+      # Pinned to a post-v2.8.0 master commit because the v2.8.0 release
+      # ships an installer that can't extract lychee >= 0.24.0 tarballs
+      # (subfolder layout) and defaults to lychee v0.23.0, which doesn't
+      # understand the new `include_fragments` enum in lychee.toml. The
+      # pinned SHA freezes behavior; revisit when a tagged release lands.
+      - uses: lycheeverse/lychee-action@b40e218fdac9481d3c13098d4e1ee56f3b589356  # master @ 2026-05-03
         with:
           args: --root-dir . --verbose --no-progress './**/*.md'
           fail: true
           jobSummary: true
-          # Pin lychee >= 0.24.0 so the action matches the version brew
-          # installs locally; required for the new `include_fragments` enum
-          # syntax in lychee.toml.
-          lycheeVersion: v0.24.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:

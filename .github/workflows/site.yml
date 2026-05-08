@@ -72,14 +72,14 @@ jobs:
 
       # --- Check internal links in built output ---
       - name: Check internal links
-        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2
+        # Keep this SHA in sync with .github/workflows/ci.yml — see the
+        # comment there for why we pin a post-v2.8.0 master commit.
+        uses: lycheeverse/lychee-action@b40e218fdac9481d3c13098d4e1ee56f3b589356  # master @ 2026-05-03
         with:
           args: --offline --root-dir site/dist --no-progress --verbose --index-files
             index.html 'site/dist/**/*.html'
           fail: true
           jobSummary: true
-          # Keep this in sync with .github/workflows/ci.yml.
-          lycheeVersion: v0.24.2
 
       # --- Deploy unified Worker (production) ---
       - name: Deploy production
