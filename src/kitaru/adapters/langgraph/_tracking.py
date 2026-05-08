@@ -42,6 +42,7 @@ class EventTracker:
     _events: list[LangGraphAdapterEvent] = field(default_factory=list)
     _status: EventStatus = "completed"
     _error: BaseException | None = None
+    _has_failure_event: bool = False
     _started_at: float = field(default_factory=time.perf_counter)
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
@@ -63,6 +64,11 @@ class EventTracker:
     def run_summary_artifact_name(self) -> str:
         return f"{self.graph_name}_{self.run_label}_run_summary"
 
+    @property
+    def has_failure_event(self) -> bool:
+        with self._lock:
+            return self._has_failure_event
+
     def record(
         self,
         kind: LangGraphEventKind,
@@ -76,6 +82,8 @@ class EventTracker:
             self._counter += 1
             if status != "completed":
                 self._status = status
+            if status == "failed":
+                self._has_failure_event = True
             if error is not None:
                 self._error = error
             self._events.append(
@@ -144,7 +152,8 @@ def tracker_scope(graph_name: str | None) -> Iterator[EventTracker]:
     try:
         yield tracker
     except Exception as error:
-        tracker.record("graph_call_failed", status="failed", error=error)
+        if not tracker.has_failure_event:
+            tracker.record("graph_call_failed", status="failed", error=error)
         raise
     finally:
         _CURRENT_TRACKER.reset(tracker_token)

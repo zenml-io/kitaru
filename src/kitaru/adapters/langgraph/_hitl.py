@@ -72,7 +72,7 @@ def wait_for_interrupt(
         )
 
     interrupt = _select_interrupt(result, interrupt_index)
-    wait_metadata = {
+    wait_metadata: dict[str, Any] = {
         "adapter": "langgraph",
         "source": "interrupt_bridge",
         "interrupt_index": interrupt.index,
@@ -80,7 +80,7 @@ def wait_for_interrupt(
         "node_name": interrupt.node_name,
     }
     if metadata:
-        wait_metadata.update(metadata)
+        wait_metadata["user_metadata"] = metadata
     payload = kitaru.wait(
         schema=schema,
         name=name or "LangGraph interrupt",
@@ -93,6 +93,7 @@ def wait_for_interrupt(
         payload,
         interrupt_index=interrupt.index,
         durability=durability,
+        metadata=metadata,
     )
 
 

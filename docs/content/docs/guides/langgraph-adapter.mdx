@@ -132,7 +132,9 @@ graph = builder.compile(checkpointer=InMemorySaver())
 
 That is good for learning, tests, and short local demos. It is **not** durable across process or container restarts, because the checkpoints live in memory.
 
-For restart durability, use a persistent LangGraph checkpointer such as the ones documented in the [LangGraph persistence guide](https://docs.langchain.com/oss/python/langgraph/persistence). Kitaru records the outer execution and preserves the `thread_id`; LangGraph's checkpointer is still the thing that stores graph-internal state.
+This matters even more on Kubernetes. A Kitaru flow can resume or replay in a different pod from the one that ran the first graph call. If your graph used `InMemorySaver`, the paused LangGraph state stayed inside the old Python process. The new pod has the same code and the same Kitaru flow checkpoint, but it does not have the old process memory. LangGraph opens the `thread_id` folder and finds nothing useful.
+
+For restart durability, use a persistent LangGraph checkpointer/store such as the ones documented in the [LangGraph persistence guide](https://docs.langchain.com/oss/python/langgraph/persistence), and keep the same stable `thread_id` for start and resume calls. Kitaru records the outer execution and preserves the `thread_id`; LangGraph's checkpointer is still the thing that stores graph-internal state.
 
 You can ask the adapter to be stricter with `LangGraphDurabilityPolicy`:
 
@@ -186,6 +188,8 @@ if first.status == "interrupted":
 
 `wait_for_interrupt(...)` must be called from the flow body, not from inside a checkpoint. That is the same Kitaru rule as regular waits: a flow can pause safely, but a checkpoint body should either complete or fail.
 
+If you pass `metadata=...`, the adapter attaches it in two places: under `user_metadata` on the Kitaru wait record, and as `metadata` on the `LangGraphRunRequest` returned for the resume call. The wait record also gets adapter metadata such as `interrupt_index`, `task_id`, and `node_name` so you can trace which LangGraph interrupt produced the pause without user metadata overwriting those adapter keys.
+
 ## Checkpoint strategy
 
 The v1 adapter has one strategy:
@@ -231,15 +235,19 @@ Important defaults:
 
 | Option | Default | Meaning |
 |---|---:|---|
-| `save_input` | `True` | Include graph-call input in captured adapter metadata/artifacts where applicable. |
-| `save_output` | `True` | Include completed graph output. Interrupted runs do not store raw interrupt SDK objects as output. |
+| `save_input` | `True` | Include the start input, or resume command payload, in the adapter run summary. |
+| `save_output` | `True` | Include completed graph output in the adapter run summary. Interrupted and failed runs do not store output. |
 | `save_config` | `True` | Include redacted config metadata, including `thread_id`. Secret-like keys are redacted. |
 | `save_context` | `False` | Do not persist arbitrary runtime context by default. |
-| `save_state_snapshot` | `True` | Inspect `graph.get_state(config)` when available and save a safe summary. |
+| `save_state_snapshot` | `True` | Inspect `graph.get_state(config)` when available and save a summary. Set this to `False` to skip `get_state(...)` entirely. |
 | `save_state_values` | `False` | Do not save full LangGraph state values unless you opt in. |
-| `save_state_tasks` | `True` | Save task metadata summaries so interrupts are easier to debug. |
+| `save_state_tasks` | `True` | Save safe task metadata summaries, not raw task internals. |
+| `save_usage` | `True` | Try to extract token usage from graph output. |
+| `capture_mode` | `"metadata"` | Metadata mode summarizes task IDs, node names, paths, interrupt counts, and error labels. `"full"` opts into raw JSON-safe task serialization. |
 
-If your graph state contains prompts, tool outputs, customer data, or secrets, be careful with `save_state_values=True`.
+Here is the practical safety story. By default, Kitaru records enough to answer, "Which graph call ran? Which thread did it use? Did it finish, fail, or interrupt? What checkpoint ID did LangGraph report?" It does **not** dump full LangGraph task objects by default, because those task objects can contain prompts, tool outputs, customer data, or SDK internals. If you set `capture_mode="full"`, treat the run summaries as potentially sensitive.
+
+If your graph state contains prompts, tool outputs, customer data, or secrets, be careful with `save_state_values=True` and `capture_mode="full"`.
 
 ## What Kitaru does and does not do in v1
 
@@ -249,6 +257,7 @@ If your graph state contains prompts, tool outputs, customer data, or secrets, b
 - Create one outer Kitaru checkpoint per `runner.invoke(...)` / `runner.ainvoke(...)` call.
 - Preserve and record the LangGraph `thread_id` used for the call.
 - Record status, interrupt summaries, latest checkpoint ID, and run-summary metadata.
+- Persist failure summaries for graph calls that raise, including the exception type/message and the safe run metadata captured before the failure.
 - Bridge LangGraph interrupts into resume requests, and optionally into `kitaru.wait(...)`.
 - Let you deploy the flow using the same Kitaru stacks as other workflows.
 
@@ -312,7 +321,7 @@ For the full catalog, see [Examples](/getting-started/examples).
 - **"requires optional dependency `langgraph`"** — install with `uv sync --extra langgraph`, or include `local` too if you want the local Kitaru server.
 - **"requires a stable non-empty `thread_id`"** — pass a stable application key such as a ticket ID, user conversation ID, or workflow session ID.
 - **The graph resumes from the beginning** — check that start and resume use the same `thread_id`, and that the graph was compiled with a checkpointer.
-- **Restart durability does not work with `InMemorySaver`** — use a persistent LangGraph checkpointer. `InMemorySaver` is only in-memory.
+- **Restart durability does not work with `InMemorySaver`** — use a persistent LangGraph checkpointer/store. `InMemorySaver` is only in-memory, so a new process or Kubernetes pod cannot see the old graph state.
 - **You need streaming** — streaming is intentionally deferred from this adapter contract until Kitaru/ZenML streaming support is available.
 - **You expected Deep Agents files to appear as Kitaru artifacts** — Deep Agents owns its filesystem backends. Save important outputs explicitly with `kitaru.save(...)` if you want them as Kitaru artifacts.
 

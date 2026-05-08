@@ -74,6 +74,7 @@ class KitaruGraphRunner:
         self._name = resolved_name
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
         self._capture = capture or LangGraphCapturePolicy()
+        self._capture_summary = self._capture.model_dump(mode="json")
         self._durability = durability or LangGraphDurabilityPolicy()
         self._run_checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             run_checkpoint_config,
@@ -171,7 +172,18 @@ class KitaruGraphRunner:
                 "graph_call_started",
                 metadata=self._safe_event_metadata(request, config=config),
             )
-            output = self._graph.invoke(input_or_command, config=config, **kwargs)
+            try:
+                output = self._graph.invoke(input_or_command, config=config, **kwargs)
+            except Exception as exc:
+                self._handle_graph_call_failure(
+                    error=exc,
+                    tracker=tracker,
+                    request=request,
+                    config=config,
+                    context=context,
+                    warnings=warnings,
+                )
+                raise
             result = self._build_result(
                 output,
                 request=request,
@@ -179,7 +191,13 @@ class KitaruGraphRunner:
                 tracker=tracker,
                 warnings=warnings,
             )
-            self._persist_tracker(tracker, result, request=request, config=config)
+            self._persist_tracker(
+                tracker,
+                result,
+                request=request,
+                config=config,
+                context=context,
+            )
             return result
 
     async def _invoke_graph_async(
@@ -207,7 +225,18 @@ class KitaruGraphRunner:
                 "graph_call_started",
                 metadata=self._safe_event_metadata(request, config=config),
             )
-            output = await ainvoke(input_or_command, config=config, **kwargs)
+            try:
+                output = await ainvoke(input_or_command, config=config, **kwargs)
+            except Exception as exc:
+                self._handle_graph_call_failure(
+                    error=exc,
+                    tracker=tracker,
+                    request=request,
+                    config=config,
+                    context=context,
+                    warnings=warnings,
+                )
+                raise
             result = self._build_result(
                 output,
                 request=request,
@@ -215,7 +244,13 @@ class KitaruGraphRunner:
                 tracker=tracker,
                 warnings=warnings,
             )
-            self._persist_tracker(tracker, result, request=request, config=config)
+            self._persist_tracker(
+                tracker,
+                result,
+                request=request,
+                config=config,
+                context=context,
+            )
             return result
 
     def _build_result(
@@ -306,7 +341,10 @@ class KitaruGraphRunner:
     def _inspect_state(
         self, config: dict[str, Any], *, warnings: list[str]
     ) -> LangGraphStateSummary | None:
-        if not self._durability.inspect_state_after_run:
+        if (
+            not self._durability.inspect_state_after_run
+            or not self._capture.save_state_snapshot
+        ):
             return None
         get_state = getattr(self._graph, "get_state", None)
         if not callable(get_state):
@@ -339,11 +377,7 @@ class KitaruGraphRunner:
             if self._capture.save_state_values
             else None
         )
-        tasks = (
-            to_json_safe(getattr(snapshot, "tasks", None))
-            if self._capture.save_state_tasks
-            else None
-        )
+        tasks = self._summarize_tasks(snapshot)
         return LangGraphStateSummary(
             latest_checkpoint_id=latest_checkpoint_id,
             checkpoint_ns=checkpoint_ns,
@@ -352,6 +386,33 @@ class KitaruGraphRunner:
             values=values,
             tasks=tasks,
         )
+
+    def _summarize_tasks(self, snapshot: Any) -> Any | None:
+        if not self._capture.save_state_tasks:
+            return None
+        tasks = getattr(snapshot, "tasks", ()) or ()
+        if self._capture.capture_mode == "full":
+            return to_json_safe(tasks)
+        return [
+            self._summarize_task_metadata(task, index=index)
+            for index, task in enumerate(tasks)
+        ]
+
+    def _summarize_task_metadata(self, task: Any, *, index: int) -> dict[str, Any]:
+        error = getattr(task, "error", None)
+        result = getattr(task, "result", None)
+        interrupts = getattr(task, "interrupts", ()) or ()
+        return {
+            "index": index,
+            "id": _string_or_none(getattr(task, "id", None)),
+            "name": _string_or_none(getattr(task, "name", None)),
+            "path": _safe_string_list(getattr(task, "path", None)),
+            "interrupt_count": _len_or_count(interrupts),
+            "has_result": result is not None,
+            "result_has_interrupt": self._output_has_interrupt(result),
+            "has_error": error is not None,
+            "error_type": type(error).__name__ if error is not None else None,
+        }
 
     def _interrupts_from_snapshot(
         self, snapshot: Any
@@ -612,33 +673,116 @@ class KitaruGraphRunner:
         *,
         request: LangGraphRunRequest,
         config: dict[str, Any],
+        context: Any | None,
     ) -> None:
         tracker.persist(
             {
-                "adapter_version": 1,
-                "langgraph_version": langgraph_version(),
-                "graph_name": self._name,
-                "thread_id": request.thread_id,
-                "thread_id_present": bool(request.thread_id),
+                **self._run_summary_metadata(
+                    request=request,
+                    config=config,
+                    context=context,
+                ),
+                "status": result.status,
                 "latest_checkpoint_id": result.latest_checkpoint_id,
                 "checkpoint_ns": (
                     result.pending_state.checkpoint_ns
                     if result.pending_state is not None
                     else request.checkpoint_ns
                 ),
-                "checkpointer_type": self._checkpointer_label(),
-                "store_type": self._store_label(),
-                "durability": self._resolved_durability(request),
-                "capture": self._capture.model_dump(mode="json"),
-                "config": redact_config(config) if self._capture.save_config else None,
-                "context": (
-                    redact_config(request.context)
-                    if self._capture.save_context
-                    else None
-                ),
+                "output": self._captured_output(result),
                 "warnings": result.warnings,
             }
         )
+
+    def _persist_failure_tracker(
+        self,
+        tracker: EventTracker,
+        error: BaseException,
+        *,
+        request: LangGraphRunRequest,
+        config: dict[str, Any],
+        context: Any | None,
+        warnings: list[str],
+    ) -> None:
+        tracker.persist(
+            {
+                **self._run_summary_metadata(
+                    request=request,
+                    config=config,
+                    context=context,
+                ),
+                "status": "failed",
+                "latest_checkpoint_id": None,
+                "checkpoint_ns": request.checkpoint_ns,
+                "output": None,
+                "warnings": warnings,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            }
+        )
+
+    def _handle_graph_call_failure(
+        self,
+        *,
+        error: BaseException,
+        tracker: EventTracker,
+        request: LangGraphRunRequest,
+        config: dict[str, Any],
+        context: Any | None,
+        warnings: list[str],
+    ) -> None:
+        tracker.record("graph_call_failed", status="failed", error=error)
+        self._persist_failure_tracker(
+            tracker,
+            error,
+            request=request,
+            config=config,
+            context=context,
+            warnings=warnings,
+        )
+
+    def _run_summary_metadata(
+        self,
+        *,
+        request: LangGraphRunRequest,
+        config: dict[str, Any],
+        context: Any | None,
+    ) -> dict[str, object]:
+        return {
+            "adapter_version": 1,
+            "langgraph_version": langgraph_version(),
+            "graph_name": self._name,
+            "thread_id": request.thread_id,
+            "thread_id_present": bool(request.thread_id),
+            "checkpointer_type": self._checkpointer_label(),
+            "store_type": self._store_label(),
+            "durability": self._resolved_durability(request),
+            "capture": self._capture_summary,
+            "config": redact_config(config) if self._capture.save_config else None,
+            "context": redact_config(context) if self._capture.save_context else None,
+            "input": self._captured_input(request),
+        }
+
+    def _captured_input(self, request: LangGraphRunRequest) -> Any | None:
+        if not self._capture.save_input:
+            return None
+        if request.kind == "start":
+            return to_json_safe(request.input)
+        return self._command_capture(request.command)
+
+    def _captured_output(self, result: LangGraphRunResult) -> Any | None:
+        if not self._capture.save_output or result.status != "completed":
+            return None
+        return to_json_safe(result.output)
+
+    def _command_capture(self, command: Any) -> Any:
+        resume_payload = getattr(command, "resume", None)
+        if resume_payload is not None:
+            return {
+                "python_type": _type_label(command),
+                "resume": to_json_safe(resume_payload),
+            }
+        return to_json_safe(command)
 
     def _safe_event_metadata(
         self, request: LangGraphRunRequest, *, config: dict[str, Any]
@@ -751,6 +895,23 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _len_or_count(value: Any) -> int:
+    try:
+        return len(value)
+    except TypeError:
+        return sum(1 for _ in value)
+
+
+def _safe_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list | tuple):
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _type_label(value: Any) -> str:

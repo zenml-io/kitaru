@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class LangGraphCapturePolicy(BaseModel):
@@ -17,8 +17,6 @@ class LangGraphCapturePolicy(BaseModel):
     save_state_snapshot: bool = True
     save_state_values: bool = False
     save_state_tasks: bool = True
-    save_stream_events: bool = True
-    max_stream_events: int = Field(default=500, ge=0)
     save_usage: bool = True
     capture_mode: Literal["metadata", "full"] = "metadata"
 

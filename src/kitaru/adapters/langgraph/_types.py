@@ -144,8 +144,9 @@ class LangGraphRunRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_kind_contract(self) -> "LangGraphRunRequest":
+        provided_fields = self.model_fields_set
         if self.kind == "start":
-            if self.input is None:
+            if "input" not in provided_fields:
                 raise ValueError("kind='start' requires input.")
             if self.command is not None:
                 raise ValueError("kind='start' forbids command.")
