@@ -1,71 +1,121 @@
 ---
 title: Claude Agent SDK Adapter
-description: Run one Claude Agent SDK invocation as one durable Kitaru checkpoint
+description: Wrap Claude Agent SDK invocations in Kitaru checkpoints, capture session context, and replay completed Claude calls honestly
 ---
 
-Kitaru's Claude Agent SDK adapter gives you one clear replay boundary around a
-Claude SDK call:
+The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) gives you
+Claude Code as a library: Claude can read files, edit files, run commands, use
+MCP servers, call tools, follow permissions, and keep a session transcript.
+Kitaru does **not** replace that agent loop.
+
+Kitaru adds an outer durable execution boundary around it:
 
 ```text
-one call to Claude Agent SDK query(...) = one Kitaru checkpoint
+one completed Claude Agent SDK invocation = one Kitaru checkpoint
 ```
 
-A concrete story helps:
+That boundary is useful when a Claude call is one part of a larger workflow.
+Imagine this flow:
 
 ```text
-1. Your flow reaches a step named claude_summary_claude_invocation.
-2. That step calls the Claude SDK once.
-3. Claude returns a final answer, session ID, and usage details.
-4. Kitaru stores that result as the checkpoint output.
-5. If a later step fails, replay can reuse this completed result instead of
-   paying Claude again for the same invocation.
+collect inputs → ask Claude to analyze them → write report → notify reviewer
 ```
 
-That is the whole v0.1 promise. The adapter is for non-streaming invocation/result
-behavior: call Claude, wait for the completed result, then store that result.
-Kitaru catches the completed invocation at the edge. It does not step inside
-Claude's private loop and checkpoint every model request, Bash command,
-built-in tool call, MCP call, custom side effect, or hook.
+If Claude finishes the analysis and the later `write report` checkpoint fails,
+Kitaru can replay the flow and reuse the completed Claude result instead of
+calling Claude again. You keep the Claude session ID, final text, usage/cost
+metadata, message records, and Kitaru artifacts that explain what happened.
 
-```python
-from claude_agent_sdk import ClaudeAgentOptions
-from kitaru import flow
-from kitaru.adapters.claude_agent_sdk import (
-    ClaudeRunRequest,
-    ClaudeRunResult,
-    KitaruClaudeRunner,
-)
+That is the v0.1 promise. It is intentionally narrower than the
+[PydanticAI adapter](/guides/pydantic-ai-adapter), which can wrap PydanticAI's
+Python-level model, tool, and MCP call objects directly.
 
-runner = KitaruClaudeRunner(
-    name="claude_reviewer",
-    options_factory=lambda request: ClaudeAgentOptions(
-        cwd=request.cwd,
-        resume=request.resume_session_id,
-        max_turns=request.max_turns,
-    ),
-)
+## The mental model
 
-@flow
-def review(prompt: str) -> ClaudeRunResult:
-    return runner.run_sync(ClaudeRunRequest.start(prompt, max_turns=1))
+Think of Claude Agent SDK as the **driver** and Kitaru as the **trip recorder and
+checkpoint gate**.
+
+Claude still drives inside the invocation:
+
+```text
+Claude prompt
+  └─ Claude Agent SDK / Claude Code loop
+      ├─ model calls
+      ├─ built-in tools
+      ├─ optional Bash commands
+      ├─ optional MCP/custom tool calls
+      ├─ permissions and hooks
+      └─ final ResultMessage with a session_id
 ```
+
+Kitaru wraps the outside:
+
+```text
+@kitaru.flow
+  └─ claude_summary_claude_invocation checkpoint
+      └─ one call to claude_agent_sdk.query(...)
+```
+
+So Kitaru can say:
+
+> “This Claude invocation completed. Here is the result and session context. On
+> replay, I can return that completed boundary output without calling Claude
+> again.”
+
+Kitaru cannot honestly say:
+
+> “I can resume from Claude's sixth internal tool call and deterministically
+> avoid every side effect Claude already performed.”
+
+The difference matters. If Claude runs Bash and creates `report.md`, Kitaru can
+store the final Claude result saying that happened. Kitaru does not automatically
+snapshot and recreate `report.md` in a fresh workspace. If that file must be a
+durable workflow output, write it in a Kitaru-owned checkpoint after Claude
+returns the content.
+
+## What you get
+
+The adapter gives existing Claude Agent SDK users:
+
+- one durable Kitaru checkpoint around each completed Claude invocation
+- replay-skip for completed Claude invocations inside larger Kitaru flows
+- a typed `ClaudeRunResult` with final text, session ID, stop reason, turn count,
+  usage, model usage, and cost fields when the SDK reports them
+- captured SDK message records
+- best-effort local transcript capture when the Claude SDK writes a transcript
+  file where the adapter can find it
+- a redacted options manifest for debugging and audit trails
+- Kitaru event-log and run-summary artifacts
+- an explicit resume path through Claude's native `session_id`
+
+Claude's own docs are still the source of truth for the inner SDK behavior:
+
+- [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk)
+- [Python SDK reference](https://code.claude.com/docs/en/agent-sdk/python)
+- [Sessions](https://code.claude.com/docs/en/agent-sdk/sessions)
+- [Hooks](https://code.claude.com/docs/en/agent-sdk/hooks)
+- [Permissions](https://code.claude.com/docs/en/agent-sdk/permissions)
+- [File checkpointing](https://code.claude.com/docs/en/agent-sdk/file-checkpointing)
 
 ## Install
+
+Add the Claude Agent SDK extra. Include `local` if you want the local Kitaru
+server and dashboard:
 
 ```bash
 uv add "kitaru[claude-agent-sdk,local]"
 ```
 
-Then initialize/login as usual:
+Initialize the project once:
 
 ```bash
 kitaru init
-kitaru login
+kitaru login        # local server; add a URL for a deployed one
 kitaru status
 ```
 
-For the direct Anthropic API path, set `ANTHROPIC_API_KEY` before running a real
-Claude invocation:
+For direct Anthropic API usage, set `ANTHROPIC_API_KEY` before making a real
+Claude call:
 
 ```bash
 export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
@@ -75,6 +125,10 @@ The Claude SDK also supports Bedrock and Vertex modes when their
 provider-specific environment is configured.
 
 ## Minimal flow
+
+This example keeps Claude's tools disabled so the first run is easy to reason
+about: one prompt goes in, one completed Claude result comes back, and Kitaru
+stores that completed invocation.
 
 ```python
 from pathlib import Path
@@ -90,13 +144,12 @@ from kitaru.adapters.claude_agent_sdk import (
 runner = KitaruClaudeRunner(
     name="claude_summary",
     options_factory=lambda request: ClaudeAgentOptions(
-        # Empty allowed_tools keeps this simple example non-destructive.
+        # Empty allowed_tools keeps this first example non-destructive.
         allowed_tools=[],
         cwd=request.cwd,
         resume=request.resume_session_id,
         max_turns=request.max_turns,
     ),
-    checkpoint_config={"cache": False},
 )
 
 @flow
@@ -113,10 +166,35 @@ print(result.final_text)
 print(result.session_id)
 ```
 
-The adapter-created checkpoint is named from the runner, for example
-`claude_summary_claude_invocation`.
+The checkpoint name is derived from the runner name. In this example, the
+adapter-created checkpoint is named:
 
-## Request and result shape
+```text
+claude_summary_claude_invocation
+```
+
+## How a run works, step by step
+
+When `runner.run_sync(ClaudeRunRequest.start(...))` executes inside a Kitaru
+flow, this is the concrete sequence:
+
+```text
+1. Kitaru opens one synthetic checkpoint.
+2. The adapter builds ClaudeAgentOptions from options_factory(request).
+3. The adapter calls claude_agent_sdk.query(prompt=..., options=...).
+4. The adapter drains the SDK messages until the final ResultMessage arrives.
+5. It extracts final text, session_id, usage, cost, stop reason, and turn count.
+6. It tries to locate the local Claude transcript file for that session.
+7. It saves configured artifacts: messages, transcript, manifest, output, usage,
+   event log, and run summary.
+8. It returns ClaudeRunResult as the checkpoint output.
+```
+
+On replay, if this checkpoint is already complete and cache/replay rules allow
+Kitaru to reuse it, Kitaru serves the saved `ClaudeRunResult`. Claude is not
+called again for that completed invocation.
+
+## Requests, sessions, and resume
 
 Use `ClaudeRunRequest.start(...)` for a fresh Claude SDK session:
 
@@ -129,8 +207,8 @@ request = ClaudeRunRequest.start(
 )
 ```
 
-Use `ClaudeRunRequest.resume(...)` when you want the Claude SDK to resume a
-previous session ID:
+Use `ClaudeRunRequest.resume(...)` when you want the Claude SDK to continue from
+a previous Claude `session_id`:
 
 ```python
 request = ClaudeRunRequest.resume(
@@ -140,6 +218,26 @@ request = ClaudeRunRequest.resume(
     max_turns=2,
 )
 ```
+
+This uses Claude's native session mechanism. Kitaru records the session ID and
+passes it back through `ClaudeAgentOptions(resume=...)` when you resume.
+
+Session resume and Kitaru replay are related but different:
+
+| Thing | What it means |
+|---|---|
+| Claude `session_id` | Claude's conversation/session handle. Use it to continue a Claude SDK session. |
+| Kitaru checkpoint | Kitaru's durable workflow boundary. Use it to skip or replay completed workflow work. |
+| Claude transcript | The conversation record written by Claude SDK when available. Useful for audit/debugging. |
+| Workspace files | Real files on disk. Kitaru does not snapshot them in this adapter. |
+
+A practical consequence: if a Claude invocation fails halfway through, Kitaru has
+no completed invocation result to reuse. Retrying that checkpoint starts the
+Claude invocation again. If you need stronger mid-invocation transcript
+persistence, look at Claude's session and session-store features in the official
+SDK docs; this adapter's v0.1 boundary is still the completed invocation.
+
+## Result shape
 
 `KitaruClaudeRunner.run_sync(...)` returns a `ClaudeRunResult` with fields such
 as:
@@ -154,18 +252,19 @@ as:
 - `num_turns`
 - artifact names for captured messages, transcript, output, usage, event log,
   and run summary
+- `warnings` for best-effort capture gaps, such as a missing transcript file
 
 Failed Claude invocations raise an exception instead of returning a
-`ClaudeRunResult(status="failed")`. The adapter still records best-effort
-failure metadata when it is already inside a Kitaru checkpoint.
+`ClaudeRunResult(status="failed")`. If the failure happens inside a Kitaru
+checkpoint, the adapter still records best-effort failure metadata before the
+exception propagates.
 
 ## Capture policy
 
-By default, the adapter captures the boundary data that is useful for audit and
-replay inspection:
+By default, the adapter captures the boundary data that is useful for replay
+inspection and audits:
 
-- message records returned by the SDK as part of the completed invocation
-- the prompt, stored with the messages artifact
+- prompt and SDK message records
 - best-effort local transcript JSONL payload
 - redacted options manifest
 - final output
@@ -189,62 +288,40 @@ runner = KitaruClaudeRunner(
 ```
 
 Treat messages and transcripts as conversation data. They may contain prompts,
-retrieved document snippets, tool arguments, and model output.
+retrieved document snippets, tool arguments, command output, and model output.
+The options manifest is redacted by default, but message/transcript artifacts are
+not a secret store; turn them off when the conversation itself is sensitive.
 
-## What this makes durable
+## Options factory
 
-Imagine the flow asks Claude to review a contract and Claude returns a final
-answer with a session ID and token usage. Kitaru saves that completed invocation
-as a checkpoint. If a later checkpoint fails, replay can reuse the saved Claude
-result instead of paying for the same completed invocation again.
+Prefer `options_factory` over passing one static options object when request
+fields should affect the Claude SDK call.
 
-Concretely, Kitaru can preserve:
-
-- the final text Claude returned
-- the Claude session ID
-- the message records collected from the completed SDK invocation
-- the local transcript file contents when the SDK writes a transcript where the
-  adapter can find it
-- usage and cost details reported by the SDK
-- a redacted manifest of the request/options used at the boundary
-- Kitaru event-log and run-summary artifacts for the invocation
-
-## What this does not make durable
-
-This is the most important limitation.
-
-Kitaru does **not** replay Claude's internal work step by step. The adapter does
-not create separate Kitaru checkpoints for Claude-internal model calls, built-in
-tool calls, Bash commands, MCP calls, permission hooks, custom tool side effects,
-file edits, workspace snapshots, or live streaming output.
-
-A concrete failure story:
-
-```text
-1. Claude runs Bash and writes report.md.
-2. Claude returns "I wrote report.md".
-3. Kitaru stores the invocation result as a checkpoint.
-4. Later, the flow crashes in a different checkpoint.
-5. You replay from after the Claude checkpoint.
+```python
+runner = KitaruClaudeRunner(
+    name="claude_project_agent",
+    options_factory=lambda request: ClaudeAgentOptions(
+        cwd=request.cwd,
+        resume=request.resume_session_id,
+        max_turns=request.max_turns,
+        allowed_tools=[],
+        setting_sources=["project"],
+    ),
+)
 ```
 
-On replay, Kitaru can return the saved `ClaudeRunResult` without calling Claude
-again. But if the replay is running in a fresh workspace, Kitaru does not
-magically recreate `report.md`, because that file write happened inside Claude's
-own Bash/tool loop, not in a Kitaru-owned checkpoint. The adapter also does not
-snapshot the working directory before or after Claude runs.
+Why this matters:
 
-If a side effect must be durable, make it a Kitaru-owned step. For example:
+- `cwd` controls which project directory Claude sees.
+- `resume_session_id` must become `ClaudeAgentOptions(resume=...)` for resumed
+  requests.
+- `max_turns` is often different per call.
+- MCP servers, hooks, permission callbacks, and session stores can be live Python
+  objects. Building fresh options per request avoids mutating shared state.
 
-- ask Claude for text, then write the file yourself in a normal `@kitaru.checkpoint`
-- have a Kitaru checkpoint call your database/ticket API directly
-- save important outputs explicitly with `kitaru.save(...)`
-- keep Claude tools read-only when you only need analysis
-
-Another concrete story: if the Claude invocation fails halfway through, Kitaru
-has no completed invocation result to reuse. A retry starts that invocation
-again. This is different from adapters that checkpoint each internal tool/model
-call separately.
+If you pass a static `options=` object and then send a request with `cwd`,
+`resume_session_id`, or `max_turns`, the adapter raises instead of guessing how
+to mutate your options.
 
 ## Checkpoint strategy
 
@@ -269,10 +346,112 @@ runner = KitaruClaudeRunner(
 ```
 
 `runtime="isolated"` is not supported for adapter-managed Claude checkpoints in
-v0.1, because Claude SDK options can contain live process objects such as MCP
-servers and callbacks.
+v0.1. Claude SDK options can contain live process objects such as MCP servers,
+hooks, and callbacks, and those are not reconstructible across Kitaru's isolated
+runtime boundary yet.
+
+## Claude tools, MCP, Bash, hooks, and permissions
+
+You can still use Claude Agent SDK features through `ClaudeAgentOptions`:
+
+```python
+runner = KitaruClaudeRunner(
+    name="claude_code_review",
+    options_factory=lambda request: ClaudeAgentOptions(
+        cwd=request.cwd,
+        allowed_tools=["Read", "Grep", "Glob"],
+        disallowed_tools=["Bash"],
+        setting_sources=["project"],
+    ),
+)
+```
+
+Kitaru passes those options to Claude. Claude's own runtime decides what tools
+are available, what permissions apply, and which hooks run. See the official
+[hooks](https://code.claude.com/docs/en/agent-sdk/hooks) and
+[permissions](https://code.claude.com/docs/en/agent-sdk/permissions) docs for
+that layer.
+
+The important Kitaru point is: these features remain **inside** the one Claude
+invocation checkpoint.
+
+A concrete failure story:
+
+```text
+1. Claude runs Bash and writes report.md.
+2. Claude returns "I wrote report.md".
+3. Kitaru stores the invocation result as a checkpoint.
+4. Later, the flow crashes in a different checkpoint.
+5. You replay from after the Claude checkpoint.
+```
+
+On replay, Kitaru can return the saved `ClaudeRunResult` without calling Claude
+again. But if the replay is running in a fresh workspace, Kitaru does not
+magically recreate `report.md`, because that file write happened inside Claude's
+own Bash/tool loop, not in a Kitaru-owned checkpoint. The adapter also does not
+snapshot the working directory before or after Claude runs.
+
+If a side effect must be durable, make it a Kitaru-owned step:
+
+```python
+from pathlib import Path
+
+import kitaru
+
+@kitaru.checkpoint
+def write_report(text: str, path: str) -> str:
+    Path(path).write_text(text)
+    return path
+
+@kitaru.flow
+def report_flow(prompt: str) -> str:
+    claude_result = runner.run_sync(ClaudeRunRequest.start(prompt, max_turns=1))
+    return write_report(claude_result.final_text or "", "report.md")
+```
+
+That way the durable file write is visible to Kitaru as its own checkpoint.
+
+## Claude file checkpointing is different
+
+Claude Agent SDK has its own
+[file checkpointing](https://code.claude.com/docs/en/agent-sdk/file-checkpointing)
+feature for rewinding certain file changes made by Claude's built-in file-edit
+tools. That is useful, but it is not the same thing as a Kitaru checkpoint.
+
+Keep the two ideas separate:
+
+| Feature | Owned by | What it helps with |
+|---|---|---|
+| Kitaru checkpoint | Kitaru | Replay/skip completed workflow work and store typed outputs. |
+| Claude session | Claude SDK | Continue a Claude conversation from a session ID. |
+| Claude file checkpointing | Claude SDK | Rewind supported Claude file-edit tool changes in a session. |
+| Workspace snapshot | Not provided by this adapter | Recreate arbitrary files/process state after a crash. |
+
+The adapter records what it can observe at the invocation boundary. It does not
+turn Claude file checkpointing into Kitaru checkpointing, and it does not provide
+a general workspace snapshot system.
+
+## How this differs from the PydanticAI adapter
+
+This page is intentionally more cautious than the PydanticAI adapter guide.
+That is because the two frameworks expose different seams.
+
+| Adapter | Kitaru can wrap | Replay unit |
+|---|---|---|
+| PydanticAI | Python-level model, tool, MCP, and turn objects | Per model/tool/MCP call by default, or one turn |
+| OpenAI Agents | Outer runner call, plus supported model/local tool calls | Runner call or supported calls |
+| Claude Agent SDK | Outer `query(...)` invocation | One completed Claude invocation |
+
+So if you are choosing where to put side effects:
+
+- let Claude do flexible analysis, reading, planning, and text generation
+- let Kitaru-owned checkpoints perform side effects that must be replayable,
+  inspectable, or idempotent
+- keep Claude tools read-only when you want the cleanest replay story
 
 ## Runnable example
+
+Run the educational integration example:
 
 ```bash
 uv sync --extra local --extra claude-agent-sdk
@@ -288,7 +467,8 @@ uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adap
 ```
 
 The example prints the final text, session ID, usage/cost details when reported,
-and Kitaru artifact names.
+and Kitaru artifact names. It uses `allowed_tools=[]` and `max_turns=1` so the
+first run teaches the adapter boundary without introducing tool side effects.
 
 ## Larger Claude example
 
@@ -299,11 +479,46 @@ uv run examples/end_to_end/compliance_review/stage_1_single_turn.py
 ```
 
 That example shows staged audit checkpoints, memory, and wait/resume around
-Claude turns. It uses the same high-level boundary: one Claude SDK turn is one
-Kitaru checkpoint. It also has a custom transcript materializer for its
+Claude turns. It uses the same high-level boundary: one Claude SDK invocation is
+one Kitaru checkpoint. It also has a custom transcript materializer for its
 multi-turn remote-stack story. That extra materializer is example-specific; the
 generic adapter still does not claim granular replay of Claude-internal side
 effects.
+
+## Troubleshooting
+
+### “Why do I need `@kitaru.flow`?”
+
+The adapter creates a Kitaru checkpoint. Checkpoints need a flow execution to
+belong to. Wrap Claude calls in `@kitaru.flow` so Kitaru can record and replay
+that boundary.
+
+### “Why did `checkpoint_strategy="calls"` fail?”
+
+Because Claude's Python SDK does not expose replay-safe Python call bodies for
+each internal model/tool/Bash/MCP action. The adapter would be lying if it called
+hook observations “call checkpoints.” Use `checkpoint_strategy="invocation"` and
+move durable side effects into explicit Kitaru checkpoints.
+
+### “Why is my transcript artifact missing?”
+
+The adapter always captures SDK-emitted messages when `save_messages=True`.
+Transcript-file capture is best-effort because Claude owns where and when local
+JSONL transcripts are written. Missing transcript files create a warning, not a
+failed run.
+
+### “Can I use live streaming output?”
+
+Not in this adapter version. Kitaru/ZenML streaming support is planned
+separately. The current adapter waits for the completed Claude result and stores
+that completed boundary output.
+
+### “Can this resume a half-finished Claude invocation?”
+
+Not by itself. If the invocation does not complete, Kitaru has no completed
+checkpoint output to reuse. Claude session/session-store features may help with
+conversation recovery at the Claude layer, but the v0.1 Kitaru adapter boundary
+is still one completed invocation.
 
 ## Related guides
 
