@@ -39,5 +39,7 @@ exclude_path = [
 
 #############################  Checking  ############################
 
-# Also check URL fragments/anchors (e.g. #section-name)
-include_fragments = true
+# Check URL fragments/anchors (e.g. #section-name).
+# Lychee 0.24.0 changed this from a boolean to an enum: none | anchor-only |
+# text-only | full. "anchor-only" preserves the pre-0.24.0 behavior.
+include_fragments = "anchor-only"
