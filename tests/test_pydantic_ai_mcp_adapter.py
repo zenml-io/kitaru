@@ -20,6 +20,8 @@ def anyio_backend() -> str:
 
 def _import_mcp_stdio() -> Any:
     pytest.importorskip("pydantic_ai")
+    pytest.importorskip("mcp")
+    pytest.importorskip("mcp.server.fastmcp")
     import kitaru.adapters.pydantic_ai  # noqa: F401
 
     try:
@@ -30,10 +32,9 @@ def _import_mcp_stdio() -> Any:
 
 
 def test_pydantic_ai_mcp_import_smoke() -> None:
+    MCPServerStdio = _import_mcp_stdio()
     kitaru_adapter = importlib.import_module("kitaru.adapters.pydantic_ai")
     pydantic_ai = importlib.import_module("pydantic_ai")
-
-    MCPServerStdio = _import_mcp_stdio()
     assert "Agent" in pydantic_ai.__dict__
     assert "KitaruAgent" in kitaru_adapter.__dict__
     assert MCPServerStdio is not None
@@ -118,6 +119,37 @@ async def test_preopened_mcp_server_call_stays_on_current_loop(
             )
 
     assert result == "echo:preopened"
+
+
+@pytest.mark.anyio
+async def test_preopened_mcp_server_outside_flow_fails_fast(
+    tmp_path: Path,
+) -> None:
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import KitaruAgent
+    from kitaru.errors import KitaruUsageError
+
+    MCPServerStdio = _import_mcp_stdio()
+    server = MCPServerStdio(
+        sys.executable,
+        args=[str(_write_echo_server(tmp_path))],
+        read_timeout=2,
+        timeout=5,
+        cache_tools=True,
+    )
+    durable_agent = KitaruAgent(
+        Agent(TestModel(), name="preopened_mcp_agent", toolsets=[server])
+    )
+
+    async with server:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            await durable_agent.run("hello")
+
+    message = str(exc_info.value)
+    assert "already-running PydanticAI MCP server" in message
+    assert "`@kitaru.flow`" in message
 
 
 @pytest.mark.anyio

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic_ai.tools import AgentDepsT, RunContext
-from pydantic_ai.toolsets import ToolsetTool
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 
 from ._events import ToolsetKind
 from ._logging import logger
@@ -98,6 +98,15 @@ class KitaruMCPServer(KitaruToolset[AgentDepsT]):
             "as its own per-call checkpoint.",
             tool_name,
         )
+
+
+def has_running_mcp_toolset(toolsets: Sequence[AbstractToolset[Any]]) -> bool:
+    """Return whether any prepared Kitaru MCP wrapper is already open."""
+    return any(
+        isinstance(toolset, KitaruMCPServer)
+        and _mcp_server_is_running(toolset.wrapped)
+        for toolset in toolsets
+    )
 
 
 def kitaruify_mcp_server(

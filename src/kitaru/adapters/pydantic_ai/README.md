@@ -158,7 +158,12 @@ This also affects where event details land. Flow-scope explicit HITL calls are s
 
 MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools. In the default granular mode, each top-level MCP call gets its own adapter checkpoint when Kitaru can safely own the MCP call lifecycle. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
 
-If the PydanticAI MCP server is already running because you entered it with `async with server:` or `async with agent:`, Kitaru keeps the MCP call on the current event loop instead of moving it into the worker-thread checkpoint bridge. That avoids the concrete failure mode where the MCP request reaches the server successfully, but the client waits or tears down from the wrong event loop afterwards. In this pre-opened case the call is still tracked as adapter event metadata, but it is not persisted as its own per-call `mcp_call` checkpoint, so checkpoint-scoped args/result artifacts are not saved for that call. If you need per-call MCP checkpointing, let PydanticAI auto-connect the MCP server so the connection opens inside the checkpoint worker loop.
+If the PydanticAI MCP server is already running because you entered it with `async with server:` or `async with agent:`, behavior depends on where the agent run happens:
+
+- **Inside an explicit `@kitaru.flow`:** Kitaru keeps the MCP call on the current event loop instead of moving it into the worker-thread checkpoint bridge. That avoids the concrete failure mode where the MCP request reaches the server successfully, but the client waits or tears down from the wrong event loop afterwards. In this pre-opened case the call is still tracked as adapter event metadata, but it is not persisted as its own per-call `mcp_call` checkpoint, so checkpoint-scoped args/result artifacts are not saved for that call.
+- **Outside an explicit `@kitaru.flow`:** `KitaruAgent.run(...)` would normally auto-open a flow by moving the async agent body to a worker thread/event loop. If the MCP server is already open on your caller loop, Kitaru fails fast with `KitaruUsageError` instead of risking a hang. Wrap the call in an explicit flow while the MCP lifecycle is open, or do not pre-open the MCP server and let PydanticAI/Kitaru auto-connect it.
+
+If you need per-call MCP checkpointing, let PydanticAI auto-connect the MCP server so the connection opens inside the checkpoint worker loop.
 
 ```python
 from kitaru.adapters.pydantic_ai import KitaruAgent

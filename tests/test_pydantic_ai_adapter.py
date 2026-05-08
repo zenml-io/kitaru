@@ -1695,6 +1695,46 @@ async def test_running_mcp_server_bypasses_granular_checkpoint_bridge(
 
 
 @pytest.mark.anyio
+async def test_auto_flow_rejects_preopened_mcp_server_before_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import Agent, FunctionToolset
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
+    from kitaru.adapters.pydantic_ai._mcp_server import KitaruMCPServer
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+    running_mcp = KitaruMCPServer(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+    )
+    agent = KitaruAgent(Agent(TestModel(), name="auto_flow_mcp_guard"))
+    agent._toolsets = [running_mcp]
+    auto_flow_called = False
+
+    def fail_auto_flow(_body: Any) -> Any:
+        nonlocal auto_flow_called
+        auto_flow_called = True
+        raise AssertionError("auto-flow should fail before the worker-thread bridge")
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._mcp_server._mcp_server_is_running",
+        lambda _server: True,
+    )
+    monkeypatch.setattr(agent, "_invoke_in_auto_flow", fail_auto_flow)
+
+    with pytest.raises(KitaruUsageError) as exc_info:
+        await agent.run("hello")
+
+    message = str(exc_info.value)
+    assert "already-running PydanticAI MCP server" in message
+    assert "`@kitaru.flow`" in message
+    assert "auto-connect" in message
+    assert auto_flow_called is False
+
+
+@pytest.mark.anyio
 async def test_closed_mcp_server_still_uses_granular_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- Fixed PydanticAI MCP tool calls hanging after a successful request when an explicitly lifecycle-managed MCP server was already open. Kitaru now keeps those MCP calls on the active event loop instead of routing them through the granular checkpoint worker-thread bridge; auto-connected MCP servers still use granular MCP checkpoints by default.
+- Fixed PydanticAI MCP tool calls hanging after a successful request when an explicitly lifecycle-managed MCP server was already open. Kitaru now keeps already-running MCP calls on the active event loop inside explicit flows, and fails fast when auto-flow would otherwise move a pre-opened MCP server across event loops; auto-connected MCP servers still use granular MCP checkpoints by default.
 - Added a compatibility shim for the `pydantic_ai.mcp` import path used by current PydanticAI releases when Kitaru is installed with the MCP SDK version still compatible with ZenML server dependencies.
 
 ### Security
