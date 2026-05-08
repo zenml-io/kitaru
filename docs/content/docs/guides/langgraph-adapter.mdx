@@ -1,44 +1,74 @@
 ---
 title: LangGraph Adapter
-description: Learn how to run a LangGraph graph in a Kitaru flow using start/interrupted/resume/completed calls with a stable thread ID
+description: Run LangGraph graphs inside Kitaru flows while preserving LangGraph thread, checkpoint, and interrupt semantics
 ---
 
-This guide explains, step by step, what happens when you combine Kitaru and LangGraph.
+Kitaru's LangGraph adapter lets you keep your existing [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) graph and add Kitaru around the **outer graph calls** you make from a flow.
 
-## First, the simple ownership story
+That distinction is the whole story:
 
-- **Kitaru tracks the outer calls** you make from your flow (`runner.invoke(...)`).
-- **LangGraph tracks the inner graph state** (thread, checkpoint history, resume point).
+- **LangGraph** keeps owning graph state: `thread_id`, checkpointers, super-step snapshots, interrupts, stores, and graph-local replay.
+- **Kitaru** records the flow that called the graph: durable graph-call checkpoints, run metadata, artifacts, deployment/runtime placement, and a Kitaru-friendly interrupt/resume helper.
 
-A concrete sequence looks like this:
+So the adapter is not trying to replace LangGraph persistence. It gives a LangGraph application a Kitaru execution wrapper.
 
-1. Flow makes start call.
-2. LangGraph interrupts.
-3. Flow makes resume call.
-4. LangGraph completes.
+```python
+from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest
 
-Kitaru records both outer calls as durable checkpoints in the same flow execution.
+runner = KitaruGraphRunner(graph, name="review_graph")
+result = runner.invoke(
+    LangGraphRunRequest.start({"ticket": "ticket-42"}, thread_id="ticket-42")
+)
+```
 
 ## Install
+
+Add the `langgraph` extra — and `local` if you want the local dashboard/server:
 
 ```bash
 uv sync --extra local --extra langgraph
 ```
 
-Then initialize/login as usual:
+Initialize the project once:
 
 ```bash
 kitaru init
-kitaru login
+kitaru login        # local server; add a URL to connect to a deployed one
 kitaru status
 ```
 
-## Minimal flow pattern (no LLM, no wait prompt)
+## The mental model
+
+Think of one LangGraph invocation as a sealed box inside a Kitaru checkpoint.
+
+```text
+Kitaru flow
+  ├─ Kitaru checkpoint: review_graph_langgraph_call
+  │    └─ LangGraph graph.invoke(..., thread_id="ticket-42")
+  │         ├─ LangGraph node A
+  │         ├─ LangGraph node B
+  │         └─ LangGraph checkpoint/state snapshot
+  └─ Kitaru checkpoint: persist_summary
+```
+
+Kitaru can see and record the box: when it started, whether it completed or interrupted, which `thread_id` was used, and which latest LangGraph checkpoint ID was observed.
+
+LangGraph controls what happens inside the box: node execution, graph state, checkpoint history, and where resume should continue.
+
+This avoids a dangerous double-replay problem. If Kitaru tried to turn every LangGraph node into its own Kitaru checkpoint, both systems could try to replay the same side effect. For example, a graph node sends a Slack message, the process crashes, LangGraph resumes from its last checkpoint, and Kitaru also retries the node. The message might be sent twice. The v1 adapter deliberately avoids that by using one Kitaru boundary around the graph call.
+
+## Minimal flow pattern
+
+This pattern has no LLM and no interactive wait prompt. It just shows the adapter shape.
 
 ```python
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest, build_resume_request
+from kitaru.adapters.langgraph import (
+    KitaruGraphRunner,
+    LangGraphRunRequest,
+    build_resume_request,
+)
 
 runner = KitaruGraphRunner(graph, name="review_graph")
 
@@ -50,45 +80,247 @@ def persist_summary(summary: dict) -> dict:
 @flow
 def review(ticket: str) -> None:
     first = runner.invoke(
-        LangGraphRunRequest.start({"ticket": ticket}, thread_id="ticket-42")
+        LangGraphRunRequest.start(
+            {"ticket": ticket},
+            thread_id=ticket,
+        )
     )
-    second = runner.invoke(build_resume_request(first, {"approved": True}))
-    _ = persist_summary({"first": first.status, "second": second.status})
+
+    if first.status == "interrupted":
+        second = runner.invoke(
+            build_resume_request(first, {"approved": True})
+        )
+        _ = persist_summary(
+            {
+                "thread_id": second.thread_id,
+                "first_status": first.status,
+                "second_status": second.status,
+                "latest_checkpoint_id": second.latest_checkpoint_id,
+                "output": second.output,
+            }
+        )
 ```
 
-This is intentionally simple:
+There are three important details in this small example:
 
-- the flow does two calls,
-- then saves one summary artifact,
-- then your script can load that artifact with `KitaruClient`.
+1. `thread_id=ticket` gives LangGraph a stable conversation key.
+2. `runner.invoke(...)` is called from flow scope, so Kitaru can create graph-call checkpoints.
+3. `kitaru.save(...)` happens inside a normal `@checkpoint`, so the summary becomes a Kitaru artifact.
 
-## Why `thread_id` is important
+## Why `thread_id` matters
 
-`thread_id` is the identity LangGraph uses to continue the same paused thread.
+LangGraph uses `thread_id` to find the same in-progress graph state later. You can think of it as the label on a folder of LangGraph checkpoints.
 
-If the start call uses one thread id and resume uses another, LangGraph sees two different threads. The resume call cannot continue the paused work you expected.
+```text
+start call  -> thread_id="ticket-42" -> graph pauses
+resume call -> thread_id="ticket-42" -> graph continues the paused thread
+```
+
+If the resume call uses a different ID, LangGraph sees a different folder and cannot continue the paused work you expected.
+
+Kitaru requires a non-empty `thread_id` on `LangGraphRunRequest` so this identity is explicit. The adapter merges it into LangGraph's `config["configurable"]` before calling the graph.
+
+## Checkpointers: local learning vs restart durability
+
+LangGraph persistence depends on the checkpointer you compile the graph with. The runnable example uses `InMemorySaver` because it is simple and local:
+
+```python
+from langgraph.checkpoint.memory import InMemorySaver
+
+graph = builder.compile(checkpointer=InMemorySaver())
+```
+
+That is good for learning, tests, and short local demos. It is **not** durable across process or container restarts, because the checkpoints live in memory.
+
+For restart durability, use a persistent LangGraph checkpointer such as the ones documented in the [LangGraph persistence guide](https://docs.langchain.com/oss/python/langgraph/persistence). Kitaru records the outer execution and preserves the `thread_id`; LangGraph's checkpointer is still the thing that stores graph-internal state.
+
+You can ask the adapter to be stricter with `LangGraphDurabilityPolicy`:
+
+```python
+from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphDurabilityPolicy
+
+runner = KitaruGraphRunner(
+    graph,
+    name="review_graph",
+    durability=LangGraphDurabilityPolicy(require_checkpointer=True),
+)
+```
+
+By default, the adapter warns when it can detect missing or obviously ephemeral checkpointers instead of failing local examples.
+
+## Interrupt and resume
+
+LangGraph's native human-in-the-loop primitive is [`interrupt(...)`](https://docs.langchain.com/oss/python/langgraph/interrupts). When a graph interrupts, the adapter returns a `LangGraphRunResult` with:
+
+- `status="interrupted"`
+- `interrupts` — JSON-safe summaries of pending interrupt payloads
+- `pending_state` — the `thread_id`, checkpoint namespace, next nodes, and warnings needed to build a resume request
+
+The resume helper creates a LangGraph `Command(resume=...)` for you:
+
+```python
+from kitaru.adapters.langgraph import build_resume_request
+
+first = runner.invoke(
+    LangGraphRunRequest.start({"ticket": "ticket-42"}, thread_id="ticket-42")
+)
+
+if first.status == "interrupted":
+    resume_request = build_resume_request(first, {"approved": True})
+    second = runner.invoke(resume_request)
+```
+
+There is also `wait_for_interrupt(...)`, which bridges an interrupted LangGraph result to `kitaru.wait(...)`:
+
+```python
+from kitaru.adapters.langgraph import wait_for_interrupt
+
+if first.status == "interrupted":
+    resume_request = wait_for_interrupt(
+        first,
+        schema=bool,
+        question="Approve this ticket escalation?",
+    )
+    second = runner.invoke(resume_request)
+```
+
+`wait_for_interrupt(...)` must be called from the flow body, not from inside a checkpoint. That is the same Kitaru rule as regular waits: a flow can pause safely, but a checkpoint body should either complete or fail.
+
+## Checkpoint strategy
+
+The v1 adapter has one strategy:
+
+```python
+KitaruGraphRunner(graph, name="review_graph", checkpoint_strategy="graph_call")
+```
+
+That means one Kitaru checkpoint is placed around each outer graph invocation.
+
+The adapter intentionally does **not** provide LangGraph node-level Kitaru checkpoints yet. LangGraph already has its own internal checkpoint and replay model, and Kitaru should not fight it.
+
+The outer graph-call checkpoint defaults are conservative:
+
+| Setting | Default | Why |
+|---|---:|---|
+| `cache` | `False` | A cached outer graph call could skip LangGraph's own resume/state logic. |
+| `retries` | `0` | Retrying a graph call can repeat external side effects if your graph node already performed them before the last LangGraph checkpoint. |
+| `runtime` | `"inline"` | Adapter-managed graph objects are live Python objects and are not sent to isolated runtime workers in v1. |
+| `type` | `"graph_call"` | The dashboard groups these as graph-call checkpoints. |
+
+You can override these through `run_checkpoint_config=...`, but only do so when your graph nodes are idempotent and you understand the replay implications.
+
+## Capture policy
+
+`LangGraphCapturePolicy` controls what the adapter records for observability. Defaults are metadata-first: useful for debugging, but cautious about full graph state.
+
+```python
+from kitaru.adapters.langgraph import LangGraphCapturePolicy, KitaruGraphRunner
+
+runner = KitaruGraphRunner(
+    graph,
+    name="review_graph",
+    capture=LangGraphCapturePolicy(
+        save_input=True,
+        save_output=True,
+        save_state_values=False,  # default: do not persist full graph values
+    ),
+)
+```
+
+Important defaults:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `save_input` | `True` | Include graph-call input in captured adapter metadata/artifacts where applicable. |
+| `save_output` | `True` | Include completed graph output. Interrupted runs do not store raw interrupt SDK objects as output. |
+| `save_config` | `True` | Include redacted config metadata, including `thread_id`. Secret-like keys are redacted. |
+| `save_context` | `False` | Do not persist arbitrary runtime context by default. |
+| `save_state_snapshot` | `True` | Inspect `graph.get_state(config)` when available and save a safe summary. |
+| `save_state_values` | `False` | Do not save full LangGraph state values unless you opt in. |
+| `save_state_tasks` | `True` | Save task metadata summaries so interrupts are easier to debug. |
+
+If your graph state contains prompts, tool outputs, customer data, or secrets, be careful with `save_state_values=True`.
+
+## What Kitaru does and does not do in v1
+
+### Kitaru does
+
+- Run your graph calls inside Kitaru flows.
+- Create one outer Kitaru checkpoint per `runner.invoke(...)` / `runner.ainvoke(...)` call.
+- Preserve and record the LangGraph `thread_id` used for the call.
+- Record status, interrupt summaries, latest checkpoint ID, and run-summary metadata.
+- Bridge LangGraph interrupts into resume requests, and optionally into `kitaru.wait(...)`.
+- Let you deploy the flow using the same Kitaru stacks as other workflows.
+
+### Kitaru does not do
+
+- Replace LangGraph's checkpointer or store.
+- Replay individual LangGraph nodes as Kitaru checkpoints.
+- Snapshot arbitrary Python process memory.
+- Snapshot Deep Agents sandbox files, local filesystem writes, or external volumes.
+- Make non-idempotent tool side effects exactly-once.
+- Provide `stream` / `astream` as a supported adapter contract yet. Streaming support is deferred until Kitaru/ZenML streaming support lands.
+
+## LangChain and Deep Agents
+
+The adapter is named `langgraph` because LangGraph is the runtime seam. LangChain agents and Deep Agents are built on top of LangGraph-style execution, but they add their own higher-level concepts.
+
+For v1, the contract is:
+
+| Layer | Kitaru support story |
+|---|---|
+| Raw LangGraph compiled graph | First-class target for this adapter. |
+| LangChain `create_agent(...)` | Supported only when the returned object behaves like a compatible LangGraph runnable with `invoke` / `ainvoke` / `get_state`. |
+| Deep Agents | Invocation can be wrapped if compatible, but Deep Agents filesystem, sandbox, and backend semantics remain Deep Agents-owned. |
+
+If you are using Deep Agents' virtual filesystem or sandbox backends, Kitaru records the outer graph call. It does not automatically snapshot the sandbox filesystem. See the official [Deep Agents backends guide](https://docs.langchain.com/oss/python/deepagents/backends) for how those files are stored.
 
 ## Runnable local example
+
+The included example is intentionally deterministic. It uses no LLM and no API key.
 
 ```bash
 uv sync --extra local --extra langgraph
 uv run examples/integrations/langgraph_agent/langgraph_adapter.py
 ```
 
-The example script runs an actual `@kitaru.flow`, waits for execution completion via handle status polling, then loads the saved summary artifact and prints it.
+What it does:
 
-## What this adapter does and does not do (v1)
+1. Builds a tiny graph with two nodes.
+2. Starts the graph with `thread_id="langgraph-local-demo-thread"`.
+3. The graph interrupts and asks whether to approve a ticket escalation.
+4. The flow resumes the graph with `build_resume_request(...)`.
+5. The flow saves a `langgraph_demo_summary` artifact.
+6. The script loads and prints that artifact through `KitaruClient`.
 
-### It does
+You should see output like:
 
-- record outer graph-call checkpoints in Kitaru,
-- keep status/metadata from each call,
-- support interrupt/resume through `build_resume_request(...)`.
+```text
+Kitaru: Checkpoint `langgraph_local_interrupt_demo_langgraph_call` started.
+Kitaru: Checkpoint `langgraph_local_interrupt_demo_langgraph_call_2` started.
+Kitaru: Checkpoint `persist_summary` started.
+LangGraph adapter local demo summary:
+- first_status: interrupted
+- resume_status: completed
+- final_output: {...}
+```
 
-### It does not do (yet)
+For the full catalog, see [Examples](/getting-started/examples).
 
-- replace LangGraph's internal checkpointing,
-- snapshot Deep Agents sandbox/filesystem state,
-- provide streaming (`stream` / `astream`) as a supported user contract (deferred).
+## Troubleshooting
 
-And one practical note: `InMemorySaver` is great for local learning, but for restart durability you should use a persistent LangGraph checkpointer.
+- **"requires optional dependency `langgraph`"** — install with `uv sync --extra langgraph`, or include `local` too if you want the local Kitaru server.
+- **"requires a stable non-empty `thread_id`"** — pass a stable application key such as a ticket ID, user conversation ID, or workflow session ID.
+- **The graph resumes from the beginning** — check that start and resume use the same `thread_id`, and that the graph was compiled with a checkpointer.
+- **Restart durability does not work with `InMemorySaver`** — use a persistent LangGraph checkpointer. `InMemorySaver` is only in-memory.
+- **You need streaming** — streaming is intentionally deferred from this adapter contract until Kitaru/ZenML streaming support is available.
+- **You expected Deep Agents files to appear as Kitaru artifacts** — Deep Agents owns its filesystem backends. Save important outputs explicitly with `kitaru.save(...)` if you want them as Kitaru artifacts.
+
+## Related docs
+
+- [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview)
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [Deep Agents backends](https://docs.langchain.com/oss/python/deepagents/backends)
+- [Replay and overrides](/guides/replay-and-overrides)
+- [Wait, Input, and Resume](/guides/wait-and-resume)
