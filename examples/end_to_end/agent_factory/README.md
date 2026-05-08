@@ -64,7 +64,7 @@ What you see in the kitaru log lines:
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
 
-**Mode.** `KitaruAgent` defaults to `granular_checkpoints=True` — every model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request resumes by replaying only the calls after the third; everything before is served from cache. The FORCE_FAILURE demo above lands at this granularity. Pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in to a single aggregating turn-mode checkpoint per `agent.run_sync()` instead — useful when you want one inspectable artifact per run.
+**Mode.** Each stage in this tour explicitly passes `granular_checkpoints=False` for log-clarity in the chapter walk-throughs — one aggregating `default` / `default_2` checkpoint per `agent.run_sync()` keeps the trace readable when you're learning the primitives. Production forks should drop the kwarg: `KitaruAgent` defaults to `granular_checkpoints=True`, so every model request and every tool call gets its own checkpoint and its own cache key, and a flow that crashed after the third model request resumes by replaying only the calls after the third. Same FORCE_FAILURE durability story; finer cache granularity and richer dashboard rows.
 
 **Env-var toggles:**
 

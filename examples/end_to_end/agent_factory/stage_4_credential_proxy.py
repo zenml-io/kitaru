@@ -95,7 +95,9 @@ def agent_factory_flow() -> str:
         # stage 4 is dense enough on infrastructure (proxy + mock + sandbox)
         # that per-call granularity isn't earning its keep, and turn mode
         # caches cross-run cleanly (see stage 1's note on granular caching).
-        agent = KitaruAgent(agent)
+        # Turn mode for log-clarity — see stage 1's note. Production
+        # forks should drop the kwarg for per-call durability.
+        agent = KitaruAgent(agent, granular_checkpoints=False)
         result = agent.run_sync("Carry out your procedure and return the result.")
 
     print(f"\n{result.output}\n")

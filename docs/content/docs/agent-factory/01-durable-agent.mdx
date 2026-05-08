@@ -55,9 +55,9 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 
 ## How it composes
 
-`KitaruAgent` defaults to `granular_checkpoints=True` — every model request and every tool call gets its own checkpoint and its own cache key. The cache-hit story above lands at every individual call: a flow that crashed after the third model request resumes by replaying only the calls after the third, everything before served from cache.
+Each stage in this tour explicitly passes `granular_checkpoints=False` to `KitaruAgent` so the chapter log blocks read cleanly: one aggregating `default` / `default_2` checkpoint per `agent.run_sync()`, easy to point at while learning. The FORCE_FAILURE demo above lands at the turn boundary in this mode.
 
-Pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in to a single aggregating turn-mode checkpoint per `agent.run_sync()` instead — useful when you want one inspectable artifact per run rather than per-call granularity.
+In production, drop the kwarg. `KitaruAgent` defaults to `granular_checkpoints=True`, which means every model request and every tool call gets its own checkpoint and its own cache key — a flow that crashed after the third model request resumes by replaying only the calls after the third. Same durability story; finer cache granularity, finer dashboard rows.
 
 The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later chapters add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
 

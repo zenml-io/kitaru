@@ -67,11 +67,12 @@ def agent_factory_flow() -> str:
     # returns a vanilla pydantic-ai Agent; KitaruAgent wraps it for durable
     # execution. Each agent.run_sync() below becomes its own kitaru checkpoint.
     agent = build_agent(DEFAULT_PROFILE)
-    # KitaruAgent defaults to granular mode — every model request and
-    # tool call gets its own checkpoint with its own cache key. Pass
-    # `granular_checkpoints=False` for a single aggregating turn-mode
-    # checkpoint per `agent.run_sync()` instead.
-    agent = KitaruAgent(agent)
+    # Turn mode (`granular_checkpoints=False`) for log-clarity in this
+    # tour: the chapter's hero is the cross-run cache hit, and a single
+    # `default` / `default_2` checkpoint per turn keeps the trace
+    # readable. Drop the kwarg (or pass `True`) in production for
+    # per-model-call / per-tool-call cache hits and finer dashboard rows.
+    agent = KitaruAgent(agent, granular_checkpoints=False)
 
     # Checkpoint 1 — first turn, expensive (multiple LLM + tool calls).
     investigation = agent.run_sync(
