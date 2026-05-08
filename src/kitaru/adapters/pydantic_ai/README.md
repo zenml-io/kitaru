@@ -156,12 +156,14 @@ This also affects where event details land. Flow-scope explicit HITL calls are s
 
 ### 4. MCP servers
 
-MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools; in the default granular mode, each top-level MCP call gets its own adapter checkpoint. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
+MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools. In the default granular mode, each top-level MCP call gets its own adapter checkpoint when Kitaru can safely own the MCP call lifecycle. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
+
+If the PydanticAI MCP server is already running because you entered it with `async with server:` or `async with agent:`, Kitaru keeps the MCP call on the current event loop instead of moving it into the worker-thread checkpoint bridge. That avoids the concrete failure mode where the MCP request reaches the server successfully, but the client waits or tears down from the wrong event loop afterwards. In this pre-opened case the call is still tracked as adapter event metadata, but it is not persisted as its own per-call `mcp_call` checkpoint, so checkpoint-scoped args/result artifacts are not saved for that call. If you need per-call MCP checkpointing, let PydanticAI auto-connect the MCP server so the connection opens inside the checkpoint worker loop.
 
 ```python
+from kitaru.adapters.pydantic_ai import KitaruAgent
 from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStdio
-from kitaru.adapters.pydantic_ai import KitaruAgent
 
 server = MCPServerStdio('npx', args=['-y', '@modelcontextprotocol/server-filesystem', '/tmp'], cache_tools=True)
 agent = Agent('openai:gpt-4o', name='researcher', toolsets=[server])
