@@ -67,6 +67,10 @@ jobs:
           args: --root-dir . --verbose --no-progress './**/*.md'
           fail: true
           jobSummary: true
+          # Pin lychee >= 0.24.0 so the action matches the version brew
+          # installs locally; required for the new `include_fragments` enum
+          # syntax in lychee.toml.
+          lycheeVersion: v0.24.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
