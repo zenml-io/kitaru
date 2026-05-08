@@ -1,0 +1,185 @@
+"""Small bridge around Claude Agent SDK query calls."""
+
+import inspect
+from collections.abc import AsyncIterable
+from dataclasses import dataclass, field
+from importlib import metadata
+from pathlib import Path
+from typing import Any, cast
+
+from kitaru.errors import KitaruUsageError
+
+from ._serialization import to_json_safe
+from ._transcripts import load_transcript_payload, resolve_claude_transcript_path
+from ._types import ClaudeRunRequest
+from ._usage import normalize_usage
+from ._utils import elapsed_ms
+
+try:
+    from claude_agent_sdk import ResultMessage as _SDK_RESULT_MESSAGE_TYPE
+except (ImportError, AttributeError):
+    _SDK_RESULT_MESSAGE_TYPE: type[Any] | None = None
+
+
+@dataclass(frozen=True)
+class ClaudeInvocationPayload:
+    """Internal, pre-result payload extracted from one SDK invocation."""
+
+    session_id: str | None
+    final_text: str | None
+    messages: list[Any]
+    transcript_path: str | None
+    transcript_payload: dict[str, Any] | None
+    usage: dict[str, Any] | None
+    cost_usd: float | None
+    model_usage: dict[str, Any] | None
+    stop_reason: str | None
+    subtype: str | None
+    num_turns: int | None
+    duration_ms: float
+    duration_api_ms: float | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+def claude_agent_sdk_version() -> str:
+    """Return the installed Claude Agent SDK version when discoverable."""
+    try:
+        return metadata.version("claude-agent-sdk")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+async def run_claude_invocation(
+    *,
+    request: ClaudeRunRequest,
+    options: Any | None,
+    save_transcript_file: bool,
+) -> ClaudeInvocationPayload:
+    """Execute ``claude_agent_sdk.query(...)`` and extract boundary fields."""
+    import time
+
+    from claude_agent_sdk import query
+
+    started_at = time.perf_counter()
+    messages: list[Any] = []
+    final_message: Any | None = None
+
+    query_result = query(prompt=request.prompt, options=options)
+    if inspect.isawaitable(query_result):
+        query_result = await query_result
+    messages_iterable = cast(AsyncIterable[Any], query_result)
+
+    async for message in messages_iterable:
+        messages.append(to_json_safe(message))
+        if is_result_message(message):
+            final_message = message
+
+    if final_message is None:
+        raise RuntimeError("Claude Agent SDK did not return a final ResultMessage.")
+    if bool(getattr(final_message, "is_error", False)):
+        raise RuntimeError(format_result_error(final_message))
+
+    session_id = _string_or_none(getattr(final_message, "session_id", None))
+    transcript_path: str | None = None
+    transcript_payload: dict[str, Any] | None = None
+    warnings: list[str] = []
+    if save_transcript_file:
+        transcript_path, transcript_payload, transcript_warnings = _load_transcript(
+            session_id=session_id,
+            request=request,
+        )
+        warnings.extend(transcript_warnings)
+
+    sdk_duration_ms = _float_or_none(getattr(final_message, "duration_ms", None))
+    return ClaudeInvocationPayload(
+        session_id=session_id,
+        final_text=_string_or_none(getattr(final_message, "result", None)),
+        messages=messages,
+        transcript_path=transcript_path,
+        transcript_payload=transcript_payload,
+        usage=normalize_usage(getattr(final_message, "usage", None)),
+        cost_usd=_float_or_none(getattr(final_message, "total_cost_usd", None)),
+        model_usage=normalize_usage(getattr(final_message, "model_usage", None)),
+        stop_reason=_string_or_none(getattr(final_message, "stop_reason", None)),
+        subtype=_string_or_none(getattr(final_message, "subtype", None)),
+        num_turns=_int_or_none(getattr(final_message, "num_turns", None)),
+        duration_ms=sdk_duration_ms
+        if sdk_duration_ms is not None
+        else elapsed_ms(started_at),
+        duration_api_ms=_float_or_none(getattr(final_message, "duration_api_ms", None)),
+        warnings=warnings,
+    )
+
+
+def is_result_message(message: Any) -> bool:
+    """Return whether ``message`` looks like Claude's final ``ResultMessage``."""
+    if _SDK_RESULT_MESSAGE_TYPE is not None and isinstance(
+        message, _SDK_RESULT_MESSAGE_TYPE
+    ):
+        return True
+    return type(message).__name__ == "ResultMessage"
+
+
+def format_result_error(final_message: Any) -> str:
+    """Format a Claude final error message without assuming SDK details."""
+    subtype = getattr(final_message, "subtype", None)
+    result = getattr(final_message, "result", None)
+    parts = ["Claude Agent SDK returned an error ResultMessage"]
+    if subtype:
+        parts.append(f"subtype={subtype!r}")
+    if result:
+        parts.append(f"result={result!r}")
+    return "; ".join(parts)
+
+
+def _load_transcript(
+    *,
+    session_id: str | None,
+    request: ClaudeRunRequest,
+) -> tuple[str | None, dict[str, Any] | None, list[str]]:
+    if not session_id:
+        return (
+            None,
+            None,
+            [
+                "Claude transcript capture was requested, but the final result "
+                "had no session_id."
+            ],
+        )
+    cwd = request.cwd or str(Path.cwd())
+    try:
+        transcript_path = resolve_claude_transcript_path(session_id, cwd=cwd)
+    except ValueError as exc:
+        return None, None, [str(exc)]
+    payload, warnings = load_transcript_payload(transcript_path)
+    return transcript_path, payload, warnings
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise KitaruUsageError(
+            f"Could not coerce Claude numeric field {value!r}."
+        ) from exc
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise KitaruUsageError(
+            f"Could not coerce Claude integer field {value!r}."
+        ) from exc
