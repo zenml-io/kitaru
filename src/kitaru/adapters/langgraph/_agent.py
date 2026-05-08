@@ -460,7 +460,10 @@ class KitaruGraphRunner:
             namespace = interrupt.get("ns") or interrupt.get("namespace")
         task_id = getattr(task, "id", None) if task is not None else None
         if task_id is None:
-            task_id = getattr(interrupt, "id", None)
+            task_id = _mapping_get(interrupt, "task_id")
+        interrupt_id = getattr(interrupt, "id", None)
+        if interrupt_id is None and isinstance(interrupt, Mapping):
+            interrupt_id = interrupt.get("id") or interrupt.get("interrupt_id")
         node_name = getattr(task, "name", None) if task is not None else None
         if node_name is None and isinstance(interrupt, Mapping):
             node_name = interrupt.get("node_name")
@@ -469,6 +472,7 @@ class KitaruGraphRunner:
             resumable = interrupt.get("resumable", resumable)
         return LangGraphInterruptSummary(
             index=index,
+            interrupt_id=str(interrupt_id) if interrupt_id is not None else None,
             value=to_json_safe(value),
             resumable=bool(resumable),
             namespace=str(namespace) if namespace is not None else None,

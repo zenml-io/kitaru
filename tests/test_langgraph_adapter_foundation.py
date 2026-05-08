@@ -8,7 +8,7 @@ import sys
 import types
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -466,6 +466,47 @@ def test_wait_for_interrupt_forwards_metadata_to_wait_and_resume_request(
     assert wait_metadata["user_metadata"] == {"review_id": "review-1"}
     assert resume_metadata == {"review_id": "review-1"}
     assert resume_request.metadata == {"review_id": "review-1"}
+
+
+def test_build_resume_request_uses_selected_interrupt_id(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCommand:
+        def __init__(self, *, resume: object) -> None:
+            self.resume = resume
+
+    fake_langgraph_types = types.ModuleType("langgraph.types")
+    cast(Any, fake_langgraph_types).Command = FakeCommand
+    monkeypatch.setitem(sys.modules, "langgraph.types", fake_langgraph_types)
+
+    result = langgraph_adapter.LangGraphRunResult(
+        status="interrupted",
+        thread_id="thread-1",
+        interrupts=[
+            langgraph_adapter.LangGraphInterruptSummary(
+                index=0,
+                interrupt_id="interrupt-0",
+                value={"question": "first?"},
+                node_name="first_node",
+            ),
+            langgraph_adapter.LangGraphInterruptSummary(
+                index=1,
+                interrupt_id="interrupt-1",
+                value={"question": "second?"},
+                node_name="second_node",
+            ),
+        ],
+        pending_state=langgraph_adapter.LangGraphPendingState(thread_id="thread-1"),
+    )
+
+    request = langgraph_adapter.build_resume_request(
+        result,
+        {"approved": True},
+        interrupt_index=1,
+    )
+
+    assert request.command.resume == {"interrupt-1": {"approved": True}}
 
 
 def test_redaction_handles_common_secret_key_forms(

@@ -211,8 +211,8 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents
+    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra langgraph" \
+        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra langgraph
 fi
 
 # ---------------------------------------------------------------------------

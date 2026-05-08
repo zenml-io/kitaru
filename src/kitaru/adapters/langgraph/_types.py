@@ -12,6 +12,7 @@ class LangGraphInterruptSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     index: int
+    interrupt_id: str | None = None
     value: Any | None = None
     resumable: bool = True
     namespace: str | None = None

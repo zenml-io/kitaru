@@ -28,14 +28,20 @@ def build_resume_request(
         )
     if result.pending_state is None:
         raise KitaruUsageError("Interrupted LangGraph result is missing pending_state.")
-    _select_interrupt(result, interrupt_index)
+    interrupt = _select_interrupt(result, interrupt_index)
 
     from langgraph.types import Command
 
     resolved_durability = cast(Literal["sync", "async", "exit"] | None, durability)
+    resume_payload = _resume_payload_for_interrupt(
+        result,
+        interrupt,
+        resume,
+        interrupt_index=interrupt_index,
+    )
 
     return LangGraphRunRequest.resume(
-        Command(resume=resume),
+        Command(resume=resume_payload),
         thread_id=result.pending_state.thread_id,
         # Do not force the latest checkpoint_id into the resume config. With
         # LangGraph 1.1.x, doing so can pin the call to the interrupted
@@ -112,6 +118,20 @@ def _select_interrupt(
         "LangGraph interrupted result does not contain interrupt index "
         f"{index}. Available indexes: {available}."
     )
+
+
+def _resume_payload_for_interrupt(
+    result: LangGraphRunResult,
+    interrupt: LangGraphInterruptSummary,
+    resume: Any,
+    *,
+    interrupt_index: int | None,
+) -> Any:
+    if interrupt.interrupt_id and (
+        interrupt_index is not None or len(result.interrupts) > 1
+    ):
+        return {interrupt.interrupt_id: resume}
+    return resume
 
 
 def _interrupt_question(interrupt: LangGraphInterruptSummary) -> str:
