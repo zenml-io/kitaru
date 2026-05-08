@@ -350,6 +350,11 @@ section_header "PydanticAI adapter"
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
+section_header "LangGraph adapter"
+
+run_test "examples/integrations/langgraph_agent/langgraph_adapter.py" \
+    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py
+
 section_header "OpenAI Agents adapter"
 
 run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \

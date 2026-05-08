@@ -1,0 +1,94 @@
+---
+title: LangGraph Adapter
+description: Learn how to run a LangGraph graph in a Kitaru flow using start/interrupted/resume/completed calls with a stable thread ID
+---
+
+This guide explains, step by step, what happens when you combine Kitaru and LangGraph.
+
+## First, the simple ownership story
+
+- **Kitaru tracks the outer calls** you make from your flow (`runner.invoke(...)`).
+- **LangGraph tracks the inner graph state** (thread, checkpoint history, resume point).
+
+A concrete sequence looks like this:
+
+1. Flow makes start call.
+2. LangGraph interrupts.
+3. Flow makes resume call.
+4. LangGraph completes.
+
+Kitaru records both outer calls as durable checkpoints in the same flow execution.
+
+## Install
+
+```bash
+uv sync --extra local --extra langgraph
+```
+
+Then initialize/login as usual:
+
+```bash
+kitaru init
+kitaru login
+kitaru status
+```
+
+## Minimal flow pattern (no LLM, no wait prompt)
+
+```python
+import kitaru
+from kitaru import checkpoint, flow
+from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest, build_resume_request
+
+runner = KitaruGraphRunner(graph, name="review_graph")
+
+@checkpoint
+def persist_summary(summary: dict) -> dict:
+    kitaru.save("review_summary", summary, type="context")
+    return summary
+
+@flow
+def review(ticket: str) -> None:
+    first = runner.invoke(
+        LangGraphRunRequest.start({"ticket": ticket}, thread_id="ticket-42")
+    )
+    second = runner.invoke(build_resume_request(first, {"approved": True}))
+    _ = persist_summary({"first": first.status, "second": second.status})
+```
+
+This is intentionally simple:
+
+- the flow does two calls,
+- then saves one summary artifact,
+- then your script can load that artifact with `KitaruClient`.
+
+## Why `thread_id` is important
+
+`thread_id` is the identity LangGraph uses to continue the same paused thread.
+
+If the start call uses one thread id and resume uses another, LangGraph sees two different threads. The resume call cannot continue the paused work you expected.
+
+## Runnable local example
+
+```bash
+uv sync --extra local --extra langgraph
+uv run examples/integrations/langgraph_agent/langgraph_adapter.py
+```
+
+The example script runs an actual `@kitaru.flow`, waits for execution completion via handle status polling, then loads the saved summary artifact and prints it.
+
+## What this adapter does and does not do (v1)
+
+### It does
+
+- record outer graph-call checkpoints in Kitaru,
+- keep status/metadata from each call,
+- support interrupt/resume through `build_resume_request(...)`.
+
+### It does not do (yet)
+
+- replace LangGraph's internal checkpointing,
+- snapshot Deep Agents sandbox/filesystem state,
+- provide streaming (`stream` / `astream`) as a supported user contract (deferred).
+
+And one practical note: `InMemorySaver` is great for local learning, but for restart durability you should use a persistent LangGraph checkpointer.

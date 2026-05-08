@@ -18,6 +18,7 @@
     "secrets",
     "pydantic-ai-adapter",
     "openai-agents-adapter",
+    "langgraph-adapter",
     "news-scout"
   ]
 }

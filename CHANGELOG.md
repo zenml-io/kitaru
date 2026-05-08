@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added a local LangGraph adapter example (`examples/integrations/langgraph_agent/`) plus a new LangGraph adapter guide (`/guides/langgraph-adapter`) covering the v1 boundary: Kitaru owns the outer graph-call runtime boundary, LangGraph owns thread/checkpointer semantics, and Deep Agents filesystem/sandbox behavior remains pass-through. Updated the examples indexes and smoke test to include the new deterministic invoke/resume example with no API keys required.
+
 ### Security
 - Bumped transitive dependencies flagged by `pip-audit`: `gitpython` 3.1.47 → 3.1.49 (CVE-2026-44244), `mako` 1.3.11 → 1.3.12 (CVE-2026-44307), and `python-multipart` 0.0.26 → 0.0.27 (CVE-2026-42561). Lockfile-only change; no API surface affected.
 
