@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-08
+
 ### Changed
 - `kitaru.wait()` and adapter wait paths are flow-scope only. Waits created from checkpoint-contained tool bodies must move to flow scope, or those waiting tools must be opted out of granular tool checkpoints. (#280)
 - `KitaruAgent` now defaults to `granular_checkpoints=True`, so model, tool, and MCP calls are persisted as separate adapter checkpoints by default. Pass `granular_checkpoints=False` to keep the previous one-checkpoint-per-agent-run turn mode. (#280)
