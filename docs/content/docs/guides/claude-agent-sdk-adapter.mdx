@@ -237,6 +237,13 @@ Claude invocation again. If you need stronger mid-invocation transcript
 persistence, look at Claude's session and session-store features in the official
 SDK docs; this adapter's v0.1 boundary is still the completed invocation.
 
+On Kubernetes (or any distributed orchestrator), treat local Claude transcript
+files and workspace files as pod-local best-effort state. A later checkpoint or
+replay may run in a different pod with a different filesystem. The durable part
+is the completed Kitaru checkpoint output/artifacts that Kitaru persists; local
+Claude JSONL transcript files are only reliably reusable across pods when you
+back them with shared persistent storage and/or a Claude session store.
+
 ## Result shape
 
 `KitaruClaudeRunner.run_sync(...)` returns a `ClaudeRunResult` with fields such

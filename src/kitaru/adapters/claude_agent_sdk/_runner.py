@@ -87,6 +87,7 @@ async def run_claude_invocation(
         transcript_path, transcript_payload, transcript_warnings = _load_transcript(
             session_id=session_id,
             request=request,
+            options=options,
         )
         warnings.extend(transcript_warnings)
 
@@ -136,6 +137,7 @@ def _load_transcript(
     *,
     session_id: str | None,
     request: ClaudeRunRequest,
+    options: Any | None,
 ) -> tuple[str | None, dict[str, Any] | None, list[str]]:
     if not session_id:
         return (
@@ -146,13 +148,39 @@ def _load_transcript(
                 "had no session_id."
             ],
         )
-    cwd = request.cwd or str(Path.cwd())
+    cwd = _resolve_effective_cwd(request=request, options=options)
     try:
         transcript_path = resolve_claude_transcript_path(session_id, cwd=cwd)
     except ValueError as exc:
         return None, None, [str(exc)]
     payload, warnings = load_transcript_payload(transcript_path)
     return transcript_path, payload, warnings
+
+
+def _resolve_effective_cwd(*, request: ClaudeRunRequest, options: Any | None) -> str:
+    if request.cwd:
+        return request.cwd
+
+    options_cwd = _extract_cwd_from_options(options)
+    if options_cwd:
+        return options_cwd
+
+    return str(Path.cwd())
+
+
+def _extract_cwd_from_options(options: Any | None) -> str | None:
+    if options is None:
+        return None
+
+    if isinstance(options, dict):
+        value = options.get("cwd")
+    else:
+        value = getattr(options, "cwd", None)
+
+    if value is None:
+        return None
+
+    return str(value)
 
 
 def _string_or_none(value: Any) -> str | None:

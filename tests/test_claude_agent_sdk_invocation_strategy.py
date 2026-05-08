@@ -415,6 +415,86 @@ def test_transcript_file_is_captured_when_available(
     }
 
 
+def test_transcript_lookup_uses_static_options_cwd_when_request_cwd_missing(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    tracking_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._tracking"
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        tracking_module.kitaru, "save", lambda name, value, *, type: None
+    )
+    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
+    monkeypatch.setattr(
+        agent_module.KitaruClaudeRunner,
+        "_save_artifact",
+        staticmethod(lambda name, value, *, type: None),
+    )
+
+    options_cwd = tmp_path / "static-options-cwd"
+    options_cwd.mkdir()
+    encoded_cwd = "".join(
+        char if char.isalnum() else "-" for char in str(options_cwd.resolve())
+    )
+    transcript_dir = tmp_path / ".claude" / "projects" / encoded_cwd
+    transcript_dir.mkdir(parents=True)
+    transcript_file = transcript_dir / "session-123.jsonl"
+    transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
+
+    runner = claude_adapter.KitaruClaudeRunner(
+        name="claude",
+        options=SimpleNamespace(cwd=str(options_cwd)),
+    )
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.transcript_path == str(transcript_file)
+
+
+def test_transcript_lookup_uses_options_factory_cwd_when_request_cwd_missing(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    tracking_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._tracking"
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        tracking_module.kitaru, "save", lambda name, value, *, type: None
+    )
+    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
+    monkeypatch.setattr(
+        agent_module.KitaruClaudeRunner,
+        "_save_artifact",
+        staticmethod(lambda name, value, *, type: None),
+    )
+
+    factory_cwd = tmp_path / "factory-cwd"
+    factory_cwd.mkdir()
+    encoded_cwd = "".join(
+        char if char.isalnum() else "-" for char in str(factory_cwd.resolve())
+    )
+    transcript_dir = tmp_path / ".claude" / "projects" / encoded_cwd
+    transcript_dir.mkdir(parents=True)
+    transcript_file = transcript_dir / "session-123.jsonl"
+    transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
+
+    runner = claude_adapter.KitaruClaudeRunner(
+        name="claude",
+        options_factory=lambda request: {"cwd": str(factory_cwd)},
+    )
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.transcript_path == str(transcript_file)
+
+
 def test_runner_raises_when_sdk_returns_no_result_message(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,
@@ -470,6 +550,21 @@ def test_transcript_path_rejects_non_ascii_cwd(
 
     with pytest.raises(ValueError, match="ASCII cwd"):
         transcripts.resolve_claude_transcript_path("session-123", cwd="/tmp/délft")
+
+
+@pytest.mark.parametrize(
+    "session_id", ["../escape", "..\\escape", "foo/bar", "foo\\bar"]
+)
+def test_transcript_path_rejects_path_like_session_ids(
+    claude_adapter: types.ModuleType,
+    session_id: str,
+) -> None:
+    transcripts = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._transcripts"
+    )
+
+    with pytest.raises(ValueError, match="path separators or traversal"):
+        transcripts.resolve_claude_transcript_path(session_id, cwd="/tmp/repo")
 
 
 def test_runner_rejects_unknown_strategy_directly(
