@@ -94,14 +94,33 @@ For an existing OpenAI Agents SDK project, the adapter gives you:
   or finer model/tool-call checkpoints.
 - **Live stream events.** With `runner_call`, streamed OpenAI output can be
   published as execution events while the flow is still running.
+- **Human approval bridge.** Interrupted OpenAI approval runs can be routed
+  through `kitaru.wait(...)` and resumed with an explicit approve/reject
+  decision.
 - **Plain OpenAI code.** Your agent remains an `agents.Agent`; you do not need to
   rewrite it as a Kitaru-specific object.
+
+Supported OpenAI SDK pieces in this first version:
+
+- agent instructions, model settings, output schemas, and normal final outputs;
+- local `@function_tool` tools, including per-tool checkpointing in `calls`
+  mode;
+- agent handoffs, with nested OpenAI agents prepared recursively;
+- `RunConfig`, supplied through `run_config_factory=` so each run gets a fresh
+  config object;
+- approval interruptions via `wait_for_approval(...)` and
+  `build_resume_request(...)`;
+- MCP servers and hosted tools as OpenAI SDK features when your agent uses them,
+  but not yet as their own fine-grained Kitaru checkpoints.
 
 What it does **not** do yet:
 
 - It does not make every OpenAI Agents SDK feature replayable at token-level
   granularity.
 - It does not support streamed per-call checkpoints with the `calls` strategy.
+- It does not create separate granular checkpoints for hosted tools or MCP calls;
+  use `runner_call` for whole-run durability, or local `@function_tool`s when
+  per-tool checkpointing matters.
 - It does not make partial token chunks durable replay data; replays use the
   final checkpoint result.
 
@@ -205,10 +224,8 @@ for event in client.executions.events(
     print(event.payload.get("text_delta", ""), end="", flush=True)
 ```
 
-Current local development note: Kitaru is still locked to `zenml==0.94.3`, which
-does not include the ZenML streaming APIs. Live watching currently requires a
-sibling ZenML streaming checkout on `PYTHONPATH`, or a streaming-enabled deployed
-server / logged-in client.
+For the general checkpoint-progress API that powers these live events, see
+[Stream Checkpoint Progress](/guides/checkpoint-streaming).
 
 ## Tools
 
@@ -238,6 +255,53 @@ Tool bodies should still follow normal durability rules: avoid irreversible side
 effects unless you are comfortable with what happens on retry or replay. For
 example, reading an order status is safe. Charging a card, sending an email, or
 posting a Slack message needs an idempotency key or an explicit human gate.
+
+### Handoffs
+
+If your agent uses OpenAI Agents SDK handoffs, keep defining them in the OpenAI
+SDK style. In `calls` mode, Kitaru prepares nested OpenAI agents too, so their
+model and local function-tool calls can receive the same adapter treatment.
+
+Use handoffs when the agent really changes specialist — for example, a planner
+hands off to a writer. Do not use handoffs just to split ordinary Python
+workflow steps; Kitaru checkpoints are usually clearer for that.
+
+### MCP and hosted tools
+
+MCP servers and hosted tools can still be part of the OpenAI agent run. The
+important distinction is checkpoint shape: today Kitaru's fine-grained tool
+checkpointing is for local OpenAI `FunctionTool`s. MCP and hosted tool activity
+should be treated as part of the surrounding agent/model run rather than as
+separate Kitaru tool checkpoints.
+
+If a tool action must be individually replayable, prefer a local
+`@function_tool` and put the external call inside it. If whole-run durability is
+enough, keep the MCP or hosted tool in the OpenAI agent and use
+`checkpoint_strategy="runner_call"`.
+
+## Approvals
+
+Some OpenAI Agents SDK runs pause for approval. Kitaru represents that as an
+interrupted `OpenAIRunResult` with pending state. You can either build a resume
+request directly, or ask Kitaru to wait for a human decision inside the flow.
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import OpenAIRunRequest, wait_for_approval
+
+@flow
+def guarded_run(prompt: str) -> str:
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
+    if result.status == "interrupted":
+        resume = wait_for_approval(result, name="Approve OpenAI tool call")
+        result = runner.run_sync(resume)
+    return str(result.final_output)
+```
+
+Use this for tool calls where the agent needs permission before doing something
+externally visible. The wait belongs in the flow body, not inside a checkpoint,
+for the same reason `kitaru.wait(...)` belongs at flow scope elsewhere in
+Kitaru.
 
 ## Gotchas
 

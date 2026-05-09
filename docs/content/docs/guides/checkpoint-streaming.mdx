@@ -30,7 +30,21 @@ The checkpoint is still the room where the real work happens. Progress events
 are the postcards. Logs, metadata, and artifacts are the durable record you can
 inspect later.
 
-## Watch events from another process
+## Choose a signal
+
+Use live checkpoint events when the user experience improves if someone can see
+movement before the checkpoint finishes. A few concrete examples:
+
+- a data-loading checkpoint can say how many files it has read;
+- a research checkpoint can announce that source selection is done;
+- an agent checkpoint can show that it is drafting, reviewing, or packaging an
+  answer;
+- a UI can update a progress panel without waiting for the final artifact.
+
+Do not use live events as storage. If the value matters after the run, save it
+as metadata, an artifact, or a normal checkpoint result.
+
+## Watch events
 
 A watcher uses the SDK event iterator:
 
@@ -60,17 +74,19 @@ cd examples/features/checkpoint_streaming
 CHECKPOINT_STREAMING_DELAY_SECONDS=8 uv run python checkpoint_streaming_flow.py "garden robot"
 ```
 
-## Use `kitaru.progress(...)` for ordinary progress
+## Progress events
 
-Use `kitaru.progress(...)` when you want to say, in plain terms, where the
-checkpoint is:
+Use `kitaru.progress(...)` for ordinary “how far along are we?” updates. It is
+the thing to reach for when a human is waiting and needs reassurance that work is
+moving:
 
 ```python
 kitaru.progress("Embedding documents", percent=0.4, documents_done=120)
 ```
 
-This emits the standard event kind `kitaru.checkpoint.progress`. It is the best
-fit for messages like:
+This emits the standard event kind `kitaru.checkpoint.progress`. `percent` is a
+number between `0.0` and `1.0`; omit it if you only know the current phase. It is
+the best fit for messages like:
 
 - “Loaded 300 rows”
 - “Finished chunk 4 of 10”
@@ -78,12 +94,15 @@ fit for messages like:
 - “Draft is 75% complete”
 
 Keep these messages small and safe. Do not put prompts, secrets, document text,
-or customer data into progress payloads.
+or customer data into progress payloads. Pass `flush=True` for important
+milestones that should be pushed immediately, such as the last update before a
+long external call.
 
-## Use `kitaru.events.publish(...)` for named custom moments
+## Custom events
 
 Use `kitaru.events.publish(...)` when a generic progress message is not precise
-enough and your watcher wants to react to a particular kind of event:
+enough. A custom event says, “this named thing happened,” and lets a watcher or
+UI display it differently:
 
 ```python
 kitaru.events.publish(
@@ -93,15 +112,16 @@ kitaru.events.publish(
 )
 ```
 
-Custom event names should be non-empty strings. Treat `kitaru.*` as reserved for
-Kitaru's own events, such as:
+Custom event names should be non-empty strings, ideally namespaced by your app or
+domain: `research.source.accepted`, `etl.batch.ready`, `agent.section.done`.
+Treat `kitaru.*` as reserved for Kitaru's own events, such as:
 
 - `kitaru.checkpoint.started`
 - `kitaru.checkpoint.progress`
 - `kitaru.checkpoint.completed`
 - `kitaru.checkpoint.failed`
 
-## How this differs from `kitaru.log(...)`
+## Events vs logs
 
 `kitaru.log(...)` writes structured metadata onto the execution or checkpoint.
 That metadata is meant to stick around. It is the record you can come back to
@@ -123,9 +143,10 @@ A concrete rule of thumb:
 - Use runtime logs when you need normal Python logging from the runner or
   checkpoint process.
 
-## Best-effort delivery
+## Delivery model
 
-Checkpoint streaming is intentionally best effort.
+Checkpoint streaming is intentionally best effort. The checkpoint's real job is
+more important than the live postcard it sends while working.
 
 That means: if the checkpoint sends a postcard and the mail carrier is missing,
 the checkpoint keeps doing its real job. A dropped progress event should not
@@ -150,12 +171,12 @@ durable or exactly-once:
 If losing the event would break the product, it is not a progress event. Save it
 as metadata, an artifact, or normal application state instead.
 
-## Requirements and current scope
+## Current scope
 
-Live execution event watching requires a REST-backed Kitaru/ZenML connection
-with stream-event support. Local database mode and older ZenML builds do not
-expose the live event lane, so `KitaruClient().executions.events(...)` raises a
-clear feature-unavailable error instead of pretending to stream.
+Live execution event watching requires a Kitaru connection with stream-event
+support. If the active backend cannot expose live events,
+`KitaruClient().executions.events(...)` raises a clear feature-unavailable error
+instead of pretending to stream.
 
 In this first version, publishing is checkpoint-only. Call
 `kitaru.progress(...)` or `kitaru.events.publish(...)` inside a function wrapped
@@ -164,6 +185,7 @@ not part of this surface yet.
 
 ## Related pages
 
+- [OpenAI Agents Adapter](/guides/openai-agents-adapter) — streams OpenAI agent output through the same live-event lane.
 - [Logging and Metadata](/concepts/logging)
 - [View Execution Runtime Logs](/guides/execution-logs)
 - [Checkpoints](/concepts/checkpoints)
