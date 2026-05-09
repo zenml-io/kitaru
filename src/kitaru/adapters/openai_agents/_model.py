@@ -8,10 +8,11 @@ from agents.models.interface import Model, ModelProvider
 from agents.tool import FunctionTool
 
 import kitaru
+from kitaru._serialization import to_json_safe
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import OpenAICapturePolicy
-from ._serialization import to_cache_identity, to_json_safe
+from ._serialization import to_cache_identity
 from ._tracking import artifact_name, get_current_tracker
 from ._usage import normalize_usage
 from ._utils import (

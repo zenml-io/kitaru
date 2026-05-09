@@ -197,7 +197,22 @@ def _wrap_entrypoint(
                     checkpoint_id=checkpoint_id,
                 )
             )
-            return func(*args, **kwargs)
+
+            from kitaru.events import (
+                _publish_checkpoint_completed,
+                _publish_checkpoint_failed,
+                _publish_checkpoint_started,
+            )
+
+            _publish_checkpoint_started()
+            try:
+                result = func(*args, **kwargs)
+            except Exception as exc:
+                _publish_checkpoint_failed(exc)
+                raise
+            else:
+                _publish_checkpoint_completed()
+                return result
 
     return _wrapped
 

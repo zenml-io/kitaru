@@ -1,0 +1,1 @@
+"""Checkpoint-level streaming example."""

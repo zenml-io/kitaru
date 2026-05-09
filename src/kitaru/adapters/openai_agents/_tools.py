@@ -8,10 +8,10 @@ from typing import Any
 from agents.tool import FunctionTool
 
 import kitaru
+from kitaru._serialization import to_json_safe
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import OpenAICapturePolicy
-from ._serialization import to_json_safe
 from ._tracking import artifact_name, get_current_tracker
 from ._utils import (
     CheckpointConfig,

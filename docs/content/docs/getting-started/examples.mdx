@@ -43,6 +43,7 @@ kitaru status
 |---|---|---|
 | Start with the smallest runnable flow | `features/basic_flow/` | `python first_working_flow.py` |
 | See structured metadata logging | `features/basic_flow/` | `python flow_with_logging.py` |
+| Watch live checkpoint progress | `features/checkpoint_streaming/` | `python checkpoint_streaming_flow.py` |
 | Persist and reload data across executions | `features/basic_flow/` | `python flow_with_artifacts.py` |
 | Seed, inspect, compact, and purge durable memory | `features/memory/` | `python flow_with_memory.py` |
 | Set runtime configuration defaults | `features/basic_flow/` | `python flow_with_configuration.py` |
@@ -68,6 +69,7 @@ python first_working_flow.py
 |---|---|---|
 | `features/basic_flow/first_working_flow.py` | Smallest `@flow` + `@checkpoint` example | [Quickstart](/getting-started/quickstart) |
 | `features/basic_flow/flow_with_logging.py` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging](/concepts/logging) |
+| `features/checkpoint_streaming/checkpoint_streaming_flow.py` | `kitaru.progress(...)`, custom live events, and a second-terminal watcher | [Stream Checkpoint Progress](/guides/checkpoint-streaming) |
 | `features/basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
 | `features/basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](/guides/configuration) |
 
@@ -106,13 +108,14 @@ If you are learning Kitaru from scratch:
 
 1. `features/basic_flow/first_working_flow.py` — [Quickstart](/getting-started/quickstart)
 2. `features/basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
-3. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
-4. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory)
-5. `features/execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
-6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
-7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
-8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
-9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
-10. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/guides/openai-agents-adapter)
-11. `end_to_end/openai_research_bot/research_bot.py` — [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example)
-12. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+3. `features/checkpoint_streaming/checkpoint_streaming_flow.py` — [Stream Checkpoint Progress](/guides/checkpoint-streaming)
+4. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
+5. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory)
+6. `features/execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
+7. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
+8. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
+9. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
+10. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
+11. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/guides/openai-agents-adapter)
+12. `end_to_end/openai_research_bot/research_bot.py` — [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example)
+13. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)

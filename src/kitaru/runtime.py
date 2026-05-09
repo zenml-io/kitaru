@@ -11,12 +11,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, NoReturn, cast
+from uuid import uuid4
 
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
 
 from kitaru._source_aliases import normalize_flow_name as _shared_normalize_flow_name
-from kitaru.errors import KitaruFeatureNotAvailableError
+from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class _CheckpointScope:
     type: str | None
     execution_id: str | None = None
     checkpoint_id: str | None = None
+    event_stream_id: str | None = None
 
 
 _CURRENT_FLOW_SCOPE: ContextVar[_FlowScope | None] = ContextVar(
@@ -47,6 +49,10 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     default=None,
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
+_CHECKPOINT_EVENT_COUNTER: ContextVar[int] = ContextVar(
+    "kitaru_checkpoint_event_counter",
+    default=0,
+)
 
 
 def _to_optional_str(value: Any) -> str | None:
@@ -54,6 +60,12 @@ def _to_optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _new_checkpoint_event_stream_id(name: str) -> str:
+    """Create the runtime-local stream ID for one checkpoint execution."""
+    normalized_name = name.strip() or "checkpoint"
+    return f"kitaru.checkpoint:{normalized_name}:{uuid4().hex}"
 
 
 def _get_zenml_execution_id() -> str | None:
@@ -163,12 +175,15 @@ def _checkpoint_scope(
             type=checkpoint_type,
             execution_id=resolved_execution_id,
             checkpoint_id=resolved_checkpoint_id,
+            event_stream_id=_new_checkpoint_event_stream_id(name),
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
+    event_counter_token = _CHECKPOINT_EVENT_COUNTER.set(0)
     try:
         yield
     finally:
+        _CHECKPOINT_EVENT_COUNTER.reset(event_counter_token)
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
@@ -281,6 +296,36 @@ def _get_current_checkpoint_id() -> str | None:
         return checkpoint_scope.checkpoint_id
 
     return None
+
+
+def _get_current_checkpoint_event_stream_id() -> str | None:
+    """Get the live event stream ID for the active checkpoint execution."""
+    if (
+        checkpoint_scope := _get_current_checkpoint()
+    ) and checkpoint_scope.event_stream_id:
+        return checkpoint_scope.event_stream_id
+
+    return None
+
+
+def _next_checkpoint_event_index(explicit_index: int | None = None) -> int:
+    """Reserve the next checkpoint-local live-event index.
+
+    Explicit indexes are forwarded as-is, but the internal counter still moves
+    past them so later automatic indexes do not collide with caller-supplied
+    values.
+    """
+    current_index = _CHECKPOINT_EVENT_COUNTER.get()
+    if explicit_index is not None:
+        if explicit_index < current_index:
+            raise KitaruUsageError(
+                "Event index cannot be lower than the next checkpoint event index."
+            )
+        _CHECKPOINT_EVENT_COUNTER.set(explicit_index + 1)
+        return explicit_index
+
+    _CHECKPOINT_EVENT_COUNTER.set(current_index + 1)
+    return current_index
 
 
 def _next_llm_call_name(prefix: str = "llm") -> str:

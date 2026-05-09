@@ -46,6 +46,12 @@ class TestPublicExports:
     def test_log_exists(self) -> None:
         assert hasattr(kitaru, "log")
 
+    def test_progress_exists(self) -> None:
+        assert hasattr(kitaru, "progress")
+
+    def test_events_exists(self) -> None:
+        assert hasattr(kitaru, "events")
+
     def test_configure_exists(self) -> None:
         assert hasattr(kitaru, "configure")
 
@@ -76,6 +82,7 @@ class TestPublicExports:
             "AuthAPIKeyWithValue",
             "AuthServiceAccount",
             "Deployment",
+            "ExecutionEvent",
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
@@ -107,6 +114,7 @@ class TestPublicExports:
             "current_stack",
             "delete_secret",
             "delete_stack",
+            "events",
             "flow",
             "get_secret",
             "list_stacks",
@@ -114,6 +122,7 @@ class TestPublicExports:
             "memory",
             "load",
             "log",
+            "progress",
             "save",
             "use_stack",
             "wait",

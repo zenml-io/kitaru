@@ -137,6 +137,20 @@ class LogEntry:
 
 
 @dataclass(frozen=True)
+class ExecutionEvent:
+    """One live event streamed for an execution."""
+
+    exec_id: str
+    kind: str
+    payload: dict[str, Any]
+    stream_id: str | None
+    index: int | None
+    timestamp: datetime | None
+    checkpoint_id: str | None
+    checkpoint_name: str | None
+
+
+@dataclass(frozen=True)
 class CheckpointAttempt:
     """One checkpoint attempt in retry/failure journaling history."""
 
@@ -257,6 +271,7 @@ __all__ = [
     "CheckpointCall",
     "Deployment",
     "Execution",
+    "ExecutionEvent",
     "ExecutionStatus",
     "FailureInfo",
     "LogEntry",

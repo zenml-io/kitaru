@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Checkpoint-level live event docs and a terminal-friendly example showing `kitaru.progress(...)`, `kitaru.events.publish(...)`, and `KitaruClient().executions.events(...)` for watching progress from another process.
 - OpenAI Agents adapter streaming entrypoints (`KitaruRunner.run_stream(...)` and `run_stream_sync(...)`) for `checkpoint_strategy="runner_call"`, publishing best-effort live progress events inside Kitaru flows while preserving the final `OpenAIRunResult` shape.
 
 ### Security

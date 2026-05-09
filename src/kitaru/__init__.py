@@ -23,8 +23,8 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
-  ``create_secret()``, ``delete_secret()``,
+  ``kitaru.progress()``, ``save()``, ``load()``, ``wait()``, ``llm()``,
+  ``get_secret()``, ``create_secret()``, ``delete_secret()``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
@@ -54,14 +54,19 @@ import os
 
 from kitaru.analytics import set_source
 
-from . import memory
+from . import events, memory
 
 _default_analytics_source = os.environ.get(
     "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
 )
 set_source(_default_analytics_source)
 
-from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._models import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionEvent,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -96,6 +101,7 @@ from kitaru.errors import (
     KitaruUserCodeError,
     KitaruWaitValidationError,
 )
+from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
@@ -113,6 +119,7 @@ __all__ = [
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionEvent",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
@@ -144,6 +151,7 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "events",
     "flow",
     "get_secret",
     "list_stacks",
@@ -151,6 +159,7 @@ __all__ = [
     "load",
     "log",
     "memory",
+    "progress",
     "save",
     "use_stack",
     "wait",

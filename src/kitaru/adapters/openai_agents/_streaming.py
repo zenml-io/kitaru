@@ -3,9 +3,12 @@
 import importlib
 import logging
 import uuid
+from collections.abc import Callable
+from functools import lru_cache
 from typing import Any
 
-from ._serialization import to_json_safe
+from kitaru._serialization import to_json_safe
+
 from ._tracking import normalize_agent_name
 
 logger = logging.getLogger(__name__)
@@ -63,7 +66,8 @@ class OpenAIStreamPublisher:
     def publish_sdk_event(self, event: Any) -> None:
         """Normalize and publish one SDK stream event."""
         self._publish(
-            STREAM_EVENT_KIND, normalize_stream_event(event, self.include_raw)
+            STREAM_EVENT_KIND,
+            lambda: normalize_stream_event(event, self.include_raw),
         )
 
     def publish_end(self, *, status: str) -> None:
@@ -95,22 +99,23 @@ class OpenAIStreamPublisher:
     def _publish(
         self,
         kind: str,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | Callable[[], dict[str, Any]],
         *,
         flush: bool = False,
     ) -> None:
         index = self._index
         self._index += 1
-        enriched_payload = {
-            "adapter": "openai_agents",
-            "agent_name": self.agent_name,
-            "stream_id": self.stream_id,
-            **payload,
-        }
         try:
             streams = _load_zenml_streams()
             if streams is None:
                 return
+            resolved_payload = payload if isinstance(payload, dict) else payload()
+            enriched_payload = {
+                "adapter": "openai_agents",
+                "agent_name": self.agent_name,
+                "stream_id": self.stream_id,
+                **resolved_payload,
+            }
             streams.publish(
                 enriched_payload,
                 kind=kind,
@@ -147,6 +152,7 @@ def normalize_stream_event(event: Any, include_raw: bool) -> dict[str, Any]:
     return payload
 
 
+@lru_cache(maxsize=1)
 def _load_zenml_streams() -> Any | None:
     try:
         return importlib.import_module("zenml.streams")

@@ -95,6 +95,7 @@ from kitaru._client._models import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionEvent,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -783,6 +784,89 @@ def _restart_run_from_snapshot(
         ) from exc
 
 
+def _event_value(event: Any, name: str) -> Any:
+    """Read an attribute from either a ZenML model or a mapping-like stub."""
+    if isinstance(event, Mapping):
+        return event.get(name)
+    return getattr(event, name, None)
+
+
+def _event_optional_str(value: Any) -> str | None:
+    """Convert optional event identity values to strings."""
+    if value is None:
+        return None
+    return str(value)
+
+
+def _event_timestamp(value: Any) -> Any:
+    """Normalize a stream event timestamp if it is already parseable."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _parse_log_timestamp(value)
+    return value
+
+
+def _event_payload(raw_payload: Any) -> dict[str, Any]:
+    """Normalize a raw stream event payload into a mutable dictionary."""
+    if isinstance(raw_payload, Mapping):
+        return dict(raw_payload)
+    return {}
+
+
+def _map_execution_event(raw_event: Any, *, fallback_exec_id: str) -> ExecutionEvent:
+    """Map a ZenML StreamEvent-like object into Kitaru's public event model."""
+    payload = _event_payload(_event_value(raw_event, "payload"))
+    kitaru_payload = payload.get("kitaru")
+    if isinstance(kitaru_payload, Mapping):
+        checkpoint_id = _event_optional_str(kitaru_payload.get("checkpoint_id"))
+        checkpoint_name = _event_optional_str(kitaru_payload.get("checkpoint_name"))
+    else:
+        checkpoint_id = _event_optional_str(_event_value(raw_event, "step_run_id"))
+        fallback_step_name = _event_optional_str(_event_value(raw_event, "step_name"))
+        checkpoint_name = (
+            _normalize_checkpoint_name(fallback_step_name)
+            if fallback_step_name is not None
+            else None
+        )
+
+    exec_id = _event_optional_str(_event_value(raw_event, "pipeline_run_id"))
+    return ExecutionEvent(
+        exec_id=exec_id or fallback_exec_id,
+        kind=str(_event_value(raw_event, "kind") or ""),
+        payload=payload,
+        stream_id=_event_optional_str(_event_value(raw_event, "stream_id")),
+        index=_event_value(raw_event, "index"),
+        timestamp=_event_timestamp(
+            _event_value(raw_event, "ts") or _event_value(raw_event, "timestamp")
+        ),
+        checkpoint_id=checkpoint_id,
+        checkpoint_name=checkpoint_name,
+    )
+
+
+def _events_unavailable_error(message: str) -> KitaruFeatureNotAvailableError:
+    """Build a consistent feature-unavailable error for live event streaming."""
+    return KitaruFeatureNotAvailableError(
+        "Live execution events require a server-backed ZenML build with stream "
+        f"event support. {message}"
+    )
+
+
+def _normalize_event_kinds(
+    kinds: builtins.list[str] | None,
+) -> builtins.list[str] | None:
+    """Validate optional event-kind filters."""
+    if kinds is None:
+        return None
+    normalized: builtins.list[str] = []
+    for kind in kinds:
+        if not isinstance(kind, str) or not kind.strip():
+            raise KitaruUsageError("`kinds` must contain only non-empty strings.")
+        normalized.append(kind.strip())
+    return normalized
+
+
 class _ExecutionsAPI:
     """Namespace for execution lifecycle and inspection operations."""
 
@@ -947,6 +1031,65 @@ class _ExecutionsAPI:
         if limit is not None:
             return sorted_entries[:limit]
         return sorted_entries
+
+    def events(
+        self,
+        exec_id: str,
+        *,
+        kinds: builtins.list[str] | None = None,
+        checkpoint: str | None = None,
+        since: str | None = None,
+        reconnect: bool = True,
+    ) -> Iterator[ExecutionEvent]:
+        """Iterate live stream events for an execution.
+
+        The installed ZenML client and active store must support REST-backed
+        run event streaming. Local database mode and older ZenML builds do not
+        expose this live event lane.
+        """
+        normalized_kinds = _normalize_event_kinds(kinds)
+        normalized_checkpoint: str | None = None
+        if checkpoint is not None:
+            normalized_checkpoint = checkpoint.strip()
+            if not normalized_checkpoint:
+                raise KitaruUsageError("`checkpoint` must be non-empty when provided.")
+
+        zenml_client = self._client_ref._client()
+        iter_run_events = getattr(zenml_client, "iter_run_events", None)
+        if not callable(iter_run_events):
+            raise _events_unavailable_error(
+                "The active ZenML client does not expose `Client.iter_run_events(...)`."
+            )
+
+        zen_store = getattr(zenml_client, "zen_store", None)
+        if zen_store is not None and not isinstance(zen_store, RestZenStore):
+            raise _events_unavailable_error(
+                "Local database mode does not expose live execution events."
+            )
+
+        try:
+            raw_events = iter_run_events(
+                exec_id,
+                since=since,
+                kinds=normalized_kinds,
+                reconnect=reconnect,
+            )
+            for raw_event in raw_events:
+                event = _map_execution_event(raw_event, fallback_exec_id=exec_id)
+                if (
+                    normalized_checkpoint is not None
+                    and event.checkpoint_name != normalized_checkpoint
+                ):
+                    continue
+                yield event
+        except KitaruFeatureNotAvailableError:
+            raise
+        except NotImplementedError as exc:
+            raise _events_unavailable_error(str(exc)) from exc
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Live event streaming failed for execution '{exec_id}': {exc}"
+            ) from exc
 
     def pending_waits(self, exec_id: str) -> builtins.list[PendingWait]:
         """List all pending wait conditions for an execution."""
@@ -2581,6 +2724,7 @@ __all__ = [
     "CheckpointCall",
     "Deployment",
     "Execution",
+    "ExecutionEvent",
     "ExecutionStatus",
     "FailureInfo",
     "KitaruClient",

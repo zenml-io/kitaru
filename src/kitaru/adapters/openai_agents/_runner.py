@@ -5,9 +5,9 @@ from functools import lru_cache
 from importlib import metadata
 from typing import Any
 
+from kitaru._serialization import to_json_safe
 from kitaru.errors import KitaruUsageError
 
-from ._serialization import to_json_safe
 from ._types import (
     OpenAIApprovalDecision,
     OpenAIInterruptionSummary,

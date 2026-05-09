@@ -1,0 +1,169 @@
+---
+title: Stream Checkpoint Progress
+description: Send live checkpoint progress events and watch them from another process
+---
+
+Checkpoint streaming is for the moment when your checkpoint is already doing
+work, but the person watching the run cannot see inside the room yet.
+
+Imagine a checkpoint that reads documents, checks a few claims, and writes a
+brief. Without live events, Terminal B is mostly waiting: the checkpoint starts,
+time passes, and eventually the run finishes or fails. With checkpoint events,
+the checkpoint can push small postcards through the door while it works:
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def draft_brief(topic: str) -> str:
+    kitaru.progress("Collecting source notes", percent=0.2, documents=3)
+    kitaru.progress("Comparing the strongest claims", percent=0.45)
+    kitaru.events.publish(
+        "demo.brief.section.ready",
+        {"section": "recommendation"},
+        message="Recommendation section is ready",
+    )
+    return f"Brief about {topic}"
+```
+
+The checkpoint is still the room where the real work happens. Progress events
+are the postcards. Logs, metadata, and artifacts are the durable record you can
+inspect later.
+
+## Watch events from another process
+
+A watcher uses the SDK event iterator:
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+for event in client.executions.events(
+    "<execution-id>",
+    kinds=["kitaru.checkpoint.progress", "demo.brief.section.ready"],
+):
+    print(event.checkpoint_name, event.kind, event.payload.get("message"))
+```
+
+For a complete terminal demo, see
+[`examples/features/checkpoint_streaming`](https://github.com/zenml-io/kitaru/tree/develop/examples/features/checkpoint_streaming).
+It is built for a short recording. Start the watcher first so it can wait for
+the next demo run, then start the flow:
+
+```bash
+# Terminal B
+cd examples/features/checkpoint_streaming
+uv run python watch_checkpoint_events.py
+
+# Terminal A
+cd examples/features/checkpoint_streaming
+CHECKPOINT_STREAMING_DELAY_SECONDS=8 uv run python checkpoint_streaming_flow.py "garden robot"
+```
+
+## Use `kitaru.progress(...)` for ordinary progress
+
+Use `kitaru.progress(...)` when you want to say, in plain terms, where the
+checkpoint is:
+
+```python
+kitaru.progress("Embedding documents", percent=0.4, documents_done=120)
+```
+
+This emits the standard event kind `kitaru.checkpoint.progress`. It is the best
+fit for messages like:
+
+- “Loaded 300 rows”
+- “Finished chunk 4 of 10”
+- “Tool call returned; summarizing result”
+- “Draft is 75% complete”
+
+Keep these messages small and safe. Do not put prompts, secrets, document text,
+or customer data into progress payloads.
+
+## Use `kitaru.events.publish(...)` for named custom moments
+
+Use `kitaru.events.publish(...)` when a generic progress message is not precise
+enough and your watcher wants to react to a particular kind of event:
+
+```python
+kitaru.events.publish(
+    "research.source.accepted",
+    {"source_id": "paper-17", "score": 0.91},
+    message="Accepted a source for the final brief",
+)
+```
+
+Custom event names should be non-empty strings. Treat `kitaru.*` as reserved for
+Kitaru's own events, such as:
+
+- `kitaru.checkpoint.started`
+- `kitaru.checkpoint.progress`
+- `kitaru.checkpoint.completed`
+- `kitaru.checkpoint.failed`
+
+## How this differs from `kitaru.log(...)`
+
+`kitaru.log(...)` writes structured metadata onto the execution or checkpoint.
+That metadata is meant to stick around. It is the record you can come back to
+when you ask, “What model did this run use?” or “How many tokens did the final
+checkpoint spend?”
+
+Checkpoint events are different. They are live signals. They help another
+process show what is happening right now.
+
+A concrete rule of thumb:
+
+- Use `kitaru.progress(...)` when a human is waiting and needs reassurance that
+  work is moving.
+- Use `kitaru.events.publish(...)` when your live watcher wants to display or
+  react to a named moment.
+- Use `kitaru.log(...)` when the value should be part of the durable execution
+  record.
+- Use artifacts when the value is an output you need to load later.
+- Use runtime logs when you need normal Python logging from the runner or
+  checkpoint process.
+
+## Best-effort delivery
+
+Checkpoint streaming is intentionally best effort.
+
+That means: if the checkpoint sends a postcard and the mail carrier is missing,
+the checkpoint keeps doing its real job. A dropped progress event should not
+make your model call, data transform, or tool call fail.
+
+Kitaru will raise for user mistakes, such as calling `kitaru.progress(...)`
+outside a `@checkpoint`. But transport problems are not fatal to your
+checkpoint. Missing stream support, temporary publisher failures, or flush
+failures are logged and dropped.
+
+Because of that tradeoff, do not use checkpoint events for anything that must be
+durable or exactly-once:
+
+- billing decisions
+- audit trails
+- approvals
+- user-visible final answers
+- replayable model transcripts
+- cache keys
+- data you cannot afford to lose
+
+If losing the event would break the product, it is not a progress event. Save it
+as metadata, an artifact, or normal application state instead.
+
+## Requirements and current scope
+
+Live execution event watching requires a REST-backed Kitaru/ZenML connection
+with stream-event support. Local database mode and older ZenML builds do not
+expose the live event lane, so `KitaruClient().executions.events(...)` raises a
+clear feature-unavailable error instead of pretending to stream.
+
+In this first version, publishing is checkpoint-only. Call
+`kitaru.progress(...)` or `kitaru.events.publish(...)` inside a function wrapped
+with `@kitaru.checkpoint`. Flow-level progress events outside a checkpoint are
+not part of this surface yet.
+
+## Related pages
+
+- [Logging and Metadata](/concepts/logging)
+- [View Execution Runtime Logs](/guides/execution-logs)
+- [Checkpoints](/concepts/checkpoints)
