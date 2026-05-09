@@ -1,156 +1,303 @@
 ---
 title: OpenAI Agents Adapter
-description: Wrap an OpenAI Agents SDK Agent with KitaruRunner so calls are durable and replayable inside Kitaru flows
+description: Make OpenAI Agents SDK runs durable, replayable, and streamable inside Kitaru flows
 ---
 
-Kitaru's OpenAI Agents adapter lets you keep your existing OpenAI Agents SDK
-agent logic while adding Kitaru durability around it.
+Kitaru's OpenAI Agents adapter is for the moment when you already have an
+[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) agent and
+want it to survive real workflow life: retries, replays, dashboard visibility,
+and long-running execution traces.
+
+Your agent stays an OpenAI agent. Kitaru adds the floor underneath it.
 
 ```python
 from agents import Agent
 from kitaru.adapters.openai_agents import KitaruRunner
 
-agent = Agent(name="researcher", model=your_model)
+agent = Agent(name="researcher", model="gpt-5-nano")
 runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 ```
 
-The runtime default is `checkpoint_strategy="calls"` (per-call checkpoints —
-see below); pass `"runner_call"` whenever you want a single terminal
-checkpoint so `flow.run(...).wait()` returns the run result directly.
-
-You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
-`OpenAIRunRequest`. For live progress events, the adapter also exposes
-`runner.run_stream(...)` and `runner.run_stream_sync(...)` for the
-`runner_call` strategy.
+Once wrapped, you call the agent from inside a Kitaru `@flow`. Kitaru records the
+agent run as one or more checkpoints, so a failed workflow can be inspected,
+retried, or replayed instead of becoming a mystery pile of API calls.
 
 ## Install
+
+Add the OpenAI Agents extra — and `local` if you want the local dashboard:
 
 ```bash
 uv add "kitaru[openai-agents,local]"
 ```
 
-Then initialize/login as usual:
+Initialize the project once:
 
 ```bash
 kitaru init
-kitaru login
+kitaru login        # local server; add a URL to connect to a deployed one
 kitaru status
 ```
 
-## Minimal flow
+Set an OpenAI key wherever the flow code actually runs:
+
+```bash
+export OPENAI_API_KEY='sk-...'
+```
+
+<Callout type="warn">
+  If your active Kitaru stack runs remotely, your laptop shell environment may
+  not be visible to the remote runtime. Put `OPENAI_API_KEY` in the environment
+  or secret mechanism used by that runtime before expecting remote executions to
+  call OpenAI successfully.
+</Callout>
+
+## Quick start
+
+This is the smallest useful shape: one OpenAI agent run inside one Kitaru flow.
 
 ```python
+from agents import Agent
 from kitaru import flow
 from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
 
+agent = Agent(
+    name="researcher",
+    instructions="Answer carefully and cite uncertainty.",
+    model="gpt-5-nano",
+)
 runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 
 @flow
 def research(prompt: str) -> str:
     result = runner.run_sync(OpenAIRunRequest.start(prompt))
     return str(result.final_output)
+
+handle = research.run("What should I know about agent durability?")
+print(handle.wait())
 ```
 
-## Streaming live progress
+Think of `KitaruRunner` as the adapter plug between two worlds:
 
-`KitaruRunner.run_stream(...)` and `run_stream_sync(...)` drain the OpenAI
-Agents SDK stream while the Kitaru flow is running, publish best-effort live
-progress events, and then return the normal final `OpenAIRunResult`. In other
-words, streaming changes what you can watch during the run; it does not change
-the final result object your flow receives.
+- OpenAI still decides how the agent reasons, calls tools, and produces output.
+- Kitaru decides where the workflow boundary is, how the call is checkpointed,
+  and what can be replayed later.
 
-The first shipped streaming surface is intentionally narrow:
+## What Kitaru adds
 
-- It supports only `checkpoint_strategy="runner_call"`.
-- It must be called from inside a Kitaru `@flow`, because the live events need
-  an active execution to attach to.
-- Stream publication is best effort. If the server or client cannot publish or
-  consume live events, the OpenAI run can still finish and return its final
-  result.
-- Partial token chunks are not durable replay data yet. Replays use the final
-  checkpoint result, not a saved token-by-token transcript.
+For an existing OpenAI Agents SDK project, the adapter gives you:
+
+- **Durable flow boundaries.** Agent work happens inside Kitaru executions that
+  show up in the CLI and dashboard.
+- **Replay and retry hooks.** Completed checkpoints can be reused when replaying
+  a failed workflow.
+- **Checkpoint strategy choices.** You can save one coarse agent-run checkpoint
+  or finer model/tool-call checkpoints.
+- **Live stream events.** With `runner_call`, streamed OpenAI output can be
+  published as execution events while the flow is still running.
+- **Plain OpenAI code.** Your agent remains an `agents.Agent`; you do not need to
+  rewrite it as a Kitaru-specific object.
+
+What it does **not** do yet:
+
+- It does not make every OpenAI Agents SDK feature replayable at token-level
+  granularity.
+- It does not support streamed per-call checkpoints with the `calls` strategy.
+- It does not make partial token chunks durable replay data; replays use the
+  final checkpoint result.
+
+## Run modes
+
+You choose how much of the agent run becomes a Kitaru checkpoint with
+`checkpoint_strategy=`.
+
+### Runner checkpoint
 
 ```python
-@flow
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+```
+
+Kitaru places one checkpoint around the outer OpenAI `Runner.run(...)` call.
+This gives the flow one clear terminal artifact, so `flow.run(...).wait()` can
+return the agent result directly.
+
+Use this when:
+
+- you want the simplest mental model;
+- you want `.wait()` to return the final agent output cleanly;
+- you want live OpenAI stream events;
+- re-running the whole agent turn on replay is acceptable.
+
+Concrete failure story: your flow asks the agent to write a report, then a later
+checkpoint fails while uploading the report. With `runner_call`, replay can reuse
+the completed agent-run checkpoint and continue after it. If the agent itself
+failed halfway through, replay re-runs the whole agent call.
+
+### Call checkpoints
+
+```python
+runner = KitaruRunner(agent, checkpoint_strategy="calls")
+```
+
+This is the default. Kitaru catches supported model and tool calls as separate
+peer checkpoints under the flow.
+
+Use this when:
+
+- the agent has expensive or flaky tool calls;
+- you want finer replay units;
+- it is okay to inspect per-call artifacts instead of receiving one clean
+  `.wait()` value.
+
+Concrete failure story: your agent calls a search tool five times and the fifth
+call fails. With `calls`, the first four completed calls can have their own
+checkpoint boundaries. That can make debugging and replay cheaper than repeating
+the whole turn.
+
+The trade-off is that there is no single terminal artifact for the flow to
+return. `flow.run(...).wait()` can raise `KitaruAmbiguousFlowResultError` because
+it sees sibling model/tool checkpoints and cannot guess which one is "the" final
+result. The artifacts are still visible in the Kitaru UI and retrievable through
+`KitaruClient`.
+
+<Callout type="warn">
+  Do not wrap `runner.run_sync(...)` with `checkpoint_strategy="calls"` inside
+  your own `@checkpoint`. The adapter needs room to open inner model/tool
+  checkpoints, so it must run at flow scope.
+</Callout>
+
+## Streaming
+
+Streaming is for demos and real workloads where the answer is useful before the
+flow finishes. The OpenAI agent writes; Kitaru publishes live execution events;
+a terminal watcher or UI can show those events as they arrive.
+
+```python
+@flow(cache=False)
 def research(prompt: str) -> str:
     result = runner.run_stream_sync(OpenAIRunRequest.start(prompt))
     return str(result.final_output)
 ```
 
-To watch events from another process, use a streaming-enabled deployed server
-or a logged-in client backed by ZenML streaming support:
+`run_stream(...)` and `run_stream_sync(...)` return the same kind of final
+`OpenAIRunResult` as non-streaming runs. The difference is what observers can see
+during execution.
+
+Current streaming rules:
+
+- Streaming supports `checkpoint_strategy="runner_call"` only.
+- Streaming must run inside a Kitaru `@flow`, because events need an active
+  execution stream.
+- Publication is best effort. If live event publishing is unavailable, the
+  OpenAI call can still finish and return a final result.
+- Cached results skip the live model call, so examples that showcase streaming
+  should usually use `@flow(cache=False)`.
+
+To consume raw events from a Python process:
 
 ```python
-from zenml.client import Client
+import kitaru
 
-for event in Client().iter_run_events(
-    "<execution-id>", kinds=["openai_agents.stream.event"]
+client = kitaru.KitaruClient()
+for event in client.executions.events(
+    "<execution-id>",
+    kinds=["openai_agents.stream.event"],
 ):
     print(event.payload.get("text_delta", ""), end="", flush=True)
 ```
 
 Current local development note: Kitaru is still locked to `zenml==0.94.3`, which
 does not include the ZenML streaming APIs. Live watching currently requires a
-sibling ZenML `feature/streaming` checkout on `PYTHONPATH`, or a
-streaming-enabled deployed server / logged-in client.
+sibling ZenML streaming checkout on `PYTHONPATH`, or a streaming-enabled deployed
+server / logged-in client.
 
-## Checkpoint strategy choices
+## Tools
 
-You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
+OpenAI Agents SDK tools stay OpenAI tools. Define them as usual, then pass them
+to your `Agent`.
 
-### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
+```python
+from agents import Agent, function_tool
 
-Kitaru places one checkpoint around the outer `Runner.run(...)` call. That
-single checkpoint becomes the flow's terminal artifact, so
-`flow.run(...).wait()` returns the run result cleanly.
+@function_tool
+def lookup_order(order_id: str) -> str:
+    return f"Order {order_id} is delayed by weather."
 
-Use this when you want one coarse replay boundary for the whole agent run, or
-whenever you want a clean Python value back from `.wait()`.
+agent = Agent(
+    name="support_agent",
+    instructions="Look up the order before answering.",
+    model="gpt-5-nano",
+    tools=[lookup_order],
+)
+```
 
-### `checkpoint_strategy="calls"` (default)
+With `checkpoint_strategy="runner_call"`, the full agent turn is one Kitaru
+checkpoint. With `checkpoint_strategy="calls"`, supported model/tool calls can
+be represented as separate adapter-created checkpoints.
 
-Kitaru catches supported model/tool calls individually as separate peer
-checkpoints under the flow.
+Tool bodies should still follow normal durability rules: avoid irreversible side
+effects unless you are comfortable with what happens on retry or replay. For
+example, reading an order status is safe. Charging a card, sending an email, or
+posting a Slack message needs an idempotency key or an explicit human gate.
 
-Use this when you want finer replay units (for example: if call 6 fails, calls
-1–5 can come from cache).
+## Gotchas
 
-Because the per-call checkpoints are siblings under the flow with no single
-sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises
-`KitaruAmbiguousFlowResultError`. The per-checkpoint artifacts are still
-fully visible in the Kitaru UI and retrievable via `KitaruClient` — the
-error message points at them. If you need a clean `.wait()` return value,
-switch to `checkpoint_strategy="runner_call"`. Wrapping the `runner.run_sync()`
-call in your own `@checkpoint` is **not** a workaround here — the adapter
-guards against it and will raise, because per-call checkpoints cannot be
-nested inside another Kitaru checkpoint.
+### The agent must run in flow scope
 
-## Important guardrail
+Call `runner.run_sync(...)`, `runner.run_stream_sync(...)`, or their async
+versions from inside a Kitaru `@flow` body. That gives Kitaru an active execution
+where checkpoints and live events can be attached.
 
-`checkpoint_strategy="calls"` must run from flow scope (not from inside another
-`@checkpoint`), because the adapter needs room to open inner checkpoints for
-model/tool calls.
+### `.wait()` is easiest with `runner_call`
 
-## Runnable example
+If you want:
 
-This example uses the real OpenAI API (not a stub model), so set your key:
+```python
+answer = flow.run(...).wait()
+```
+
+to return one clean Python value, prefer `checkpoint_strategy="runner_call"`.
+Use `calls` when per-call replay is more important than a single flow return
+value.
+
+### Streaming is not transcript durability
+
+Live token chunks are like radio chatter during the run. They are useful to
+watch, but they are not the replay source of truth yet. The durable value is the
+completed checkpoint result.
+
+### Cached demos look silent
+
+If you run a streaming demo once and then immediately run it again with caching,
+Kitaru may reuse the completed result. That is good for durability, but bad for
+a screen recording. Use `@flow(cache=False)` for demos where the point is to
+watch fresh live events.
+
+## Example
+
+Run the compact OpenAI Agents adapter example:
 
 ```bash
 uv sync --extra local --extra openai-agents
+uv run kitaru init
 export OPENAI_API_KEY='sk-...'
-# default model in the example is gpt-5-nano
-# optional override: any OpenAI model you have access to
-# export OPENAI_AGENTS_MODEL='<another-openai-model>'
+
 uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
 ```
 
-To run the same compact example through `run_stream_sync(...)`, set:
+To run the same example with live stream events:
 
 ```bash
-OPENAI_AGENTS_STREAM=1 uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+OPENAI_AGENTS_STREAM=1 \
+uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
 ```
 
-## End-to-end research bot example
+Optional model override:
+
+```bash
+export OPENAI_AGENTS_MODEL='<another-openai-model>'
+```
+
+## Research bot
 
 For a larger example, run the OpenAI research bot:
 
