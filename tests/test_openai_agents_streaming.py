@@ -1,6 +1,8 @@
 """Focused tests for OpenAI Agents SDK streaming support."""
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -54,34 +56,64 @@ class FakeStreamingResult:
         self.drained = True
 
 
+@contextmanager
+def _patched_openai_agent_globals(
+    openai_agent: Any,
+    **replacements: Any,
+) -> Iterator[None]:
+    sentinel = object()
+    raw_namespaces = [
+        openai_agent.__dict__,
+        KitaruRunner._require_streaming_scope.__globals__,
+        KitaruRunner._run_runner_call_stream_async.__globals__,
+        KitaruRunner._run_sdk_stream_async.__globals__,
+    ]
+    namespaces = {id(namespace): namespace for namespace in raw_namespaces}.values()
+    originals = {
+        (id(namespace), name): namespace.get(name, sentinel)
+        for namespace in namespaces
+        for name in replacements
+    }
+    try:
+        for namespace in namespaces:
+            namespace.update(replacements)
+        yield
+    finally:
+        for namespace in namespaces:
+            for name in replacements:
+                original = originals[(id(namespace), name)]
+                if original is sentinel:
+                    namespace.pop(name, None)
+                else:
+                    namespace[name] = original
+
+
+def _scope_functions(*, inside_flow: bool, inside_checkpoint: bool) -> dict[str, Any]:
+    def _is_inside_flow() -> bool:
+        return inside_flow
+
+    def _is_inside_checkpoint() -> bool:
+        return inside_checkpoint
+
+    return {
+        "is_inside_flow": _is_inside_flow,
+        "is_inside_checkpoint": _is_inside_checkpoint,
+    }
+
+
 @pytest.mark.anyio
 async def test_run_stream_runner_call_drains_stream_and_finalizes_in_tracker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import kitaru.adapters.openai_agents._agent as openai_agent
-    import kitaru.adapters.openai_agents._streaming as openai_streaming
     from kitaru.adapters.openai_agents._tracking import get_current_tracker
 
     fake_streams = FakeZenMLStreams()
-    monkeypatch.setattr(
-        openai_streaming,
-        "_load_zenml_streams",
-        lambda: fake_streams,
-    )
-    monkeypatch.setattr(openai_agent, "is_inside_flow", lambda: True)
-    monkeypatch.setattr(openai_agent, "is_inside_checkpoint", lambda: False)
-
     checkpoint_calls: list[dict[str, Any]] = []
 
     async def fake_run_async_in_checkpoint(**kwargs: Any) -> OpenAIRunResult:
         checkpoint_calls.append(kwargs)
         return await kwargs["body"]()
-
-    monkeypatch.setattr(
-        openai_agent,
-        "run_async_in_checkpoint",
-        fake_run_async_in_checkpoint,
-    )
 
     fake_sdk_result = FakeStreamingResult(
         [{"type": "raw_response_event", "data": {"delta": "hello"}}]
@@ -92,11 +124,59 @@ async def test_run_stream_runner_call_drains_stream_and_finalizes_in_tracker(
         seen_runner_kwargs.update(kwargs)
         return fake_sdk_result
 
-    monkeypatch.setattr(
-        openai_agent,
-        "run_openai_agent_streamed",
-        fake_run_openai_agent_streamed,
-    )
+    publisher_kwargs: dict[str, Any] = {}
+
+    class FakeOpenAIStreamPublisher:
+        def __init__(self, **kwargs: Any) -> None:
+            publisher_kwargs.update(kwargs)
+            self.stream_id = "stream-1"
+            self._index = 0
+
+        def publish_start(self) -> None:
+            self._publish(
+                "openai_agents.stream.start",
+                {"status": "started"},
+            )
+
+        def publish_sdk_event(self, event: Any) -> None:
+            self._publish(
+                "openai_agents.stream.event",
+                {
+                    "text_delta": event["data"]["delta"],
+                    "raw": event,
+                },
+            )
+
+        def publish_end(self, *, status: str) -> None:
+            self._publish(
+                "openai_agents.stream.end",
+                {"status": status},
+                flush=True,
+            )
+
+        def publish_error(self, error: BaseException) -> None:
+            self._publish(
+                "openai_agents.stream.error",
+                {"message": str(error)},
+                flush=True,
+            )
+
+        def _publish(
+            self,
+            kind: str,
+            payload: dict[str, Any],
+            *,
+            flush: bool = False,
+        ) -> None:
+            fake_streams.publish(
+                payload,
+                kind=kind,
+                stream_id=self.stream_id,
+                index=self._index,
+            )
+            self._index += 1
+            if flush:
+                fake_streams.flush()
 
     build_saw_drained: list[bool] = []
 
@@ -105,8 +185,6 @@ async def test_run_stream_runner_call_drains_stream_and_finalizes_in_tracker(
     ) -> OpenAIRunResult:
         build_saw_drained.append(sdk_result.drained)
         return OpenAIRunResult(status="completed", final_output="done")
-
-    monkeypatch.setattr(openai_agent, "build_run_result", fake_build_run_result)
 
     finalize_saw_active_tracker: list[bool] = []
 
@@ -128,7 +206,15 @@ async def test_run_stream_runner_call_drains_stream_and_finalizes_in_tracker(
         capture=OpenAICapturePolicy(save_response_items=True),
     )
 
-    result = await runner.run_stream(OpenAIRunRequest.start("hi", max_turns=4))
+    with _patched_openai_agent_globals(
+        openai_agent,
+        **_scope_functions(inside_flow=True, inside_checkpoint=False),
+        OpenAIStreamPublisher=FakeOpenAIStreamPublisher,
+        run_async_in_checkpoint=fake_run_async_in_checkpoint,
+        run_openai_agent_streamed=fake_run_openai_agent_streamed,
+        build_run_result=fake_build_run_result,
+    ):
+        result = await runner.run_stream(OpenAIRunRequest.start("hi", max_turns=4))
 
     assert result.status == "completed"
     assert result.final_output == "done"
@@ -138,6 +224,7 @@ async def test_run_stream_runner_call_drains_stream_and_finalizes_in_tracker(
     assert finalize_saw_active_tracker == [True]
     assert seen_runner_kwargs["input"] == "hi"
     assert seen_runner_kwargs["max_turns"] == 4
+    assert publisher_kwargs == {"agent_name": "stream-agent", "include_raw": True}
     assert checkpoint_calls[0]["step_name"] == "stream-agent_openai_runner_call"
     assert checkpoint_calls[0]["cache_key"]
 
@@ -163,17 +250,20 @@ async def test_run_stream_rejects_calls_strategy() -> None:
 
 
 @pytest.mark.anyio
-async def test_run_stream_rejects_outside_flow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_run_stream_rejects_outside_flow() -> None:
     import kitaru.adapters.openai_agents._agent as openai_agent
 
-    monkeypatch.setattr(openai_agent, "is_inside_flow", lambda: False)
     runner = KitaruRunner(
         SimpleNamespace(name="agent"), checkpoint_strategy="runner_call"
     )
 
-    with pytest.raises(KitaruUsageError, match="inside a Kitaru flow"):
+    with (
+        _patched_openai_agent_globals(
+            openai_agent,
+            **_scope_functions(inside_flow=False, inside_checkpoint=False),
+        ),
+        pytest.raises(KitaruUsageError, match="inside a Kitaru flow"),
+    ):
         await runner.run_stream(OpenAIRunRequest.start("hi"))
 
 
