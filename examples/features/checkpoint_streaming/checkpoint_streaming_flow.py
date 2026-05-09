@@ -46,7 +46,7 @@ def draft_brief(topic: str) -> str:
     return f"A short practical brief about {topic}."
 
 
-@kitaru.flow
+@kitaru.flow(cache=False)
 def streaming_brief(topic: str) -> str:
     """Run one checkpoint that emits live progress while it works."""
     return draft_brief(topic)
