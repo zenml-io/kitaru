@@ -31,6 +31,48 @@ uv run python openai_agents_adapter.py
 
 If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
+## Optional streaming run
+
+To opt into the OpenAI Agents streaming path, set:
+
+```bash
+OPENAI_AGENTS_STREAM=1 uv run python openai_agents_adapter.py
+```
+
+That changes only the `runner_call` run: the flow calls
+`KitaruRunner.run_stream_sync(...)` instead of `run_sync(...)`. The final value
+is still the same `OpenAIRunResult` shape after the stream finishes.
+
+Live terminal watching currently needs a streaming-enabled Kitaru/ZenML
+backend. With the current Kitaru lock (`zenml==0.94.3`), local zero-config runs
+still complete normally but do not expose live stream watching. For live events,
+use either:
+
+- a deployed/logged-in Kitaru server that includes ZenML streaming support, or
+- a sibling ZenML `feature/streaming` checkout on `PYTHONPATH`, for local
+  development:
+
+```bash
+PYTHONPATH=/path/to/zenml/src OPENAI_AGENTS_STREAM=1 uv run python openai_agents_adapter.py
+```
+
+In another terminal, once you have the execution ID, you can watch text deltas
+with the low-level ZenML iterator:
+
+```python
+from zenml.client import Client
+
+for event in Client().iter_run_events(
+    "<execution-id>", kinds=["openai_agents.stream.event"]
+):
+    print(event.payload.get("text_delta", ""), end="", flush=True)
+```
+
+Streaming is intentionally narrow in this first version: it requires
+`checkpoint_strategy="runner_call"`, must run inside a Kitaru flow, publishes
+best-effort live progress events, and does not yet make partial token chunks
+durable or replayable.
+
 ## What to look for in Kitaru UI
 
 By default this example uses `checkpoint_strategy="runner_call"` — Kitaru

@@ -363,6 +363,16 @@ else
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then
+    skip_test "OpenAI Agents streaming example" "OPENAI_API_KEY not set"
+elif [[ "${KITARU_SMOKE_OPENAI_AGENTS_STREAM:-}" != "1" ]]; then
+    skip_test "OpenAI Agents streaming example" "set KITARU_SMOKE_OPENAI_AGENTS_STREAM=1 with a streaming-enabled ZenML/Kitaru server"
+else
+    run_test "OpenAI Agents streaming example" \
+        env OPENAI_AGENTS_STREAM=1 \
+        $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+fi
+
+if [[ "$HAS_OPENAI" != true ]]; then
     skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "OPENAI_API_KEY not set"
 elif [[ "${KITARU_SMOKE_RESEARCH_BOT:-}" != "1" ]]; then
     skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "set KITARU_SMOKE_RESEARCH_BOT=1 to run the real web-search smoke test"

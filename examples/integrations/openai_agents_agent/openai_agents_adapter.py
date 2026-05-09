@@ -10,6 +10,10 @@ Run:
     uv run kitaru init
     export OPENAI_API_KEY=sk-...
     uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+
+Optional streaming run, for streaming-enabled Kitaru/ZenML environments:
+    OPENAI_AGENTS_STREAM=1 uv run \
+        examples/integrations/openai_agents_agent/openai_agents_adapter.py
 """
 
 import ast
@@ -146,6 +150,10 @@ def _normalize_wait_output(value: Any) -> str:
     return _extract_final_output_from_envelope_text(text)
 
 
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").lower() in {"1", "true", "yes"}
+
+
 def _run_once(checkpoint_strategy: str) -> str:
     agent = _build_agent()
     runner = KitaruRunner(
@@ -156,7 +164,11 @@ def _run_once(checkpoint_strategy: str) -> str:
 
     @flow
     def support_flow(customer_message: str) -> str:
-        result = runner.run_sync(OpenAIRunRequest.start(customer_message))
+        request = OpenAIRunRequest.start(customer_message)
+        if _env_flag("OPENAI_AGENTS_STREAM"):
+            result = runner.run_stream_sync(request)
+        else:
+            result = runner.run_sync(request)
         if result.status != "completed":
             raise RuntimeError(f"Expected completed run, got status={result.status!r}.")
         return str(result.final_output)
@@ -174,16 +186,21 @@ def main() -> None:
 
     model_label = os.getenv("OPENAI_AGENTS_MODEL", "gpt-5-nano")
     print(f"Using model: {model_label}")
+    if _env_flag("OPENAI_AGENTS_STREAM"):
+        print("Streaming enabled: using KitaruRunner.run_stream_sync(...)")
 
     runner_call_output = _run_once("runner_call")
     print("\n=== runner_call strategy output ===")
     print(runner_call_output)
 
-    if os.getenv("OPENAI_AGENTS_COMPARE_CALLS", "").lower() in {
-        "1",
-        "true",
-        "yes",
-    }:
+    if _env_flag("OPENAI_AGENTS_COMPARE_CALLS") and _env_flag("OPENAI_AGENTS_STREAM"):
+        print(
+            "\nSkipping calls comparison: streaming currently supports "
+            "runner_call only."
+        )
+        return
+
+    if _env_flag("OPENAI_AGENTS_COMPARE_CALLS"):
         # `calls` strategy creates per-tool/per-model peer checkpoints with no
         # single sink, so `.wait()` raises `KitaruAmbiguousFlowResultError`
         # when it can't pick a single terminal artifact. The raised message

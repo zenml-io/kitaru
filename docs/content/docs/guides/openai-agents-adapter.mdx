@@ -19,7 +19,9 @@ see below); pass `"runner_call"` whenever you want a single terminal
 checkpoint so `flow.run(...).wait()` returns the run result directly.
 
 You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
-`OpenAIRunRequest`.
+`OpenAIRunRequest`. For live progress events, the adapter also exposes
+`runner.run_stream(...)` and `runner.run_stream_sync(...)` for the
+`runner_call` strategy.
 
 ## Install
 
@@ -48,6 +50,49 @@ def research(prompt: str) -> str:
     result = runner.run_sync(OpenAIRunRequest.start(prompt))
     return str(result.final_output)
 ```
+
+## Streaming live progress
+
+`KitaruRunner.run_stream(...)` and `run_stream_sync(...)` drain the OpenAI
+Agents SDK stream while the Kitaru flow is running, publish best-effort live
+progress events, and then return the normal final `OpenAIRunResult`. In other
+words, streaming changes what you can watch during the run; it does not change
+the final result object your flow receives.
+
+The first shipped streaming surface is intentionally narrow:
+
+- It supports only `checkpoint_strategy="runner_call"`.
+- It must be called from inside a Kitaru `@flow`, because the live events need
+  an active execution to attach to.
+- Stream publication is best effort. If the server or client cannot publish or
+  consume live events, the OpenAI run can still finish and return its final
+  result.
+- Partial token chunks are not durable replay data yet. Replays use the final
+  checkpoint result, not a saved token-by-token transcript.
+
+```python
+@flow
+def research(prompt: str) -> str:
+    result = runner.run_stream_sync(OpenAIRunRequest.start(prompt))
+    return str(result.final_output)
+```
+
+To watch events from another process, use a streaming-enabled deployed server
+or a logged-in client backed by ZenML streaming support:
+
+```python
+from zenml.client import Client
+
+for event in Client().iter_run_events(
+    "<execution-id>", kinds=["openai_agents.stream.event"]
+):
+    print(event.payload.get("text_delta", ""), end="", flush=True)
+```
+
+Current local development note: Kitaru is still locked to `zenml==0.94.3`, which
+does not include the ZenML streaming APIs. Live watching currently requires a
+sibling ZenML `feature/streaming` checkout on `PYTHONPATH`, or a
+streaming-enabled deployed server / logged-in client.
 
 ## Checkpoint strategy choices
 
@@ -97,6 +142,12 @@ export OPENAI_API_KEY='sk-...'
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
 uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+```
+
+To run the same compact example through `run_stream_sync(...)`, set:
+
+```bash
+OPENAI_AGENTS_STREAM=1 uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
 ```
 
 ## End-to-end research bot example
