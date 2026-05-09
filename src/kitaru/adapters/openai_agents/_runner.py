@@ -42,6 +42,23 @@ async def run_openai_agent(
     )
 
 
+async def run_openai_agent_streamed(
+    *,
+    agent: Any,
+    input: Any,
+    max_turns: int,
+    run_config: Any,
+) -> Any:
+    from agents import Runner
+
+    return Runner.run_streamed(
+        agent,
+        input,
+        max_turns=max_turns,
+        run_config=run_config,
+    )
+
+
 def run_openai_agent_sync(
     *,
     agent: Any,

@@ -17,8 +17,10 @@ from ._runner import (
     deserialize_run_state,
     deserialize_run_state_sync,
     run_openai_agent,
+    run_openai_agent_streamed,
     run_openai_agent_sync,
 )
+from ._streaming import OpenAIStreamPublisher
 from ._tracking import tracker_scope
 from ._types import (
     OpenAIApprovalDecision,
@@ -176,6 +178,13 @@ class KitaruRunner:
         self._track_completed("run", result)
         return result
 
+    async def run_stream(self, request: OpenAIRunRequest) -> OpenAIRunResult:
+        """Run an OpenAI agent stream inside a Kitaru flow."""
+        self._require_streaming_scope()
+        result = await self._run_runner_call_stream_async(request)
+        self._track_completed("run_stream", result)
+        return result
+
     def run_sync(self, request: OpenAIRunRequest) -> OpenAIRunResult:
         """Run or resume an OpenAI agent synchronously."""
         try:
@@ -195,11 +204,41 @@ class KitaruRunner:
         self._track_completed("run_sync", result)
         return result
 
+    def run_stream_sync(self, request: OpenAIRunRequest) -> OpenAIRunResult:
+        """Synchronously run an OpenAI agent stream inside a Kitaru flow."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise KitaruUsageError(
+                "`KitaruRunner.run_stream_sync()` cannot be called inside an "
+                "already running event loop. Use `await "
+                "KitaruRunner.run_stream(...)` instead."
+            )
+        return asyncio.run(self.run_stream(request))
+
     def _require_calls_scope(self) -> None:
         if self._checkpoint_strategy == "calls" and is_inside_checkpoint():
             raise KitaruUsageError(
                 "`checkpoint_strategy='calls'` opens model/tool checkpoints and "
                 "must run from a flow body, not from inside another checkpoint."
+            )
+
+    def _require_streaming_scope(self) -> None:
+        if self._checkpoint_strategy != "runner_call":
+            raise KitaruUsageError(
+                "OpenAI Agents streaming currently supports only "
+                "`checkpoint_strategy='runner_call'`. Streaming with "
+                "`checkpoint_strategy='calls'` needs replayable per-call stream "
+                "transcripts and is deferred."
+            )
+        if not is_inside_flow():
+            raise KitaruUsageError(
+                "`KitaruRunner.run_stream()` must be called from inside a "
+                "Kitaru flow so ZenML can attach live stream events to the "
+                "active execution. Outside a flow there is no execution stream "
+                "to watch."
             )
 
     async def _run_calls_async(self, request: OpenAIRunRequest) -> OpenAIRunResult:
@@ -266,6 +305,31 @@ class KitaruRunner:
             )
         return _body()
 
+    async def _run_runner_call_stream_async(
+        self, request: OpenAIRunRequest
+    ) -> OpenAIRunResult:
+        prepared_agent, run_config = self._prepare_execution_objects(wrap_calls=False)
+
+        async def _body() -> OpenAIRunResult:
+            return await self._run_sdk_stream_async(
+                request,
+                agent=prepared_agent,
+                run_config=run_config,
+            )
+
+        if is_inside_flow() and not is_inside_checkpoint():
+            return await run_async_in_checkpoint(
+                config=self._runner_call_checkpoint_config(),
+                step_name=f"{self._name}_openai_runner_call",
+                body=_body,
+                cache_key=self._runner_call_cache_key(
+                    request,
+                    agent=prepared_agent,
+                    run_config=run_config,
+                ),
+            )
+        return await _body()
+
     async def _run_sdk_async(
         self,
         request: OpenAIRunRequest,
@@ -290,6 +354,44 @@ class KitaruRunner:
                 ),
                 tracker=tracker,
             )
+
+    async def _run_sdk_stream_async(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        agent: Any,
+        run_config: Any,
+    ) -> OpenAIRunResult:
+        sdk_input = await self._sdk_input_async(request, agent=agent)
+        publisher = OpenAIStreamPublisher(
+            agent_name=self._name,
+            include_raw=self._capture.save_response_items,
+        )
+        with tracker_scope(self._name) as tracker:
+            publisher.publish_start()
+            try:
+                sdk_result = await run_openai_agent_streamed(
+                    agent=agent,
+                    input=sdk_input,
+                    max_turns=request.max_turns or 10,
+                    run_config=run_config,
+                )
+                async for stream_event in sdk_result.stream_events():
+                    publisher.publish_sdk_event(stream_event)
+                result = self._finalize_run_result(
+                    build_run_result(
+                        sdk_result,
+                        strict_sdk_version=self._strict_sdk_version,
+                        context_serializer=self._context_serializer,
+                        strict_context=self._strict_context,
+                    ),
+                    tracker=tracker,
+                )
+            except Exception as exc:
+                publisher.publish_error(exc)
+                raise
+            publisher.publish_end(status=result.status)
+            return result
 
     def _run_sdk_sync(
         self,
