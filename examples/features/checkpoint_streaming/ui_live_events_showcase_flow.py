@@ -33,7 +33,9 @@ DEFAULT_TOPIC = "Aria and Blupus, two cats sharing a quiet afternoon adventure"
 
 def delay_seconds() -> float:
     """Return the delay between visible live-event beats."""
-    return float(os.environ.get("CHECKPOINT_STREAMING_DELAY_SECONDS", DEFAULT_DELAY_SECONDS))
+    return float(
+        os.environ.get("CHECKPOINT_STREAMING_DELAY_SECONDS", DEFAULT_DELAY_SECONDS)
+    )
 
 
 def min_words() -> int:
@@ -129,7 +131,9 @@ def stream_agent_brief(topic: str) -> str:
     )
     result = runner.run_stream_sync(request)
     if result.status != "completed":
-        raise RuntimeError(f"Expected completed OpenAI run, got status={result.status!r}.")
+        raise RuntimeError(
+            f"Expected completed OpenAI run, got status={result.status!r}."
+        )
     return str(result.final_output)
 
 
@@ -169,7 +173,10 @@ def run_workflow(topic: str = DEFAULT_TOPIC) -> tuple[str, str]:
     """Start the showcase flow and wait for the final result."""
     handle = ui_live_events_showcase.run(topic)
     print(f"Execution ID: {handle.exec_id}", flush=True)
-    print("Open this execution in the local UI and watch the Live events panel.", flush=True)
+    print(
+        "Open this execution in the local UI and watch the Live events panel.",
+        flush=True,
+    )
     result = handle.wait()
     return handle.exec_id, result
 
