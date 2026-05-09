@@ -14,6 +14,9 @@ Run:
 Optional streaming run, for streaming-enabled Kitaru/ZenML environments:
     OPENAI_AGENTS_STREAM=1 uv run \
         examples/integrations/openai_agents_agent/openai_agents_adapter.py
+
+Streaming demo runs disable flow caching so repeat executions still call OpenAI
+and publish live stream events.
 """
 
 import ast
@@ -162,7 +165,9 @@ def _run_once(checkpoint_strategy: str) -> str:
         run_config_factory=lambda: RunConfig(tracing_disabled=True),
     )
 
-    @flow
+    flow_decorator = flow(cache=False) if _env_flag("OPENAI_AGENTS_STREAM") else flow
+
+    @flow_decorator
     def support_flow(customer_message: str) -> str:
         request = OpenAIRunRequest.start(customer_message)
         if _env_flag("OPENAI_AGENTS_STREAM"):
@@ -188,6 +193,7 @@ def main() -> None:
     print(f"Using model: {model_label}")
     if _env_flag("OPENAI_AGENTS_STREAM"):
         print("Streaming enabled: using KitaruRunner.run_stream_sync(...)")
+        print("Streaming demo cache disabled: repeat runs will call OpenAI again.")
 
     runner_call_output = _run_once("runner_call")
     print("\n=== runner_call strategy output ===")

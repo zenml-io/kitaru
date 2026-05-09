@@ -261,6 +261,25 @@ def test_stream_publisher_orders_start_error_and_flushes(
     assert fake_streams.flush_count == 1
 
 
+def test_watch_stream_prefers_text_delta_then_display() -> None:
+    from examples.integrations.openai_agents_agent.watch_stream import iter_display_text
+
+    events = [
+        {"payload": {"text_delta": "hello", "display": "ignored"}},
+        SimpleNamespace(payload={"display": "run item: tool_call"}),
+        {"payload": {"text_delta": "!"}},
+        {"payload": {}},
+    ]
+
+    assert list(iter_display_text(events)) == ["hello", "run item: tool_call", "!"]
+
+
+def test_watch_stream_usage_error() -> None:
+    from examples.integrations.openai_agents_agent.watch_stream import main
+
+    assert main([]) == 2
+
+
 def test_stream_publishing_degrades_when_zenml_streams_are_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

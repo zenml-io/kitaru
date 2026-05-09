@@ -33,15 +33,33 @@ If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
 ## Optional streaming run
 
-To opt into the OpenAI Agents streaming path, set:
+Streaming mode is easiest to watch with two terminals.
+
+**Terminal A: start the example**
 
 ```bash
 OPENAI_AGENTS_STREAM=1 uv run python openai_agents_adapter.py
 ```
 
-That changes only the `runner_call` run: the flow calls
+Copy the execution ID printed by Kitaru for that run.
+
+**Terminal B: watch live text events**
+
+```bash
+uv run python watch_stream.py <execution-id>
+```
+
+That watcher prints `openai_agents.stream.event` `text_delta` chunks, falling
+back to the event `display` message when there is no token text.
+
+Streaming changes only the `runner_call` run: the flow calls
 `KitaruRunner.run_stream_sync(...)` instead of `run_sync(...)`. The final value
 is still the same `OpenAIRunResult` shape after the stream finishes.
+
+For demo visibility, `OPENAI_AGENTS_STREAM=1` also disables flow caching for
+this example. That means repeat streaming runs still call OpenAI and publish
+fresh live events. The default non-streaming run keeps normal checkpoint/flow
+caching.
 
 Live terminal watching currently needs a streaming-enabled Kitaru/ZenML
 backend. With the current Kitaru lock (`zenml==0.94.3`), local zero-config runs
@@ -54,18 +72,6 @@ use either:
 
 ```bash
 PYTHONPATH=/path/to/zenml/src OPENAI_AGENTS_STREAM=1 uv run python openai_agents_adapter.py
-```
-
-In another terminal, once you have the execution ID, you can watch text deltas
-with the low-level ZenML iterator:
-
-```python
-from zenml.client import Client
-
-for event in Client().iter_run_events(
-    "<execution-id>", kinds=["openai_agents.stream.event"]
-):
-    print(event.payload.get("text_delta", ""), end="", flush=True)
 ```
 
 Streaming is intentionally narrow in this first version: it requires
