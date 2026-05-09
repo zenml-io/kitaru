@@ -86,9 +86,18 @@ def scout_topic(topic: str) -> dict[str, Any]:
         "audience": "curious builders",
         "source_count": 5,
         "notes": [
-            "Aria is an older tortoiseshell cat: cautious, observant, secretly affectionate.",
-            "Blupus is a ginger cat with big energy and a talent for demanding attention.",
-            "Keep the story cozy and specific enough that the stream is fun to watch unfold.",
+            (
+                "Aria is an older tortoiseshell cat: cautious, observant, "
+                "secretly affectionate."
+            ),
+            (
+                "Blupus is a ginger cat with big energy and a talent for "
+                "demanding attention."
+            ),
+            (
+                "Keep the story cozy and specific enough that the stream is "
+                "fun to watch unfold."
+            ),
         ],
     }
 
@@ -125,9 +134,12 @@ def stream_agent_brief(topic: str) -> str:
         f"Minimum length: {word_count} words\n"
         "Audience: people watching a Kitaru live-events UI demo\n"
         "Notes:\n"
-        "- Aria is an older tortoiseshell cat: cautious, observant, secretly affectionate.\n"
-        "- Blupus is a ginger cat with big energy and a talent for demanding attention.\n"
-        "- Keep the story cozy, specific, and continuous enough that streaming is fun to watch."
+        "- Aria is an older tortoiseshell cat: cautious, observant, "
+        "secretly affectionate.\n"
+        "- Blupus is a ginger cat with big energy and a talent for demanding "
+        "attention.\n"
+        "- Keep the story cozy, specific, and continuous enough that streaming "
+        "is fun to watch."
     )
     result = runner.run_stream_sync(request)
     if result.status != "completed":
