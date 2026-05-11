@@ -43,6 +43,7 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
+from ._mcp_server import has_running_mcp_toolset
 from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
@@ -758,6 +759,32 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             "Use `await agent.run(...)` instead."
         )
 
+    def _ensure_auto_flow_mcp_lifecycle_safe(
+        self,
+        *,
+        call_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None,
+    ) -> None:
+        if is_inside_flow():
+            return
+
+        if not call_toolsets:
+            effective_toolsets = self._toolsets
+        else:
+            effective_toolsets = (*self._toolsets, *call_toolsets)
+        if not has_running_mcp_toolset(effective_toolsets):
+            return
+
+        raise KitaruUsageError(
+            "KitaruAgent cannot auto-open a flow around an already-running "
+            "PydanticAI MCP server. Auto-flow runs async agent bodies in a "
+            "worker thread/event loop so it can wait for the flow without "
+            "blocking your caller loop. Your MCP server is already open on the "
+            "caller loop, so moving the agent run can hang after a successful "
+            "MCP request. Wrap this call in an explicit `@kitaru.flow` while "
+            "the MCP server lifecycle is open, or do not pre-open the MCP server "
+            "and let PydanticAI/Kitaru auto-connect it."
+        )
+
     async def _run_async(
         self,
         body: Callable[[], Awaitable[Any]],
@@ -766,6 +793,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         cache_key: str | None = None,
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
@@ -777,6 +805,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_config=checkpoint_config,
             )
 
+        self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
+
         # Outside any flow: auto-open one. FlowHandle.wait() is sync-blocking,
         # so we dispatch the flow to a worker thread (no running loop there,
         # so asyncio.run is safe for the agent coroutine).
@@ -787,6 +817,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
+                auto_flow_toolsets=auto_flow_toolsets,
             )
 
         loop = asyncio.get_running_loop()
@@ -803,6 +834,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         cache_key: str | None = None,
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
@@ -813,6 +845,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
             )
+        self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
         return self._invoke_in_auto_flow(
             lambda: self._run_sync(
                 body,
@@ -820,6 +853,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
+                auto_flow_toolsets=auto_flow_toolsets,
             )
         )
 
@@ -930,6 +964,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=turn_call_config.cache_key,
                 checkpoint_inputs=turn_call_config.checkpoint_inputs,
                 checkpoint_config=turn_call_config.checkpoint_config,
+                auto_flow_toolsets=prepared_toolsets,
             )
             self._remember_messages(result)
             return result
@@ -1039,6 +1074,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=turn_call_config.cache_key,
                 checkpoint_inputs=turn_call_config.checkpoint_inputs,
                 checkpoint_config=turn_call_config.checkpoint_config,
+                auto_flow_toolsets=prepared_toolsets,
             )
             self._remember_messages(result)
             return result
