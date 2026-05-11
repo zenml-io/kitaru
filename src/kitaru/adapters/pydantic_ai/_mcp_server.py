@@ -89,13 +89,9 @@ class KitaruMCPServer(KitaruToolset[AgentDepsT]):
         if self._warned_running_mcp_checkpoint_bypass:
             return
         self._warned_running_mcp_checkpoint_bypass = True
-        logger.warning(
-            "Kitaru detected an already-running PydanticAI MCP server while "
-            "calling tool %r. The MCP tool call will stay on the current event "
-            "loop instead of opening a granular MCP checkpoint, which avoids "
-            "moving loop-bound MCP lifecycle resources across threads. The call "
-            "is still tracked as an adapter tool event, but it is not persisted "
-            "as its own per-call checkpoint.",
+        logger.info(
+            "Kitaru recorded MCP tool %r without a separate MCP-call checkpoint "
+            "because its PydanticAI MCP server is already running.",
             tool_name,
         )
 
