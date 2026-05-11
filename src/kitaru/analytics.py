@@ -83,6 +83,9 @@ class AnalyticsEvent(StrEnum):
     # Adapter
     PYDANTIC_AI_WRAPPED = "Kitaru PydanticAI wrapped"
     PYDANTIC_AI_RUN_COMPLETED = "Kitaru PydanticAI run completed"
+    OPENAI_AGENTS_WRAPPED = "Kitaru OpenAI Agents wrapped"
+    OPENAI_AGENTS_RUN_COMPLETED = "Kitaru OpenAI Agents run completed"
+    OPENAI_AGENTS_CALL_CHECKPOINTED = "Kitaru OpenAI Agents call checkpointed"
 
 
 def set_source(suffix_or_source: str) -> None:

@@ -211,8 +211,8 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai
+    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents" \
+        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents
 fi
 
 # ---------------------------------------------------------------------------
@@ -349,6 +349,29 @@ section_header "PydanticAI adapter"
 
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
+
+section_header "OpenAI Agents adapter"
+
+run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
+    $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py --help
+
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
+        $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+else
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
+fi
+
+if [[ "$HAS_OPENAI" != true ]]; then
+    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "OPENAI_API_KEY not set"
+elif [[ "${KITARU_SMOKE_RESEARCH_BOT:-}" != "1" ]]; then
+    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "set KITARU_SMOKE_RESEARCH_BOT=1 to run the real web-search smoke test"
+else
+    run_test "examples/end_to_end/openai_research_bot/research_bot.py" \
+        timed 180 $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py \
+            "AI agent durability in one paragraph" --max-searches 2 \
+            --fail-on-search-error
+fi
 
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).

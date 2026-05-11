@@ -71,6 +71,7 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     FailureOrigin,
+    KitaruAmbiguousFlowResultError,
     KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruRuntimeError,
@@ -581,6 +582,49 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
     return values
 
 
+class _MultipleTerminalStepsOutputError(KitaruAmbiguousFlowResultError):
+    """Raised when fallback result extraction sees several terminal steps.
+
+    Subclasses :class:`KitaruAmbiguousFlowResultError` so external callers can
+    catch the public ambiguity error, while internal adapters (e.g. the
+    Pydantic AI auto-flow path) can detect this specific subtype to recover
+    via in-memory results instead of re-raising.
+    """
+
+
+def _is_multiple_terminal_steps_output_error(error: BaseException) -> bool:
+    """Return whether ``error`` came from ambiguous terminal-step extraction."""
+    return isinstance(error, _MultipleTerminalStepsOutputError)
+
+
+def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
+    """Build a discoverable message when terminal-step extraction can't pick.
+
+    Common in agent-style flows where each model/tool call produces its own
+    checkpoint with no DAG sink — there is no single artifact that represents
+    "the" flow result, but the per-checkpoint artifacts are still visible in
+    the Kitaru UI and retrievable via ``KitaruClient``.
+    """
+    lines = [
+        f"This flow's return value cannot be extracted automatically because {reason}.",
+        "",
+        "This typically happens when a flow's checkpoints fan out into "
+        "parallel branches without a single sink — for example, when an "
+        "agent adapter creates one checkpoint per model or tool call. The "
+        "per-checkpoint artifacts ARE persisted and visible:",
+        f"  - View artifacts in the Kitaru UI for execution {execution_id}",
+        f"  - Retrieve via the client: "
+        f"`KitaruClient().executions.get('{execution_id}')` and inspect "
+        "checkpoint outputs",
+        "",
+        "To get a clean `.wait()` return value, give the flow a single "
+        "sink: wrap the agent call in an explicit `@checkpoint`, or add a "
+        "final checkpoint that consumes the upstream result(s) and returns "
+        "the value you want.",
+    ]
+    return "\n".join(lines)
+
+
 def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     """Extract return values from terminal step outputs as a fallback.
 
@@ -604,23 +648,37 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     )
     if not terminal_step_names:
         return []
+    execution_id = str(hydrated_run.id)
     if len(terminal_step_names) > 1:
-        raise KitaruRuntimeError(
-            "Execution output metadata is missing and fallback extraction is "
-            "ambiguous because multiple terminal steps were found."
+        raise _MultipleTerminalStepsOutputError(
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=(
+                    f"multiple terminal checkpoints were found "
+                    f"({len(terminal_step_names)}): "
+                    f"{', '.join(terminal_step_names)}"
+                ),
+            )
         )
 
     terminal_step_name = terminal_step_names[0]
     terminal_step = step_runs[terminal_step_name]
     if not terminal_step.regular_outputs:
         raise KitaruRuntimeError(
-            f"Execution {hydrated_run.id} has no regular outputs on terminal "
+            f"Execution {execution_id} has no regular outputs on terminal "
             f"step '{terminal_step_name}'."
         )
     if len(terminal_step.regular_outputs) > 1:
-        raise KitaruRuntimeError(
-            "Execution output metadata is missing and fallback extraction is "
-            "ambiguous because the terminal step has multiple outputs."
+        output_names = ", ".join(sorted(terminal_step.regular_outputs))
+        raise KitaruAmbiguousFlowResultError(
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=(
+                    f"terminal checkpoint '{terminal_step_name}' has "
+                    f"{len(terminal_step.regular_outputs)} outputs: "
+                    f"{output_names}"
+                ),
+            )
         )
 
     output_name = next(iter(terminal_step.regular_outputs))

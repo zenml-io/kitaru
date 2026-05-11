@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.8.0"
+version = "0.10.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -47,7 +47,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = [
-    "openai>=1.0.0,<2",
+    "openai>=1.0.0,<3",
 ]
 anthropic = [
     "anthropic>=0.40.0,<1",
@@ -60,8 +60,11 @@ local = [
     "zenml[server]>=0.94.3",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.86.0,<2",
+    "pydantic-ai-slim>=1.89.0,<1.93.0",
     "typing_extensions>=4.12",
+]
+openai-agents = [
+    "openai-agents>=0.15.0,<0.16.0",
 ]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
@@ -110,8 +113,9 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.86.0,<2",
-    "openai>=1.0.0,<2",
+    "pydantic-ai-slim>=1.89.0,<1.93.0",
+    "openai-agents>=0.15.0,<0.16.0",
+    "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
     "pip-audit>=2.9.0",
@@ -193,6 +197,7 @@ invalid-method-override = "ignore"
 invalid-assignment = "ignore"
 invalid-return-type = "ignore"
 invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

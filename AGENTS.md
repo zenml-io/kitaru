@@ -8,7 +8,7 @@ Kitaru is a **mixed Python + web repo** that produces three things: a Python SDK
 src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI facade / console entrypoint (cyclopts)
   _cli/               # Internal command modules + shared CLI helpers
-  adapters/           # Framework adapters (includes PydanticAI)
+  adapters/           # Framework adapters (includes PydanticAI and OpenAI Agents)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
 tests/                # pytest tests
 tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
@@ -20,8 +20,7 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
 scripts/              # Doc generation, site merge, and smoke test scripts
-docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
-spec/                 # SDK design specifications (planning material, not shipped code)
+docker/               # Dockerfiles (production server, server-dev, and dev flow images)
 design/               # Design docs, meeting notes (gitignored, never commit)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 ```
@@ -52,7 +51,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 
 | Command | What it does | When to run |
 |---|---|---|
-| **`just check`** | All checks: format, lint, typecheck, typos, yaml, links | After every chunk of work, before commit/push |
+| **`just check`** | All checks: format, lint, typecheck, typos, yaml, actions lint, links | After every chunk of work, before commit/push |
 | **`just fix`** | Auto-fixes formatting, lint issues, yaml | When `just check` reports fixable issues — resolves most linting problems automatically |
 | **`just test`** | Full pytest suite | After code changes, before commit/push |
 
@@ -65,6 +64,9 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `just typos`: typo check only
 - `just format-check`: check formatting without modifying
 - `just yaml-check`: check YAML formatting
+- `just actions-lint`: lint GitHub Actions workflows (requires `actionlint`: `brew install actionlint`)
+- `just zizmor`: audit GitHub Actions workflow security with `zizmor`
+- `just audit`: audit Python dependencies with `pip-audit` and the documented ignore list
 - `just links`: check markdown links offline (requires `lychee`: `brew install lychee`)
 - `just links-external`: check links including external URLs (slow)
 - `just build`: build wheel and sdist locally
@@ -149,19 +151,20 @@ When adding a new CLI command, MCP tool, or SDK feature:
 
 ### Python CI (`ci.yml`)
 
-Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, link check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
+Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, dependency audit, link check, Docker server smoke test, wheel-packaging check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
 
 ### Site CI (`site.yml`)
 
-Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `scripts/`, `src/kitaru/`, `CHANGELOG.md`, or `wrangler.toml`. Generates docs content, builds both apps, merges output, and deploys:
+Runs on manual dispatch, push to `main` (production deploy), and PRs touching `site/**`, `docs/**`, `scripts/generate_*.py`, `scripts/merge_site.sh`, `CHANGELOG.md`, or `wrangler.toml`. Generates docs content, builds both apps, merges output, and deploys:
 - **Production:** deploys unified Worker to `kitaru.ai` on `main` push
 - **PR previews:** deploys a preview Worker for same-repo PRs; cleans up on PR close
 
 ### Other workflows
 
 - `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release)
-- `spellcheck.yml`: separate typo/spell checking on `develop` PRs/pushes
-- `image-optimiser.yml`: PR-only image compression for docs assets
+- `spellcheck.yml`: separate typo/spell checking on `develop` pushes and non-draft PRs
+- `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP files in same-repo non-draft PRs, with `site/public/dashboard.png` ignored
+- `zizmor.yml`: GitHub Actions security analysis for workflow/dependabot changes, plus weekly and manual runs
 
 ## Branching and Release Strategy
 

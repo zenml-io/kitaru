@@ -7,8 +7,8 @@
   <div class="features-header">
     <div class="section-inner">
       <span class="section-eyebrow" data-reveal>CORE RUNTIME PRIMITIVES</span>
-      <h2 class="section-title" data-reveal data-reveal-delay="1">The primitives long-running agents keep needing.</h2>
-      <p class="section-desc" data-reveal data-reveal-delay="2">These are the runtime basics teams keep rebuilding once agents leave the laptop.</p>
+      <h2 class="section-title" data-reveal data-reveal-delay="1">The outer runtime production agents keep needing.</h2>
+      <p class="section-desc" data-reveal data-reveal-delay="2">The model can own the loop. The runtime has to own what happens when the loop waits, fails, forks, or moves to remote infrastructure.</p>
     </div>
   </div>
 
@@ -20,9 +20,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">01 · Wait & Resume</div>
-          <h3>Pause. Get input. Continue later.</h3>
-          <p>Suspends at decision points, releases compute, and resumes when input arrives from a human, another agent, or a webhook, even hours or days later.</p>
+          <div class="feature-number">01 · Cheap Waiting</div>
+          <h3>Pause. Release compute. Continue later.</h3>
+          <p>Agents can wait on a human, another agent, or a webhook for hours or days. Kitaru persists the run, shuts down the worker, and rehydrates when input arrives.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-pause-resume" id="animPause">
@@ -48,9 +48,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">02 · Replay from Failure</div>
-          <h3>Crash at step 6? Resume from step 6.</h3>
-          <p>Every step is checkpointed. Fix the issue and replay from the point of failure instead of re-burning tokens.</p>
+          <div class="feature-number">02 · Durable State</div>
+          <h3>Crash at step 6? Replay from step 6.</h3>
+          <p>Every checkpoint writes real outputs to the artifact store. Fix the issue and replay from the failed boundary instead of re-burning upstream model and tool calls.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-replay" id="animReplay">
@@ -74,9 +74,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">03 · Framework Portability</div>
-          <h3>Keep your framework. Add durable execution.</h3>
-          <p>OpenAI Agents SDK, Anthropic Agent SDK, PydanticAI, LangGraph, or raw Python. Wrap it with Kitaru and get checkpointed execution without rewriting your agent.</p>
+          <div class="feature-number">03 · No Harness Bet</div>
+          <h3>Keep the inner loop your team picked.</h3>
+          <p>OpenAI Agents SDK, Anthropic Agent SDK, PydanticAI, LangGraph, or raw Python. Kitaru adds the runtime around the harness instead of replacing it.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-framework" id="animFramework">
@@ -97,8 +97,8 @@
       <div class="feature-card-inner">
         <div class="feature-text">
           <div class="feature-number">04 · Parallel Recovery</div>
-          <h3>Fan out work without losing recovery.</h3>
-          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each keeps its own checkpoint history, so you can replay only the failed branch.</p>
+          <h3>Fan out work without losing the thread.</h3>
+          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each branch keeps its own durable boundary, so one failed search does not erase the rest.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-parallel" id="animParallel">

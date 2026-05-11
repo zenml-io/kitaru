@@ -177,14 +177,14 @@ def _checkpoint_scope(
 def _suspend_checkpoint_scope() -> Iterator[None]:
     """Temporarily clear checkpoint scope while keeping flow scope active.
 
-    This internal helper is used by framework adapters that need to trigger
-    flow-level operations (for example ``kitaru.wait()``) during
-    framework-internal execution that otherwise runs inside a checkpoint.
+    This internal helper exists for low-level runtime operations that need to
+    step outside checkpoint-local bookkeeping. It does not make arbitrary
+    checkpoint-contained waits part of the public contract: ``kitaru.wait()``
+    should still be called from flow scope, before or after checkpoint calls.
 
-    Both Kitaru's checkpoint scope and ZenML's ``StepContext`` are suspended:
-    ZenML's dynamic runner rejects ``wait()`` whenever ``StepContext`` is
-    active, so suspending Kitaru's scope alone is not enough to let an
-    adapter-driven HITL tool call reach the pipeline-level wait machinery.
+    Both Kitaru's checkpoint scope and ZenML's ``StepContext`` are suspended
+    because some internal operations need to hide all step-local state, not
+    only Kitaru's own scope marker.
     """
     checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
     step_context_var = _get_step_context_var()
@@ -201,10 +201,10 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
 def _get_step_context_var() -> ContextVar[StepContext | None]:
     """Return ZenML's internal `StepContext` ContextVar with a hard failure.
 
-    The adapter currently needs to clear ZenML's step-local state to allow a
-    flow-scope `kitaru.wait()` from inside framework-managed checkpoint code.
-    Keep the private-attribute reach-through in one place so a ZenML rename
-    fails loudly and contract tests can pin the dependency.
+    Runtime helpers occasionally need to clear ZenML's step-local state while
+    preserving Kitaru flow scope. Keep the private-attribute reach-through in
+    one place so a ZenML rename fails loudly and contract tests can pin the
+    dependency.
     """
     context_var = getattr(StepContext, "__context_var__", None)
     if not isinstance(context_var, ContextVar):

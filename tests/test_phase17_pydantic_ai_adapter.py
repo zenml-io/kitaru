@@ -1,10 +1,11 @@
 """Integration tests for the PydanticAI adapter."""
 
-from __future__ import annotations
-
 import asyncio
+import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -18,13 +19,18 @@ from pydantic_ai.agent.abstract import AbstractAgent
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.models.test import TestModel
 
-from kitaru import flow
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru import checkpoint, flow
+from kitaru.adapters.pydantic_ai import KitaruAgent, _tracking
 
 
-def _make_wrapped_agent(
-    *, name_prefix: str, granular: bool = False
-) -> KitaruAgent[Any, str]:
+@dataclass(frozen=True)
+class _FakeCheckpointScope:
+    execution_id: str | None
+    checkpoint_id: str | None
+    name: str
+
+
+def _make_test_agent(*, name_prefix: str) -> Agent[Any, str]:
     agent = Agent(
         TestModel(call_tools=["add"]),
         name=f"{name_prefix}_{uuid4().hex[:8]}",
@@ -35,7 +41,16 @@ def _make_wrapped_agent(
     def add(a: int = 0, b: int = 0) -> int:
         return a + b
 
-    return KitaruAgent(agent, granular_checkpoints=granular)
+    return agent
+
+
+def _make_wrapped_agent(
+    *, name_prefix: str, granular_checkpoints: bool
+) -> KitaruAgent[Any, str]:
+    return KitaruAgent(
+        _make_test_agent(name_prefix=name_prefix),
+        granular_checkpoints=granular_checkpoints,
+    )
 
 
 def _artifact_names(hydrated_run: Any) -> list[str]:
@@ -44,6 +59,14 @@ def _artifact_names(hydrated_run: Any) -> list[str]:
         for artifacts in step.outputs.values():
             names.extend(artifact.name for artifact in artifacts)
     return names
+
+
+def _input_names_by_step(hydrated_run: Any) -> list[set[str]]:
+    return [set(step.inputs) for step in hydrated_run.steps.values()]
+
+
+def _has_step_input(hydrated_run: Any, input_name: str) -> bool:
+    return any(input_name in inputs for inputs in _input_names_by_step(hydrated_run))
 
 
 def _wait_for_hydrated_run(exec_id: str) -> Any:
@@ -66,17 +89,60 @@ def _metadata_dict_from_steps(hydrated_run: Any, key: str) -> dict[str, Any]:
     raise AssertionError(f"No step metadata contained key {key!r}.")
 
 
+def _events(event_map: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [event for events in event_map.values() for event in events]
+
+
 def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
-    return {event["kind"] for events in event_map.values() for event in events}
+    return {event["kind"] for event in _events(event_map)}
 
 
-def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
+def _assert_event_artifacts_use_display_names(
+    event_map: dict[str, list[dict[str, Any]]], artifact_names: list[str]
+) -> None:
+    for event in _events(event_map):
+        event_id = event["event_id"]
+        for artifact_name in event.get("artifacts", {}).values():
+            assert artifact_name in artifact_names
+            assert not artifact_name.startswith(f"{event_id}_")
+
+
+def test_phase17_event_artifact_names_use_short_display_shape() -> None:
+    """Display artifact names should omit internal agent/run event prefixes."""
+    event_id = "agent_name_ab12cd34_llm_call_1"
+
+    assert _tracking.artifact_name(event_id, "prompt") == "llm_call_1_prompt"
+    assert _tracking.artifact_name(event_id, "response") == "llm_call_1_response"
+    assert (
+        _tracking.artifact_name(event_id, "stream_transcript")
+        == "llm_call_1_stream_transcript"
+    )
+    assert (
+        _tracking._namespaced_artifact_name(
+            event_id,
+            "stream_transcript",
+            namespace="agent_ab12cd34_tracker_2",
+        )
+        == "agent_ab12cd34_tracker_2_llm_call_1_stream_transcript"
+    )
+
+
+def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The adapter should mirror and forward Pydantic AI's per-run capabilities."""
-    durable_agent = _make_wrapped_agent(name_prefix="capability_agent")
+    """The adapter should mirror and forward Pydantic AI per-run kwargs."""
+    durable_agent = _make_wrapped_agent(
+        name_prefix="capability_agent", granular_checkpoints=True
+    )
     capabilities = [Hooks()]
-    captured: dict[str, object] = {}
+    conversation_id = "conversation-phase17"
+    output_retries = 2
+    expected_forwarded_kwargs = {
+        "capabilities": capabilities,
+        "conversation_id": conversation_id,
+        "output_retries": output_retries,
+    }
+    captured: dict[str, dict[str, object]] = {}
     run_result = object()
     stream_result = object()
     iter_result = object()
@@ -87,22 +153,25 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     def run_sync_direct(body: Any, **_: Any) -> Any:
         return body()
 
+    def capture_forwarded_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+        return {key: kwargs[key] for key in expected_forwarded_kwargs}
+
     async def fake_run(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run"] = kwargs["capabilities"]
+        captured["run"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     def fake_run_sync(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run_sync"] = kwargs["capabilities"]
+        captured["run_sync"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     @asynccontextmanager
     async def fake_run_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
-        captured["run_stream"] = kwargs["capabilities"]
+        captured["run_stream"] = capture_forwarded_kwargs(kwargs)
         yield stream_result
 
     @asynccontextmanager
     async def fake_iter(*args: Any, **kwargs: Any) -> Any:
-        captured["iter"] = kwargs["capabilities"]
+        captured["iter"] = capture_forwarded_kwargs(kwargs)
         yield iter_result
 
     monkeypatch.setattr(durable_agent, "_run_async", run_async_direct)
@@ -120,29 +189,53 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch.setattr(durable_agent.wrapped, "iter", fake_iter)
 
     async def exercise_async_surfaces() -> None:
-        result = await durable_agent.run("prompt", capabilities=capabilities)
+        result = await durable_agent.run(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
         assert result is run_result
         async with durable_agent.run_stream(
-            "prompt", capabilities=capabilities
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
         ) as streamed_result:
             assert streamed_result is stream_result
-        async with durable_agent.iter("prompt", capabilities=capabilities) as agent_run:
+        async with durable_agent.iter(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        ) as agent_run:
             assert agent_run is iter_result
 
     asyncio.run(exercise_async_surfaces())
-    assert durable_agent.run_sync("prompt", capabilities=capabilities) is run_result
+    assert (
+        durable_agent.run_sync(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
+        is run_result
+    )
 
     assert captured == {
-        "run": capabilities,
-        "run_stream": capabilities,
-        "iter": capabilities,
-        "run_sync": capabilities,
+        "run": expected_forwarded_kwargs,
+        "run_stream": expected_forwarded_kwargs,
+        "iter": expected_forwarded_kwargs,
+        "run_sync": expected_forwarded_kwargs,
     }
 
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     """Turn mode should persist tracker metadata and checkpoint artifacts."""
-    durable_agent = _make_wrapped_agent(name_prefix="turn_agent")
+    durable_agent = _make_wrapped_agent(
+        name_prefix="turn_agent",
+        granular_checkpoints=False,
+    )
 
     @flow
     def turn_flow(prompt: str) -> str:
@@ -159,14 +252,93 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
 
+    assert _has_step_input(hydrated_run, "user_prompt")
+
     artifact_names = _artifact_names(hydrated_run)
-    assert any(name.endswith("_event_log") for name in artifact_names)
-    assert any(name.endswith("_run_summary") for name in artifact_names)
+    run_label = summary["run_label"]
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_event_log", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_run_summary", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
+        for name in artifact_names
+    )
+    assert any(re.fullmatch(r".*_tool_call_\d+_args", name) for name in artifact_names)
+    assert any(
+        re.fullmatch(r".*_tool_call_\d+_result", name) for name in artifact_names
+    )
+    _assert_event_artifacts_use_display_names(event_map, artifact_names)
 
 
-def test_phase17_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
-    """Granular mode should flush run metadata at flow scope."""
-    durable_agent = _make_wrapped_agent(name_prefix="granular_agent", granular=True)
+def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
+    primed_zenml,
+) -> None:
+    """Continuation turns should expose message_history without a fake prompt input."""
+    durable_agent = _make_wrapped_agent(
+        name_prefix="history_agent",
+        granular_checkpoints=False,
+    )
+
+    @flow
+    def continuation_flow() -> str:
+        first = durable_agent.run_sync("first turn")
+        second = durable_agent.run_sync(
+            user_prompt=None, message_history=first.all_messages()
+        )
+        return second.output
+
+    handle = continuation_flow.run()
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    inputs_by_step = _input_names_by_step(hydrated_run)
+    assert any("message_history" in inputs for inputs in inputs_by_step)
+    assert any(
+        "message_history" in inputs and "user_prompt" not in inputs
+        for inputs in inputs_by_step
+    )
+    artifact_names = _artifact_names(hydrated_run)
+    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+
+
+def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
+    primed_zenml,
+) -> None:
+    """Instructions-only turns should not create prompt/history placeholders."""
+    agent = Agent(
+        TestModel(),
+        name=f"empty_input_agent_{uuid4().hex[:8]}",
+        output_type=str,
+        instructions="Reply successfully.",
+    )
+    durable_agent = KitaruAgent(agent, granular_checkpoints=False)
+
+    @flow
+    def instructions_only_flow() -> str:
+        return durable_agent.run_sync(user_prompt=None).output
+
+    handle = instructions_only_flow.run()
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    assert not _has_step_input(hydrated_run, "user_prompt")
+    assert not _has_step_input(hydrated_run, "message_history")
+    artifact_names = _artifact_names(hydrated_run)
+    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+
+
+def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
+    """Default granular mode should flush run metadata at flow scope."""
+    durable_agent = KitaruAgent(_make_test_agent(name_prefix="granular_agent"))
 
     @flow
     def granular_flow(prompt: str) -> str:
@@ -185,10 +357,24 @@ def test_phase17_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
     assert summary["model_call_count"] >= 1
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
+    artifact_names = _artifact_names(hydrated_run)
+    run_label = summary["run_label"]
     assert len(hydrated_run.steps) >= 2
-    assert not any(
-        name.endswith("_run_summary") for name in _artifact_names(hydrated_run)
+    assert "llm_call_1_prompt" not in artifact_names
+    assert "llm_call_1_response" not in artifact_names
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        for name in artifact_names
     )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
+        for name in artifact_names
+    )
+    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    assert "event_log" not in artifact_names
+    assert "run_summary" not in artifact_names
+    assert not any(name.endswith("_event_log") for name in artifact_names)
+    assert not any(name.endswith("_run_summary") for name in artifact_names)
 
 
 _AUTO_FLOW_AGENT: KitaruAgent[Any, str] | None = None
@@ -199,10 +385,173 @@ def _invoke_shared_auto_flow_agent() -> str:
     return _AUTO_FLOW_AGENT.run_sync("use the add tool").output
 
 
+def test_phase17_tracker_namespace_allocation_is_checkpoint_shared(monkeypatch) -> None:
+    """Concurrent trackers in one checkpoint should not all get plain names."""
+    checkpoint_scope = _FakeCheckpointScope(
+        execution_id="exec-1",
+        checkpoint_id="checkpoint-1",
+        name="shared_checkpoint",
+    )
+    monkeypatch.setattr(_tracking, "get_current_checkpoint", lambda: checkpoint_scope)
+    monkeypatch.setattr(
+        _tracking, "get_current_checkpoint_name", lambda: checkpoint_scope.name
+    )
+    monkeypatch.setattr(
+        _tracking, "get_current_execution_id", lambda: checkpoint_scope.execution_id
+    )
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            namespaces = list(
+                executor.map(
+                    lambda index: (
+                        _tracking.EventTracker(
+                            agent_name=f"agent_{index}"
+                        ).artifact_namespace
+                    ),
+                    range(4),
+                )
+            )
+
+        assert None not in namespaces
+        assert len(namespaces) == len(set(namespaces))
+        assert all("_tracker_" in namespace for namespace in namespaces if namespace)
+        suffixes = sorted(
+            int(match.group(1))
+            for namespace in namespaces
+            if (match := re.search(r"_tracker_(\d+)$", namespace or ""))
+        )
+        assert suffixes == [1, 2, 3, 4]
+    finally:
+        _tracking._reset_artifact_namespace_state(checkpoint_scope)
+
+
+def test_phase17_multiple_tracker_scopes_at_flow_scope_get_unique_namespaces(
+    primed_zenml,
+) -> None:
+    """Multiple flow-scope trackers should not collide on bare artifact names."""
+    first_agent = KitaruAgent(_make_test_agent(name_prefix="flow_first_agent"))
+    second_agent = KitaruAgent(_make_test_agent(name_prefix="flow_second_agent"))
+
+    @flow
+    def multi_agent_flow(prompt: str) -> str:
+        first = first_agent.run_sync(prompt).output
+        second = second_agent.run_sync(prompt).output
+        return f"{first}\n{second}"
+
+    handle = multi_agent_flow.run("use the add tool")
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    summary_map = hydrated_run.run_metadata["pydantic_ai_run_summaries"]
+    event_map = hydrated_run.run_metadata["pydantic_ai_events"]
+    artifact_names = _artifact_names(hydrated_run)
+    summaries = list(summary_map.values())
+    run_labels = {summary["run_label"] for summary in summaries}
+    assert len(run_labels) == 2
+
+    model_artifact_names = [
+        stored_name
+        for event in _events(event_map)
+        if event["kind"] == "llm_call"
+        for stored_name in event.get("artifacts", {}).values()
+    ]
+    assert model_artifact_names
+    assert len(model_artifact_names) == len(set(model_artifact_names))
+    assert all(stored_name in artifact_names for stored_name in model_artifact_names)
+    assert all(
+        any(run_label in stored_name for stored_name in model_artifact_names)
+        for run_label in run_labels
+    )
+    assert all("_tracker_1_" in stored_name for stored_name in model_artifact_names)
+    assert "llm_call_1_prompt" not in artifact_names
+    assert "llm_call_1_response" not in artifact_names
+    assert not any(name.endswith("_event_log") for name in artifact_names)
+    assert not any(name.endswith("_run_summary") for name in artifact_names)
+    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+
+
+def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
+    primed_zenml,
+) -> None:
+    """All trackers in the same checkpoint should get unique namespaces."""
+    first_agent = _make_wrapped_agent(
+        name_prefix="first_agent",
+        granular_checkpoints=False,
+    )
+    second_agent = _make_wrapped_agent(
+        name_prefix="second_agent",
+        granular_checkpoints=False,
+    )
+
+    @checkpoint
+    def run_both_agents(prompt: str) -> str:
+        first = first_agent.run_sync(prompt).output
+        second = second_agent.run_sync(prompt).output
+        return f"{first}\n{second}"
+
+    @flow
+    def multi_agent_flow(prompt: str) -> str:
+        return run_both_agents(prompt)
+
+    handle = multi_agent_flow.run("use the add tool")
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+    event_map = _metadata_dict_from_steps(hydrated_run, "pydantic_ai_events")
+    artifact_names = _artifact_names(hydrated_run)
+
+    summaries = list(
+        _metadata_dict_from_steps(hydrated_run, "pydantic_ai_run_summaries").values()
+    )
+    run_labels = {summary["run_label"] for summary in summaries}
+    assert len(run_labels) == 2
+    for tracker_index in (1, 2):
+        assert any(
+            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_event_log", name)
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_run_summary", name)
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(
+                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_prompt", name
+            )
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(
+                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_response", name
+            )
+            for name in artifact_names
+        )
+    assert all(
+        any(run_label in name for name in artifact_names) for run_label in run_labels
+    )
+    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    event_artifact_names = [
+        stored_name
+        for event in _events(event_map)
+        for stored_name in event.get("artifacts", {}).values()
+    ]
+    assert any(
+        re.fullmatch(r"[a-zA-Z0-9_]+_tracker_2_llm_call_1_prompt", name)
+        for name in event_artifact_names
+    )
+
+    event_log_names = [name for name in artifact_names if name.endswith("event_log")]
+    run_summary_names = [
+        name for name in artifact_names if name.endswith("run_summary")
+    ]
+    assert len(event_log_names) == 2
+    assert len(run_summary_names) == 2
+    assert len(event_log_names) == len(set(event_log_names))
+    assert len(run_summary_names) == len(set(run_summary_names))
+
+
 def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
     """`run_sync()` outside any flow auto-opens a flow and completes."""
     global _AUTO_FLOW_AGENT
-    _AUTO_FLOW_AGENT = _make_wrapped_agent(name_prefix="auto_flow_agent")
+    _AUTO_FLOW_AGENT = KitaruAgent(_make_test_agent(name_prefix="auto_flow_agent"))
     try:
         result = _invoke_shared_auto_flow_agent()
     finally:
@@ -212,7 +561,7 @@ def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
 
 def test_phase17_persist_message_history_extends_across_runs(primed_zenml) -> None:
     """Two successive `run_sync` calls on the same instance accumulate history."""
-    durable_agent = _make_wrapped_agent(name_prefix="chat_agent")
+    durable_agent = KitaruAgent(_make_test_agent(name_prefix="chat_agent"))
     durable_agent._persist_message_history = True
 
     @flow

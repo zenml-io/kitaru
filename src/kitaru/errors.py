@@ -37,6 +37,16 @@ class KitaruRuntimeError(KitaruError, RuntimeError):
     """Raised for runtime/serialization/materialization failures."""
 
 
+class KitaruAmbiguousFlowResultError(KitaruRuntimeError):
+    """Raised when ``flow.run(...).wait()`` cannot pick a single return value.
+
+    Common in agent-style flows where each model/tool call produces its own
+    checkpoint with no DAG sink. The per-checkpoint artifacts are still
+    persisted and visible in the Kitaru UI / via ``KitaruClient`` — the
+    exception message points at them.
+    """
+
+
 if TYPE_CHECKING:
     from kitaru._client._models import ExecutionStatus
 
@@ -262,6 +272,7 @@ def format_recovery_hint(exec_id: str, *, status: str) -> str | None:
 
 __all__ = [
     "FailureOrigin",
+    "KitaruAmbiguousFlowResultError",
     "KitaruBackendError",
     "KitaruContextError",
     "KitaruDeploymentInputValuesError",

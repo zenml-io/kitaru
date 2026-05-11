@@ -4,12 +4,12 @@
 
 <section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>HARNESS VS RUNTIME</span>
+    <span class="section-eyebrow" data-reveal>INNER LOOP VS OUTER RUNTIME</span>
     <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
-      You picked a harness. Now what runs it?
+      The inner harness is getting absorbed. The outer runtime is still missing.
     </h2>
     <p class="problem-lede" data-reveal data-reveal-delay="2">
-      Harnesses &mdash; <em>Pydantic AI, LangGraph, Claude Agent SDK, or your own</em> &mdash; own the inner loop. The runtime underneath gets rebuilt from scratch, company by company.
+      Models and SDKs increasingly own the loop: call, tool, observe, repeat. Production teams still need the layer around that loop &mdash; recovery, sandboxes, approvals, replay, and cheap waiting.
     </p>
 
     <div class="problem-grid">
@@ -20,9 +20,9 @@
           <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Durable agent state" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">State</span>
-          <h3>Runs your agents can come back to.</h3>
-          <p>Every checkpoint records the state needed to inspect, replay, or resume a run. A crash does not erase the trail: you can see what happened, reuse completed work, and continue from a known point.</p>
+          <span class="why-card-tag">Recovery</span>
+          <h3>Agent died at hour 11? Resume from hour 10.</h3>
+          <p>Every durable checkpoint persists its inputs and outputs. Fix the failure and replay from the boundary that broke instead of re-running every model call and tool call upstream.</p>
         </div>
       </div>
 
@@ -32,9 +32,9 @@
           <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="One agent, three runtimes" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">Deployment</span>
-          <h3>Deploy once. Invoke anywhere.</h3>
-          <p><code>flow.deploy()</code> captures an immutable versioned snapshot. Consumers invoke by flow name &mdash; from CLI, Python, MCP, or a generated curl &mdash; with tag routing for rollout and rollback.</p>
+          <span class="why-card-tag">Trust boundaries</span>
+          <h3>The brain and the hand should not share a process.</h3>
+          <p>Run risky tools in controlled execution targets while the durable runner owns state, replay, and policy hooks. A sandbox failure becomes one failed checkpoint, not a lost agent.</p>
         </div>
       </div>
 
@@ -44,9 +44,9 @@
           <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Runs you can actually compare" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">Artifacts</span>
-          <h3>Inspect every run.</h3>
-          <p>Every checkpoint writes a typed, versioned artifact you can diff across runs. Trace a bad output back to the exact step and inputs that made it. Built in, not bolted on.</p>
+          <span class="why-card-tag">Cheap waiting</span>
+          <h3>Wait on humans, webhooks, or agents without burning compute.</h3>
+          <p><code>wait()</code> suspends the run and releases the worker. When the input arrives minutes, hours, or days later, Kitaru rehydrates the execution and continues.</p>
         </div>
       </div>
 

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- PydanticAI adapter run surfaces now accept and forward upstream `conversation_id` and `output_retries` kwargs and include them in turn-checkpoint cache keys, while temporarily capping `pydantic-ai-slim` to the supported 1.89–1.92 line.
+- Fixed PydanticAI MCP tool calls hanging after a successful request when an explicitly lifecycle-managed MCP server was already open. Kitaru now keeps already-running MCP calls on the active event loop inside explicit flows, and fails fast when auto-flow would otherwise move a pre-opened MCP server across event loops; auto-connected MCP servers still use granular MCP checkpoints by default.
+- Added a compatibility shim for the `pydantic_ai.mcp` import path used by current PydanticAI releases when Kitaru is installed with the MCP SDK version still compatible with ZenML server dependencies.
+
+### Removed
+- Removed the native memory surface from Kitaru: `kitaru.memory`, `KitaruClient.memories`, the `kitaru memory` CLI group, MCP `kitaru_memory_*` tools, and the corresponding memory docs/examples. Use your own storage for durable application state and pass values into flows explicitly.
+
+### Security
+- Bumped transitive dependencies flagged by `pip-audit`: `gitpython` 3.1.47 → 3.1.49 (CVE-2026-44244), `mako` 1.3.11 → 1.3.12 (CVE-2026-44307), and `python-multipart` 0.0.26 → 0.0.27 (CVE-2026-42561). Lockfile-only change; no API surface affected.
+
+## [0.10.0] - 2026-05-08
+
+### Changed
+- `kitaru.wait()` and adapter wait paths are flow-scope only. Waits created from checkpoint-contained tool bodies must move to flow scope, or those waiting tools must be opted out of granular tool checkpoints. (#280)
+- `KitaruAgent` now defaults to `granular_checkpoints=True`, so model, tool, and MCP calls are persisted as separate adapter checkpoints by default. Pass `granular_checkpoints=False` to keep the previous one-checkpoint-per-agent-run turn mode. (#280)
+- PydanticAI adapter checkpoint configs now accept `cache`, and granular model checkpoint cache keys ignore PydanticAI-generated per-run message metadata so identical logical prompts can cache across runs. (#280)
+- Streamlined the `openai_research_bot` end-to-end example for readability, and refreshed the OpenAI Agents adapter guide and examples index to match. (#308)
+
+### Fixed
+- PydanticAI flow-scope trackers now allocate unique artifact namespaces to avoid cross-run artifact-name collisions. (#280)
+- Cached granular PydanticAI model responses now preserve model event/tool-call ordering for parallel tool calls. (#280)
+- OpenAI Agents adapter parallel tool-call events now keep assistant-emitted order in event logs and summaries, even when tools start or finish out of order. (#280)
+- PydanticAI adapter parallel tool-call events now keep assistant-emitted order in event logs, summaries, and fan-in metadata, even when tools start or finish out of order. (#280)
+- PydanticAI adapter observability artifact names now use shorter event-local suffixes inside readable tracker namespaces, avoiding collisions across flow-scope and checkpoint-scope trackers. (#280)
+
+## [0.9.0] - 2026-05-05
+
+### Added
+- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruRunner` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`, recommended when you want a clean `.wait()` return value) or `checkpoint_strategy="calls"` (per-tool/per-model checkpoints for finer replay units, with per-checkpoint artifacts visible in the Kitaru UI / `KitaruClient`). The guide at `/guides/openai-agents-adapter` walks through the trade-offs. (#295)
+- OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner/writer runner checkpoints, submitted search fan-out, and final report artifacts, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
+- Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
+
+### Changed
+- `flow.run(...).wait()` now raises a new dedicated `KitaruAmbiguousFlowResultError` (subclass of `KitaruRuntimeError`) when the flow has multiple terminal checkpoints with no single sink (common with the OpenAI Agents adapter's `checkpoint_strategy="calls"`). The error names the terminal checkpoints, points at the execution's artifacts in the Kitaru UI, and suggests `KitaruClient` retrieval and the `runner_call` strategy as alternatives. Catching this specific subclass lets callers handle the ambiguity case without accidentally swallowing real execution failures.
+
 ## [0.8.0] - 2026-05-04
 
 ### Added
@@ -22,9 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Runtime log retrieval (`KitaruClient.executions.logs(...)`, `kitaru executions logs`) now tolerates server/client version skew on log payload schemas instead of erroring out. (#251)
 - Active-stack resolution no longer silently falls back to a deleted or unavailable stack — flow submission, MCP, and `kitaru status` now surface a clear error when the configured active stack is gone. (#263)
 - `KitaruAgent` auto-checkpointing of agents that use `@hitl_tool(schema=...)` no longer crashes with `PydanticSerializationError: Unable to serialize unknown type: <class 'type'>` under `pydantic-ai-slim>=1.86`, which now surfaces per-tool metadata through the `AgentRunResult` tree. (#292)
-
-### Removed
-- Removed the native memory surface from Kitaru: `kitaru.memory`, `KitaruClient.memories`, the `kitaru memory` CLI group, MCP `kitaru_memory_*` tools, and the corresponding memory docs/examples. Use your own storage for durable application state and pass values into flows explicitly.
 
 ## [0.7.0] - 2026-04-24
 

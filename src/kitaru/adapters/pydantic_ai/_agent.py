@@ -5,14 +5,17 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Sequence
+import warnings
+from dataclasses import dataclass
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Any
 
 import kitaru
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from kitaru.flow import _is_multiple_terminal_steps_output_error
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -32,13 +35,15 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
-from ._model import KitaruModel
+from ._mcp_server import has_running_mcp_toolset
+from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
+    checkpoint_input_value,
     run_async_in_checkpoint,
     run_sync_in_checkpoint,
     turn_cache_key,
@@ -48,6 +53,17 @@ from ._utils import (
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar('kitaru_tracking_active', default=False)
 _INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar('kitaru_internal_iter_allowed', default=False)
+_INTERNAL_RUN_SYNC_DELEGATION: ContextVar[bool] = ContextVar(
+    'kitaru_internal_run_sync_delegation', default=False
+)
+
+
+@dataclass(frozen=True)
+class _TurnCheckpointCallConfig:
+    cache_key: str
+    checkpoint_inputs: dict[str, Any]
+    checkpoint_config: CheckpointConfig
+    force_turn_checkpoint: bool
 
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
 # level for ZenML dynamic-pipeline source resolution, so it can't close over
@@ -137,6 +153,53 @@ def _is_wrapped_handler(handler: Any) -> bool:
     return bool(inner is not None and getattr(inner, '_kitaru_wrapped', False))
 
 
+_STREAMING_HOOK_ATTRS = (
+    'on_event',
+    'on_run_event_stream',
+    'event',
+    'run_event_stream',
+)
+_STREAMING_HOOK_REGISTRY_KEYS = ('_on_event', 'wrap_run_event_stream')
+
+
+def _capabilities_imply_streaming_hooks(
+    capabilities: Sequence[AbstractCapability[Any]] | None,
+) -> bool:
+    if capabilities is None:
+        return False
+
+    for capability in capabilities:
+        if getattr(capability, 'has_wrap_run_event_stream', False):
+            return True
+
+        registry = getattr(capability, '_registry', None)
+        if isinstance(registry, Mapping) and any(
+            registry.get(key) for key in _STREAMING_HOOK_REGISTRY_KEYS
+        ):
+            return True
+
+        for attr in _STREAMING_HOOK_ATTRS:
+            value = getattr(capability, attr, None)
+            if value is not None and value is not _utils.UNSET:
+                return True
+
+    return False
+
+
+def _upstream_run_kwargs(
+    *,
+    conversation_id: str | None,
+    output_retries: int | None,
+) -> dict[str, Any]:
+    """Return PydanticAI run kwargs only when callers explicitly set them."""
+    kwargs: dict[str, Any] = {}
+    if conversation_id is not None:
+        kwargs['conversation_id'] = conversation_id
+    if output_retries is not None:
+        kwargs['output_retries'] = output_retries
+    return kwargs
+
+
 def _track_run_completed(method: str, error: BaseException | None) -> None:
     if error is None:
         status = 'completed'
@@ -159,7 +222,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         capture: CapturePolicy | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         turn_checkpoint_config: CheckpointConfig | None = None,
-        granular_checkpoints: bool = False,
+        granular_checkpoints: bool = True,
         model_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
@@ -170,18 +233,20 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         Outside a flow, ``run()`` / ``run_sync()`` auto-open a ``@kitaru.flow``.
 
-        **Turn mode (default):** each run opens one ``@kitaru.checkpoint`` named
-        after the agent; model/tool/MCP calls are recorded as child events.
+        **Granular mode (default):** no turn checkpoint; each top-level
+        model/tool/MCP call per turn opens its own checkpoint, giving per-call
+        replay/retry boundaries and a less crowded artifact view. Sub-calls
+        nested inside an already-open granular checkpoint (for example tool
+        calls inside the turn's model request) fall back to inline tracking —
+        they do *not* open a second checkpoint. The ``model_/tool_/mcp_checkpoint_config``
+        kwargs (and the per-tool ``tool_checkpoint_config_by_name`` map, where
+        ``False`` opts a tool out entirely) are honored in this mode. Cross-run
+        cache behavior for adapter-created granular checkpoints is still being
+        tightened.
 
-        **Granular mode** (``granular_checkpoints=True``): no turn checkpoint;
-        each top-level model/tool/MCP call per turn opens its own checkpoint —
-        true per-call retry and cache at the cost of losing the aggregating
-        run artifact. Sub-calls nested inside an already-open granular
-        checkpoint (for example tool calls inside the turn's model request)
-        fall back to inline tracking — they do *not* open a second checkpoint.
-        The ``model_/tool_/mcp_checkpoint_config`` kwargs (and the per-tool
-        ``tool_checkpoint_config_by_name`` map, where ``False`` opts a tool
-        out entirely) are only honored in this mode.
+        **Turn mode** (``granular_checkpoints=False``): each run opens one
+        ``@kitaru.checkpoint`` named after the agent; model/tool/MCP calls are
+        recorded as child events under that checkpoint.
 
         When ``persist_message_history=True``, the adapter remembers the final
         ``result.all_messages()`` of each run on the instance and auto-injects
@@ -191,8 +256,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         Limits of ``persist_message_history``:
 
-        - **In-memory only**: history lives on the Python instance; restarts
-          and replays of a prior flow start with no history.
+        - **In-memory only**: history lives on the Python instance. Adapter-owned
+          cached run results can refresh it, but restarts, new processes, and
+          replay paths that skip this adapter call start with no instance history.
         - **Serial use**: concurrent ``run`` / ``run_sync`` calls on the same
           instance race on the stored history. Gate concurrency externally or
           use one instance per concurrent conversation.
@@ -222,6 +288,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
         self._granular_checkpoints = granular_checkpoints
         self._warned_streaming_fallback = False
+        self._warned_checkpoint_history_limit = False
         has_granular_configs = any(
             value is not None
             for value in (
@@ -429,17 +496,99 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         finally:
             _INTERNAL_ITER_ALLOWED.reset(token)
 
+    @staticmethod
+    def _turn_checkpoint_inputs(
+        *,
+        user_prompt: str | Sequence[_messages.UserContent] | None,
+        message_history: Sequence[_messages.ModelMessage] | None,
+    ) -> dict[str, Any]:
+        inputs: dict[str, Any] = {}
+        if user_prompt is not None:
+            inputs['user_prompt'] = checkpoint_input_value(user_prompt)
+        if message_history is not None:
+            inputs['message_history'] = checkpoint_input_value(list(message_history))
+        return inputs
+
+    def _turn_checkpoint_config_for_call(
+        self,
+        *,
+        disable_cache: bool,
+    ) -> CheckpointConfig:
+        if not disable_cache:
+            return self._turn_checkpoint_config
+        return {**self._turn_checkpoint_config, 'cache': False}
+
+    def _prepare_turn_checkpoint_call_config(
+        self,
+        *,
+        user_prompt: str | Sequence[_messages.UserContent] | None,
+        message_history: Sequence[_messages.ModelMessage] | None,
+        deferred_tool_results: DeferredToolResults | None,
+        output_type: OutputSpec[Any] | None,
+        conversation_id: str | None,
+        output_retries: int | None,
+        instructions: AgentInstructions[AgentDepsT],
+        deps: AgentDepsT | None,
+        model_settings: AgentModelSettings[AgentDepsT] | None,
+        usage_limits: _usage.UsageLimits | None,
+        usage: _usage.RunUsage | None,
+        metadata: AgentMetadata[AgentDepsT] | None,
+        infer_name: bool,
+        toolsets: Sequence[AbstractToolset[AgentDepsT]] | None,
+        builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None,
+        event_stream_handler: EventStreamHandler[AgentDepsT] | None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None,
+        spec: dict[str, Any] | None,
+    ) -> _TurnCheckpointCallConfig:
+        force_turn_checkpoint = event_stream_handler is not None or _capabilities_imply_streaming_hooks(
+            capabilities
+        )
+        return _TurnCheckpointCallConfig(
+            cache_key=turn_cache_key(
+                agent_name=self._name,
+                user_prompt=user_prompt,
+                message_history=message_history,
+                deferred_tool_results=deferred_tool_results,
+                output_type=output_type,
+                conversation_id=conversation_id,
+                output_retries=output_retries,
+                instructions=instructions,
+                deps=deps,
+                model_settings=model_settings,
+                usage_limits=usage_limits,
+                usage=usage,
+                metadata=metadata,
+                infer_name=infer_name,
+                toolsets=toolsets,
+                builtin_tools=builtin_tools,
+                event_stream_handler=event_stream_handler,
+                capabilities=capabilities,
+                spec=spec,
+            ),
+            checkpoint_inputs=self._turn_checkpoint_inputs(
+                user_prompt=user_prompt,
+                message_history=message_history,
+            ),
+            checkpoint_config=self._turn_checkpoint_config_for_call(
+                disable_cache=force_turn_checkpoint,
+            ),
+            force_turn_checkpoint=force_turn_checkpoint,
+        )
+
     async def _auto_checkpoint_async(
         self,
         body: Callable[[], Awaitable[Any]],
         *,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ) -> Any:
         return await run_async_in_checkpoint(
-            config=self._turn_checkpoint_config,
+            config=checkpoint_config or self._turn_checkpoint_config,
             step_name=self._name or 'agent',
             body=body,
             cache_key=cache_key,
+            checkpoint_inputs=checkpoint_inputs,
         )
 
     def _auto_checkpoint_sync(
@@ -447,12 +596,15 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         body: Callable[[], Any],
         *,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ) -> Any:
         return run_sync_in_checkpoint(
-            config=self._turn_checkpoint_config,
+            config=checkpoint_config or self._turn_checkpoint_config,
             step_name=self._name or 'agent',
             body=body,
             cache_key=cache_key,
+            checkpoint_inputs=checkpoint_inputs,
         )
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
@@ -465,7 +617,16 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         try:
             serialized_body_path = _try_serialize_auto_flow_body(body)
             handle = _kitaru_pydantic_ai_auto_flow.run(run_id, serialized_body_path)
-            flow_result = handle.wait()
+            try:
+                flow_result = handle.wait()
+            except KitaruRuntimeError as error:
+                # Granular auto-flows can finish with multiple terminal adapter
+                # checkpoints. The auto-flow body ran in this process, so prefer
+                # the in-memory result that the module-level flow stored for us.
+                if slot.has_result and _is_multiple_terminal_steps_output_error(error):
+                    flow_result = slot.result
+                else:
+                    raise
         finally:
             with _AUTO_FLOW_LOCK:
                 _AUTO_FLOW_BODIES.pop(run_id, None)
@@ -493,8 +654,34 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     def _remember_messages(self, result: Any) -> None:
         if not self._persist_message_history:
             return
+        all_messages = getattr(result, 'all_messages', None)
+        if not callable(all_messages):
+            raise KitaruRuntimeError(
+                'KitaruAgent could not refresh persisted message history because '
+                'the run result does not expose all_messages().'
+            )
         with self._message_history_lock:
-            self._last_messages = list(result.all_messages())
+            self._last_messages = list(all_messages())
+
+    def _warn_if_persist_history_inside_checkpoint(self) -> None:
+        if (
+            not self._persist_message_history
+            or self._warned_checkpoint_history_limit
+            or _INTERNAL_RUN_SYNC_DELEGATION.get()
+            or not is_inside_checkpoint()
+        ):
+            return
+        self._warned_checkpoint_history_limit = True
+        message = (
+            '`persist_message_history=True` is only in-memory. This agent call '
+            'is running inside an existing `@kitaru.checkpoint`; if that '
+            'checkpoint is served from cache during replay/resume, the adapter '
+            'will not execute and cannot restore `_last_messages`. For '
+            'resume-safe conversations, call the agent at flow scope in '
+            'granular mode, or pass `message_history=` explicitly from your '
+            'own durable storage.'
+        )
+        warnings.warn(message, UserWarning, stacklevel=3)
 
     def _use_granular(self, force_turn_checkpoint: bool) -> bool:
         # Granular mode cannot apply to streaming turns: per-call checkpointing
@@ -542,17 +729,53 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             'Use `await agent.run(...)` instead.'
         )
 
+    def _ensure_auto_flow_mcp_lifecycle_safe(
+        self,
+        *,
+        call_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None,
+    ) -> None:
+        if is_inside_flow():
+            return
+
+        if not call_toolsets:
+            effective_toolsets = self._toolsets
+        else:
+            effective_toolsets = (*self._toolsets, *call_toolsets)
+        if not has_running_mcp_toolset(effective_toolsets):
+            return
+
+        raise KitaruUsageError(
+            'KitaruAgent cannot auto-open a flow around an already-running '
+            'PydanticAI MCP server. Auto-flow runs async agent bodies in a '
+            'worker thread/event loop so it can wait for the flow without '
+            'blocking your caller loop. Your MCP server is already open on the '
+            'caller loop, so moving the agent run can hang after a successful '
+            'MCP request. Wrap this call in an explicit `@kitaru.flow` while '
+            'the MCP server lifecycle is open, or do not pre-open the MCP server '
+            'and let PydanticAI/Kitaru auto-connect it.'
+        )
+
     async def _run_async(
         self,
         body: Callable[[], Awaitable[Any]],
         *,
         force_turn_checkpoint: bool = False,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
+        checkpoint_config: CheckpointConfig | None = None,
+        auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return await body()
-            return await self._auto_checkpoint_async(body, cache_key=cache_key)
+            return await self._auto_checkpoint_async(
+                body,
+                cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+                checkpoint_config=checkpoint_config,
+            )
+
+        self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
 
         # Outside any flow: auto-open one. FlowHandle.wait() is sync-blocking,
         # so we dispatch the flow to a worker thread (no running loop there,
@@ -562,6 +785,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+                checkpoint_config=checkpoint_config,
+                auto_flow_toolsets=auto_flow_toolsets,
             )
 
         loop = asyncio.get_running_loop()
@@ -576,16 +802,28 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         force_turn_checkpoint: bool = False,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
+        checkpoint_config: CheckpointConfig | None = None,
+        auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return body()
-            return self._auto_checkpoint_sync(body, cache_key=cache_key)
+            return self._auto_checkpoint_sync(
+                body,
+                cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+                checkpoint_config=checkpoint_config,
+            )
+        self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
         return self._invoke_in_auto_flow(
             lambda: self._run_sync(
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+                checkpoint_config=checkpoint_config,
+                auto_flow_toolsets=auto_flow_toolsets,
             )
         )
 
@@ -608,6 +846,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -615,6 +854,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -623,19 +863,30 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         spec: dict[str, Any] | None = None,
     ) -> Any:
         self._validate_model_override(model)
+        self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
-        if wrapped_handler is not None and self._granular_checkpoints:
-            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
         async def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
+            with (
+                self._kitaru_overrides(),
+                self._tracking_scope(),
+                self._allow_internal_iter(),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
+            ):
                 result = await super(KitaruAgent, self).run(
                     user_prompt,
                     output_type=output_type,
                     message_history=effective_history,
                     deferred_tool_results=deferred_tool_results,
+                    **upstream_run_kwargs,
                     model=None,
                     instructions=instructions,
                     deps=deps,
@@ -650,27 +901,43 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     capabilities=capabilities,
                     spec=spec,
                 )
-            self._remember_messages(result)
             return result
 
-        cache_key = turn_cache_key(
-            agent_name=self._name,
+        turn_call_config = self._prepare_turn_checkpoint_call_config(
             user_prompt=user_prompt,
-            message_history=effective_history if effective_history is not None else message_history,
+            message_history=effective_history,
             deferred_tool_results=deferred_tool_results,
+            output_type=output_type,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
             instructions=instructions,
+            deps=deps,
             model_settings=model_settings,
+            usage_limits=usage_limits,
+            usage=usage,
+            metadata=metadata,
+            infer_name=infer_name,
+            toolsets=prepared_toolsets,
+            builtin_tools=builtin_tools,
+            event_stream_handler=wrapped_handler,
             capabilities=capabilities,
             spec=spec,
         )
+        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+            self._log_streaming_fallback()
 
         error: BaseException | None = None
         try:
-            return await self._run_async(
+            result = await self._run_async(
                 _body,
-                force_turn_checkpoint=wrapped_handler is not None,
-                cache_key=cache_key,
+                force_turn_checkpoint=turn_call_config.force_turn_checkpoint,
+                cache_key=turn_call_config.cache_key,
+                checkpoint_inputs=turn_call_config.checkpoint_inputs,
+                checkpoint_config=turn_call_config.checkpoint_config,
+                auto_flow_toolsets=prepared_toolsets,
             )
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise
@@ -684,6 +951,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -691,6 +959,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -700,54 +969,85 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     ) -> Any:
         self._ensure_run_sync_safe()
         self._validate_model_override(model)
+        self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
-        if wrapped_handler is not None and self._granular_checkpoints:
-            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
         def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
-                result = super(KitaruAgent, self).run_sync(
-                    user_prompt,
-                    output_type=output_type,
-                    message_history=effective_history,
-                    deferred_tool_results=deferred_tool_results,
-                    model=None,
-                    instructions=instructions,
-                    deps=deps,
-                    model_settings=model_settings,
-                    usage_limits=usage_limits,
-                    usage=usage,
-                    metadata=metadata,
-                    infer_name=infer_name,
-                    toolsets=prepared_toolsets,
-                    builtin_tools=builtin_tools,
-                    event_stream_handler=wrapped_handler,
-                    capabilities=capabilities,
-                    spec=spec,
-                )
-            self._remember_messages(result)
+            with (
+                self._kitaru_overrides(),
+                self._tracking_scope(),
+                self._allow_internal_iter(),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
+            ):
+                delegation_token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
+                try:
+                    result = super(KitaruAgent, self).run_sync(
+                        user_prompt,
+                        output_type=output_type,
+                        message_history=effective_history,
+                        deferred_tool_results=deferred_tool_results,
+                        **upstream_run_kwargs,
+                        model=None,
+                        instructions=instructions,
+                        deps=deps,
+                        model_settings=model_settings,
+                        usage_limits=usage_limits,
+                        usage=usage,
+                        metadata=metadata,
+                        infer_name=infer_name,
+                        toolsets=prepared_toolsets,
+                        builtin_tools=builtin_tools,
+                        event_stream_handler=wrapped_handler,
+                        capabilities=capabilities,
+                        spec=spec,
+                    )
+                finally:
+                    _INTERNAL_RUN_SYNC_DELEGATION.reset(delegation_token)
             return result
 
-        cache_key = turn_cache_key(
-            agent_name=self._name,
+        turn_call_config = self._prepare_turn_checkpoint_call_config(
             user_prompt=user_prompt,
-            message_history=effective_history if effective_history is not None else message_history,
+            message_history=effective_history,
             deferred_tool_results=deferred_tool_results,
+            output_type=output_type,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
             instructions=instructions,
+            deps=deps,
             model_settings=model_settings,
+            usage_limits=usage_limits,
+            usage=usage,
+            metadata=metadata,
+            infer_name=infer_name,
+            toolsets=prepared_toolsets,
+            builtin_tools=builtin_tools,
+            event_stream_handler=wrapped_handler,
             capabilities=capabilities,
             spec=spec,
         )
+        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+            self._log_streaming_fallback()
 
         error: BaseException | None = None
         try:
-            return self._run_sync(
+            result = self._run_sync(
                 _body,
-                force_turn_checkpoint=wrapped_handler is not None,
-                cache_key=cache_key,
+                force_turn_checkpoint=turn_call_config.force_turn_checkpoint,
+                cache_key=turn_call_config.cache_key,
+                checkpoint_inputs=turn_call_config.checkpoint_inputs,
+                checkpoint_config=turn_call_config.checkpoint_config,
+                auto_flow_toolsets=prepared_toolsets,
             )
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise
@@ -762,6 +1062,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -769,6 +1070,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -780,13 +1082,24 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._require_explicit_checkpoint('run_stream')
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
-        with self._kitaru_overrides(), self._tracking_scope():
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
+        ):
             async with super(KitaruAgent, self).run_stream(
                 user_prompt,
                 output_type=output_type,
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
+                **upstream_run_kwargs,
                 model=None,
                 instructions=instructions,
                 deps=deps,
@@ -811,6 +1124,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -818,6 +1132,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -830,12 +1145,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._validate_model_override(model)
         self._require_explicit_checkpoint('iter')
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
-        with self._kitaru_overrides(), self._tracking_scope():
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
+        ):
             async with self.wrapped.iter(
                 user_prompt=user_prompt,
                 output_type=output_type,
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
+                **upstream_run_kwargs,
                 model=None,
                 instructions=instructions,
                 deps=deps,
