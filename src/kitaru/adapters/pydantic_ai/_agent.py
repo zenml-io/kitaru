@@ -36,7 +36,7 @@ from pydantic_ai.toolsets import AbstractToolset
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._mcp_server import has_running_mcp_toolset
-from ._model import KitaruModel
+from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
 from ._tracking import get_current_tracker, tracker_scope
@@ -184,6 +184,20 @@ def _capabilities_imply_streaming_hooks(
                 return True
 
     return False
+
+
+def _upstream_run_kwargs(
+    *,
+    conversation_id: str | None,
+    output_retries: int | None,
+) -> dict[str, Any]:
+    """Return PydanticAI run kwargs only when callers explicitly set them."""
+    kwargs: dict[str, Any] = {}
+    if conversation_id is not None:
+        kwargs['conversation_id'] = conversation_id
+    if output_retries is not None:
+        kwargs['output_retries'] = output_retries
+    return kwargs
 
 
 def _track_run_completed(method: str, error: BaseException | None) -> None:
@@ -511,6 +525,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         message_history: Sequence[_messages.ModelMessage] | None,
         deferred_tool_results: DeferredToolResults | None,
         output_type: OutputSpec[Any] | None,
+        conversation_id: str | None,
+        output_retries: int | None,
         instructions: AgentInstructions[AgentDepsT],
         deps: AgentDepsT | None,
         model_settings: AgentModelSettings[AgentDepsT] | None,
@@ -534,6 +550,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
                 output_type=output_type,
+                conversation_id=conversation_id,
+                output_retries=output_retries,
                 instructions=instructions,
                 deps=deps,
                 model_settings=model_settings,
@@ -828,6 +846,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -835,6 +854,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -847,14 +867,26 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         effective_history = self._effective_message_history(message_history)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
         async def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
+            with (
+                self._kitaru_overrides(),
+                self._tracking_scope(),
+                self._allow_internal_iter(),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
+            ):
                 result = await super(KitaruAgent, self).run(
                     user_prompt,
                     output_type=output_type,
                     message_history=effective_history,
                     deferred_tool_results=deferred_tool_results,
+                    **upstream_run_kwargs,
                     model=None,
                     instructions=instructions,
                     deps=deps,
@@ -876,6 +908,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             message_history=effective_history,
             deferred_tool_results=deferred_tool_results,
             output_type=output_type,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
             instructions=instructions,
             deps=deps,
             model_settings=model_settings,
@@ -917,6 +951,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -924,6 +959,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -937,9 +973,20 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         effective_history = self._effective_message_history(message_history)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
         def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
+            with (
+                self._kitaru_overrides(),
+                self._tracking_scope(),
+                self._allow_internal_iter(),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
+            ):
                 delegation_token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
                 try:
                     result = super(KitaruAgent, self).run_sync(
@@ -947,6 +994,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         output_type=output_type,
                         message_history=effective_history,
                         deferred_tool_results=deferred_tool_results,
+                        **upstream_run_kwargs,
                         model=None,
                         instructions=instructions,
                         deps=deps,
@@ -970,6 +1018,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             message_history=effective_history,
             deferred_tool_results=deferred_tool_results,
             output_type=output_type,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
             instructions=instructions,
             deps=deps,
             model_settings=model_settings,
@@ -1012,6 +1062,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -1019,6 +1070,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1030,13 +1082,24 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._require_explicit_checkpoint('run_stream')
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
 
-        with self._kitaru_overrides(), self._tracking_scope():
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
+        ):
             async with super(KitaruAgent, self).run_stream(
                 user_prompt,
                 output_type=output_type,
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
+                **upstream_run_kwargs,
                 model=None,
                 instructions=instructions,
                 deps=deps,
@@ -1061,6 +1124,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         output_type: OutputSpec[Any] | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        conversation_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT | None = None,
@@ -1068,6 +1132,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage_limits: _usage.UsageLimits | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
+        output_retries: int | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1080,12 +1145,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._validate_model_override(model)
         self._require_explicit_checkpoint('iter')
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
-        with self._kitaru_overrides(), self._tracking_scope():
+        upstream_run_kwargs = _upstream_run_kwargs(
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
+        ):
             async with self.wrapped.iter(
                 user_prompt=user_prompt,
                 output_type=output_type,
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
+                **upstream_run_kwargs,
                 model=None,
                 instructions=instructions,
                 deps=deps,

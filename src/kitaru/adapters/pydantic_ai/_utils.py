@@ -269,6 +269,8 @@ def turn_cache_key(
     toolsets: Any,
     builtin_tools: Any,
     event_stream_handler: Any,
+    conversation_id: Any,
+    output_retries: Any,
     capabilities: Any,
     spec: Any,
 ) -> str:
@@ -298,6 +300,8 @@ def turn_cache_key(
             "toolsets": toolsets,
             "builtin_tools": builtin_tools,
             "event_stream_handler": event_stream_handler,
+            "conversation_id": conversation_id,
+            "output_retries": output_retries,
             "capabilities": capabilities,
             "spec": spec,
         }
