@@ -35,11 +35,10 @@ const {
     {title && <h2 class="codecompare-title">{title}</h2>}
   </div>
   <div class="codecompare-grid">
-    <article class="codecompare-pane codecompare-pane--kitaru" aria-label="Recommended — Kitaru implementation">
+    <article class="codecompare-pane codecompare-pane--kitaru" aria-label="Kitaru implementation">
       <header>
         <span class="codecompare-dot codecompare-dot--kitaru" aria-hidden="true"></span>
         <span class="codecompare-label">{kitaruLabel}</span>
-        <span class="codecompare-pill">Recommended</span>
       </header>
       <div class="codecompare-code">
         <Code code={kitaruCode} lang={lang} themes={codeThemes} defaultColor="light" />

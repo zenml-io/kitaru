@@ -1,0 +1,242 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">Hatchet · replay from the event log</span>
+      <span class="panel-sub">Restart the run; no input-override primitive in the docs</span>
+    </div>
+
+    <div class="dag">
+      <div class="step step--rerun">
+        <span class="mono step-name">research</span>
+        <span class="step-tag">re-run</span>
+      </div>
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M5 50 L95 50" />
+          <path d="M88 42 L96 50 L88 58" />
+        </svg>
+      </div>
+      <div class="step step--rerun">
+        <span class="mono step-name">draft</span>
+        <span class="step-tag">re-run</span>
+      </div>
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M5 50 L95 50" />
+          <path d="M88 42 L96 50 L88 58" />
+        </svg>
+      </div>
+      <div class="step step--rerun">
+        <span class="mono step-name">wait</span>
+        <span class="step-tag">re-run</span>
+      </div>
+    </div>
+
+    <div class="caption">Restart from the top of the run. Earlier steps execute again unless you've hand-rolled an override layer inside step bodies.</div>
+
+    <div class="foot">Operational replay. Not parameterised over a specific step's output.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · checkpoint-output override</span>
+      <span class="panel-sub">Pin a value at any checkpoint, replay surgically</span>
+    </div>
+
+    <div class="dag">
+      <div class="step step--cached">
+        <span class="mono step-name">research</span>
+        <span class="step-tag">cached</span>
+      </div>
+      <div class="arrow arrow--accent" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M5 50 L95 50" />
+          <path d="M88 42 L96 50 L88 58" />
+        </svg>
+      </div>
+      <div class="step step--override">
+        <span class="mono step-name">draft</span>
+        <span class="step-tag step-tag--accent">override</span>
+      </div>
+      <div class="arrow arrow--accent" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M5 50 L95 50" />
+          <path d="M88 42 L96 50 L88 58" />
+        </svg>
+      </div>
+      <div class="step step--rerun">
+        <span class="mono step-name">wait</span>
+        <span class="step-tag">re-execute</span>
+      </div>
+    </div>
+
+    <div class="override-call">
+      <span class="mono">kitaru replay --override checkpoint.draft="..."</span>
+    </div>
+
+    <div class="caption">Swap one checkpoint's output. Downstream re-executes against the new value, upstream stays cached.</div>
+
+    <div class="foot foot--accent">Built-in. No event-log surgery, no per-step override scaffolding.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 14px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .dag {
+    display: grid;
+    grid-template-columns: 1fr 20px 1fr 20px 1fr;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 8px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-surface);
+    min-height: 56px;
+    justify-content: center;
+  }
+  .step--cached { background: var(--color-bg); }
+  .step--rerun {
+    background: var(--color-cost-up-bg, var(--color-surface-warm));
+    border-color: var(--color-cost-up, var(--color-border));
+  }
+  .step--override {
+    background: var(--color-accent-light);
+    border-color: var(--color-accent);
+  }
+  .step-name {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .step--override .step-name { color: var(--color-accent); }
+  .step-tag {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--color-surface);
+  }
+  .step--rerun .step-tag {
+    color: var(--color-cost-up, var(--color-muted));
+  }
+  .step-tag--accent {
+    color: var(--color-accent);
+    background: var(--color-surface);
+  }
+
+  .arrow {
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .arrow svg {
+    width: 100%;
+    height: 12px;
+    overflow: visible;
+  }
+  .arrow path {
+    fill: none;
+    stroke: var(--color-muted);
+    stroke-width: 1.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .arrow--accent path {
+    stroke: var(--color-accent);
+  }
+
+  .override-call {
+    padding: 8px 12px;
+    background: var(--color-bg);
+    border: 1px dashed var(--color-accent);
+    border-radius: 6px;
+    margin-bottom: 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-primary);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mono { font-family: var(--font-mono); }
+
+  .caption {
+    font-size: 11px;
+    color: var(--color-secondary);
+    line-height: 1.45;
+    margin-bottom: 10px;
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+    .dag {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    .arrow {
+      height: 16px;
+      transform: rotate(90deg);
+    }
+  }
+</style>
