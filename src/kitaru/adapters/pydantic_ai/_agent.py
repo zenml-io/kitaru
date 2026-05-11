@@ -877,7 +877,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
-                model_cache_run_context(conversation_id=conversation_id),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
             ):
                 result = await super(KitaruAgent, self).run(
                     user_prompt,
@@ -981,7 +983,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
-                model_cache_run_context(conversation_id=conversation_id),
+                model_cache_run_context(
+                    conversation_id=conversation_id, message_history=effective_history
+                ),
             ):
                 delegation_token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
                 try:
@@ -1086,7 +1090,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with (
             self._kitaru_overrides(),
             self._tracking_scope(),
-            model_cache_run_context(conversation_id=conversation_id),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
         ):
             async with super(KitaruAgent, self).run_stream(
                 user_prompt,
@@ -1146,7 +1152,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with (
             self._kitaru_overrides(),
             self._tracking_scope(),
-            model_cache_run_context(conversation_id=conversation_id),
+            model_cache_run_context(
+                conversation_id=conversation_id, message_history=message_history
+            ),
         ):
             async with self.wrapped.iter(
                 user_prompt=user_prompt,

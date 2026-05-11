@@ -801,6 +801,52 @@ class TestModelMessageCacheSerialization:
         )
         assert cache_key_a == cache_key_b
 
+    def test_cache_serialization_preserves_inherited_conversation_id(
+        self,
+    ) -> None:
+        from pydantic_ai.models import ModelRequestParameters
+
+        from kitaru.adapters.pydantic_ai._model import (
+            _serialize_messages_for_cache,
+            model_cache_run_context,
+        )
+
+        messages_a = self._messages(run_id="run-a", second=1)
+        messages_b = self._messages(run_id="run-b", second=2)
+
+        with model_cache_run_context(
+            conversation_id=None,
+            message_history=messages_a,
+        ):
+            stable_a = _serialize_messages_for_cache(messages_a)
+
+        with model_cache_run_context(
+            conversation_id=None,
+            message_history=messages_b,
+        ):
+            stable_b = _serialize_messages_for_cache(messages_b)
+
+        assert stable_a[0]["conversation_id"] == "conversation-run-a"
+        assert stable_a[2]["conversation_id"] == "conversation-run-a"
+        assert stable_b[0]["conversation_id"] == "conversation-run-b"
+        assert stable_b[2]["conversation_id"] == "conversation-run-b"
+
+        cache_key_a = checkpoint_cache_key(
+            {
+                "messages": stable_a,
+                "model_settings": None,
+                "model_request_parameters": ModelRequestParameters(),
+            }
+        )
+        cache_key_b = checkpoint_cache_key(
+            {
+                "messages": stable_b,
+                "model_settings": None,
+                "model_request_parameters": ModelRequestParameters(),
+            }
+        )
+        assert cache_key_a != cache_key_b
+
     def test_granular_model_checkpoint_uses_stable_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,
