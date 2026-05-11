@@ -49,8 +49,8 @@ Install dependencies and initialize:
 
 ```bash
 uv sync --extra local --extra pydantic-ai --extra llm
-kitaru init
-kitaru login        # local dashboard at http://127.0.0.1:8383
+uv run kitaru init
+uv run kitaru login        # local dashboard at http://127.0.0.1:8383
 ```
 
 </Step>
@@ -60,8 +60,8 @@ kitaru login        # local dashboard at http://127.0.0.1:8383
 Drop API keys into `.env` in the example directory:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-XAI_API_KEY=xai-...         # optional — enables the search_twitter tool
+ANTHROPIC_API_KEY=ANTHROPIC_API_KEY_VALUE
+XAI_API_KEY=XAI_API_KEY_VALUE         # optional — enables the search_twitter tool
 ```
 
 The example loads `.env` via a tiny stdlib dotenv parser before any provider SDK is imported, so keys are available at module construction time.
@@ -73,14 +73,14 @@ The example loads `.env` via a tiny stdlib dotenv parser before any provider SDK
 Seed your interest profile (once), then run:
 
 ```bash
-python scout.py --seed-profile
-python scout.py
+uv run python scout.py --seed-profile
+uv run python scout.py
 ```
 
 Override interests per-run without touching memory:
 
 ```bash
-python scout.py --interests "robotics,biotech"
+uv run python scout.py --interests "robotics,biotech"
 ```
 
 </Step>
@@ -150,11 +150,11 @@ Create the secret once (shared across stacks):
 
 ```bash
 kitaru secrets set news-scout-keys \
-  --ANTHROPIC_API_KEY=sk-ant-... \
-  --XAI_API_KEY=xai-...      # optional, unlocks search_twitter
+  --ANTHROPIC_API_KEY=ANTHROPIC_API_KEY_VALUE \
+  --XAI_API_KEY=XAI_API_KEY_VALUE      # optional, unlocks search_twitter
 
-kitaru stack use my-k8s-stack
-python scout.py
+uv run kitaru stack use my-k8s-stack
+uv run python scout.py
 ```
 
 <Callout type="info">
@@ -170,9 +170,9 @@ python scout.py
 The default model is `anthropic:claude-sonnet-4-6`. Any PydanticAI model string works:
 
 ```bash
-KITARU_SCOUT_MODEL=openai:gpt-4o python scout.py
-KITARU_SCOUT_MODEL=gemini:gemini-2.5-flash python scout.py
-KITARU_SCOUT_MODEL=ollama:llama3.3 python scout.py
+KITARU_SCOUT_MODEL=openai:gpt-4o uv run python scout.py
+KITARU_SCOUT_MODEL=gemini:gemini-2.5-flash uv run python scout.py
+KITARU_SCOUT_MODEL=ollama:llama3.3 uv run python scout.py
 ```
 
 The Grok model used by the `search_twitter` tool is overridable separately via `KITARU_GROK_MODEL`.
