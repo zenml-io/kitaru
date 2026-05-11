@@ -91,7 +91,7 @@ class TestTurnCacheKeyCallSites:
 
         return KitaruAgent(Agent(TestModel(), name="cache_key_agent"))
 
-    def test_run_sync_forwards_capabilities_and_spec_to_cache_key(
+    def test_run_sync_forwards_run_kwargs_to_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -117,15 +117,23 @@ class TestTurnCacheKeyCallSites:
         )
         monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
 
-        result = agent.run_sync("hello", capabilities=capabilities, spec=spec)
+        result = agent.run_sync(
+            "hello",
+            capabilities=capabilities,
+            spec=spec,
+            conversation_id="conversation-sync",
+            output_retries=2,
+        )
 
         assert result is sentinel
         assert captured["capabilities"] is capabilities
         assert captured["spec"] is spec
+        assert captured["conversation_id"] == "conversation-sync"
+        assert captured["output_retries"] == 2
         assert captured["run_sync_cache_key"] == "cache-sync"
 
     @pytest.mark.anyio
-    async def test_run_forwards_capabilities_and_spec_to_cache_key(
+    async def test_run_forwards_run_kwargs_to_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -151,11 +159,19 @@ class TestTurnCacheKeyCallSites:
         )
         monkeypatch.setattr(agent, "_run_async", fake_run_async)
 
-        result = await agent.run("hello", capabilities=capabilities, spec=spec)
+        result = await agent.run(
+            "hello",
+            capabilities=capabilities,
+            spec=spec,
+            conversation_id="conversation-async",
+            output_retries=3,
+        )
 
         assert result is sentinel
         assert captured["capabilities"] is capabilities
         assert captured["spec"] is spec
+        assert captured["conversation_id"] == "conversation-async"
+        assert captured["output_retries"] == 3
         assert captured["run_cache_key"] == "cache-async"
 
 
@@ -969,6 +985,8 @@ class TestTurnCacheKey:
             "toolsets": ["tools-a"],
             "builtin_tools": ["builtin-a"],
             "event_stream_handler": None,
+            "conversation_id": "conversation-a",
+            "output_retries": 1,
             "capabilities": ["capability-a"],
             "spec": {"output": "plain"},
         }
@@ -1006,6 +1024,8 @@ class TestTurnCacheKey:
             ("toolsets", ["tools-b"]),
             ("builtin_tools", ["builtin-b"]),
             ("event_stream_handler", lambda *_args: None),
+            ("conversation_id", "conversation-b"),
+            ("output_retries", 2),
             ("capabilities", ["capability-b"]),
             ("spec", {"output": "structured"}),
         ],

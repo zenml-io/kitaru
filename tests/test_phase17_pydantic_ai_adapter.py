@@ -127,15 +127,22 @@ def test_phase17_event_artifact_names_use_short_display_shape() -> None:
     )
 
 
-def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
+def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The adapter should mirror and forward Pydantic AI's per-run capabilities."""
+    """The adapter should mirror and forward Pydantic AI per-run kwargs."""
     durable_agent = _make_wrapped_agent(
         name_prefix="capability_agent", granular_checkpoints=True
     )
     capabilities = [Hooks()]
-    captured: dict[str, object] = {}
+    conversation_id = "conversation-phase17"
+    output_retries = 2
+    expected_forwarded_kwargs = {
+        "capabilities": capabilities,
+        "conversation_id": conversation_id,
+        "output_retries": output_retries,
+    }
+    captured: dict[str, dict[str, object]] = {}
     run_result = object()
     stream_result = object()
     iter_result = object()
@@ -146,22 +153,25 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     def run_sync_direct(body: Any, **_: Any) -> Any:
         return body()
 
+    def capture_forwarded_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+        return {key: kwargs[key] for key in expected_forwarded_kwargs}
+
     async def fake_run(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run"] = kwargs["capabilities"]
+        captured["run"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     def fake_run_sync(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run_sync"] = kwargs["capabilities"]
+        captured["run_sync"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     @asynccontextmanager
     async def fake_run_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
-        captured["run_stream"] = kwargs["capabilities"]
+        captured["run_stream"] = capture_forwarded_kwargs(kwargs)
         yield stream_result
 
     @asynccontextmanager
     async def fake_iter(*args: Any, **kwargs: Any) -> Any:
-        captured["iter"] = kwargs["capabilities"]
+        captured["iter"] = capture_forwarded_kwargs(kwargs)
         yield iter_result
 
     monkeypatch.setattr(durable_agent, "_run_async", run_async_direct)
@@ -179,23 +189,44 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch.setattr(durable_agent.wrapped, "iter", fake_iter)
 
     async def exercise_async_surfaces() -> None:
-        result = await durable_agent.run("prompt", capabilities=capabilities)
+        result = await durable_agent.run(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
         assert result is run_result
         async with durable_agent.run_stream(
-            "prompt", capabilities=capabilities
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
         ) as streamed_result:
             assert streamed_result is stream_result
-        async with durable_agent.iter("prompt", capabilities=capabilities) as agent_run:
+        async with durable_agent.iter(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        ) as agent_run:
             assert agent_run is iter_result
 
     asyncio.run(exercise_async_surfaces())
-    assert durable_agent.run_sync("prompt", capabilities=capabilities) is run_result
+    assert (
+        durable_agent.run_sync(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
+        is run_result
+    )
 
     assert captured == {
-        "run": capabilities,
-        "run_stream": capabilities,
-        "iter": capabilities,
-        "run_sync": capabilities,
+        "run": expected_forwarded_kwargs,
+        "run_stream": expected_forwarded_kwargs,
+        "iter": expected_forwarded_kwargs,
+        "run_sync": expected_forwarded_kwargs,
     }
 
 
