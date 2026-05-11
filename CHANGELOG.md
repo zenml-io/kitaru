@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed PydanticAI MCP tool calls hanging after a successful request when an explicitly lifecycle-managed MCP server was already open. Kitaru now keeps already-running MCP calls on the active event loop inside explicit flows, and fails fast when auto-flow would otherwise move a pre-opened MCP server across event loops; auto-connected MCP servers still use granular MCP checkpoints by default.
 - Added a compatibility shim for the `pydantic_ai.mcp` import path used by current PydanticAI releases when Kitaru is installed with the MCP SDK version still compatible with ZenML server dependencies.
 
+### Removed
+- Removed the native memory surface from Kitaru: `kitaru.memory`, `KitaruClient.memories`, the `kitaru memory` CLI group, MCP `kitaru_memory_*` tools, and the corresponding memory docs/examples. Use your own storage for durable application state and pass values into flows explicitly.
+
 ### Security
 - Bumped transitive dependencies flagged by `pip-audit`: `gitpython` 3.1.47 → 3.1.49 (CVE-2026-44244), `mako` 1.3.11 → 1.3.12 (CVE-2026-44307), and `python-multipart` 0.0.26 → 0.0.27 (CVE-2026-42561). Lockfile-only change; no API surface affected.
 
@@ -44,7 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only. (#230)
-- Synthetic memory operations now register as `StepType.MEMORY_CALL` checkpoints (instead of generic `tool_call`), so memory reads/writes surface distinctly in execution graphs and `@checkpoint(type="memory_call")` is supported. (#239)
 
 ### Changed
 - Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#270)

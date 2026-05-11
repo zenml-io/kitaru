@@ -273,7 +273,7 @@ With `persist_message_history=True` the adapter remembers `result.all_messages()
 
 - **In-memory only.** History lives on the Python instance. Adapter-owned cached turns can refresh it from their returned result, but a restart, new process, or replay path that skips the adapter call still starts with no instance history.
 - **Do not hide the whole agent call inside a cached checkpoint if you rely on this.** If an outer `@kitaru.checkpoint` returns from cache, `KitaruAgent.run*()` never executes, so the adapter cannot restore `_last_messages`. The adapter warns once when `persist_message_history=True` is used inside an existing checkpoint.
-- **For fully durable conversation state, persist it yourself.** Store `result.all_messages()` somewhere durable, such as `kitaru.memory`, and pass it back with `message_history=`.
+- **For fully durable conversation state, persist it yourself.** Store `result.all_messages()` in your own durable storage (database, file, or `kitaru.save()` artifact) and pass it back with `message_history=`.
 - **Serial use.** Concurrent `run` / `run_sync` calls on the same instance race on the stored history. Gate concurrency externally, or use one instance per conversation.
 - **Unbounded.** The list grows monotonically — apply your own truncation or summarization for long-lived conversations.
 - **Success-only.** The instance only updates its history after a successful run. A partial failure leaves the last-successful history in place.

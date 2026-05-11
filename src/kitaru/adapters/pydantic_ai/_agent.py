@@ -678,8 +678,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             'checkpoint is served from cache during replay/resume, the adapter '
             'will not execute and cannot restore `_last_messages`. For '
             'resume-safe conversations, call the agent at flow scope in '
-            'granular mode, or pass `message_history=` explicitly from durable '
-            'storage such as `kitaru.memory`.'
+            'granular mode, or pass `message_history=` explicitly from your '
+            'own durable storage.'
         )
         warnings.warn(message, UserWarning, stacklevel=3)
 

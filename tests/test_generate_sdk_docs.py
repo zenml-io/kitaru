@@ -318,7 +318,7 @@ class TestExtractApi:
         )
         assert "_ExecutionsAPI" not in client_classes
         assert "_ArtifactsAPI" not in client_classes
-        assert "_MemoriesAPI" not in client_classes
+        assert "_DeploymentsAPI" not in client_classes
 
         client_methods = client_classes["KitaruClient"]["functions"]
         assert "_client" not in client_methods

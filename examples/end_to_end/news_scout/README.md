@@ -10,8 +10,9 @@ artifact you can read without scrolling through every tool call.
 
 ## What happens when you run it
 
-The agent reads your interest list from Kitaru's memory and starts a loop:
-it searches news and social sources for each interest, picks the headlines
+The agent starts from either the interests you pass with `--interests` or
+the built-in default list. It searches news and social sources for each
+interest, picks the headlines
 that look promising, pulls up the full articles to actually read them, and
 scores each on novelty, consequence, and relevance. It stops once it's
 covered every interest area (or hits the 50-request cap). Output is a
@@ -78,17 +79,12 @@ below for the secret-based setup when you move to a remote stack.)
 Then:
 
 ```bash
-# One-time setup: writes the default interest list into Kitaru's
-# persistent memory store so every future run knows what you care about.
-python scout.py --seed-profile
-
-# Normal usage: reads your interests from memory and runs one full pass —
+# Normal usage: uses the built-in default interests and runs one full pass —
 # search, investigate, score, and emit the final briefing to the terminal.
 python scout.py
 
-# One-off override: runs a pass for these specific topics instead of
-# whatever is stored in memory. Useful for trying the agent on a new
-# topic without overwriting your saved interests.
+# Choose the topics for this run. This does not save anything for later;
+# pass the list again next time if you want the same custom briefing.
 python scout.py --interests "robotics,biotech"
 ```
 
@@ -161,21 +157,6 @@ step dispatch time and exposes each key (`ANTHROPIC_API_KEY`, `XAI_API_KEY`)
 in the pod's environment — values never enter image layers, logs, or the
 frozen execution spec.
 
-## Memory
-
-One key in the `news_scout` namespace:
-
-- `interests` — what you care about
-
-```bash
-kitaru memory get --scope-type=namespace --scope=news_scout interests
-kitaru memory set --scope-type=namespace --scope=news_scout interests '["ai","robots"]'
-```
-
-Memory is read outside the flow (in `main()`) and passed in as an argument.
-Granular-mode agents run at flow scope, and flow-scope needs concrete values
-rather than DAG refs.
-
 ## Replay a failed run
 
 ```bash
@@ -198,7 +179,7 @@ utils/          — dotenv loader, HTTP helpers
 
 - Track which articles have been surfaced before (no dedup across runs). To
   add this cleanly, have the agent emit structured JSON with fingerprints at
-  the end of each run, then a `record_seen` checkpoint writes those to memory.
+  the end of each run, then save those fingerprints in your own store.
 - Send alerts anywhere — just prints to your terminal.
 - Schedule itself — pair with a K8s CronJob or `just schedule`.
 - Learn from thumbs up / down — no feedback loop yet.
