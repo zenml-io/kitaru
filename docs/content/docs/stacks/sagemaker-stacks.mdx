@@ -60,7 +60,7 @@ kitaru stack create prod-sagemaker \
 
 `--async` is shorthand for that same `orchestrator.synchronous=false` setting. If you provide both, the explicit `--extra` value wins.
 
-For the full underlying field list, see the [ZenML SageMaker orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker).
+If you need provider-specific settings not shown here, keep them in a reviewed stack YAML template and pass them through `extra:` / `--extra`.
 
 ## Use YAML for repeatable setup
 
