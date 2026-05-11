@@ -7,6 +7,8 @@ from typing import Any, Literal, TypedDict
 
 from kitaru.errors import KitaruFeatureNotAvailableError
 
+from ._mcp_compat import ensure_pydantic_ai_mcp_import_compat
+
 try:
     import pydantic_ai  # noqa: F401
 except ImportError as exc:  # pragma: no cover - import-time guard only
@@ -24,6 +26,8 @@ from ._policy import CaptureMode, CapturePolicy
 from ._toolset import KitaruToolset, kitaruify_toolset
 from ._utils import CheckpointConfig, CheckpointRuntime
 from ._wait_for_input import wait_for_input
+
+ensure_pydantic_ai_mcp_import_compat()
 
 LegacyCaptureMode = Literal['full', 'metadata_only', 'off']
 

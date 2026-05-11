@@ -1650,6 +1650,176 @@ async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
 
 
 @pytest.mark.anyio
+async def test_running_mcp_server_bypasses_granular_checkpoint_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._mcp_server import KitaruMCPServer
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def echo(text: str) -> str:
+        return f"echo:{text}"
+
+    wrapped = KitaruMCPServer(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["echo"]
+
+    async def fail_checkpoint(**_kwargs: Any) -> Any:
+        raise AssertionError("pre-opened MCP calls must stay on the current loop")
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._mcp_server._mcp_server_is_running",
+        lambda _server: True,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fail_checkpoint,
+    )
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("echo", {"text": "preopened"}, ctx, tool)
+
+    assert result == "echo:preopened"
+
+
+@pytest.mark.anyio
+async def test_auto_flow_rejects_preopened_mcp_server_before_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import Agent, FunctionToolset
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
+    from kitaru.adapters.pydantic_ai._mcp_server import KitaruMCPServer
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+    running_mcp = KitaruMCPServer(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+    )
+    agent = KitaruAgent(Agent(TestModel(), name="auto_flow_mcp_guard"))
+    agent._toolsets = [running_mcp]
+    auto_flow_called = False
+
+    def fail_auto_flow(_body: Any) -> Any:
+        nonlocal auto_flow_called
+        auto_flow_called = True
+        raise AssertionError("auto-flow should fail before the worker-thread bridge")
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._mcp_server._mcp_server_is_running",
+        lambda _server: True,
+    )
+    monkeypatch.setattr(agent, "_invoke_in_auto_flow", fail_auto_flow)
+
+    with pytest.raises(KitaruUsageError) as exc_info:
+        await agent.run("hello")
+
+    message = str(exc_info.value)
+    assert "already-running PydanticAI MCP server" in message
+    assert "`@kitaru.flow`" in message
+    assert "auto-connect" in message
+    assert auto_flow_called is False
+
+
+@pytest.mark.anyio
+async def test_closed_mcp_server_still_uses_granular_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._mcp_server import KitaruMCPServer
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def echo(text: str) -> str:
+        return f"echo:{text}"
+
+    wrapped = KitaruMCPServer(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["echo"]
+    checkpoint_steps = _install_checkpoint_step_recorder(monkeypatch)
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._mcp_server._mcp_server_is_running",
+        lambda _server: False,
+    )
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("echo", {"text": "auto"}, ctx, tool)
+
+    assert result == "echo:auto"
+    assert checkpoint_steps == ["echo_tool"]
+
+
+def test_mcp_server_running_detection() -> None:
+    from kitaru.adapters.pydantic_ai._mcp_server import _mcp_server_is_running
+
+    class RunningProperty:
+        is_running = True
+
+    class StoppedProperty:
+        is_running = False
+
+    class RunningMethod:
+        def is_running(self) -> bool:
+            return True
+
+    class ClientOnly:
+        _client = object()
+
+    class RunningCount:
+        _running_count = 1
+        _client = object()
+
+    class StoppedCount:
+        _running_count = 0
+        _client = object()
+
+    class ExitStackOnly:
+        _exit_stack = object()
+
+    class NoClient:
+        _client = None
+
+    class RaisingRunning:
+        @property
+        def is_running(self) -> bool:
+            raise RuntimeError("boom")
+
+    assert _mcp_server_is_running(RunningProperty()) is True
+    assert _mcp_server_is_running(StoppedProperty()) is False
+    assert _mcp_server_is_running(RunningMethod()) is True
+    assert _mcp_server_is_running(ClientOnly()) is True
+    assert _mcp_server_is_running(RunningCount()) is True
+    assert _mcp_server_is_running(StoppedCount()) is False
+    assert _mcp_server_is_running(ExitStackOnly()) is False
+    assert _mcp_server_is_running(NoClient()) is False
+    assert _mcp_server_is_running(RaisingRunning()) is False
+
+
+@pytest.mark.anyio
 async def test_named_hitl_tool_uses_name_as_unique_wait_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
