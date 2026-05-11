@@ -8,8 +8,9 @@ LLM calls uniformly.
 """
 
 import time
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, cast
 
@@ -43,7 +44,20 @@ from ._utils import (
 
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
-_VOLATILE_MESSAGE_ENVELOPE_KEYS = frozenset({"timestamp", "run_id"})
+_VOLATILE_MESSAGE_ENVELOPE_KEYS = frozenset({"timestamp", "run_id", "conversation_id"})
+_EXPLICIT_RUN_CONVERSATION_ID: ContextVar[str | None] = ContextVar(
+    "kitaru_pydantic_ai_explicit_run_conversation_id", default=None
+)
+
+
+@contextmanager
+def model_cache_run_context(*, conversation_id: str | None) -> Iterator[None]:
+    """Expose behavior-affecting run kwargs to granular model cache keys."""
+    token = _EXPLICIT_RUN_CONVERSATION_ID.set(conversation_id)
+    try:
+        yield
+    finally:
+        _EXPLICIT_RUN_CONVERSATION_ID.reset(token)
 
 
 def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
@@ -268,6 +282,7 @@ class KitaruModel(WrapperModel):
                 cache_key = checkpoint_cache_key(
                     {
                         "messages": _serialize_messages_for_cache(messages),
+                        "explicit_run_conversation_id": _EXPLICIT_RUN_CONVERSATION_ID.get(),
                         "model_settings": model_settings,
                         "model_request_parameters": model_request_parameters,
                     }

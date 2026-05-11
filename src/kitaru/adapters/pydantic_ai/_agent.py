@@ -43,7 +43,7 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
-from ._model import KitaruModel
+from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
 from ._tracking import get_current_tracker, tracker_scope
@@ -875,6 +875,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                model_cache_run_context(conversation_id=conversation_id),
             ):
                 result = await super(KitaruAgent, self).run(
                     user_prompt,
@@ -979,6 +980,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                model_cache_run_context(conversation_id=conversation_id),
             ):
                 delegation_token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
                 try:
@@ -1081,7 +1083,11 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             output_retries=output_retries,
         )
 
-        with self._kitaru_overrides(), self._tracking_scope():
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(conversation_id=conversation_id),
+        ):
             async with super(KitaruAgent, self).run_stream(
                 user_prompt,
                 output_type=output_type,
@@ -1139,7 +1145,11 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             conversation_id=conversation_id,
             output_retries=output_retries,
         )
-        with self._kitaru_overrides(), self._tracking_scope():
+        with (
+            self._kitaru_overrides(),
+            self._tracking_scope(),
+            model_cache_run_context(conversation_id=conversation_id),
+        ):
             async with self.wrapped.iter(
                 user_prompt=user_prompt,
                 output_type=output_type,
