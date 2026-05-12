@@ -122,7 +122,7 @@ Kitaru is narrower on purpose. We built it for Python agents, because that's the
 |---|---|---|
 | Workflow boundary | `@inngest_client.create_function` registered with the engine, triggered by an event | `@flow` on ordinary Python, called as `flow.run(...)` |
 | Durable step | `await ctx.step.run("name", fn)` memoizes the return value in the engine | `@checkpoint` persists a typed, versioned artifact in your own bucket |
-| Determinism requirement | Side effects must live inside `step.run` to be memoized on replay | No constraint; `@flow` and `@checkpoint` are plain Python, side effects anywhere |
+| Determinism / replay safety | Side effects that need replay protection should live inside `step.run`, so the engine can memoize the result | `@flow` and `@checkpoint` stay plain Python, but replay-safe external side effects still need durable boundaries or idempotency |
 | Pause and resume | `await ctx.step.wait_for_event("name", event="...")` plus an external send to resolve it | `kitaru.wait(name="...", schema=...)` releases compute, resumes from any input source |
 | Cross-run state | Roll your own (Redis, Postgres, KV) | `kitaru.memory`: typed, scoped, versioned KV in the box |
 | LLM call | Your code inside `step.run`; provider key, prompt and token logging are glue you write | `kitaru.llm()` resolves the model alias, injects the provider key, logs prompt/tokens/latency per call |
