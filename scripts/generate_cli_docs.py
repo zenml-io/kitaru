@@ -59,6 +59,25 @@ class CommandDoc:
     usage: str
     parameters: list[ParameterDoc] = field(default_factory=list)
     subcommands: list[CommandDoc] = field(default_factory=list)
+    docs_path: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def docs_url(self) -> str:
+        """Canonical root-relative docs URL for this command page."""
+        path_parts = self.docs_path
+        if not path_parts:
+            # Tests and small call sites often construct CommandDoc directly.
+            # In that case, derive the docs path from the command invocation.
+            invocation_parts = tuple(self.invocation.split())
+            path_parts = (
+                invocation_parts[1:]
+                if invocation_parts[:1] == ("kitaru",)
+                else invocation_parts
+            )
+
+        if not path_parts:
+            return "/docs/cli/"
+        return f"/docs/cli/{'/'.join(path_parts)}/"
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +299,7 @@ def build_command_tree(
     app: Any,
     parent_invocation: str = "",
     command_name: str | tuple[str, ...] | None = None,
+    parent_docs_path: tuple[str, ...] = (),
 ) -> CommandDoc:
     """Recursively build a normalized command tree from a cyclopts App."""
     raw_name = app.name if command_name is None else command_name
@@ -289,6 +309,7 @@ def build_command_tree(
     name = name_parts[-1]
     invocation = f"{parent_invocation} {name}".strip() if parent_invocation else name
     slug = name
+    docs_path = parent_docs_path + ((slug,) if parent_invocation else ())
 
     summary, body = _get_description(app)
 
@@ -305,6 +326,7 @@ def build_command_tree(
                 sub_app,
                 parent_invocation=invocation,
                 command_name=cmd_name,
+                parent_docs_path=docs_path,
             )
         )
 
@@ -317,6 +339,7 @@ def build_command_tree(
         usage=usage,
         parameters=params,
         subcommands=subcommands,
+        docs_path=docs_path,
     )
 
 
@@ -424,7 +447,7 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
             # content, so a body with lists or code fences would break the
             # table. The detail body is already on the subcommand's own page.
             desc_text = _escape_mdx(sub.summary) if sub.summary else ""
-            lines.append(f"| [`{sub.name}`](./{sub.slug}) | {desc_text} |")
+            lines.append(f"| [`{sub.name}`]({sub.docs_url}) | {desc_text} |")
         lines.append("")
 
     return "\n".join(lines)
