@@ -86,13 +86,82 @@ nested inside another Kitaru checkpoint.
 `@checkpoint`), because the adapter needs room to open inner checkpoints for
 model/tool calls.
 
+## Approval interruptions
+
+The adapter preserves OpenAI Agents SDK runs that stop for human approval. In story form: the agent reaches a tool approval, the SDK returns an interrupted run, Kitaru stores the serialized run state, and your flow can turn that interruption into a normal durable `kitaru.wait()`.
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import (
+    KitaruRunner,
+    OpenAIRunRequest,
+    wait_for_approval,
+)
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+
+@flow
+def publish_with_gate(prompt: str) -> str:
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
+
+    if result.status == "interrupted":
+        resume_request = wait_for_approval(
+            result,
+            name="approve_openai_tool",
+            timeout=600,
+        )
+        result = runner.run_sync(resume_request)
+
+    return str(result.final_output)
+```
+
+`wait_for_approval(...)` asks Kitaru to wait for a boolean approval and then returns an `OpenAIRunRequest.resume(...)` object. Approving resumes the saved OpenAI run state; rejecting sends the SDK a rejection message. If you already collected the decision somewhere else, use `build_resume_request(result, approve=True)` or pass an explicit `OpenAIApprovalDecision` to `OpenAIRunRequest.resume(...)`.
+
+Keep this bridge at flow scope. If you put it inside a Kitaru checkpoint, the flow would be trying to pause from inside a step that is meant to finish or fail as one unit.
+
+## Capture and checkpoint configuration
+
+`KitaruRunner` exposes the same two kinds of knobs most teams need in production:
+
+- **Capture policy:** what gets saved for observability.
+- **Checkpoint policy:** how retries and dashboard grouping apply to adapter-created checkpoints.
+
+```python
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAICapturePolicy
+
+runner = KitaruRunner(
+    agent,
+    checkpoint_strategy="calls",
+    capture=OpenAICapturePolicy(
+        save_input=False,              # privacy: do not persist full user input
+        save_final_output=True,
+        save_run_state=True,           # needed for approval resume
+        save_interruption_payloads=True,
+        save_response_items=False,      # opt in only when you need raw SDK items
+        save_usage=True,
+    ),
+    model_checkpoint_config={"retries": 2},
+    tool_checkpoint_config={"retries": 1},
+    tool_checkpoint_config_by_name={
+        "charge_card": False,          # do not checkpoint side-effectful tool
+        "search_docs": {"retries": 3},
+    },
+)
+```
+
+`OpenAICapturePolicy` defaults are designed for useful traces: child events, input, final output, run state, interruption payloads, usage, and OTel correlation are on; raw response items are off by default because they can be noisy.
+
+Checkpoint config accepts `retries`, `type`, and `runtime`. `runtime="isolated"` is rejected for adapter-managed checkpoints today because those synthetic checkpoint closures capture live OpenAI SDK objects; use inline runtime or omit `runtime`.
+
+If your agent context contains objects that are not JSON-serializable, pass `context_serializer=` and `context_deserializer=` to `KitaruRunner`. By default `strict_context=True`, so Kitaru fails loudly instead of saving a resume state that cannot be reconstructed later.
+
 ## Runnable example
 
 This example uses the real OpenAI API (not a stub model), so set your key:
 
 ```bash
 uv sync --extra local --extra openai-agents
-export OPENAI_API_KEY='sk-...'
+export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # default model in the example is gpt-5-nano
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
@@ -107,7 +176,7 @@ For a larger example, run the OpenAI research bot:
 cd examples/end_to_end/openai_research_bot
 uv sync --extra local --extra openai-agents
 uv run kitaru init
-export OPENAI_API_KEY='sk-...'
+export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 uv run python research_bot.py "AI agent durability" --max-searches 2
 ```
 

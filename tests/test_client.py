@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
-from zenml.enums import ArtifactSaveType, StackComponentType, StepType
+from zenml.enums import ArtifactSaveType, StackComponentType
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse, StepRunResponse
@@ -54,7 +54,6 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruWaitValidationError,
 )
-from kitaru.memory import MemoryEntry, MemoryScopeType, _MemoryScope
 
 
 def _module_spec(name: str) -> ModuleSpec:
@@ -320,27 +319,6 @@ def _dummy_wait_condition(
     )
 
 
-def _sample_memory_entry(
-    *,
-    key: str = "prefs",
-    scope: str = "demo_scope",
-    scope_type: MemoryScopeType = "namespace",
-    version: int = 1,
-    is_deleted: bool = False,
-) -> MemoryEntry:
-    return MemoryEntry(
-        key=key,
-        value_type="dict",
-        version=version,
-        scope=scope,
-        scope_type=scope_type,
-        created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-        is_deleted=is_deleted,
-        artifact_id=str(uuid4()),
-        execution_id=None,
-    )
-
-
 def _paused_status() -> Any:
     return SimpleNamespace(value="paused")
 
@@ -368,7 +346,6 @@ def test_client_initializes_namespaces() -> None:
 
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
-    assert hasattr(client, "memories")
     assert hasattr(client, "deployments")
     assert hasattr(client, "auth")
     assert hasattr(client.auth, "service_accounts")
@@ -1917,218 +1894,6 @@ def test_client_requires_project_for_env_driven_remote_connection() -> None:
     )
 
 
-def test_memories_get_delegates_to_entry_impl() -> None:
-    entry = _sample_memory_entry(scope="repo_scope", version=2)
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client._get_entry_impl", return_value=entry) as get_entry_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.get(
-            "prefs",
-            scope="repo_scope",
-            scope_type="namespace",
-            version=2,
-        )
-
-    assert result == entry
-    assert get_entry_impl.call_args.args[:2] == (
-        _MemoryScope(scope="repo_scope", scope_type="namespace"),
-        "prefs",
-    )
-    assert get_entry_impl.call_args.kwargs["version"] == 2
-
-
-def test_memories_list_passes_prefix_to_storage_impl() -> None:
-    entry = _sample_memory_entry(key="repo_alpha", scope="repo_scope")
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client._list_impl", return_value=[entry]) as list_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.list(
-            scope="repo_scope",
-            scope_type="namespace",
-            prefix="repo_",
-        )
-
-    assert result == [entry]
-    assert list_impl.call_args.args == (
-        _MemoryScope(scope="repo_scope", scope_type="namespace"),
-    )
-    assert list_impl.call_args.kwargs["prefix"] == "repo_"
-
-
-def test_memories_history_delegates_to_history_impl() -> None:
-    history = [
-        _sample_memory_entry(scope="repo_scope", version=2, is_deleted=True),
-        _sample_memory_entry(scope="repo_scope", version=1),
-    ]
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client._history_impl", return_value=history) as history_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.history(
-            "prefs",
-            scope="repo_scope",
-            scope_type="namespace",
-        )
-
-    assert result == history
-    assert history_impl.call_args.args == (
-        _MemoryScope(scope="repo_scope", scope_type="namespace"),
-        "prefs",
-    )
-
-
-def test_memories_set_delegates_to_set_entry_impl() -> None:
-    entry = _sample_memory_entry(scope="repo_scope", scope_type="flow", version=3)
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client._set_entry_impl", return_value=entry) as set_entry_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.set(
-            "prefs",
-            {"theme": "dark"},
-            scope="repo_scope",
-            scope_type="flow",
-        )
-
-    assert result == entry
-    assert set_entry_impl.call_args.args == (
-        _MemoryScope(scope="repo_scope", scope_type="flow"),
-        "prefs",
-        {"theme": "dark"},
-    )
-
-
-def test_memories_delete_delegates_to_delete_impl() -> None:
-    tombstone = _sample_memory_entry(
-        scope="repo_scope",
-        version=2,
-        is_deleted=True,
-    )
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client._delete_impl", return_value=tombstone) as delete_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.delete(
-            "prefs",
-            scope="repo_scope",
-            scope_type="namespace",
-        )
-
-    assert result == tombstone
-    assert delete_impl.call_args.args == (
-        _MemoryScope(scope="repo_scope", scope_type="namespace"),
-        "prefs",
-    )
-
-
-def test_memories_compact_delegates_to_compact_impl_with_source_mode() -> None:
-    compact_result = MagicMock()
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch(
-            "kitaru.client._compact_impl", return_value=compact_result
-        ) as compact_impl,
-    ):
-        client = KitaruClient()
-        result = client.memories.compact(
-            scope="repo_scope",
-            scope_type="namespace",
-            key="prefs",
-            source_mode="history",
-        )
-
-    assert result == compact_result
-    assert compact_impl.call_args.args == (
-        _MemoryScope(scope="repo_scope", scope_type="namespace"),
-    )
-    assert compact_impl.call_args.kwargs["key"] == "prefs"
-    assert compact_impl.call_args.kwargs["keys"] is None
-    assert compact_impl.call_args.kwargs["source_mode"] == "history"
-    assert compact_impl.call_args.kwargs["target_key"] is None
-
-
-def test_memories_compact_rejects_invalid_source_mode() -> None:
-    with patch(
-        "kitaru.client.resolve_connection_config", return_value=_resolved_connection()
-    ):
-        client = KitaruClient()
-
-    with pytest.raises(KitaruUsageError, match="source_mode"):
-        client.memories.compact(
-            scope="repo_scope",
-            scope_type="namespace",
-            key="prefs",
-            source_mode="future",  # ty: ignore[invalid-argument-type]
-        )
-
-
-def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
-    with patch(
-        "kitaru.client.resolve_connection_config", return_value=_resolved_connection()
-    ):
-        client = KitaruClient()
-
-    with pytest.raises(KitaruUsageError, match="Memory scope"):
-        client.memories.get("prefs", scope="bad:scope", scope_type="namespace")
-
-    with pytest.raises(KitaruUsageError, match="Memory key"):
-        client.memories.history("bad:key", scope="repo_scope", scope_type="namespace")
-
-    with pytest.raises(KitaruUsageError, match="Memory version"):
-        client.memories.get(
-            "prefs",
-            scope="repo_scope",
-            scope_type="namespace",
-            version=0,
-        )
-
-    with pytest.raises(KitaruUsageError, match="Memory prefix"):
-        client.memories.list(
-            scope="repo_scope",
-            scope_type="namespace",
-            prefix="bad:prefix",
-        )
-
-    with pytest.raises(KitaruUsageError, match="Memory scope_type"):
-        client.memories.set(
-            "prefs",
-            {"theme": "dark"},
-            scope="repo_scope",
-            scope_type="bogus",  # ty: ignore[invalid-argument-type]
-        )
-
-
 def test_get_maps_execution_details() -> None:
     frozen = FrozenExecutionSpec(
         version=1,
@@ -2191,35 +1956,6 @@ def test_get_maps_execution_details() -> None:
     artifact_ref = execution.artifacts[0]
     assert artifact_ref.name == "research_context"
     assert artifact_ref.kind == "context"
-
-
-def test_get_preserves_memory_call_checkpoint_type() -> None:
-    step = _DummyStep(
-        name="kitaru_memory_get",
-        status=ZenMLExecutionStatus.COMPLETED,
-        outputs={},
-        step_type=StepType.MEMORY_CALL,
-    )
-    run = _DummyRun(
-        status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="agent_flow",
-        steps={step.name: step},
-    )
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client.Client") as client_cls,
-    ):
-        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(run)
-
-        client = KitaruClient()
-        execution = client.executions.get(str(run.id))
-
-    assert len(execution.checkpoints) == 1
-    assert execution.checkpoints[0].checkpoint_type == "memory_call"
 
 
 def test_get_surfaces_checkpoint_attempt_history() -> None:

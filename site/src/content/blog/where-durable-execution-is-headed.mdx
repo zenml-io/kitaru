@@ -1,0 +1,142 @@
+---
+title: "Checkpoint Replay, Worker Shape, and Where Durable Execution Is Going"
+description: "Armin Ronacher's Absurd and Kitaru arrived at the same answers on replay semantics, ephemeral compute, and an agent-legible runtime. Here's why that matters."
+date: 2026-05-11
+author: "Hamza Tahir"
+category: "Design"
+ogImage: "https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/7d7b380e/where-durable-execution-is-headed-cover.avif"
+image: "https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/7d7b380e/where-durable-execution-is-headed-cover.avif"
+---
+
+Recently, I stumbled across [Armin Ronacher](https://x.com/mitsuhiko)'s musings about his attempt at building [an absurdly simple durable execution system](https://lucumr.pocoo.org/2025/11/3/absurd-workflows/) and how it has fared in production over the last few months.
+
+Armin is someone I greatly admire, and whenever he writes about the stack, I'm inclined to stop and listen.
+
+The timing also feels unusually good. At ZenML, we've just launched a sister project called [Kitaru.ai](https://kitaru.ai/), which is also tackling the durable execution problem. We're obviously not alone. After OpenClaw, there seems to have been a collective realization that durable execution needs to be part of how people think about agent systems.
+
+Temporal remains the obvious category leader, but beyond Temporal, there is now a growing field: Restate, DBOS, Inngest, Convex, LittleHorse, Golem Cloud, Orra, Microsoft's open-source durabletask-go, plus Cloudflare Workflows and AWS, adding their own takes.
+
+Similarly, every orchestration product that already existed is being forced to give an answer to the "durable execution" question. Tools that classically orchestrated data or machine learning workflows, like ZenML, Prefect, and even [good old Airflow](https://x.com/kaxil/status/2036827636073119994), have all taken varying stances on the matter.
+
+And to top off the confusion, some frameworks like Pydantic AI cleanly separate the deployment of agents onto a durable execution service, while others like LangGraph insist that the framework should handle that for you.
+
+I liked Armin's post because there's no vendor selling angle, it's simply an OSS project he's passionate about. Particularly, what I found most interesting isn't any single feature but rather the philosophical asides, the bits where Armin gestures at decisions he made, considered, or wishes he'd made differently.
+
+There are a few of those, and they map onto the axes I am personally most interested in.
+
+## Replay semantics matter
+
+The first aside is about replay.
+
+At a high level, Absurd and Temporal actually do look more similar than people sometimes admit. In both systems, execution comes back through your code again after interruption, and previously completed work is not naively redone from scratch.
+
+The difference is not *whether* code is revisited, but *what has to remain true* when that happens.
+
+In Absurd, when a task fails or suspends, the task is entered again from the top. What gets reused are the explicit steps. If execution reaches a `ctx.step(...)` whose result has already been stored, Absurd loads that result from Postgres and returns it instead of running the step body again. Code between steps, though, is just ordinary application code. It may run again, and if it produces different values on the next attempt, Absurd is perfectly happy with that.
+
+![Absurd's checkpoint-based replay model: only completed steps are restored from Postgres; ordinary code between steps may run again.](https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/0fa20004/absurd-checkpoint.avif)
+
+That is why Armin can say non-deterministic code outside steps is fine. The framework is not trying to guarantee that the whole function behaves identically on replay.
+
+It is making a narrower promise: completed steps are durable and reusable, and the expensive or side-effecting work inside those steps does not need to happen twice.
+
+Temporal is stricter. A Temporal workflow is also replayed by running workflow code again, but it is replayed against a recorded Event History.
+
+The contract is that, given the same history, the workflow code must produce the same Commands in the same order. That is the important distinction.
+
+Activity results, timer firings, and similar things are reconstructed from history during replay rather than re-executed as fresh external work, but the workflow code itself still has to make the same decisions it made the first time.
+
+![Temporal's deterministic replay model: workflow code is rerun against a recorded Event History and must issue the same Commands in the same order.](https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/320166c5/temporal-replay.avif)
+
+That is why `Date.now()`, `Math.random()`, unstable iteration order, and direct I/O are a problem inside the Temporal workflow code.
+
+It is not just that the code runs again. It is that the replayed run has to line up with history closely enough to issue the same commands in the same sequence. Ordinary code is therefore part of the correctness model in a way it is not in Absurd.
+
+Deterministic replay buys you a stronger and more uniform execution model, but only by asking the framework to mediate much more of what workflow code is allowed to do.
+
+Checkpoint-based replay gives you a smaller and thinner framework, but the guarantee is narrower: code outside checkpoints may run again, may produce different values, and the framework will not consider that a violation.
+
+Most of the surface-level differences people notice in this space, how much code lives in the SDK, whether there is a long list of forbidden operations, whether the framework feels like it owns the runtime or merely sits alongside it, are downstream of this one choice. Once you see that, the field organizes itself much more cleanly.
+
+## Pull, push, and the question underneath both
+
+The second aside is about pull versus push scheduling. Armin explicitly endorses pull: workers pull tasks from Postgres as they have capacity, there's no coordinator, no push router, no HTTP callback fabric, and the system is trivially self-hostable as a result.
+
+I think he's right about that.
+
+Pull is simpler to operate because it doesn't require a brain. There is nothing tracking which workers exist, nothing deciding who gets what task, nothing to fail over when a coordinator dies.
+
+Workers connect outbound to Postgres, ask for work, do it, and ask again. You can run them behind almost any firewall, in any cloud, or on a developer's laptop, and the system doesn't need to care.
+
+![Pull versus push scheduling: workers pulling work from Postgres versus a coordinator pushing work to workers.](https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/ec7c22c3/push-pull.avif)
+
+Push systems buy other things. Inngest's HTTP-invocation model is probably the clearest example in this space. Push can reduce latency and give you routing intelligence, but only by introducing a control plane that decides where work goes.
+
+For a project whose explicit goal is to be dropped into an existing application without demanding new infrastructure, pull is very obviously the right answer.
+
+But I think there is an assumption hiding underneath the entire pull-versus-push debate.
+
+The debate is about *how processes find work*. It assumes that the system is fundamentally organized around a fleet of workers somewhere, and that the only open question is how tasks get assigned to them.
+
+I'm not sure that assumption deserves to pass unchallenged anymore.
+
+The worker fleet itself is the assumption I'd like to look deeper into. My guess is that this design is default-inherited from an earlier era of distributed systems. When compute was expensive to provision and slow to appear, keeping a few long-lived processes warm on machines you had already paid for was the cheapest way to have capacity available.
+
+Container orchestrators have made that calculation much less obvious, and the costs of the worker-pool model have started showing up in places that aren't on the architecture diagram.
+
+- **Versioning** is the first one. Workers are long-lived, which means that at any given moment, some of them are running v1 of your code and some are running v2. A task scheduled under one version might resume on another. Temporal has an entire workflow versioning API for exactly this problem, with patches and version markers, and it is one of the parts of Temporal that teams complain about most. The pain is not accidental. It is the natural consequence of decoupling the lifetime of code from the lifetime of an execution.
+- **Cleanup** is the second. Long-running processes accumulate state they shouldn't: connection pools that drift, caches that grow, memory that fragments, half-finished bugs that compound across hours of uptime. You either build worker hygiene into the system or you accept degradation and periodically restart everything.
+- **Heterogeneous resource requirements** are the third. One flow might call an LLM and need almost nothing, another might run a vision model and require a GPU, and a third might chew through a large CSV and need 32 GB of RAM. In a worker-pool world, the usual answer is to maintain separate fleets for each resource profile and then route tasks between them, which means you have quietly signed up to operate a second scheduling system inside the first one.
+- And then there is the **latency** question. Keeping warm resources around will usually win on startup time. But if the dominant cost in the workload is an LLM call that takes several seconds, how much does a bit of container spin-up time really matter?
+
+The alternative is to stop treating the worker as the durable unit of the system. Each execution runs in its own ephemeral container, scheduled by an orchestrator when there is work to do and terminated when there isn't. Versioning collapses into "which image did this execution start under?" Cleanup collapses into "the container ended." Heterogeneous resource requirements collapse into ordinary pod scheduling.
+
+The price, of course, is that you now depend on a real orchestrator, which is a much bigger dependency than "Postgres and some processes."
+
+So I think Armin is right about pull versus push, and right about it for the right reasons. Given a worker-pool design, pull is the cleaner answer. The question I would add is whether the worker pool itself is still the shape the workload wants.
+
+For a system designed to slot into an existing application without changing its deployment story, the answer is yes.
+
+For a system designed for teams that already live on top of a container orchestrator, the answer feels more open than the field has admitted.
+
+## Where Kitaru actually sits
+
+I owe the reader a section about [Kitaru](https://kitaru.ai/), since I opened by mentioning it.
+
+Kitaru started after we watched ZenML users force agents onto a pipeline DAG that was not built for them. They hacked around state, branching, waiting, and recovery until it became obvious that the abstraction did not fit. At that point, the only honest response was to start over.
+
+So Kitaru is a Python-native durable execution system built for the infrastructure that teams already run.
+
+![Where Kitaru sits relative to Absurd and Temporal: checkpoint-based replay, no long-lived workers, infrastructure provided by an orchestrator the team already runs.](https://assets.kitaru.ai/content/blog/where-durable-execution-is-headed/93994d91/where-kitaru-sits.avif)
+
+What it shares with Absurd is most of the core architectural posture. Checkpoint-based recovery, not deterministic replay. Postgres for state, with an artifact store underneath for larger payloads. Suspends that release compute entirely while waiting. A default-local experience that scales up to a real cloud target without changing application code. The surface API will look familiar to anyone who has read the Absurd README: `@flow` and `@checkpoint` instead of `ctx.step`, but a very similar underlying contract.
+
+Wrap the expensive or side-effecting thing, and the framework gives you crash recovery and replay for free.
+
+Where we disagree, we disagree honestly.
+
+Absurd keeps its worker pool because that is what allows it to slot into an existing app without demanding new infrastructure. Kitaru goes the other way: there are no long-lived Kitaru workers at all. Each flow execution runs in its own container, scheduled when there is work to do and terminated when there isn't. The versioning, cleanup, and resource-shape problems I described earlier collapse into normal orchestrator concerns, in exchange for depending on an orchestrator at all.
+
+That is why I don't think one answer is "right" and the other "wrong." They are optimizing for different deployment stories around roughly the same core model.
+
+Kitaru also inherits ZenML's stack abstraction, which means a flow can target a local install on your laptop or a Kubernetes-backed production stack with a simple `kitaru stack use prod`, without application-level changes. Absurd deliberately knows almost nothing about your infrastructure, because knowing almost nothing is what allows it to fit into almost anything. Kitaru is more opinionated. It is closer in posture to DBOS than to Absurd: more batteries included, more assumptions about the surrounding environment, and more code under the hood that we are happy to lean on rather than apologize for.
+
+## Convergence in design is a good thing
+
+What I find striking is not that Kitaru and Absurd are identical. They are not. What is striking is how far they converge despite starting from different places and serving different users.
+
+Two teams, different audiences, different constraints, and yet they land on substantially the same outline: checkpoint-based replay over deterministic replay, state in the database, compute that can disappear while waiting, and a first-class surface for agents to inspect and manipulate running executions from outside the framework.
+
+That last point is something I haven't touched much on, but it is important to conclude on. Absurd ships a bundled skill for coding agents to inspect and debug workflow state. Kitaru ships an MCP server out of the box. Neither team copied that from the other.
+
+We both just noticed the same thing: the protocol a system exposes to external actors, what an agent can list, inspect, replay, resume, unblock, and repair, is becoming at least as important as the dashboard a human reads.
+
+When two designs converge this hard without coordinating, the design space usually has a strong attractor. Agents cost real money per step, so retrying from scratch is unacceptable. The framework has to be operable by a small team, so it can't demand total ownership of the runtime. Waiting should cost nothing. And the system increasingly needs to be legible to an external actor that is not a person but can still intervene operationally.
+
+If you take those constraints seriously, you end up somewhere in the neighborhood of Absurd or Kitaru, even if you started somewhere else.
+
+What I'm less sure about is whether the agent surface becomes a moat or just table stakes. MCP servers are easy to add. The architectural commitments underneath them (replay semantics, runtime ownership, worker shape, deployment model, etc) are not. So maybe the agent interface is just something everyone ships by next year. Or maybe the systems that thought about agents from the start end up shaped in ways that don't retrofit cleanly later.
+
+I don't know which way that goes, and I'd be wary of anyone in this space who tells you they do.
+
+If you have thoughts on any of the above, I'd welcome the conversation.

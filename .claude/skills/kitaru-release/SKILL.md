@@ -131,7 +131,7 @@ Version semantics:
 | **Minor** (`0.X.0`) | New user-facing SDK primitive, new CLI command group, new public surface |
 | **Patch** (`0.0.X`) | Bug fix, doc improvement, internal refactor, small-surface CLI tweak |
 
-Default to patch unless the diff clearly warrants minor. A single new CLI flag is usually patch. A whole new command group (e.g. `kitaru memory`) is minor.
+Default to patch unless the diff clearly warrants minor. A single new CLI flag is usually patch. A whole new command group (e.g. `kitaru auth`) is minor.
 
 **Wait for user to confirm or override the version.** Do not proceed until they've agreed on a version number.
 
