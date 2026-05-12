@@ -14,6 +14,65 @@ function acceptsMarkdown(acceptHeader) {
   });
 }
 
+
+const PERMANENT_REDIRECTS = new Map([
+  ["/get-started", "/book-a-demo/"],
+  ["/get-started/", "/book-a-demo/"],
+  ["/docs/concepts/memory", "/docs/concepts/checkpoints/"],
+  ["/docs/concepts/memory/", "/docs/concepts/checkpoints/"],
+  ["/docs/guides/memory", "/docs/guides/artifacts/"],
+  ["/docs/guides/memory/", "/docs/guides/artifacts/"],
+  ["/blog/kitaru-agents-now-have-memory", "/blog/"],
+  ["/blog/kitaru-agents-now-have-memory/", "/blog/"],
+]);
+
+function isFileLikeOrApiPath(pathname) {
+  if (pathname.startsWith("/api/")) return true;
+
+  const segments = pathname.split("/").filter(Boolean);
+  const lastSegment = segments.at(-1) ?? "";
+  return /\.[^/]+$/.test(lastSegment);
+}
+
+function acceptsHtml(acceptHeader) {
+  if (!acceptHeader) return true;
+
+  return acceptHeader.split(",").some((entry) => {
+    const [mediaType, ...params] = entry
+      .split(";")
+      .map((part) => part.trim().toLowerCase());
+    if (mediaType !== "text/html" && mediaType !== "*/*") return false;
+
+    const q = params.find((param) => param.startsWith("q="));
+    return q ? Number.parseFloat(q.slice(2)) > 0 : true;
+  });
+}
+
+function redirectResponse(request, destination, status) {
+  const sourceUrl = new URL(request.url);
+  const url = new URL(destination, sourceUrl);
+  if (!url.search && sourceUrl.search) {
+    url.search = sourceUrl.search;
+  }
+
+  return Response.redirect(url.href, status);
+}
+
+function permanentRedirectResponse(request, pathname) {
+  const destination = PERMANENT_REDIRECTS.get(pathname);
+  return destination ? redirectResponse(request, destination, 301) : undefined;
+}
+
+function canonicalSlashRedirectResponse(request, pathname) {
+  if (request.method !== "GET" && request.method !== "HEAD") return undefined;
+  if (pathname === "/" || pathname.endsWith("/")) return undefined;
+  if (isFileLikeOrApiPath(pathname)) return undefined;
+  if (acceptsMarkdown(request.headers.get("accept"))) return undefined;
+  if (!acceptsHtml(request.headers.get("accept"))) return undefined;
+
+  return redirectResponse(request, `${pathname}/`, 308);
+}
+
 function isDocsPath(pathname) {
   return pathname === "/docs" || pathname.startsWith("/docs/");
 }
@@ -88,6 +147,12 @@ async function negotiatedMarkdownResponse(request, env, pathname) {
 export default {
   async fetch(request, env, context) {
     const url = new URL(request.url);
+    const permanentRedirect = permanentRedirectResponse(request, url.pathname);
+    if (permanentRedirect) return permanentRedirect;
+
+    const canonicalRedirect = canonicalSlashRedirectResponse(request, url.pathname);
+    if (canonicalRedirect) return canonicalRedirect;
+
     const response = await negotiatedMarkdownResponse(
       request,
       env,
