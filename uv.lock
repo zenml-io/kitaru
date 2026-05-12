@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "0.97.0"
+version = "0.98.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -179,9 +179,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/93/f66ea8bfe39f2e6bb9da8e27fa5457ad2520e8f7612dfc547b17fad55c4d/anthropic-0.97.0.tar.gz", hash = "sha256:021e79fd8e21e90ad94dc5ba2bbbd8b1599f424f5b1fab6c06204009cab764be", size = 669502, upload-time = "2026-04-23T20:52:34.445Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/60/a9e4426dfe594e5eec8a9757d48e3d8dcf529a0a35a4fc8aefa352bd95fe/anthropic-0.98.1.tar.gz", hash = "sha256:62205edec42f5877df63d58be8e9443843d3e032215836e228fba1f59514a433", size = 725085, upload-time = "2026-05-04T21:40:39.496Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/b6/8e851369fa661ad0fef2ae6266bf3b7d52b78ccf011720058f4adaca59e2/anthropic-0.97.0-py3-none-any.whl", hash = "sha256:8a1a472dfabcfc0c52ff6a3eecf724ac7e07107a2f6e2367be55ceb42f5d5613", size = 662126, upload-time = "2026-04-23T20:52:32.377Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/6f/7f7f80f714e6de0784518f1999f71fd632076aefd3e22fe0ccd27ca9571f/anthropic-0.98.1-py3-none-any.whl", hash = "sha256:107ebf954415382fdcea6a94f9cf334a53199ad64794403590dc55366cefcc28", size = 699604, upload-time = "2026-05-04T21:40:41.311Z" },
 ]
 
 [[package]]
@@ -440,20 +440,20 @@ wheels = [
 
 [[package]]
 name = "claude-agent-sdk"
-version = "0.1.72"
+version = "0.1.80"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
     { name = "sniffio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5d/b7/ce35a79f4891797ef60b5cf437453bf22e3e420f5946007312c9e144f5e0/claude_agent_sdk-0.1.72.tar.gz", hash = "sha256:e737f919301d5fc65a3ebc6f438911b73e237b16fa9fa3061420e79727cfa307", size = 241286, upload-time = "2026-05-01T02:17:34.37Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/06/0984d8bc2f0f7b05aca2005461d587f9d04d8009fc4a2d333dec1c2f3164/claude_agent_sdk-0.1.80.tar.gz", hash = "sha256:1938d376cd6db273583266b184fc9caf53779841f131bf3fe308014707536019", size = 250299, upload-time = "2026-05-09T06:44:58.202Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e8/de/098dd15dec8ce3c5ed9c9c2415a290fb5c24ad9cd1214cfc3e20c3be0342/claude_agent_sdk-0.1.72-py3-none-macosx_11_0_arm64.whl", hash = "sha256:3a16ee041db0734e8f82d1fca7bd7c122227c0d8c150a301b365ab3f0a83a27b", size = 63695454, upload-time = "2026-05-01T02:17:38.468Z" },
-    { url = "https://files.pythonhosted.org/packages/55/de/bea82fdd65244bab9cf6aa3492c2b6cc5d97213836730febd89c0a342975/claude_agent_sdk-0.1.72-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:4b3c630b5b07cd4f3d57631d833539b77045937093ec4975f47ee29de6b9a9df", size = 65539313, upload-time = "2026-05-01T02:17:43.129Z" },
-    { url = "https://files.pythonhosted.org/packages/1c/26/78e45a08c4acb262b8f99f6885fb5b96ccf32f27be008610403b86cc3da8/claude_agent_sdk-0.1.72-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:6fd7c6cbab95928ceb39fe82f413bd124e83dc5ed9bf63b6dffb9dc2b83f67bc", size = 76872182, upload-time = "2026-05-01T02:17:48.616Z" },
-    { url = "https://files.pythonhosted.org/packages/58/6d/9641f9a3119adec03d33cb40be8a194801cde0c15b3c497f07e36b38dab1/claude_agent_sdk-0.1.72-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:e2cf7beb573b608832cf2c644b330e51b79cfdab85286f064cf92f8f63c66382", size = 77032401, upload-time = "2026-05-01T02:17:54.322Z" },
-    { url = "https://files.pythonhosted.org/packages/88/a1/35eeda6bac78c5c236c0f3c36fb8634503514ff78ada4e46b77397922ed7/claude_agent_sdk-0.1.72-py3-none-win_amd64.whl", hash = "sha256:9159ac974b496bb50d05027f49b44b76a595f1b4df3bfdef1136b56c95fc956d", size = 78421027, upload-time = "2026-05-01T02:18:00.614Z" },
+    { url = "https://files.pythonhosted.org/packages/84/4d/fc78dae356a43126d0142921a73254f371b359b0508d5af046c43bc680bf/claude_agent_sdk-0.1.80-py3-none-macosx_11_0_arm64.whl", hash = "sha256:0a26cfea92029f1e3bcc468657e9bbb464a7bf04519b528ec0182ede3415a311", size = 60909658, upload-time = "2026-05-09T06:45:01.651Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/08/586c98a59d30bea43d83a9db7f8468a24affd2f7d3721a0dd010bf4784c8/claude_agent_sdk-0.1.80-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:09f025305524e909c8ee190e73ad319b0d14f2c5d2d1ec567995c1eb833f4de7", size = 62949213, upload-time = "2026-05-09T06:45:04.848Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/a8/e7825005610e711fdebcc5c82c5de2214bb967f1cf5a14edd50ef16e0bc0/claude_agent_sdk-0.1.80-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:be269e118cce52b638b17232f2a52ce4d0877218672261d987cc20b4e5d9c83a", size = 70625763, upload-time = "2026-05-09T06:45:07.899Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/dd/a754eed2ab4f8437aac52d4d321e28c4d8bfd6ca126b5179b441aa7aeadf/claude_agent_sdk-0.1.80-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:653fb53600777c253885f9536c17da19d12f9d7fedd5e419c522854f1089449a", size = 70806172, upload-time = "2026-05-09T06:45:11.51Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/a8/3b27d7aa434b471a3100d158c7e709d09e7be0179a6c34be27def3ffaa1f/claude_agent_sdk-0.1.80-py3-none-win_amd64.whl", hash = "sha256:51ecfc32257201fc2cb6c061ba4d78e27b789a736fd5ed1e6ec0af60fd5d81aa", size = 71422151, upload-time = "2026-05-09T06:45:15.043Z" },
 ]
 
 [[package]]
@@ -575,7 +575,7 @@ wheels = [
 
 [[package]]
 name = "cyclopts"
-version = "4.11.1"
+version = "4.11.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -583,9 +583,9 @@ dependencies = [
     { name = "rich" },
     { name = "rich-rst" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/57/1a6d246b391ef2904b3c1b17a1930a8512e4d02f3a11d1a21c9ed9b5f2ca/cyclopts-4.11.1.tar.gz", hash = "sha256:6c1d4b55a1d05bd9e1fdc4d7800e9ce69cf16f6141db34e5a5c9857bdb81887f", size = 175941, upload-time = "2026-05-02T00:23:31.51Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/f7/3ee212c1bc314551094fc8fda7b4b63c647ac5c32d06daa285d04d33edfc/cyclopts-4.11.2.tar.gz", hash = "sha256:8c9b77921660fa1ee52c150e2217ced672323efb3434e9b338077de1bc551ff4", size = 175935, upload-time = "2026-05-04T00:11:57.857Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8f/16/19e676f3ab9254dff7f8ec06840adb97931327a88a111f032dbd0b5b0343/cyclopts-4.11.1-py3-none-any.whl", hash = "sha256:178cf3a892c22fc35815f352d8433cc70aaeec4f930ce3b9b15a6b79d7ce158e", size = 213540, upload-time = "2026-05-02T00:23:32.759Z" },
+    { url = "https://files.pythonhosted.org/packages/23/18/4cedda786e7da429e7489549a9e5461530d4133130e541f25fb94f015776/cyclopts-4.11.2-py3-none-any.whl", hash = "sha256:838020120b939549ff7c8423aca29c86764b5dd1d8a5d7f3753a6327861f537b", size = 213537, upload-time = "2026-05-04T00:11:56.103Z" },
 ]
 
 [[package]]
@@ -1628,7 +1628,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "2.33.0"
+version = "2.34.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1640,14 +1640,14 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/ee/d056c82f63c05f06baac0cffb4a90952d8274f90c49dfe244f20497b9bbd/openai-2.33.0.tar.gz", hash = "sha256:f850c435e2a4685bba3295bd54912dd26315d9c1b7733068186134d6e0599f9a", size = 693254, upload-time = "2026-04-28T14:04:42.428Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/89/f1e78f5f828f4e97a6ebca8f45c6b35667da12b074ac490dc8362b882279/openai-2.34.0.tar.gz", hash = "sha256:828b4efcbb126352c2b5eb97d33ae890c92a71ab72511aefc1b7fe64aeccb07b", size = 759556, upload-time = "2026-05-04T17:34:08.721Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/32/37734d769bc8b42e4938785313cc05aade6cb0fa72479d3220a0d61a4e78/openai-2.33.0-py3-none-any.whl", hash = "sha256:03ac37d70e8c9e3a8124214e3afa785e2cbc12e627fbd98177a086ef2fd87ad5", size = 1162695, upload-time = "2026-04-28T14:04:40.482Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/40/f090499f10514515081d09cb9da09f25b821eb20497e9423afe4f07b4ecf/openai-2.34.0-py3-none-any.whl", hash = "sha256:c996a71b1a210f3569844572ad4c609307e978515fb76877cf449b72596e549e", size = 1316535, upload-time = "2026-05-04T17:34:06.773Z" },
 ]
 
 [[package]]
 name = "openai-agents"
-version = "0.15.1"
+version = "0.15.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "griffelib" },
@@ -1659,9 +1659,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/52/125891e56b67ec78bef08d91dc0a8d39457088cd0f59bf8e74a37e5e591c/openai_agents-0.15.1.tar.gz", hash = "sha256:78c3f1226e1d6d34dd7566e211c8345e996629d1704335153d1728995a3a7775", size = 5319915, upload-time = "2026-05-02T02:20:53.631Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/20/7238649d32d7050abe6ab00262f6078f181fd946107813bbcb77deae4cfe/openai_agents-0.15.3.tar.gz", hash = "sha256:cf3d8635b92fa0d91bccf75c57a626dae31e4f98d446fc45721b3b37806adfc7", size = 5334940, upload-time = "2026-05-06T12:13:00.854Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/7b/69a33975b3610300219e1d25185c46280814cdb87e69a779acf0c9b9166a/openai_agents-0.15.1-py3-none-any.whl", hash = "sha256:2d304a5dcb919bc4fa1de5c7c9c93a4353a8a79d87d582d6170929390b7b3cef", size = 818627, upload-time = "2026-05-02T02:20:50.932Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/ca/77bf4813844fbd46e2e2d83555be04e905d2c1d50fbeac1870ffd7a9142f/openai_agents-0.15.3-py3-none-any.whl", hash = "sha256:d533640ca762849dd668277fb64d3ac110b9df5ad90c96cf98921cca8a704f44", size = 821732, upload-time = "2026-05-06T12:12:58.917Z" },
 ]
 
 [[package]]
