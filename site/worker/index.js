@@ -34,6 +34,15 @@ function isFileLikeOrApiPath(pathname) {
   return /\.[^/]+$/.test(lastSegment);
 }
 
+function isAstroInternalPath(pathname) {
+  return (
+    pathname === "/_image" ||
+    pathname.startsWith("/_image/") ||
+    pathname === "/_server-islands" ||
+    pathname.startsWith("/_server-islands/")
+  );
+}
+
 function acceptsHtml(acceptHeader) {
   if (!acceptHeader) return true;
 
@@ -67,6 +76,7 @@ function canonicalSlashRedirectResponse(request, pathname) {
   if (request.method !== "GET" && request.method !== "HEAD") return undefined;
   if (pathname === "/" || pathname.endsWith("/")) return undefined;
   if (isFileLikeOrApiPath(pathname)) return undefined;
+  if (isAstroInternalPath(pathname)) return undefined;
   if (acceptsMarkdown(request.headers.get("accept"))) return undefined;
   if (!acceptsHtml(request.headers.get("accept"))) return undefined;
 

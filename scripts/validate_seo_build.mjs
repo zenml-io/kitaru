@@ -14,6 +14,7 @@ const RETIRED_REDIRECTED_PATHS = new Set([
 const BAD_BUILT_OUTPUT_SNIPPETS = [
   'https://kitaru.ai/docs/docs',
   '/docs/docs/cli',
+  'https://kitaru.ai/og/docs',
 ];
 const EXPECTED_ROBOTS_SITEMAPS = [
   'Sitemap: https://kitaru.ai/sitemap-index.xml',
@@ -169,6 +170,10 @@ function extractOgUrl(html) {
   return html.match(/<meta\b[^>]*property=["']og:url["'][^>]*content=["']([^"']+)["'][^>]*>/i)?.[1];
 }
 
+function extractOgImage(html) {
+  return html.match(/<meta\b[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i)?.[1];
+}
+
 async function validateRepresentativeHtml() {
   for (const [label, relativePath, expectedUrl] of REPRESENTATIVE_HTML) {
     const filePath = path.join(siteDist, relativePath);
@@ -182,6 +187,7 @@ async function validateRepresentativeHtml() {
 
     const canonical = extractCanonical(html);
     const ogUrl = extractOgUrl(html);
+    const ogImage = extractOgImage(html);
 
     if (!canonical) {
       fail(`${label} is missing a canonical URL in ${relativeToRepo(filePath)}`);
@@ -195,12 +201,15 @@ async function validateRepresentativeHtml() {
     if (ogUrl && ogUrl !== expectedUrl) {
       fail(`${label} og:url mismatch: expected ${expectedUrl}, got ${ogUrl}`);
     }
+    if (relativePath.startsWith('docs/') && ogImage && !ogImage.startsWith('https://kitaru.ai/docs/og/docs/')) {
+      fail(`${label} docs og:image should live under /docs/og/docs, got ${ogImage}`);
+    }
     if (canonical && ogUrl && canonical !== ogUrl) {
       fail(`${label} canonical and og:url disagree: ${canonical} vs ${ogUrl}`);
     }
   }
 
-  pass('representative HTML pages expose matching canonical and og:url values');
+  pass('representative HTML pages expose matching canonical, og:url, and docs og:image values');
 }
 
 async function validateBuiltOutputSnippets() {
@@ -229,7 +238,7 @@ async function validateBuiltOutputSnippets() {
         .join('\n')}`,
     );
   } else {
-    pass('built output does not contain docs/docs URL shapes');
+    pass('built output does not contain forbidden docs/docs or root docs OG image URL shapes');
   }
 }
 
@@ -395,6 +404,16 @@ async function validateWorkerRedirects() {
     {
       label: 'API path',
       url: 'https://kitaru.ai/api/waitlist',
+      accept: 'text/html',
+    },
+    {
+      label: 'Astro image optimizer endpoint',
+      url: 'https://kitaru.ai/_image?href=%2Fdashboard.png&w=640&f=webp',
+      accept: 'text/html',
+    },
+    {
+      label: 'Astro server island endpoint',
+      url: 'https://kitaru.ai/_server-islands/example',
       accept: 'text/html',
     },
     {
