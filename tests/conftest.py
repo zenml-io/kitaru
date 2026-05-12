@@ -79,7 +79,6 @@ from kitaru.config import (
     KITARU_STACK_ENV,
     _reset_runtime_configuration,
 )
-from kitaru.memory import _scope as _memory_scope_module
 
 
 @pytest.fixture(autouse=True)
@@ -160,19 +159,6 @@ def isolated_zenml_global_config(
     set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
-
-
-@pytest.fixture(autouse=True)
-def _reset_memory_scope_configuration() -> Generator[None]:
-    """Reset process-local and flow-local memory scope state between tests."""
-    original_default = _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT
-    token = _memory_scope_module._CURRENT_MEMORY_SCOPE.set(None)
-    _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = None
-    try:
-        yield
-    finally:
-        _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
-        _memory_scope_module._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 @pytest.fixture()

@@ -10,9 +10,8 @@ shows up as a named ``final_report`` artifact in the dashboard trace.
 
 Usage::
 
-    python scout.py --seed-profile       # one-time: seed the user profile
-    python scout.py                       # run one agentic sweep
-    python scout.py --interests ai,llms   # override interests for this run
+    python scout.py                       # run one agentic sweep with defaults
+    python scout.py --interests ai,llms   # choose interests for this run
 """
 
 import argparse
@@ -33,7 +32,7 @@ from rich.markdown import Markdown  # noqa: E402
 from rich.rule import Rule  # noqa: E402
 from tools import fetch_url, investigate, search_news, search_twitter  # noqa: E402
 
-from kitaru import ImageSettings, checkpoint, flow, memory  # noqa: E402
+from kitaru import ImageSettings, checkpoint, flow  # noqa: E402
 from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent  # noqa: E402
 from kitaru.config import classify_stack_deployment_type  # noqa: E402
 
@@ -41,7 +40,6 @@ from kitaru.config import classify_stack_deployment_type  # noqa: E402
 # Config
 # ---------------------------------------------------------------------------
 
-NAMESPACE = "news_scout"
 MODEL = os.environ.get("KITARU_SCOUT_MODEL", "anthropic:claude-sonnet-4-6")
 MAX_REQUESTS = 50
 
@@ -150,20 +148,6 @@ def news_scout(interests: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Profile seeding (detached — outside the flow, namespace-scoped memory)
-# ---------------------------------------------------------------------------
-
-
-def seed_profile(interests: list[str]) -> None:
-    """Write interests into namespace memory. Runs detached (outside any flow)."""
-    memory.configure(scope=NAMESPACE, scope_type="namespace")
-    memory.set("interests", interests)
-    print(f"Seeded {len(interests)} interests into namespace '{NAMESPACE}':")
-    for interest in interests:
-        print(f"  - {interest}")
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -200,27 +184,17 @@ def _image_override_for_active_stack() -> dict | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Kitaru agentic news scout.")
     parser.add_argument(
-        "--seed-profile",
-        action="store_true",
-        help="Write default interests into namespace memory and exit.",
-    )
-    parser.add_argument(
         "--interests",
         type=str,
         default=None,
-        help="Comma-separated interests to override for this run.",
+        help=(
+            "Comma-separated interests for this run. If omitted, the built-in "
+            "default list is used."
+        ),
     )
     args = parser.parse_args(argv)
 
-    override = _parse_interests(args.interests)
-
-    if args.seed_profile:
-        seed_profile(override or DEFAULT_INTERESTS)
-        return 0
-
-    memory.configure(scope=NAMESPACE, scope_type="namespace")
-    interests_from_memory = memory.get("interests")
-    interests = override or interests_from_memory or DEFAULT_INTERESTS
+    interests = _parse_interests(args.interests) or DEFAULT_INTERESTS
 
     run_kwargs: dict = {"interests": interests}
     image_override = _image_override_for_active_stack()

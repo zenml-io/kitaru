@@ -420,7 +420,7 @@ That's the full tour. Memory and replay aren't covered as separate chapters — 
 
 ## Architecture overview
 
-The full architectural rationale lives in [`DESIGN.md`](./DESIGN.md). Highlights:
+Highlights of the architecture choices behind this tour:
 
 - **Single shared library; no per-stage code copies.** The `agent_factory/` library grows monotonically; per-stage progressive disclosure happens through the Profile, not through versioning the library.
 - **Two credential paths.** `exec` (sandboxed shell, proxy-injected creds) vs. `exec_service` (host-side typed call, direct `kitaru.secrets` resolution). Both demoed.

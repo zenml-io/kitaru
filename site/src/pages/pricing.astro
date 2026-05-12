@@ -9,7 +9,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
 );
 
 const openSourceFeatures = [
-  'All primitives — flow, checkpoint, wait, llm, memory',
+  'All primitives — flow, checkpoint, wait, llm, save/load',
   'Framework adapters and bundled MCP server',
   'Replay, retry, resume, and cancel (CLI, SDK, dashboard)',
   'Local execution and remote orchestrators (K8s, Vertex, SageMaker, AzureML)',
@@ -36,7 +36,7 @@ const compareSections: Section[] = [
   {
     title: 'Core SDK',
     rows: [
-      { feature: 'All primitives (flow, checkpoint, wait, llm, memory)', oss: 'yes', enterprise: 'yes' },
+      { feature: 'All primitives (flow, checkpoint, wait, llm, save/load)', oss: 'yes', enterprise: 'yes' },
       { feature: 'Framework adapters + bundled MCP server', oss: 'yes', enterprise: 'yes' },
       { feature: 'Replay, retry, resume, cancel (CLI, SDK, dashboard)', oss: 'yes', enterprise: 'yes' },
       { feature: 'Distributed execution across deployments (not single-node)', oss: 'no', enterprise: 'yes' },
@@ -112,7 +112,7 @@ const faq = [
   },
   {
     q: 'Can I migrate from Open Source to Enterprise later?',
-    a: "Yes. The schema is the same on both sides, so flows, checkpoints, memory scopes, and stack configs port over. We'll help script the cutover during onboarding.",
+    a: "Yes. The schema is the same on both sides, so flows, checkpoints, artifacts, and stack configs port over. We'll help script the cutover during onboarding.",
     open: false,
   },
   {

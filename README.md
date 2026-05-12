@@ -39,7 +39,7 @@ Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 |---|---|---|
 | **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
 | **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
-| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()`, `kitaru.memory` |
+| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
@@ -55,7 +55,7 @@ application teams use on top.
 
 ## 🎯 Why Kitaru?
 
-### Durable execution and memory
+### Durable execution
 
 - **Durable execution.** A crash, pod eviction, or timeout doesn't send the run
   back to zero. Fix the bug, replay, and the completed checkpoints return cached
@@ -72,9 +72,6 @@ application teams use on top.
 - **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
   step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
   steps stay isolated; orchestration stays inline.
-- **Durable memory.** Scoped, versioned state for long-running agents. Write
-  from Python, read from the CLI or MCP. Agents remember conventions, context,
-  and prior work across runs.
 
 ### Python-first, no graph DSL
 
@@ -257,7 +254,6 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
 | [PydanticAI adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | Wrap a PydanticAI agent with `KitaruAgent` |
-| [Memory guide](https://kitaru.ai/docs/guides/memory) | Durable memory concepts, scopes, history, and compaction |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 

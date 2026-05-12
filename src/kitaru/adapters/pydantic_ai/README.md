@@ -156,12 +156,19 @@ This also affects where event details land. Flow-scope explicit HITL calls are s
 
 ### 4. MCP servers
 
-MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools; in the default granular mode, each top-level MCP call gets its own adapter checkpoint. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
+MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools. In the default granular mode, each top-level MCP call gets its own adapter checkpoint when Kitaru can safely own the MCP call lifecycle. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.
+
+If the PydanticAI MCP server is already running because you entered it with `async with server:` or `async with agent:`, behavior depends on where the agent run happens:
+
+- **Inside an explicit `@kitaru.flow`:** Kitaru keeps the MCP call on the current event loop instead of moving it into the worker-thread checkpoint bridge. That avoids the concrete failure mode where the MCP request reaches the server successfully, but the client waits or tears down from the wrong event loop afterwards. In this pre-opened case the call is still tracked as adapter event metadata, but it is not persisted as its own per-call `mcp_call` checkpoint, so checkpoint-scoped args/result artifacts are not saved for that call.
+- **Outside an explicit `@kitaru.flow`:** `KitaruAgent.run(...)` would normally auto-open a flow by moving the async agent body to a worker thread/event loop. If the MCP server is already open on your caller loop, Kitaru fails fast with `KitaruUsageError` instead of risking a hang. Wrap the call in an explicit flow while the MCP lifecycle is open, or do not pre-open the MCP server and let PydanticAI/Kitaru auto-connect it.
+
+If you need per-call MCP checkpointing, let PydanticAI auto-connect the MCP server so the connection opens inside the checkpoint worker loop.
 
 ```python
+from kitaru.adapters.pydantic_ai import KitaruAgent
 from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStdio
-from kitaru.adapters.pydantic_ai import KitaruAgent
 
 server = MCPServerStdio('npx', args=['-y', '@modelcontextprotocol/server-filesystem', '/tmp'], cache_tools=True)
 agent = Agent('openai:gpt-4o', name='researcher', toolsets=[server])
@@ -266,7 +273,7 @@ With `persist_message_history=True` the adapter remembers `result.all_messages()
 
 - **In-memory only.** History lives on the Python instance. Adapter-owned cached turns can refresh it from their returned result, but a restart, new process, or replay path that skips the adapter call still starts with no instance history.
 - **Do not hide the whole agent call inside a cached checkpoint if you rely on this.** If an outer `@kitaru.checkpoint` returns from cache, `KitaruAgent.run*()` never executes, so the adapter cannot restore `_last_messages`. The adapter warns once when `persist_message_history=True` is used inside an existing checkpoint.
-- **For fully durable conversation state, persist it yourself.** Store `result.all_messages()` somewhere durable, such as `kitaru.memory`, and pass it back with `message_history=`.
+- **For fully durable conversation state, persist it yourself.** Store `result.all_messages()` in your own durable storage (database, file, or `kitaru.save()` artifact) and pass it back with `message_history=`.
 - **Serial use.** Concurrent `run` / `run_sync` calls on the same instance race on the stored history. Gate concurrency externally, or use one instance per conversation.
 - **Unbounded.** The list grows monotonically — apply your own truncation or summarization for long-lived conversations.
 - **Success-only.** The instance only updates its history after a successful run. A partial failure leaves the last-successful history in place.

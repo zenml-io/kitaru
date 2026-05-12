@@ -8,8 +8,9 @@ LLM calls uniformly.
 """
 
 import time
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, cast
 
@@ -44,6 +45,43 @@ from ._utils import (
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
 _VOLATILE_MESSAGE_ENVELOPE_KEYS = frozenset({"timestamp", "run_id"})
+_EXPLICIT_RUN_CONVERSATION_ID: ContextVar[str | None] = ContextVar(
+    "kitaru_pydantic_ai_explicit_run_conversation_id", default=None
+)
+_INHERITED_MESSAGE_CONVERSATION_IDS: ContextVar[frozenset[str]] = ContextVar(
+    "kitaru_pydantic_ai_inherited_message_conversation_ids",
+    default=frozenset(),
+)
+
+
+def _message_conversation_ids(
+    message_history: Sequence[ModelMessage] | None,
+) -> frozenset[str]:
+    if message_history is None:
+        return frozenset()
+    return frozenset(
+        conversation_id
+        for message in message_history
+        if (conversation_id := getattr(message, "conversation_id", None)) is not None
+    )
+
+
+@contextmanager
+def model_cache_run_context(
+    *,
+    conversation_id: str | None,
+    message_history: Sequence[ModelMessage] | None = None,
+) -> Iterator[None]:
+    """Expose behavior-affecting run context to granular model cache keys."""
+    conversation_token = _EXPLICIT_RUN_CONVERSATION_ID.set(conversation_id)
+    inherited_token = _INHERITED_MESSAGE_CONVERSATION_IDS.set(
+        _message_conversation_ids(message_history)
+    )
+    try:
+        yield
+    finally:
+        _INHERITED_MESSAGE_CONVERSATION_IDS.reset(inherited_token)
+        _EXPLICIT_RUN_CONVERSATION_ID.reset(conversation_token)
 
 
 def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
@@ -61,9 +99,23 @@ def _without_volatile_message_envelope_keys(item: dict[str, Any]) -> dict[str, A
     }
 
 
+def _should_keep_message_conversation_id(conversation_id: Any) -> bool:
+    if not isinstance(conversation_id, str):
+        return False
+    return (
+        conversation_id == _EXPLICIT_RUN_CONVERSATION_ID.get()
+        or conversation_id in _INHERITED_MESSAGE_CONVERSATION_IDS.get()
+    )
+
+
 def _strip_message_envelope_for_cache(message: dict[str, Any]) -> dict[str, Any]:
-    """Return a cache-key copy without PydanticAI per-run envelope fields."""
+    """Return a cache-key copy without PydanticAI-generated envelope fields."""
     stable_message = _without_volatile_message_envelope_keys(message)
+    conversation_id = message.get("conversation_id")
+    if _should_keep_message_conversation_id(conversation_id):
+        stable_message["conversation_id"] = conversation_id
+    else:
+        stable_message.pop("conversation_id", None)
     parts = stable_message.get("parts")
     if isinstance(parts, list):
         # Strip at parts level only. Nested dicts, such as tool args/results, are
@@ -268,6 +320,7 @@ class KitaruModel(WrapperModel):
                 cache_key = checkpoint_cache_key(
                     {
                         "messages": _serialize_messages_for_cache(messages),
+                        "explicit_run_conversation_id": _EXPLICIT_RUN_CONVERSATION_ID.get(),
                         "model_settings": model_settings,
                         "model_request_parameters": model_request_parameters,
                     }
