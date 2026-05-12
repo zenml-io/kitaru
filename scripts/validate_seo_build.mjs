@@ -312,7 +312,19 @@ function loadWorkerRedirectHarness(workerSource) {
   const testableSource = workerSource
     .replace(
       /^import astroWorker from .*;\n/m,
-      'const astroWorker = { fetch: async () => new Response(null, { status: 599 }) };\n',
+      `const astroWorker = {
+        fetch: async (request) => {
+          const url = new URL(request.url);
+          if (url.pathname === '/api/waitlist') {
+            return Response.redirect(new URL('/api/waitlist/', url).href, 301);
+          }
+
+          return new Response(null, {
+            status: 599,
+            headers: { 'x-astro-pathname': url.pathname },
+          });
+        },
+      };\n`,
     )
     .replace(/export default\s*{/, 'return {');
 
@@ -416,6 +428,15 @@ async function validateWorkerRedirects() {
     if ([301, 308].includes(response.status)) {
       fail(
         `Worker ${testCase.label} should not redirect, got ${response.status} ${response.headers.get('location')}`,
+      );
+    }
+
+    if (
+      testCase.url === 'https://kitaru.ai/api/waitlist' &&
+      response.headers.get('x-astro-pathname') !== '/api/waitlist/'
+    ) {
+      fail(
+        `Worker API path should dispatch internally as /api/waitlist/, got ${response.headers.get('x-astro-pathname')}`,
       );
     }
   }

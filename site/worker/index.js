@@ -102,6 +102,17 @@ function markdownAssetRequest(sourceRequest, pathname) {
   return new Request(url, sourceRequest);
 }
 
+function astroDispatchRequest(sourceRequest, pathname) {
+  if (!pathname.startsWith("/api/") || pathname.endsWith("/")) {
+    return sourceRequest;
+  }
+
+  const url = new URL(sourceRequest.url);
+  url.pathname = `${pathname}/`;
+
+  return new Request(url, sourceRequest);
+}
+
 function addVaryAccept(headers) {
   const vary = headers.get("Vary");
   if (!vary) {
@@ -160,7 +171,11 @@ export default {
     );
     if (response) return response;
 
-    const delegatedResponse = await astroWorker.fetch(request, env, context);
+    const delegatedResponse = await astroWorker.fetch(
+      astroDispatchRequest(request, url.pathname),
+      env,
+      context,
+    );
 
     return isDocsPath(url.pathname)
       ? responseWithAcceptVary(delegatedResponse)
