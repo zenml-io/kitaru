@@ -215,7 +215,7 @@ class TestBuildCommandTree:
 
         executions_list = _find_command(tree, "executions", "list")
         assert executions_list.docs_path == ("executions", "list")
-        assert executions_list.docs_url == "/docs/cli/executions/list/"
+        assert executions_list.docs_url == "/cli/executions/list/"
 
         flow_deployment_logs = _find_command(tree, "flow", "deployments", "logs")
         assert flow_deployment_logs.docs_path == (
@@ -223,7 +223,9 @@ class TestBuildCommandTree:
             "deployments",
             "logs",
         )
-        assert flow_deployment_logs.docs_url == "/docs/cli/flow/deployments/logs/"
+        assert flow_deployment_logs.docs_url == "/cli/flow/deployments/logs/"
+        assert not flow_deployment_logs.docs_url.startswith("/docs/docs/")
+        assert not flow_deployment_logs.docs_url.startswith("/docs/cli/")
 
     def test_stack_tree_includes_create_and_delete(self) -> None:
         from kitaru.cli import app
@@ -437,7 +439,7 @@ class TestRenderCommandPage:
         )
         page = render_command_page(cmd, is_root=False)
         assert "## Commands" in page
-        assert "[`run`](/docs/cli/agent/run/)" in page
+        assert "[`run`](/cli/agent/run/)" in page
 
     def test_subcommand_table_omits_body(self) -> None:
         # Markdown tables can't contain block-level content, so the child's

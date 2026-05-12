@@ -63,7 +63,13 @@ class CommandDoc:
 
     @property
     def docs_url(self) -> str:
-        """Canonical root-relative docs URL for this command page."""
+        """Docs-app-relative URL for this command page.
+
+        Source MDX is rendered inside the Next docs app, which already has
+        ``basePath: "/docs"``. Keep generated links relative to that app
+        root so built HTML publishes them with exactly one public docs
+        prefix instead of a doubled docs prefix.
+        """
         path_parts = self.docs_path
         if not path_parts:
             # Tests and small call sites often construct CommandDoc directly.
@@ -76,8 +82,8 @@ class CommandDoc:
             )
 
         if not path_parts:
-            return "/docs/cli/"
-        return f"/docs/cli/{'/'.join(path_parts)}/"
+            return "/cli/"
+        return f"/cli/{'/'.join(path_parts)}/"
 
 
 # ---------------------------------------------------------------------------
