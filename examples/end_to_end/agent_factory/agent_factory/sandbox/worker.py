@@ -13,7 +13,8 @@ cwd+env snapshot can't capture or undo, so replaying a snapshot would
 give the illusion of replayability while silently dropping every actual
 mutation. If the agent needs cross-run durable state, it should write to
 `/workspace` (a named Docker volume that survives container teardown) or
-use `kitaru.memory` for specific values it explicitly wants to carry.
+persist specific values via `kitaru.save()` and reload them with
+`kitaru.load()` at the top of the next run.
 
 Each lifecycle event and exec call prints a `[sandbox]` line to stdout
 and (during a kitaru flow) attaches structured metadata via `kitaru.log`

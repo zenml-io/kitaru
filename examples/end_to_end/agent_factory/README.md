@@ -138,7 +138,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 **Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`).
 
-**Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or use [`kitaru.memory`](https://kitaru.ai/docs/guides/memory) deliberately at flow scope for specific values it explicitly wants to carry forward.
+**Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or persist specific values via [`kitaru.save()`](https://kitaru.ai/docs/guides/artifacts) and reload them with `kitaru.load()` at the top of the next run.
 
 **Not yet here:** credentials still come from the host process; chapter 3 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
@@ -414,7 +414,7 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 
 ---
 
-That's the full tour. Memory and replay aren't covered as separate chapters — they're general Kitaru primitives that apply uniformly to any flow, not platform-engineering capabilities specific to agent factories. See [Memory](https://kitaru.ai/docs/guides/memory) and [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) when you want those.
+That's the full tour. Replay isn't covered as a separate chapter — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) when you want it.
 
 ---
 
