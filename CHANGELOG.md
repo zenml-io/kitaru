@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Agent Factory** — a chapter-by-chapter flagship example at [`examples/end_to_end/agent_factory/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) and a dedicated docs section at [`/docs/agent-factory/`](https://kitaru.ai/docs/agent-factory/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_factory/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_factory_example.py`. (#288)
+- **Agent Factory** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_factory/` and a dedicated docs section at [`/docs/agent-factory/`](https://kitaru.ai/docs/agent-factory/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_factory/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_factory_example.py`. (#288)
 
 ### Changed
 - `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Factory tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
