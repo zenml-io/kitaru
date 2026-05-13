@@ -1,0 +1,227 @@
+---
+---
+
+<figure class="fig">
+  <div class="card card--competitor">
+    <div class="card-head">
+      <span class="card-label">OpenAI trace</span>
+      <span class="card-sub">What happened</span>
+    </div>
+    <div class="spans">
+      <div class="span">
+        <span class="span-dot"></span>
+        <span class="span-text"><code>model.request</code></span>
+        <span class="span-meta">218ms</span>
+      </div>
+      <div class="span span--child">
+        <span class="span-dot"></span>
+        <span class="span-text"><code>tool.search_docs</code></span>
+        <span class="span-meta">412ms</span>
+      </div>
+      <div class="span">
+        <span class="span-dot"></span>
+        <span class="span-text"><code>model.request</code></span>
+        <span class="span-meta">186ms</span>
+      </div>
+      <div class="span span--child">
+        <span class="span-dot"></span>
+        <span class="span-text"><code>handoff</code></span>
+        <span class="span-meta">9ms</span>
+      </div>
+      <div class="span">
+        <span class="span-dot"></span>
+        <span class="span-text"><code>model.request</code></span>
+        <span class="span-meta">324ms</span>
+      </div>
+    </div>
+    <div class="card-foot">Read-only. Reproduce by re-running.</div>
+  </div>
+
+  <div class="card card--kitaru">
+    <div class="card-head">
+      <span class="card-label card-label--accent">Kitaru execution</span>
+      <span class="card-sub">What was produced</span>
+    </div>
+    <div class="exec">
+      <div class="exec-id">
+        <span class="exec-id-mono">exec 7c1b</span>
+        <span class="exec-id-meta">3 checkpoints · $0.15</span>
+      </div>
+      <div class="cp">
+        <span class="cp-name"><code>@checkpoint research</code></span>
+        <span class="artifact">brief.json</span>
+      </div>
+      <div class="cp">
+        <span class="cp-name"><code>@checkpoint draft</code></span>
+        <span class="artifact">draft.md</span>
+      </div>
+      <div class="cp">
+        <span class="cp-name"><code>@checkpoint review</code></span>
+        <span class="artifact">review.json</span>
+      </div>
+    </div>
+    <div class="actions">
+      <span class="action"><code>kitaru.load()</code></span>
+      <span class="action">replay</span>
+      <span class="action">diff</span>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .card {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .card--competitor { background: var(--color-surface-warm); }
+  .card--kitaru { border-color: var(--color-accent); }
+
+  .card-head { margin-bottom: 14px; }
+  .card-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .card-label--accent { color: var(--color-accent); }
+  .card-sub {
+    display: block;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .spans {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: auto;
+  }
+  .span {
+    display: grid;
+    grid-template-columns: 10px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    background: var(--color-surface);
+    border-radius: 4px;
+  }
+  .span--child { margin-left: 14px; }
+  .span-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-muted);
+  }
+  .span-text code {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-primary);
+  }
+  .span-meta {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--color-muted);
+  }
+  .card-foot {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--color-border-light);
+    font-size: 10.5px;
+    color: var(--color-muted);
+    font-style: italic;
+    text-align: center;
+  }
+
+  .exec {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .exec-id {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--color-accent-light);
+    border-radius: 6px;
+    margin-bottom: 4px;
+  }
+  .exec-id-mono {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-accent-deep);
+  }
+  .exec-id-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-accent-deep);
+  }
+  .cp {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+  }
+  .cp-name code {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+  .artifact {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    background: var(--color-accent-light);
+    color: var(--color-accent-deep);
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  .actions {
+    margin-top: auto;
+    display: flex;
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border-light);
+    flex-wrap: wrap;
+  }
+  .action {
+    font-size: 10.5px;
+    color: var(--color-accent-deep);
+    padding: 2px 7px;
+    border: 1px solid var(--color-accent);
+    border-radius: 3px;
+    background: var(--color-surface);
+    font-weight: 600;
+  }
+  .action code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-accent-deep);
+  }
+
+  @media (max-width: 520px) {
+    .fig { grid-template-columns: 1fr; }
+    .span--child { margin-left: 10px; }
+  }
+</style>
