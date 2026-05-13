@@ -1,0 +1,175 @@
+---
+competitor: "OpenAI Agents SDK"
+competitorLogo: "/compare/openai-agents-sdk.svg"
+title: "Kitaru vs OpenAI Agents SDK: build the agent, run it durably"
+description: "The OpenAI Agents SDK builds the agent loop. Kitaru is the durable runtime underneath: checkpoints, replay, wait/resume, and artifact lineage on your own cloud."
+cardSubtitle: "Build the agent with the OpenAI SDK. Run it durably with Kitaru, via a first-class adapter."
+ctaHeading: "Put a runtime under your OpenAI agents"
+order: 55
+ogImage: "https://assets.kitaru.ai/compare/6ddb6142/og-card.avif"
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+import DurableReplay from '../../components/compare/graphics/openai-agents-sdk/DurableReplay.astro';
+import DurableWait from '../../components/compare/graphics/openai-agents-sdk/DurableWait.astro';
+import ArtifactLineage from '../../components/compare/graphics/openai-agents-sdk/ArtifactLineage.astro';
+
+The OpenAI Agents SDK is the code-first harness for defining and running an agent. It's OpenAI's opinionated stack for building agent behavior in Python and TypeScript.
+
+Kitaru is not another harness. It lives one layer down as the durable runtime. Wrap your existing OpenAI Agents SDK code with `@flow` and `KitaruRunner` and the same agent gets checkpointing, replay, durable waits, artifact lineage, and a stack abstraction for Kubernetes, AWS, GCP, and Azure. The two are complementary, with a first-class [OpenAI Agents adapter](/docs/guides/openai-agents-adapter) that does the wiring.
+
+<WhenToUseEach
+  competitorLabel="OpenAI Agents SDK"
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running an OpenAI agent long enough that crashes, pod evictions, or timeouts re-burn LLM tokens you already paid for",
+      "Pausing for hours or days on a human approval without keeping a worker process alive",
+      "Replaying a failed run from a specific step without re-paying for the LLM calls above it",
+      "Deploying onto your own Kubernetes, AWS, GCP, or Azure with execution state in your own object storage",
+      "Standardizing one durable runtime under multiple harnesses (OpenAI Agents, PydanticAI, raw Python)",
+    ],
+  }}
+  competitor={{
+    title: "Use the OpenAI Agents SDK if you are",
+    items: [
+      "Building an Agents SDK-native agent and want a tight code-first harness for tools, handoffs, guardrails, structured outputs, and OpenAI platform integrations",
+      "Standardizing on OpenAI's tracing, evals, sandbox agents, and hosted tools in one ecosystem",
+      "Running short-lived agents where crashes and long approvals are not a real cost yet",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="The OpenAI Agents SDK builds the agent and Kitaru helps that agent survive production."
+/>
+
+<FeatureWithGraphic title="Replay from the last good checkpoint, not from step 1">
+  <DurableReplay slot="graphic" />
+
+  The OpenAI Agents SDK gives you the agent loop. But have you ever thought, what happens when that loop crashes at step 15 of an 18-step run? The SDK has run state and continuation surfaces around approval interruptions, but the durable-replay-after-failure story is not its core promise. Kitaru's is.
+
+  <Fragment slot="bullets">
+    - **Checkpoint boundary:** Every `@checkpoint` persists its return value as a typed artifact. Wrap a Runner call in one and the whole agent run becomes a replay boundary.
+    - **Replay from a step:** `kitaru executions replay <exec_id> --from <checkpoint>` replays from the selected checkpoint and its downstream descendants. Checkpoints that are neither replay roots nor downstream dependencies are skipped, so completed expensive work can be reused instead of re-executed.
+    - **Per-call granularity:** `checkpoint_strategy="calls"` on `KitaruRunner` records each model or tool call as its own peer checkpoint, so a single failing tool does not invalidate the run.
+  </Fragment>
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Long waits without keeping a worker alive" reverse={true}>
+  <DurableWait slot="graphic" />
+
+  The OpenAI Agents SDK has a real approval story. Tools can require approval; the run returns interrupted, and you resume it later with a decision. What the base SDK does not provide by itself is a self-hosted workflow runtime that releases compute, persists workflow-level state and artifacts, and resumes the long-running workflow across your own infrastructure. This is what Kitaru solves:
+
+  <Fragment slot="bullets">
+    - **Compute released:** `kitaru.wait()` suspends the flow and tears down the worker. When the approval signal arrives, a fresh container reads the checkpoint state and the flow resumes. Idle compute does not pay rent.
+    - **Wait for anything:** Human, webhook, another agent, scheduled time, or an out-of-band CLI invocation can satisfy the wait.
+    - **OpenAI approvals, bridged:** The adapter ships `wait_for_approval(result, ...)` so a native OpenAI Agents SDK approval interruption becomes a durable `kitaru.wait()` without you wiring it together.
+  </Fragment>
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Artifacts you can inspect, not just traces of what happened">
+  <ArtifactLineage slot="graphic" />
+
+  OpenAI's tracing is genuinely useful. Model calls, tool calls, handoffs, guardrails, and custom spans all land in the dashboard, and the eval tooling on top is first-party. What traces are not is a typed artifact graph you can load, diff, and replay against. Kitaru ships that.
+
+  <Fragment slot="bullets">
+    - **Per-checkpoint artifacts:** Every `@checkpoint` return value lands in the active stack's artifact store (local filesystem, S3, GCS, or Azure Blob). `kitaru.llm()` calls add prompt and response artifacts on top.
+    - **Cross-run load:** From inside a checkpoint, `kitaru.load(exec_id, name)` reads a named artifact from another execution. Useful when last week's research output should feed this week's draft without re-running the research.
+    - **Inspect and replay:** Executions, checkpoints, logs, and artifacts are exposed through the dashboard, CLI, Python client, and an MCP server. Trace tells you what happened; the execution record lets you do something about it.
+  </Fragment>
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  competitorLabel="OpenAI Agents SDK"
+  rows={[
+    { feature: "First-class Agent abstraction with instructions, tools, handoffs, guardrails", kitaru: false, competitor: true },
+    { feature: "First-party evals with graders, datasets, and eval runs", kitaru: false, competitor: true },
+    { feature: "Python and TypeScript SDKs", kitaru: false, competitor: true },
+    { feature: "Crash recovery via checkpoint replay that skips completed work", kitaru: true, competitor: "partial" },
+    { feature: "Durable wait/resume with compute released during the pause", kitaru: true, competitor: "partial" },
+    { feature: "Typed, versioned artifact lineage per checkpoint (cross-run load and diff)", kitaru: true, competitor: false },
+    { feature: "Framework-agnostic runtime (wrap OpenAI Agents, PydanticAI, Anthropic, raw Python)", kitaru: true, competitor: false },
+    { feature: "Self-hosted runtime with stack abstraction (Kubernetes, AWS, GCP, Azure)", kitaru: true, competitor: false },
+    { feature: "Versioned, tag-routed deployments with rollback", kitaru: true, competitor: false },
+    { feature: "First-class adapter for the other", kitaru: true, competitor: false },
+  ]}
+/>
+
+## How the two surfaces map
+
+| Concept | OpenAI Agents SDK | Kitaru |
+|---|---|---|
+| Layer | Agent harness (how the agent thinks and acts) | Durable runtime (how the agent survives over time and infra) |
+| Agent definition | `Agent(name, instructions, tools, model, handoffs)` | Wraps existing agent code with `@flow` and `@checkpoint` |
+| Run boundary | `Runner.run_sync(agent, input)` | `@flow` plus `KitaruRunner(agent, checkpoint_strategy=...)` |
+| Crash recovery | Run state for approval interruptions; rerun for hard failures | Replay from a checkpoint, completed steps return cached output |
+| Long wait on a human or agent | Tool approval that pauses the run | `kitaru.wait()` with the worker torn down, plus `wait_for_approval` adapter helper |
+| Artifacts | Run history and final output | Typed, versioned artifact per checkpoint, cross-run `load()` |
+| Observability | First-party tracing, evals, dashboards | Execution record with logs, checkpoints, artifacts, replay, MCP server |
+| Deployment | Wherever you run your application or server | Stack abstraction for Kubernetes, AWS, GCP, Azure with versioned snapshots |
+
+<CodeCompare
+  kitaruLabel="OpenAI Agents SDK + Kitaru"
+  competitorLabel="OpenAI Agents SDK alone"
+  kitaruCode={`from agents import Agent
+from kitaru import flow
+from kitaru.adapters.openai_agents import (
+    KitaruRunner,
+    OpenAIRunRequest,
+    wait_for_approval,
+)
+
+reviewer = Agent(
+    name="reviewer",
+    instructions="Review the draft for compliance.",
+    model="gpt-5",
+)
+runner = KitaruRunner(reviewer, checkpoint_strategy="runner_call")
+
+@flow
+def review_flow(case: str) -> str:
+    # One Runner call == one durable checkpoint.
+    # On replay, the cached final_output is returned, no re-billing.
+    result = runner.run_sync(OpenAIRunRequest.start(case))
+
+    # Native OpenAI approval bridges to a durable kitaru.wait().
+    # Compute is released for the duration of the wait.
+    if result.status == "interrupted":
+        resume = wait_for_approval(
+            result, name="approve_tool", timeout=600
+        )
+        result = runner.run_sync(resume)
+
+    return str(result.final_output)
+
+review_flow.run("Case C-001")`}
+  competitorCode={`from agents import Agent, Runner
+
+reviewer = Agent(
+    name="reviewer",
+    instructions="Review the draft for compliance.",
+    model="gpt-5",
+)
+
+def review_flow(case: str) -> str:
+    result = Runner.run_sync(reviewer, case)
+    draft = str(result.final_output)
+    # Blocking input(). If the container dies mid-wait,
+    # the draft is lost and the run restarts from step 1.
+    approved = input(f"Approve?\\n{draft}\\n[y/n]: ") == "y"
+    return draft if approved else "Rejected"
+
+review_flow("Case C-001")`}
+/>
+
+<ComparisonCta headline={frontmatter.ctaHeading}>
+If your OpenAI agent still fits in a notebook or a short-lived script, the SDK on its own is the right answer. If it is becoming a production workload, long-running, crash-surviving, approved by a human hours later, deployed on your own cloud, Kitaru is the runtime layer underneath the harness you already picked.
+</ComparisonCta>
