@@ -8,14 +8,14 @@
       <span class="lane-sub">Worker stays alive while it waits</span>
     </div>
     <div class="timeline">
-      <div class="tick tick--start">
+      <div class="tick">
         <span class="tick-dot"></span>
         <span class="tick-text">tool approval pause</span>
       </div>
       <div class="bar bar--busy">
         <span class="bar-text">process alive · 6h idle</span>
       </div>
-      <div class="tick tick--end">
+      <div class="tick">
         <span class="tick-dot tick-dot--done"></span>
         <span class="tick-text">human approves</span>
       </div>
@@ -33,14 +33,14 @@
       <span class="lane-sub">Compute released, flow resumes on signal</span>
     </div>
     <div class="timeline">
-      <div class="tick tick--start">
+      <div class="tick">
         <span class="tick-dot tick-dot--accent"></span>
         <span class="tick-text"><code>wait(name="approve")</code></span>
       </div>
       <div class="bar bar--idle">
         <span class="bar-text">no container · 6h waiting</span>
       </div>
-      <div class="tick tick--end">
+      <div class="tick">
         <span class="tick-dot tick-dot--accent"></span>
         <span class="tick-text">signal arrives, flow resumes</span>
       </div>
@@ -90,7 +90,6 @@
   }
 
   .timeline {
-    position: relative;
     display: flex;
     flex-direction: column;
     gap: 4px;
