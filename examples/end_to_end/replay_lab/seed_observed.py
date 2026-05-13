@@ -195,8 +195,7 @@ def _validate_arg_combinations(
         args.small or args.count is not None or args.variants_per_base is not None
     ):
         parser.error(
-            "--case cannot be combined with --small, --count, or "
-            "--variants-per-base."
+            "--case cannot be combined with --small, --count, or --variants-per-base."
         )
     if args.small and args.variants_per_base is not None:
         parser.error("--small cannot be combined with --variants-per-base.")
@@ -208,9 +207,7 @@ def _validate_arg_combinations(
         args.variants_per_base is not None
         and args.variants_per_base > MAX_VARIANTS_PER_BASE
     ):
-        parser.error(
-            f"--variants-per-base must be {MAX_VARIANTS_PER_BASE} or fewer."
-        )
+        parser.error(f"--variants-per-base must be {MAX_VARIANTS_PER_BASE} or fewer.")
 
 
 def _validate_explicit_case_ids(case_ids: list[str]) -> list[str]:

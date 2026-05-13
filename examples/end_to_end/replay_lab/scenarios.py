@@ -335,8 +335,7 @@ def _build_variant(base: Scenario, variant_index: int) -> Scenario:
                 f"{production_signal}. Original issue: {base['customer_message']}"
             ),
             "reason": (
-                f"{production_signal.title()} for {tier} {topic} case "
-                f"from {company}."
+                f"{production_signal.title()} for {tier} {topic} case from {company}."
             ),
             "cost_multiplier": profile["cost_multiplier"],
             "latency_multiplier": profile["latency_multiplier"],
@@ -382,6 +381,4 @@ def _validate_variants_per_base(variants_per_base: int) -> None:
     if variants_per_base < 0:
         raise ValueError("variants_per_base must be at least 0.")
     if variants_per_base > MAX_VARIANTS_PER_BASE:
-        raise ValueError(
-            f"variants_per_base must be {MAX_VARIANTS_PER_BASE} or fewer."
-        )
+        raise ValueError(f"variants_per_base must be {MAX_VARIANTS_PER_BASE} or fewer.")
