@@ -272,5 +272,11 @@ AGENTS.override.md
 .claude/skills/instrumentation
 skills-lock.json
 
+# Replay Lab example generated reports/manifests
+examples/end_to_end/replay_lab/manifests/*
+!examples/end_to_end/replay_lab/manifests/.gitkeep
+examples/end_to_end/replay_lab/reports/*
+!examples/end_to_end/replay_lab/reports/.gitkeep
+
 # Local PR review screenshots
 .pr-screenshots/

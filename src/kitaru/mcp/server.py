@@ -15,6 +15,7 @@ from typing import Any, Literal, TypeVar
 import kitaru._cleanup as cleanup
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
+import kitaru._replay_lab as replay_lab
 import kitaru.client as client_api
 import kitaru.inspection as inspection
 import kitaru.secrets as secrets_api
@@ -432,6 +433,37 @@ def kitaru_executions_replay(
         }
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_replay_lab_compare(
+    manifest: dict[str, Any] | None = None,
+    manifest_path: str | None = None,
+    candidate_descriptor: dict[str, Any] | None = None,
+    timeout_seconds: float = 300,
+    poll_interval_seconds: float = 5,
+    report_dir: str | None = None,
+) -> dict[str, Any]:
+    """Compare observed, baseline replay, and candidate replay lanes."""
+
+    def _compare() -> dict[str, Any]:
+        report = replay_lab.compare_replay_lab(
+            manifest=manifest,
+            manifest_path=manifest_path,
+            candidate_descriptor=candidate_descriptor,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            report_dir=report_dir,
+        )
+        return {
+            "available": True,
+            "operation": "replay_lab_compare",
+            "summary": report.summary,
+            "report_paths": report.report_paths,
+            "report": report.to_dict(),
+        }
+
+    return run_with_mcp_error_boundary(_compare)
 
 
 @tracked_mcp_tool

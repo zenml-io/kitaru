@@ -1,0 +1,8 @@
+{
+  "label": "Cheaper deterministic support agent",
+  "flow_inputs": {
+    "agent_profile": "candidate"
+  },
+  "checkpoint_overrides": {},
+  "notes": "Replay the same support cases from draft_response with a shorter deterministic candidate profile. It should reduce cost and latency, but the regulated medical case should make reviewers look twice."
+}

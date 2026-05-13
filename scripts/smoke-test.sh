@@ -407,6 +407,31 @@ run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow
 run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
 run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
+run_test "Replay Lab seed help"    $UV_RUN python examples/end_to_end/replay_lab/seed_observed.py --help
+run_test "Replay Lab compare help" $UV_RUN python examples/end_to_end/replay_lab/run_replay_lab.py --help
+run_test "Replay Lab render help"  $UV_RUN python examples/end_to_end/replay_lab/render_report.py --help
+
+if [[ "${KITARU_SMOKE_REPLAY_LAB:-}" != "1" ]]; then
+    skip_test "Replay Lab full demo" "set KITARU_SMOKE_REPLAY_LAB=1 to run observed/replay/report path"
+else
+    REPLAY_LAB_TMP=$(mktemp -d)
+    run_test "Replay Lab seed observed" \
+        timed 120 $UV_RUN python examples/end_to_end/replay_lab/seed_observed.py \
+            --case support-refund-delay \
+            --case regulated-medical-claim \
+            --manifest-path "$REPLAY_LAB_TMP/manifest.json"
+    run_test "Replay Lab compare" \
+        timed 180 $UV_RUN python examples/end_to_end/replay_lab/run_replay_lab.py \
+            --manifest-path "$REPLAY_LAB_TMP/manifest.json" \
+            --candidate-path examples/end_to_end/replay_lab/candidates/cheaper_support_agent.json \
+            --report-dir "$REPLAY_LAB_TMP/reports" \
+            --timeout-seconds 120 \
+            --poll-interval-seconds 1
+    run_test "Replay Lab render HTML" \
+        $UV_RUN python examples/end_to_end/replay_lab/render_report.py \
+            --json-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.json" \
+            --output-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.html"
+fi
 
 # ---------------------------------------------------------------------------
 # CLI inspection of executions

@@ -49,6 +49,7 @@ from kitaru.mcp.server import (
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_info,
+    kitaru_replay_lab_compare,
     kitaru_secrets_create,
     kitaru_stacks_list,
     kitaru_start_local_server,
@@ -922,6 +923,40 @@ def test_executions_replay_returns_structured_execution(
     assert payload["available"] is True
     assert payload["operation"] == "replay"
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
+
+
+def test_replay_lab_compare_delegates_to_internal_module() -> None:
+    report = SimpleNamespace(
+        summary={"case_count": 1},
+        report_paths={"json": "/tmp/report.json"},
+        to_dict=MagicMock(return_value={"name": "Support cohort"}),
+    )
+
+    with patch(
+        "kitaru.mcp.server.replay_lab.compare_replay_lab",
+        return_value=report,
+    ) as mock_compare:
+        payload = kitaru_replay_lab_compare(
+            manifest={"name": "Support cohort"},
+            candidate_descriptor={"label": "candidate"},
+            timeout_seconds=12,
+            poll_interval_seconds=0.5,
+            report_dir="/tmp/reports",
+        )
+
+    mock_compare.assert_called_once_with(
+        manifest={"name": "Support cohort"},
+        manifest_path=None,
+        candidate_descriptor={"label": "candidate"},
+        timeout_seconds=12,
+        poll_interval_seconds=0.5,
+        report_dir="/tmp/reports",
+    )
+    assert payload["available"] is True
+    assert payload["operation"] == "replay_lab_compare"
+    assert payload["summary"] == {"case_count": 1}
+    assert payload["report_paths"] == {"json": "/tmp/report.json"}
+    assert payload["report"] == {"name": "Support cohort"}
 
 
 def test_execution_mutation_tools_return_serialized_execution(
