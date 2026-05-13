@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const SITE_ORIGIN = 'https://kitaru.ai';
 // Keep this list in sync with the permanent redirect sources in site/worker/index.js.
 const RETIRED_REDIRECTED_PATHS = new Set([
+  '/get-started',
   '/docs/concepts/memory',
   '/docs/guides/memory',
   '/blog/kitaru-agents-now-have-memory',
