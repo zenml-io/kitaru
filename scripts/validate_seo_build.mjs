@@ -209,8 +209,12 @@ async function validateRepresentativeHtml() {
     if (ogUrl && ogUrl !== expectedUrl) {
       fail(`${label} og:url mismatch: expected ${expectedUrl}, got ${ogUrl}`);
     }
-    if (relativePath.startsWith('docs/') && ogImage && !ogImage.startsWith('https://kitaru.ai/docs/og/docs/')) {
-      fail(`${label} docs og:image should live under /docs/og/docs, got ${ogImage}`);
+    if (relativePath.startsWith('docs/')) {
+      if (!ogImage) {
+        fail(`${label} is missing docs og:image in ${relativeToRepo(filePath)}`);
+      } else if (!ogImage.startsWith('https://kitaru.ai/docs/og/docs/')) {
+        fail(`${label} docs og:image should live under /docs/og/docs, got ${ogImage}`);
+      }
     }
     if (canonical && ogUrl && canonical !== ogUrl) {
       fail(`${label} canonical and og:url disagree: ${canonical} vs ${ogUrl}`);
@@ -488,7 +492,7 @@ async function validateWorkerRedirects() {
       {},
     );
 
-    if ([301, 308].includes(response.status)) {
+    if (response.status >= 300 && response.status < 400) {
       fail(
         `Worker ${testCase.label} should not redirect, got ${response.status} ${response.headers.get('location')}`,
       );
