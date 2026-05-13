@@ -17,6 +17,9 @@ const BAD_BUILT_OUTPUT_SNIPPETS = [
   '/docs/docs/cli',
   'https://kitaru.ai/og/docs',
 ];
+const DOCS_APP_ROOT_MARKDOWN_LINK_PATTERN =
+  /!?\[[\s\S]*?\]\(\/(agent-native|changelog|cli|concepts|contributing|deploy|getting-started|guides|reference|stacks)(?:[\/#)?]|$)/g;
+const FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/g;
 const EXPECTED_ROBOTS_SITEMAPS = [
   'Sitemap: https://kitaru.ai/sitemap-index.xml',
   'Sitemap: https://kitaru.ai/docs/sitemap.xml',
@@ -88,6 +91,10 @@ async function readText(filePath) {
 
 function relativeToRepo(filePath) {
   return path.relative(repoRoot, filePath);
+}
+
+function removeFencedCodeBlocks(content) {
+  return content.replace(FENCED_CODE_BLOCK_PATTERN, '');
 }
 
 function extractXmlLocations(xml) {
@@ -240,6 +247,42 @@ async function validateBuiltOutputSnippets() {
     );
   } else {
     pass('built output does not contain forbidden docs/docs or root docs OG image URL shapes');
+  }
+}
+
+async function validatePublicMarkdownLinks() {
+  const markdownDirectories = [docsOut, path.join(siteDist, 'docs')];
+  const badLinks = [];
+
+  for (const directory of markdownDirectories) {
+    const exists = await assertDirectory(
+      directory,
+      `Public markdown directory ${relativeToRepo(directory)}`,
+    );
+    if (!exists) continue;
+
+    const files = (await listFiles(directory)).filter(
+      (filePath) => path.extname(filePath) === '.md',
+    );
+    for (const filePath of files) {
+      const content = removeFencedCodeBlocks(await readText(filePath));
+      const matches = [
+        ...content.matchAll(DOCS_APP_ROOT_MARKDOWN_LINK_PATTERN),
+      ];
+      for (const match of matches) {
+        badLinks.push(`${relativeToRepo(filePath)}: ${match[0]}`);
+      }
+    }
+  }
+
+  if (badLinks.length > 0) {
+    fail(
+      `Public markdown contains docs-app-root links that should be prefixed with /docs:\n${badLinks
+        .map((entry) => `  - ${entry}`)
+        .join('\n')}`,
+    );
+  } else {
+    pass('public markdown docs links are prefixed with /docs');
   }
 }
 
@@ -474,6 +517,7 @@ async function main() {
   await validateSitemaps();
   await validateRepresentativeHtml();
   await validateBuiltOutputSnippets();
+  await validatePublicMarkdownLinks();
   await validateGeneratedCliDocs();
   await validateRobots();
   await validateWorkerRedirects();
