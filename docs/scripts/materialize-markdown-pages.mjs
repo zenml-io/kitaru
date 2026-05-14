@@ -6,6 +6,18 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const docsRoot = path.resolve(scriptDir, "..");
 const outDir = path.join(docsRoot, "out");
 const hiddenDocsDir = path.join(outDir, "llms.mdx", "docs");
+const DOCS_APP_ROOT_SEGMENTS = new Set([
+  "agent-native",
+  "changelog",
+  "cli",
+  "concepts",
+  "contributing",
+  "deploy",
+  "getting-started",
+  "guides",
+  "reference",
+  "stacks",
+]);
 
 async function fileExists(filePath) {
   try {
@@ -61,8 +73,33 @@ function looksLikeMarkdown(content) {
   );
 }
 
+function rewriteMarkdownLinksOutsideCode(content) {
+  return content.replace(
+    /(!?\[[\s\S]*?\]\()\/([^\s)#][^\s)]*)/g,
+    (match, prefix, href) => {
+      const firstSegment = href.split("/", 1)[0];
+      if (!DOCS_APP_ROOT_SEGMENTS.has(firstSegment)) {
+        return match;
+      }
+
+      return `${prefix}/docs/${href}`;
+    },
+  );
+}
+
+function rewritePublicMarkdownLinks(content) {
+  return content
+    .split(/(```[\s\S]*?```)/g)
+    .map((segment) =>
+      segment.startsWith("```") ? segment : rewriteMarkdownLinksOutsideCode(segment),
+    )
+    .join("");
+}
+
 async function copyMarkdownFile(sourcePath, destinationPath) {
-  const content = await readFile(sourcePath, "utf8");
+  const content = rewritePublicMarkdownLinks(
+    await readFile(sourcePath, "utf8"),
+  );
   if (!looksLikeMarkdown(content)) {
     throw new Error(
       `Refusing to materialize non-markdown content from ${sourcePath}`,

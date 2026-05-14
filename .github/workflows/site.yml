@@ -11,6 +11,7 @@ on:
       - docs/**
       - scripts/generate_*.py
       - scripts/merge_site.sh
+      - scripts/validate_seo_build.mjs
       - CHANGELOG.md
       - wrangler.toml
   pull_request_target:
@@ -69,6 +70,10 @@ jobs:
 
       # --- Merge docs into site ---
       - run: bash scripts/merge_site.sh
+
+      # --- Validate SEO invariants in merged output ---
+      - name: Validate SEO output
+        run: node scripts/validate_seo_build.mjs
 
       # --- Check internal links in built output ---
       - name: Check internal links

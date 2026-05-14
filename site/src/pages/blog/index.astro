@@ -24,10 +24,6 @@ const featuredReadTime = readingTime(featured.body ?? '');
 ---
 
 <Base title="Blog — Kitaru" description="Thoughts on durable execution, agent infrastructure, and building reliable AI systems.">
-  <Fragment slot="head">
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content={new URL('/blog', Astro.site).href} />
-  </Fragment>
   <Nav />
   <main class="blog-index" id="main-content">
     <div class="section-inner">
@@ -51,7 +47,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
           </div>
           <h1 class="blog-featured-title" itemprop="headline">{featured.data.title}</h1>
           <p class="blog-featured-desc" itemprop="description">{featured.data.description}</p>
-          <a href={`/blog/${featured.id}`} class="blog-featured-read">Read post &rarr;</a>
+          <a href={`/blog/${featured.id}/`} class="blog-featured-read">Read post &rarr;</a>
         </div>
         <div class="blog-featured-image" aria-hidden="true">
           {featured.data.image ? (
@@ -67,7 +63,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
         <div class="blog-grid" data-reveal data-reveal-delay="3">
           {rest.map((post) => (
             <BlogCard
-              href={`/blog/${post.id}`}
+              href={`/blog/${post.id}/`}
               title={post.data.title}
               description={post.data.description}
               date={post.data.date}

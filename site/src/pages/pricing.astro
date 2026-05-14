@@ -198,7 +198,7 @@ const faq = [
               ))}
             </ul>
           </div>
-          <a href="/book-a-demo" class="pricing-card-cta pricing-card-cta--primary">
+          <a href="/book-a-demo/" class="pricing-card-cta pricing-card-cta--primary">
             <span>Book a demo</span>
             <span class="pricing-card-cta-arrow" aria-hidden="true">→</span>
           </a>
@@ -275,7 +275,7 @@ const faq = [
           <ul class="pricing-stacks-grid">
             {comparisons.map((entry, idx) => (
               <li>
-                <a href={`/compare/${entry.id}`} class="pricing-stacks-card" data-reveal data-reveal-delay={String((idx % 3) + 1)}>
+                <a href={`/compare/${entry.id}/`} class="pricing-stacks-card" data-reveal data-reveal-delay={String((idx % 3) + 1)}>
                   {entry.data.competitorLogo && (
                     <span class="pricing-stacks-card-icon" aria-hidden="true">
                       <img src={entry.data.competitorLogo} alt="" width="22" height="22" />
@@ -338,7 +338,7 @@ const faq = [
             </button>
           </div>
           <div class="pricing-cta-buttons">
-            <a href="/book-a-demo" class="pricing-cta-primary">
+            <a href="/book-a-demo/" class="pricing-cta-primary">
               <span>Book a demo</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>
             </a>
