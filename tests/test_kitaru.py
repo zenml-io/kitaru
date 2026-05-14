@@ -55,6 +55,9 @@ class TestPublicExports:
     def test_current_stack_exists(self) -> None:
         assert hasattr(kitaru, "current_stack")
 
+    def test_current_execution_id_exists(self) -> None:
+        assert hasattr(kitaru, "current_execution_id")
+
     def test_use_stack_exists(self) -> None:
         assert hasattr(kitaru, "use_stack")
 
@@ -100,6 +103,7 @@ class TestPublicExports:
             "connect",
             "create_secret",
             "create_stack",
+            "current_execution_id",
             "current_stack",
             "delete_secret",
             "delete_stack",
