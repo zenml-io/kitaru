@@ -35,7 +35,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
           <ul class="compare-grid">
             {comparisons.map((entry, index) => (
               <li>
-                <a href={`/compare/${entry.id}`} class="compare-card" data-reveal="scale-up" data-reveal-delay={String(3 + index)}>
+                <a href={`/compare/${entry.id}/`} class="compare-card" data-reveal="scale-up" data-reveal-delay={String(3 + index)}>
                   <div class="compare-card-head">
                     <span class="compare-card-vs">Kitaru <em>vs</em></span>
                     <h2>{entry.data.competitor}</h2>
