@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://kitaru.ai/docs'),
+  metadataBase: new URL('https://kitaru.ai'),
   title: {
     default: 'Kitaru Documentation',
     template: '%s | Kitaru',

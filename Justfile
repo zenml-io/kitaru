@@ -157,7 +157,9 @@ site-build:
     @just site-build-only
     @printf '\n─── Merge Docs into Site ────────────────────────\n'
     bash scripts/merge_site.sh
+    @printf '\n─── Validate SEO Output ────────────────────────\n'
+    node scripts/validate_seo_build.mjs
     @printf '\n─── Check Internal Links ───────────────────────\n'
-    lychee --offline --root-dir site/dist 'site/dist/**/*.html'
+    lychee --offline --root-dir site/dist --index-files index.html 'site/dist/**/*.html'
     @printf '\n─────────────────────────────────────────────────\n'
     @printf 'Unified site built at site/dist/\n'

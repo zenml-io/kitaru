@@ -1,0 +1,203 @@
+---
+competitor: "Inngest"
+competitorLogo: "https://assets.kitaru.ai/compare/aab08903/inngest-mark.png"
+title: "Kitaru vs Inngest: The runtime layer underneath your Python agents"
+description: "Inngest is a broad event-driven workflow platform spanning TypeScript, Python, and Go. Kitaru is the self-hosted Python runtime that slots underneath the agent harness you already picked, with LLM, wait, memory, and artifact lineage in the box."
+cardSubtitle: "The self-hosted Python runtime layer underneath your existing agent harness, with primitives for `llm()`, `wait()`, memory, and artifact lineage."
+ctaHeading: "Durable execution, shaped for Python agents"
+order: 70
+ogImage: "https://assets.kitaru.ai/compare/b4ea27b1/inngest-og.avif"
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+import RuntimeUnderHarness from '../../components/compare/graphics/inngest/RuntimeUnderHarness.astro';
+import AgentPrimitives from '../../components/compare/graphics/inngest/AgentPrimitives.astro';
+import CustomerDataPath from '../../components/compare/graphics/inngest/CustomerDataPath.astro';
+import ArtifactLineage from '../../components/compare/graphics/inngest/ArtifactLineage.astro';
+
+Inngest makes the pitch: "make any code durable across an event-driven app," and they genuinely do that. One platform takes your TypeScript, Python, or Go function, wraps it in retries and step memoization, and gives you the flow-control surface (concurrency, throttling, rate limiting, debounce, batching, prioritization) that most workflow engines leave you to wire up yourself. Add managed Inngest Cloud with SOC 2 Type II, enterprise SAML, HIPAA BAA available, and isolated branch environments for non-production branches, plus a single-binary self-host path, and you can see why a lot of app teams on Vercel or Lambda picked it. So if your durability problem is shaped like an event-driven app, Inngest is the pragmatic answer.
+
+Kitaru is narrower on purpose. We built it for Python agents, because that's the workload most teams we talk to are trying to ship right now. Today, it's increasingly obvious that every company running agents in production needs the same capabilities: a durable `llm()` call, wait/resume, typed versioned memory, artifact lineage across runs, human/agent approval gates, and a runtime that understands the cloud underneath it. Those don't come in the box with a general-purpose event-and-function platform. So we put them there, underneath whatever harness your team already picked rather than asking you to re-shape the app around a new platform.
+
+<WhenToUseEach
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running Python agents and want `kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`, and artifact lineage as primitives, not glue code your platform team maintains forever",
+      "Deploying across Kubernetes, AWS, GCP, or Azure (Vertex AI, SageMaker, AzureML) and want an opinionated stack abstraction where one config switches every flow's backend",
+      "Keeping the agent harness, auth, entitlements, and observability stack you already picked, and adding only the runtime layer underneath them",
+      "Designing around dynamic agent loops: tool calls, conditional branches, human/agent approval gates, hours-long waits, replay from a specific checkpoint",
+    ],
+  }}
+  competitor={{
+    title: "Use Inngest if you are",
+    items: [
+      "Running a polyglot estate (TypeScript, Python, Go) that needs one durability primitive across all of it",
+      "Building event-driven workflows, background jobs, durable endpoints, or replacing a queue, not specifically Python agents",
+      "Leaning on a flow-control suite (concurrency, throttling, rate limiting, debounce, batching, prioritization) as a first-class feature",
+      "Fine adopting a function-and-event app shape, with managed Inngest Cloud or a single-binary self-host",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="Inngest is the durable execution platform you adopt. Kitaru is the runtime layer underneath the harness you already picked."
+/>
+
+<FeatureWithGraphic title="Runtime under your harness vs platform across your stack">
+  <RuntimeUnderHarness slot="graphic" />
+
+  Defaults tell you what a tool is actually for. Inngest's defaults are workflows, background jobs, agents, durable endpoints, cron, and queue replacement: a packaged platform across your stack. Kitaru's defaults are `@flow` and `@checkpoint` on ordinary Python, with `kitaru.llm()`, `kitaru.wait()`, and `kitaru.memory` shipped underneath whatever harness your team already picked. Different opinion about the workload, same commitment to durability.
+
+  <Fragment slot="bullets">
+    - **Layered model:** We think about the agent stack as four layers (model, harness, runtime, platform). Kitaru owns one of them, the runtime, and stays out of the other three. Inngest is broader on purpose: it packages an event-driven platform that also acts as the runtime underneath it. It's the wrong shape if you've already chosen your harness, your auth, your observability stack, and your data path, and only need durability under them.
+    - **Adoption shape:** `pip install kitaru`, add two decorators to ordinary Python, the flow runs in your process. Inngest asks you to define functions that register with the engine, get triggered by events, and connect over `serve()` (HTTP) or `connect()` (outbound WebSocket). Both work, but the wedge is whether the runtime sits inside your app or whether your app gets re-shaped around the runtime.
+  </Fragment>
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Python-agent primitives vs polyglot durable functions">
+  <AgentPrimitives slot="graphic" />
+
+  The shape of the SDK tells you who the team was watching when they set the defaults. Inngest's surface is `step.run`, `step.sleep`, `step.wait_for_event`, `step.send_event`, `step.invoke`. Kitaru's surface is `kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`, and `kitaru.save()` / `kitaru.load()`, the primitives every Python agent team writes on top of a general-purpose workflow engine.
+
+  <Fragment slot="bullets">
+    - **Languages:** Inngest ships SDKs for TypeScript, Python, and Go (with a Kotlin/Java repo). Kitaru is Python 3.11+ only. If you're running TypeScript-and-Python-and-Go services that need one durability primitive across all of it, Inngest is the right tool.
+    - **LLM call:** `kitaru.llm()` resolves the model alias, injects the provider key from the configured secret backend, and logs prompt, response, latency, tokens, and resolved model on every call. Inngest's equivalent is your code inside a `step.run`. Durable, but the agent-specific telemetry is glue you write on top.
+    - **HITL:** `kitaru.wait()` suspends execution for human-in-the-loop or external input. Local runs can prompt inline; remote, CI, non-interactive, or MCP runs move to `waiting` and can be resolved later via the client, CLI, or MCP. Both work; the Kitaru shape collapses to one primitive without committing the app to an event-trigger model.
+  </Fragment>
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Customer-controlled data path vs managed cloud + flow control">
+  <CustomerDataPath slot="graphic" />
+
+  Both products ship a durable runtime. The wedge is where the data lives, and how much packaging arrives with it.
+
+  <Fragment slot="bullets">
+    - **Kitaru:** Self-hosted by default, single-service Kitaru server, and Helm-deployable. Runs on Kubernetes, AWS, GCP, Azure (Vertex AI, SageMaker, AzureML), picked via stacks. Checkpoint outputs and artifacts are written to the stack's S3, GCS, or Azure Blob storage; the Kitaru server stores execution metadata, checkpoint state, and logs, and brokers temporary credentials for artifact access. You have no mandatory SaaS control plane in the data path. Configure the stack once; every flow gets artifacts in your object store, secrets through the cloud's provider, and orchestration on the chosen compute.
+    - **Inngest:** Managed Inngest Cloud is the easy path: SOC 2 Type II, enterprise SAML, HIPAA BAA available, encrypted data at rest and in transit, and isolated production, branch, custom, and local environments. Self-hosting is supported via a single-binary engine. Managed-cloud data is hosted in US AWS databases, which is a constraint for some.
+  </Fragment>
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Versioned deployments + artifact lineage vs event-source steps">
+  <ArtifactLineage slot="graphic" />
+
+  Both runtimes persist work. The data models are different, and they're optimized for different shapes of recovery.
+
+  <Fragment slot="bullets">
+    - **Kitaru:** Every `@checkpoint` output lands as a typed, versioned artifact in your own bucket, linked to the execution record. Checkpoint outputs and explicit artifacts are persisted and can be browsed or loaded by execution; `kitaru.load(exec_id, name)` can read an artifact from another execution.
+    - **Inngest:** Step return values get persisted by the durable engine, so a crashed run replays from the last completed step rather than from the top. The dashboard turns that durability into operational tools: a replay button on stuck functions, bulk cancellation when a bad event poisons a queue, traces showing what each step did, alerts when a function fails, and branch environments per Git branch so you can ship without breaking prod.
+    - **Deployment evolution:** `kitaru deploy <path.py:flow_name>` creates a saved deployment version automatically (v1, v2, ...). Tags like `default`, `canary`, and `stable` route consumers to a saved snapshot, so promotion and rollback become a tag move rather than a redeploy. The result is that consumers invoke by flow name pinned to whatever version the tag resolves to, and don't have to ship code when a new agent version ships behind them. We borrowed the shape from how platform teams already manage models in production; the agents on top inherit it for free.
+  </Fragment>
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  competitorLabel="Inngest"
+  rows={[
+    { feature: "Durable execution and replay", kitaru: true, competitor: true },
+    { feature: "Human/agent-in-the-loop waiting with compute released", kitaru: true, competitor: true },
+    { feature: "Self-hostable (Kitaru: Apache 2.0; Inngest server: SSPL with delayed Apache; SDKs Apache 2.0)", kitaru: true, competitor: true },
+    { feature: "Python-agent-shaped primitives (`kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`)", kitaru: true, competitor: false },
+    { feature: "Built-in LLM primitive with alias-resolved secrets and per-call token/latency logging", kitaru: true, competitor: false },
+    { feature: "Typed, versioned artifact lineage per checkpoint with cross-run diff", kitaru: true, competitor: false },
+    { feature: "Opinionated stack abstraction for Kubernetes, AWS, GCP, Azure", kitaru: true, competitor: false },
+    { feature: "Immutable versioned deployment snapshots with tag-routed rollout/rollback", kitaru: true, competitor: false },
+    { feature: "Self-hosted by default with no mandatory SaaS control plane in the data path", kitaru: true, competitor: false },
+    { feature: "Polyglot SDKs (TypeScript, Python, Go, +Kotlin/Java repo)", kitaru: false, competitor: true },
+    { feature: "Built-in event triggers, cron, and webhook ingestion", kitaru: false, competitor: true },
+    { feature: "Built-in flow control: concurrency, throttling, rate limiting, debounce, batching, prioritization", kitaru: false, competitor: true },
+    { feature: "Managed cloud with SOC 2 Type II, SAML, HIPAA BAA available, branch environments", kitaru: false, competitor: true },
+  ]}
+/>
+
+## How the two surfaces map
+
+| Concept | Inngest | Kitaru |
+|---|---|---|
+| Workflow boundary | `@inngest_client.create_function` registered with the engine, triggered by an event | `@flow` on ordinary Python, called as `flow.run(...)` |
+| Durable step | `await ctx.step.run("name", fn)` memoizes the return value in the engine | `@checkpoint` persists a typed, versioned artifact in your own bucket |
+| Determinism / replay safety | Side effects that need replay protection should live inside `step.run`, so the engine can memoize the result | `@flow` and `@checkpoint` stay plain Python, but replay-safe external side effects still need durable boundaries or idempotency |
+| Pause and resume | `await ctx.step.wait_for_event("name", event="...")` plus an external send to resolve it | `kitaru.wait(name="...", schema=...)` releases compute, resumes from any input source |
+| Cross-run state | Roll your own (Redis, Postgres, KV) | `kitaru.memory`: typed, scoped, versioned KV in the box |
+| LLM call | Your code inside `step.run`; provider key, prompt and token logging are glue you write | `kitaru.llm()` resolves the model alias, injects the provider key, logs prompt/tokens/latency per call |
+| Invocation | `await inngest_client.send(inngest.Event(name="review.start", data={...}))` to send an event | `flow.run(...)` for source/local execution; saved deployments via `kitaru invoke FLOW ...`, `KitaruClient().deployments.invoke(flow="...", inputs={...})`, or `flow.invoke(...)` |
+| Artifacts | Step return values memoized in the durable engine | Typed artifact in your bucket, queryable across runs via `kitaru.load(exec_id, name)` |
+<CodeCompare
+  kitaruLabel="Kitaru"
+  competitorLabel="Inngest (Python SDK)"
+  kitaruCode={`import kitaru
+from kitaru import checkpoint, flow
+
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(
+        prompt=f"Research: {topic}. Return a brief.",
+        model="fast",
+    )
+
+@checkpoint
+def draft(brief: str) -> str:
+    return kitaru.llm(
+        prompt=f"Write a draft from this brief:\\n{brief}",
+        model="fast",
+    )
+
+@flow
+def review_flow(topic: str) -> str:
+    brief = research(topic)
+    text = draft(brief)
+    approved = kitaru.wait(
+        name="approve_draft",
+        question="Approve draft?",
+        schema=bool,
+    )
+    return text if approved else "Rejected"
+
+review_flow.run(topic="Durable agents").wait()`}
+  competitorCode={`import datetime
+import inngest
+
+inngest_client = inngest.Inngest(app_id="agent-app")
+
+async def call_llm(prompt: str) -> str:
+    ...
+
+@inngest_client.create_function(
+    fn_id="review-flow",
+    trigger=inngest.TriggerEvent(event="review.start"),
+)
+async def review_flow(ctx: inngest.Context) -> str:
+    topic = ctx.event.data["topic"]
+
+    async def research() -> str:
+        return await call_llm(f"Research: {topic}")
+
+    async def draft_step(brief: str) -> str:
+        return await call_llm(f"Draft: {brief}")
+
+    brief = await ctx.step.run("research", research)
+    text = await ctx.step.run("draft", draft_step, brief)
+
+    decision = await ctx.step.wait_for_event(
+        "approve_draft",
+        event="review.approve",
+        timeout=datetime.timedelta(days=1),
+    )
+    return text if decision and decision.data["ok"] else "Rejected"
+
+# Trigger:  await inngest_client.send(inngest.Event(name="review.start",   data={"topic": "..."}))
+# Approve:  await inngest_client.send(inngest.Event(name="review.approve", data={"ok": True}))
+# Functions register with the Inngest engine; events route through it.`}
+/>
+
+<ComparisonCta headline={frontmatter.ctaHeading}>
+If your durability problem is shaped like an event-driven app (workflows triggered by events, cron jobs, durable endpoints, queue replacement), Inngest is the right tool, and I'd tell any team that. For Python agent work specifically (LLM calls, memory, artifacts, human/agent approval gates, a stack abstraction over your own cloud), the glue you'd write on top of a general-purpose event-and-function platform is the stuff we ship in the box.
+
+We've spent five years building the MLOps-ready version of this problem space at ZenML. JetBrains runs their AI globally on it; Adeo runs across all their brands and geographies on it. Kitaru is that team two years into the agent version. Bet on us for agent infrastructure and you're betting on the group that's been doing this the whole time.
+</ComparisonCta>
