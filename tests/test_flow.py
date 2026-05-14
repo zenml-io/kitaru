@@ -16,6 +16,7 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
+import kitaru
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru._config._core import ExecutionStackSource
 from kitaru.analytics import AnalyticsEvent
@@ -2029,6 +2030,28 @@ def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
     assert result == "ok"
     assert not _is_inside_flow()
     assert _get_current_flow() is None
+
+
+def test_public_current_execution_id_reads_flow_scope_only() -> None:
+    def _user_flow() -> str | None:
+        return kitaru.current_execution_id()
+
+    wrapped = _wrap_flow_entrypoint(_user_flow)
+
+    with patch(
+        "kitaru.runtime.DynamicPipelineRunContext.get",
+        return_value=SimpleNamespace(
+            run=SimpleNamespace(
+                id="exec-public-123",
+                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+            ),
+            pipeline=SimpleNamespace(id=None, name=None),
+        ),
+    ):
+        result = wrapped()
+
+    assert result == "exec-public-123"
+    assert kitaru.current_execution_id() is None
 
 
 def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> None:
