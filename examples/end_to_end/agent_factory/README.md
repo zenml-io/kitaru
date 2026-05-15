@@ -1,4 +1,4 @@
-# Build a production-ready agent factory
+# Build an internal agent factory
 
 > **Reading on the docs site is recommended:** the same tour as a chapter-by-chapter walk lives at [kitaru.ai/docs/agent-factory](https://kitaru.ai/docs/agent-factory/). This README is the on-GitHub mirror — same content, slightly different formatting, useful when you've cloned the repo and want a single file to scroll while you run the stages.
 
@@ -140,7 +140,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 **Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or persist specific values via [`kitaru.save()`](https://kitaru.ai/docs/guides/artifacts) and reload them with `kitaru.load()` at the top of the next run.
 
-**Not yet here:** credentials still come from the host process; chapter 3 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
+**Not yet here:** credentials still come from the host process; chapter 4 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
 ---
 
