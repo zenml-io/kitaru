@@ -98,12 +98,13 @@ def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
 
 
 def _assert_event_artifacts_use_display_names(
-    event_map: dict[str, list[dict[str, Any]]], artifact_names: list[str]
+    event_map: dict[str, list[dict[str, Any]]], allowed_refs: list[str] | set[str]
 ) -> None:
+    allowed = set(allowed_refs)
     for event in _events(event_map):
         event_id = event["event_id"]
         for artifact_name in event.get("artifacts", {}).values():
-            assert artifact_name in artifact_names
+            assert artifact_name in allowed
             assert not artifact_name.startswith(f"{event_id}_")
 
 
@@ -358,19 +359,24 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
     artifact_names = _artifact_names(hydrated_run)
-    run_label = summary["run_label"]
     assert len(hydrated_run.steps) >= 2
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
-        for name in artifact_names
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert not any(name.endswith("_llm_call_1_response") for name in artifact_names)
+    assert not any(
+        re.fullmatch(r".*_tool_call_\d+_args", name) for name in artifact_names
     )
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
-        for name in artifact_names
+    assert not any(
+        re.fullmatch(r".*_tool_call_\d+_result", name) for name in artifact_names
     )
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
+    assert all(
+        event.get("checkpoint_name")
+        for event in _events(event_map)
+        if "output" in event.get("artifacts", {}).values()
+    )
     assert "event_log" not in artifact_names
     assert "run_summary" not in artifact_names
     assert not any(name.endswith("_event_log") for name in artifact_names)
@@ -449,25 +455,22 @@ def test_phase17_multiple_tracker_scopes_at_flow_scope_get_unique_namespaces(
     run_labels = {summary["run_label"] for summary in summaries}
     assert len(run_labels) == 2
 
-    model_artifact_names = [
+    model_artifact_refs = [
         stored_name
         for event in _events(event_map)
         if event["kind"] == "llm_call"
         for stored_name in event.get("artifacts", {}).values()
     ]
-    assert model_artifact_names
-    assert len(model_artifact_names) == len(set(model_artifact_names))
-    assert all(stored_name in artifact_names for stored_name in model_artifact_names)
-    assert all(
-        any(run_label in stored_name for stored_name in model_artifact_names)
-        for run_label in run_labels
-    )
-    assert all("_tracker_1_" in stored_name for stored_name in model_artifact_names)
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
+    assert model_artifact_refs
+    assert {"messages", "output"} <= set(model_artifact_refs)
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert not any(name.endswith("_llm_call_1_response") for name in artifact_names)
     assert not any(name.endswith("_event_log") for name in artifact_names)
     assert not any(name.endswith("_run_summary") for name in artifact_names)
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
 
 
 def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(

@@ -540,6 +540,119 @@ class TestCachedGranularModelCheckpoints:
         assert alpha_id.endswith("_tool_call_2")
         assert beta_id.endswith("_tool_call_3")
 
+    @pytest.mark.anyio
+    async def test_granular_model_checkpoint_uses_structural_messages_and_output_refs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.messages import ModelResponse, TextPart
+        from pydantic_ai.models.function import FunctionModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        response = ModelResponse(parts=[TextPart(content="fixed answer")])
+        tracker = EventTracker(agent_name="structural_agent", run_label="structural")
+        captured_checkpoint_inputs: dict[str, Any] = {}
+
+        def model_function(_messages: list[Any], _info: Any) -> Any:
+            return response
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            captured_checkpoint_inputs.update(kwargs.get("checkpoint_inputs") or {})
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "llm_call"),
+            ):
+                return await kwargs["body"]()
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+
+        def fail_model_manual_save(*args: Any, **kwargs: Any) -> None:
+            pytest.fail(
+                "granular model checkpoint should not manually save "
+                f"{args!r} {kwargs!r}"
+            )
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.kitaru.save",
+            fail_model_manual_save,
+        )
+        model = KitaruModel(
+            FunctionModel(model_function),
+            capture=CapturePolicy(correlate_otel_spans=False),
+            agent_name="structural_agent",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="structural_flow"):
+            actual = await model.request([], None, self._model_request_parameters())
+
+        assert actual is response
+        assert captured_checkpoint_inputs == {"messages": []}
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        model_event = cast(Any, model_events[0])
+        assert model_event.artifacts == {
+            "prompt": "messages",
+            "response": "output",
+        }
+
+    @pytest.mark.anyio
+    async def test_cached_granular_model_event_uses_canonical_refs_when_captured(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _flow_scope
+
+        cached_response = self._tool_call_response()
+        tracker = EventTracker(agent_name="cached_refs", run_label="cached_refs")
+
+        async def fake_checkpoint(**_kwargs: Any) -> Any:
+            return cached_response
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+        model = KitaruModel(
+            TestModel(),
+            capture=CapturePolicy(correlate_otel_spans=False),
+            agent_name="cached_refs",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="cached_refs_flow"):
+            response = await model.request([], None, self._model_request_parameters())
+
+        assert response is cached_response
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        model_event = cast(Any, model_events[0])
+        assert model_event.artifacts == {
+            "prompt": "messages",
+            "response": "output",
+        }
+        assert model_event.checkpoint_name == "cached_refs_model_request"
+
 
 class TestEventTrackerToolCallOrdering:
     def _record_completed_model(self, tracker: Any) -> tuple[str, Any]:
@@ -1788,6 +1901,70 @@ async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
 
     assert result == "ordinary result"
     assert checkpoint_steps == ["ordinary_tool_tool"]
+
+
+@pytest.mark.anyio
+async def test_granular_tool_checkpoint_uses_structural_args_and_output_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.adapters.pydantic_ai._tracking import EventTracker
+    from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    tracker = EventTracker(agent_name="tool_agent", run_label="tool")
+    captured_checkpoint_inputs: dict[str, Any] = {}
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        captured_checkpoint_inputs.update(kwargs.get("checkpoint_inputs") or {})
+        with _checkpoint_scope(
+            name=kwargs["step_name"],
+            checkpoint_type=kwargs["config"].get("type", "tool_call"),
+        ):
+            return await kwargs["body"]()
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: tracker,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.save",
+        lambda *args, **kwargs: pytest.fail(
+            f"granular tool checkpoint should not manually save {args!r} {kwargs!r}"
+        ),
+    )
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["add"]
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("add", {"a": 2, "b": 3}, ctx, tool)
+
+    assert result == 5
+    assert captured_checkpoint_inputs == {"tool_args": {"a": 2, "b": 3}}
+    tool_events = [event for event in tracker.events if event.kind == "tool_call"]
+    assert len(tool_events) == 1
+    tool_event = cast(Any, tool_events[0])
+    assert tool_event.artifacts == {"args": "tool_args", "result": "output"}
 
 
 @pytest.mark.anyio

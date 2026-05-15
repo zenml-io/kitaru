@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin
@@ -159,6 +159,8 @@ class ArtifactRef:
     producing_call: str | None
     metadata: dict[str, Any]
     _client: KitaruClient = field(repr=False, compare=False)
+    direction: Literal["input", "output"] = "output"
+    input_type: str | None = None
 
     def load(self) -> Any:
         """Load and materialize this artifact value."""

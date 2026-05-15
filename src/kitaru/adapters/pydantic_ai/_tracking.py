@@ -285,6 +285,13 @@ class EventTracker:
     def _event_sequence_index(self, event_id: str) -> int:
         return self._event_sequence_by_id.get(event_id, self._counter + 1)
 
+    def _current_checkpoint_refs(self) -> tuple[str | None, str | None]:
+        checkpoint = get_current_checkpoint()
+        return (
+            get_current_checkpoint_name(),
+            checkpoint.checkpoint_id if checkpoint is not None else None,
+        )
+
     def _clear_reserved_tool_events_unlocked(self) -> None:
         for reservations in self._reserved_tool_events_by_call_id.values():
             for reservation in reservations:
@@ -346,6 +353,8 @@ class EventTracker:
         usage: RequestUsage | None = None,
         stream_event_count: int | None = None,
         error: BaseException | None = None,
+        checkpoint_name: str | None = None,
+        checkpoint_id: str | None = None,
     ) -> None:
         with self._lock:
             if status == "completed":
@@ -353,6 +362,9 @@ class EventTracker:
             elif self._current_model_event_id == event_id:
                 self._current_model_event_id = None
 
+            current_checkpoint_name, current_checkpoint_id = (
+                self._current_checkpoint_refs()
+            )
             self._events.append(
                 ModelEvent(
                     event_id=event_id,
@@ -360,6 +372,8 @@ class EventTracker:
                     sequence_index=event_context.sequence_index,
                     turn_index=event_context.turn_index,
                     parent_event_ids=event_context.fan_in_from,
+                    checkpoint_name=checkpoint_name or current_checkpoint_name,
+                    checkpoint_id=checkpoint_id or current_checkpoint_id,
                     fan_in_from=event_context.fan_in_from,
                     duration_ms=duration_ms,
                     artifacts=artifacts,
@@ -426,6 +440,7 @@ class EventTracker:
                 if event_context.fan_out_from is not None
                 else []
             )
+            checkpoint_name, checkpoint_id = self._current_checkpoint_refs()
             self._events.append(
                 ToolEvent(
                     event_id=event_id,
@@ -433,6 +448,8 @@ class EventTracker:
                     sequence_index=event_context.sequence_index,
                     turn_index=event_context.turn_index,
                     parent_event_ids=parent_event_ids,
+                    checkpoint_name=checkpoint_name,
+                    checkpoint_id=checkpoint_id,
                     tool_name=name,
                     toolset_kind=toolset_kind,
                     hitl=hitl,
@@ -458,6 +475,7 @@ class EventTracker:
             parent_event_ids = (
                 [self._current_model_event_id] if self._current_model_event_id else []
             )
+            checkpoint_name, checkpoint_id = self._current_checkpoint_refs()
             self._events.append(
                 DeferredEvent(
                     event_id=event_id,
@@ -465,6 +483,8 @@ class EventTracker:
                     sequence_index=sequence_index,
                     turn_index=self._turn_index,
                     parent_event_ids=parent_event_ids,
+                    checkpoint_name=checkpoint_name,
+                    checkpoint_id=checkpoint_id,
                     tool_name=tool_name,
                     deferred_kind=deferred_kind,
                     wait_name=wait_name,
@@ -482,6 +502,7 @@ class EventTracker:
                 self._event_stream_handler_duration_ms + duration_ms, 3
             )
             event_id, sequence_index = self._next_event_id("event_stream")
+            checkpoint_name, checkpoint_id = self._current_checkpoint_refs()
             self._events.append(
                 StreamEvent(
                     event_id=event_id,
@@ -489,6 +510,8 @@ class EventTracker:
                     sequence_index=sequence_index,
                     turn_index=self._turn_index,
                     parent_event_ids=[],
+                    checkpoint_name=checkpoint_name,
+                    checkpoint_id=checkpoint_id,
                     index=self._event_stream_handler_call_count,
                     duration_ms=duration_ms,
                     error=error_from_exception(error) if error is not None else None,

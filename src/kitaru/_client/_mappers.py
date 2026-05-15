@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import ValidationError
 from zenml.models import PipelineRunResponse, StepRunResponse
@@ -241,20 +241,27 @@ def _map_artifact_ref(
     artifact: ArtifactVersionResponse,
     client: KitaruClient,
     producing_call: str | None,
+    name: str | None = None,
+    direction: Literal["input", "output"] = "output",
+    input_type: str | None = None,
+    fallback_kind: str | None = None,
 ) -> ArtifactRef:
     """Map a ZenML artifact response into a Kitaru artifact reference."""
     metadata = _to_plain_dict(artifact.run_metadata)
     raw_kind = metadata.get("kitaru_artifact_type")
-    kind = raw_kind if isinstance(raw_kind, str) else None
+    kind = raw_kind if isinstance(raw_kind, str) else fallback_kind
+    artifact_name = name or artifact.name
 
     return ArtifactRef(
         artifact_id=str(artifact.id),
-        name=artifact.name,
+        name=artifact_name,
         kind=kind,
         save_type=artifact.save_type.value,
         producing_call=producing_call,
         metadata=metadata,
         _client=client,
+        direction=direction,
+        input_type=input_type,
     )
 
 
@@ -266,20 +273,52 @@ def _map_checkpoint_call(
 ) -> CheckpointCall:
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
+    checkpoint_type = step.type.value if step.type else None
     seen_artifact_ids: set[str] = set()
     artifacts: list[ArtifactRef] = []
 
-    for output_artifacts in step.outputs.values():
+    for input_name, input_artifacts in step.inputs.items():
+        for artifact in input_artifacts:
+            artifact_id = str(artifact.id)
+            if artifact_id in seen_artifact_ids:
+                continue
+            seen_artifact_ids.add(artifact_id)
+            input_type = getattr(getattr(artifact, "input_type", None), "value", None)
+            input_kind = (
+                "prompt"
+                if checkpoint_type == "llm_call" and input_name == "messages"
+                else "input"
+            )
+            artifacts.append(
+                _map_artifact_ref(
+                    artifact=artifact,
+                    client=client,
+                    producing_call=None,
+                    name=input_name,
+                    direction="input",
+                    input_type=input_type,
+                    fallback_kind=input_kind,
+                )
+            )
+
+    for output_name, output_artifacts in step.outputs.items():
         for artifact in output_artifacts:
             artifact_id = str(artifact.id)
             if artifact_id in seen_artifact_ids:
                 continue
             seen_artifact_ids.add(artifact_id)
+            output_kind = None
+            if output_name == "output":
+                if checkpoint_type == "llm_call":
+                    output_kind = "response"
+                elif checkpoint_type == "tool_call":
+                    output_kind = "output"
             artifacts.append(
                 _map_artifact_ref(
                     artifact=artifact,
                     client=client,
                     producing_call=producing_call,
+                    fallback_kind=output_kind,
                 )
             )
 
@@ -294,8 +333,6 @@ def _map_checkpoint_call(
     original_call_id: str | None = None
     if step.original_step_run_id is not None:
         original_call_id = str(step.original_step_run_id)
-
-    checkpoint_type = step.type.value if step.type else None
 
     return CheckpointCall(
         call_id=str(step.id),

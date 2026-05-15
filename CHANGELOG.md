@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Added `kitaru.current_execution_id()` as the public way to read the active Kitaru execution ID inside a running flow or checkpoint.
 
+### Fixed
+- PydanticAI granular checkpoints now store model messages and tool arguments as structural checkpoint inputs and use the returned checkpoint output as the canonical response/result artifact, avoiding duplicate manual artifacts in new runs.
+
 ## [0.11.0] - 2026-05-12
 
 ### Fixed
