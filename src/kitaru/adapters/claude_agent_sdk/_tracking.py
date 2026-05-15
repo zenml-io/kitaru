@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import kitaru
+from kitaru.errors import KitaruRuntimeError
 
 from ._constants import (
     CLAUDE_AGENT_SDK_EVENTS_METADATA_KEY,
@@ -33,6 +34,11 @@ ArtifactKind = Literal[
     "event_log",
     "run_summary",
 ]
+EventPersistenceOperation = Literal[
+    "save_event_log",
+    "save_run_summary",
+    "log_metadata",
+]
 
 
 def normalize_runner_name(runner_name: str | None) -> str:
@@ -41,6 +47,39 @@ def normalize_runner_name(runner_name: str | None) -> str:
 
 def artifact_name(runner_name: str, run_label: str, kind: ArtifactKind) -> str:
     return f"{normalize_runner_name(runner_name)}_{run_label}_{kind}"
+
+
+@dataclass(frozen=True)
+class EventPersistenceFailure:
+    """Structured failure from best-effort event/log persistence."""
+
+    operation: EventPersistenceOperation
+    artifact_name: str | None
+    exception_type: str
+    message: str
+
+    @classmethod
+    def from_exception(
+        cls,
+        *,
+        operation: EventPersistenceOperation,
+        artifact_name: str | None,
+        error: BaseException,
+    ) -> "EventPersistenceFailure":
+        return cls(
+            operation=operation,
+            artifact_name=artifact_name,
+            exception_type=type(error).__name__,
+            message=str(error),
+        )
+
+    def as_metadata(self) -> dict[str, str | None]:
+        return {
+            "operation": self.operation,
+            "artifact_name": self.artifact_name,
+            "exception_type": self.exception_type,
+            "message": self.message,
+        }
 
 
 @dataclass
@@ -144,25 +183,66 @@ class EventTracker:
         with self._lock:
             return self._build_run_summary_unlocked(list(self._events))
 
-    def persist(self) -> None:
+    def persist(self, *, fail_on_error: bool = False) -> list[EventPersistenceFailure]:
+        failures: list[EventPersistenceFailure] = []
         if not self._events:
-            return
+            return failures
         if not (is_inside_flow() or is_inside_checkpoint()):
-            return
+            return failures
         run_label = self.run_label
         with self._lock:
             ordered_events = list(self._events)
             events_dump = dump_claude_events(ordered_events)
             summary_dump = self._build_run_summary_unlocked(ordered_events)
         if is_inside_checkpoint():
-            kitaru.save(self.event_log_artifact_name, events_dump, type="context")
-            kitaru.save(self.run_summary_artifact_name, summary_dump, type="context")
-        kitaru.log(
-            **{
-                CLAUDE_AGENT_SDK_EVENTS_METADATA_KEY: {run_label: events_dump},
-                CLAUDE_AGENT_SDK_RUN_SUMMARIES_METADATA_KEY: {run_label: summary_dump},
-            }
-        )
+            event_log_name = self.event_log_artifact_name
+            try:
+                kitaru.save(event_log_name, events_dump, type="context")
+            except Exception as error:
+                failures.append(
+                    EventPersistenceFailure.from_exception(
+                        operation="save_event_log",
+                        artifact_name=event_log_name,
+                        error=error,
+                    )
+                )
+            run_summary_name = self.run_summary_artifact_name
+            try:
+                kitaru.save(run_summary_name, summary_dump, type="context")
+            except Exception as error:
+                failures.append(
+                    EventPersistenceFailure.from_exception(
+                        operation="save_run_summary",
+                        artifact_name=run_summary_name,
+                        error=error,
+                    )
+                )
+        try:
+            kitaru.log(
+                **{
+                    CLAUDE_AGENT_SDK_EVENTS_METADATA_KEY: {run_label: events_dump},
+                    CLAUDE_AGENT_SDK_RUN_SUMMARIES_METADATA_KEY: {
+                        run_label: summary_dump
+                    },
+                }
+            )
+        except Exception as error:
+            failures.append(
+                EventPersistenceFailure.from_exception(
+                    operation="log_metadata",
+                    artifact_name=None,
+                    error=error,
+                )
+            )
+        if failures and fail_on_error:
+            failure_summary = "; ".join(
+                f"{failure.operation}: {failure.exception_type}: {failure.message}"
+                for failure in failures
+            )
+            raise KitaruRuntimeError(
+                f"Claude Agent SDK event/log persistence failed: {failure_summary}"
+            )
+        return failures
 
 
 _CURRENT_TRACKER: ContextVar[EventTracker | None] = ContextVar(
@@ -176,7 +256,12 @@ _TRACKING_ACTIVE: ContextVar[bool] = ContextVar(
 
 
 @contextmanager
-def tracker_scope(runner_name: str | None) -> Iterator[EventTracker]:
+def tracker_scope(
+    runner_name: str | None,
+    *,
+    persist_on_exit: bool = True,
+    fail_on_persistence_error: bool = False,
+) -> Iterator[EventTracker]:
     if _TRACKING_ACTIVE.get():
         existing = _CURRENT_TRACKER.get()
         if existing is None:
@@ -197,7 +282,8 @@ def tracker_scope(runner_name: str | None) -> Iterator[EventTracker]:
         raise
     finally:
         try:
-            tracker.persist()
+            if persist_on_exit:
+                tracker.persist(fail_on_error=fail_on_persistence_error)
         finally:
             _CURRENT_TRACKER.reset(tracker_token)
             _TRACKING_ACTIVE.reset(active_token)

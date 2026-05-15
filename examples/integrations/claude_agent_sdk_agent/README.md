@@ -9,12 +9,16 @@ Story in one line: a Kitaru flow asks Claude for a short summary, and
 The mental model is deliberately simple:
 
 ```text
-flow starts
-  -> Kitaru opens one checkpoint
+flow body calls KitaruClaudeRunner
+  -> Kitaru opens one adapter-created checkpoint
   -> Claude SDK runs once
   -> Kitaru stores ClaudeRunResult
 flow continues
 ```
+
+Keep this pattern in your own flows: call the runner from the flow body, not
+from inside another `@kitaru.checkpoint`, so the adapter can create the Claude
+invocation checkpoint itself.
 
 If a later part of the flow fails, Kitaru can replay from the saved
 `ClaudeRunResult` instead of calling Claude again for that completed invocation.
@@ -72,6 +76,7 @@ The script prints:
 - the local transcript path when the SDK reports one
 - cost and usage details when the SDK reports them
 - Kitaru artifact names for messages, output, usage, event log, and run summary
+- warnings when best-effort capture or event/log persistence has a problem
 
 ## Important durability boundary
 

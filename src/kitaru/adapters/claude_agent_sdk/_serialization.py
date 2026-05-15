@@ -115,11 +115,37 @@ def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) ->
                 "model_dump_error": type(exc).__name__,
             }
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        if _is_key_value_sequence(value):
+            return [
+                [
+                    str(pair[0]),
+                    _manifest_value(
+                        pair[1],
+                        redact=redact,
+                        key_hint=str(pair[0]),
+                    ),
+                ]
+                for pair in value
+            ]
         return [_manifest_value(item, redact=redact) for item in value]
     server_name = getattr(value, "name", None)
     if server_name is not None:
         return {"python_type": _python_type(value), "name": server_name}
     return {"python_type": _python_type(value)}
+
+
+def _is_key_value_sequence(value: Sequence[Any]) -> bool:
+    if not value:
+        return False
+    return all(_is_two_item_sequence(item) for item in value)
+
+
+def _is_two_item_sequence(value: Any) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes | bytearray)
+        and len(value) == 2
+    )
 
 
 def _is_secret_key(key: str) -> bool:

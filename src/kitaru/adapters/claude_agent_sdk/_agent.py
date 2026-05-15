@@ -3,10 +3,11 @@
 import asyncio
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any, Literal, cast
 
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import ClaudeCapturePolicy
@@ -16,7 +17,12 @@ from ._runner import (
     run_claude_invocation,
 )
 from ._serialization import redacted_options_manifest, to_cache_identity
-from ._tracking import ArtifactKind, EventTracker, tracker_scope
+from ._tracking import (
+    ArtifactKind,
+    EventPersistenceFailure,
+    EventTracker,
+    tracker_scope,
+)
 from ._types import ClaudeRunRequest, ClaudeRunResult
 from ._utils import (
     CheckpointConfig,
@@ -28,6 +34,66 @@ from ._utils import (
     validate_checkpoint_config,
     validate_checkpoint_strategy,
 )
+
+_DIRECT_EXECUTION_WARNING = (
+    "Claude Agent SDK ran directly inside an existing Kitaru checkpoint because "
+    "allow_direct_execution_inside_checkpoint=True. Replaying the outer "
+    "checkpoint can rerun Claude and duplicate Claude-side tool calls, file "
+    "edits, or API cost."
+)
+
+ArtifactCaptureOperation = Literal["save_artifact"]
+
+
+@dataclass(frozen=True)
+class ArtifactCaptureFailure:
+    """Structured failure from best-effort artifact capture."""
+
+    operation: ArtifactCaptureOperation
+    kind: ArtifactKind
+    artifact_name: str
+    exception_type: str
+    message: str
+
+    @classmethod
+    def from_exception(
+        cls,
+        *,
+        operation: ArtifactCaptureOperation,
+        kind: ArtifactKind,
+        artifact_name: str,
+        error: BaseException,
+    ) -> "ArtifactCaptureFailure":
+        return cls(
+            operation=operation,
+            kind=kind,
+            artifact_name=artifact_name,
+            exception_type=type(error).__name__,
+            message=str(error),
+        )
+
+    def as_metadata(self) -> dict[str, str]:
+        return {
+            "operation": self.operation,
+            "kind": self.kind,
+            "artifact_name": self.artifact_name,
+            "exception_type": self.exception_type,
+            "message": self.message,
+        }
+
+    def warning(self) -> str:
+        return (
+            "Claude artifact capture failed for "
+            f"{self.kind} artifact {self.artifact_name}: "
+            f"{self.exception_type}: {self.message}"
+        )
+
+    def as_error(self) -> KitaruRuntimeError:
+        return KitaruRuntimeError(
+            "Claude Agent SDK artifact capture failed for "
+            f"{self.kind} artifact {self.artifact_name}: "
+            f"{self.exception_type}: {self.message}"
+        )
 
 
 class KitaruClaudeRunner:
@@ -48,6 +114,7 @@ class KitaruClaudeRunner:
         checkpoint_strategy: CheckpointStrategy = "invocation",
         capture: ClaudeCapturePolicy | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        allow_direct_execution_inside_checkpoint: bool = False,
     ) -> None:
         if not isinstance(name, str) or not name.strip():
             raise KitaruUsageError("KitaruClaudeRunner requires a stable `name`.")
@@ -55,12 +122,19 @@ class KitaruClaudeRunner:
             raise KitaruUsageError(
                 "`options` and `options_factory` are mutually exclusive."
             )
+        if not isinstance(allow_direct_execution_inside_checkpoint, bool):
+            raise KitaruUsageError(
+                "`allow_direct_execution_inside_checkpoint` must be a boolean."
+            )
 
         self._name = name
         self._options = options
         self._options_factory = options_factory
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
         self._capture = capture or ClaudeCapturePolicy()
+        self._allow_direct_execution_inside_checkpoint = (
+            allow_direct_execution_inside_checkpoint
+        )
         self._checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             checkpoint_config,
             context="checkpoint_config",
@@ -71,6 +145,9 @@ class KitaruClaudeRunner:
             {
                 "checkpoint_strategy": self._checkpoint_strategy,
                 "has_options_factory": options_factory is not None,
+                "allow_direct_execution_inside_checkpoint": (
+                    self._allow_direct_execution_inside_checkpoint
+                ),
             },
         )
 
@@ -119,11 +196,16 @@ class KitaruClaudeRunner:
 
     async def _run_invocation_async(self, request: ClaudeRunRequest) -> ClaudeRunResult:
         options = self._build_options(request)
+        direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         async def _body() -> ClaudeRunResult:
-            return await self._run_sdk_async(request, options=options)
+            return await self._run_sdk_async(
+                request,
+                options=options,
+                direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+            )
 
-        if is_inside_flow() and not is_inside_checkpoint():
+        if is_inside_flow() and not direct_execution_inside_checkpoint:
             return await run_async_in_checkpoint(
                 config=self._invocation_checkpoint_config(),
                 step_name=f"{self._name}_claude_invocation",
@@ -134,11 +216,18 @@ class KitaruClaudeRunner:
 
     def _run_invocation_sync(self, request: ClaudeRunRequest) -> ClaudeRunResult:
         options = self._build_options(request)
+        direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         def _body() -> ClaudeRunResult:
-            return asyncio.run(self._run_sdk_async(request, options=options))
+            return asyncio.run(
+                self._run_sdk_async(
+                    request,
+                    options=options,
+                    direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                )
+            )
 
-        if is_inside_flow() and not is_inside_checkpoint():
+        if is_inside_flow() and not direct_execution_inside_checkpoint:
             return run_sync_in_checkpoint(
                 config=self._invocation_checkpoint_config(),
                 step_name=f"{self._name}_claude_invocation",
@@ -152,13 +241,21 @@ class KitaruClaudeRunner:
         request: ClaudeRunRequest,
         *,
         options: Any | None,
+        direct_execution_inside_checkpoint: bool,
     ) -> ClaudeRunResult:
-        with tracker_scope(self._name) as tracker:
-            manifest = redacted_options_manifest(
-                options,
-                request,
-                redact=self._capture.redact_options_manifest,
-            )
+        with tracker_scope(self._name, persist_on_exit=False) as tracker:
+            manifest: dict[str, Any] | None = None
+
+            def get_manifest() -> dict[str, Any]:
+                nonlocal manifest
+                if manifest is None:
+                    manifest = redacted_options_manifest(
+                        options,
+                        request,
+                        redact=self._capture.redact_options_manifest,
+                    )
+                return manifest
+
             started_at = time.perf_counter()
             try:
                 payload = await run_claude_invocation(
@@ -170,44 +267,72 @@ class KitaruClaudeRunner:
                 self._record_failed_invocation(
                     tracker,
                     error=error,
-                    manifest=manifest,
+                    manifest=(
+                        get_manifest() if self._capture.save_options_manifest else None
+                    ),
                     request=request,
                     duration_ms=elapsed_ms(started_at),
                 )
+                tracker.persist(fail_on_error=False)
                 raise
-            return self._finalize_run_result(
+            result = self._finalize_run_result(
                 payload,
                 tracker=tracker,
-                manifest=manifest,
+                get_manifest=get_manifest,
                 request=request,
+                direct_execution_inside_checkpoint=(direct_execution_inside_checkpoint),
             )
+            persistence_failures = tracker.persist(fail_on_error=False)
+            result = self._apply_event_persistence_failures(
+                result, persistence_failures
+            )
+            if persistence_failures and self._capture.fail_on_event_persistence_error:
+                raise self._event_persistence_error(persistence_failures)
+            return result
 
     def _finalize_run_result(
         self,
         payload: ClaudeInvocationPayload,
         *,
         tracker: EventTracker,
-        manifest: dict[str, Any],
+        get_manifest: Callable[[], dict[str, Any]],
         request: ClaudeRunRequest,
+        direct_execution_inside_checkpoint: bool,
     ) -> ClaudeRunResult:
-        artifacts = self._persist_capture_artifacts(
+        artifacts, capture_failures, capture_warnings = self._persist_capture_artifacts(
             tracker,
             payload=payload,
-            manifest=manifest,
+            get_manifest=get_manifest,
             request=request,
         )
+        warnings = [*payload.warnings, *capture_warnings]
+        if direct_execution_inside_checkpoint:
+            warnings.append(_DIRECT_EXECUTION_WARNING)
+        metadata: dict[str, Any] = {
+            "run_label": tracker.run_label,
+            "direct_execution_inside_checkpoint": direct_execution_inside_checkpoint,
+        }
+        capture_failure_metadata = [
+            failure.as_metadata() for failure in capture_failures
+        ]
+        if capture_failure_metadata:
+            metadata["capture_failures"] = capture_failure_metadata
         if self._capture.emit_events:
             tracker.record_invocation(
                 status="completed",
                 duration_ms=payload.duration_ms,
                 session_id=payload.session_id,
                 transcript_path=payload.transcript_path,
-                warnings=payload.warnings,
+                warnings=warnings,
                 artifacts=artifacts,
                 metadata={
                     "sdk_version": claude_agent_sdk_version(),
                     "has_usage": payload.usage is not None,
                     "message_count": len(payload.messages),
+                    "direct_execution_inside_checkpoint": (
+                        direct_execution_inside_checkpoint
+                    ),
+                    "capture_failures": capture_failure_metadata,
                 },
             )
         return ClaudeRunResult(
@@ -233,8 +358,8 @@ class KitaruClaudeRunner:
             run_summary_artifact_name=(
                 tracker.run_summary_artifact_name if self._capture.emit_events else None
             ),
-            warnings=payload.warnings,
-            metadata={"run_label": tracker.run_label},
+            warnings=warnings,
+            metadata=metadata,
         )
 
     def _persist_capture_artifacts(
@@ -242,10 +367,12 @@ class KitaruClaudeRunner:
         tracker: EventTracker,
         *,
         payload: ClaudeInvocationPayload,
-        manifest: dict[str, Any],
+        get_manifest: Callable[[], dict[str, Any]],
         request: ClaudeRunRequest,
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], list[ArtifactCaptureFailure], list[str]]:
         artifacts: dict[str, str] = {}
+        failures: list[ArtifactCaptureFailure] = []
+        warnings: list[str] = []
 
         def _maybe_register_artifact(
             key: ArtifactKind,
@@ -256,9 +383,25 @@ class KitaruClaudeRunner:
         ) -> None:
             if not enabled:
                 return
-            artifacts[key] = tracker.artifact_name(key)
-            if is_inside_checkpoint():
-                self._save_artifact(artifacts[key], payload_value, type=type)
+            artifact_name = tracker.artifact_name(key)
+            if not is_inside_checkpoint():
+                artifacts[key] = artifact_name
+                return
+            try:
+                self._save_artifact(artifact_name, payload_value, type=type)
+            except Exception as error:
+                failure = self._capture_failure(
+                    operation="save_artifact",
+                    kind=key,
+                    artifact_name=artifact_name,
+                    error=error,
+                )
+                if self._capture.fail_on_artifact_capture_error:
+                    raise self._artifact_capture_error(failure) from error
+                failures.append(failure)
+                warnings.append(failure.warning())
+                return
+            artifacts[key] = artifact_name
 
         messages_payload: dict[str, Any] = {"messages": payload.messages}
         if self._capture.save_prompt:
@@ -279,12 +422,13 @@ class KitaruClaudeRunner:
             payload_value=payload.transcript_payload,
             type="context",
         )
-        _maybe_register_artifact(
-            "options_manifest",
-            enabled=self._capture.save_options_manifest,
-            payload_value=manifest,
-            type="context",
-        )
+        if self._capture.save_options_manifest:
+            _maybe_register_artifact(
+                "options_manifest",
+                enabled=True,
+                payload_value=get_manifest(),
+                type="context",
+            )
         _maybe_register_artifact(
             "output",
             enabled=self._capture.save_final_output,
@@ -303,35 +447,120 @@ class KitaruClaudeRunner:
             type="context",
         )
 
-        return artifacts
+        return artifacts, failures, warnings
 
     def _record_failed_invocation(
         self,
         tracker: EventTracker,
         *,
         error: BaseException,
-        manifest: dict[str, Any],
+        manifest: dict[str, Any] | None,
         request: ClaudeRunRequest,
         duration_ms: float,
     ) -> None:
         artifacts: dict[str, str] = {}
+        capture_failures: list[ArtifactCaptureFailure] = []
+        warnings: list[str] = []
         if self._capture.save_options_manifest:
-            artifacts["options_manifest"] = tracker.artifact_name("options_manifest")
+            artifact_name = tracker.artifact_name("options_manifest")
             if is_inside_checkpoint():
-                self._save_artifact(
-                    artifacts["options_manifest"], manifest, type="context"
-                )
+                try:
+                    self._save_artifact(artifact_name, manifest, type="context")
+                except Exception as capture_error:
+                    failure = self._capture_failure(
+                        operation="save_artifact",
+                        kind="options_manifest",
+                        artifact_name=artifact_name,
+                        error=capture_error,
+                    )
+                    capture_failures.append(failure)
+                    warnings.append(failure.warning())
+                else:
+                    artifacts["options_manifest"] = artifact_name
+            else:
+                artifacts["options_manifest"] = artifact_name
         if self._capture.emit_events:
             tracker.record_invocation(
                 status="failed",
                 duration_ms=duration_ms,
                 artifacts=artifacts,
+                warnings=warnings,
                 metadata={
                     "sdk_version": claude_agent_sdk_version(),
                     "request_kind": request.kind,
+                    "capture_failures": [
+                        failure.as_metadata() for failure in capture_failures
+                    ],
                 },
                 error=error,
             )
+
+    @staticmethod
+    def _capture_failure(
+        *,
+        operation: ArtifactCaptureOperation,
+        kind: ArtifactKind,
+        artifact_name: str,
+        error: BaseException,
+    ) -> ArtifactCaptureFailure:
+        return ArtifactCaptureFailure.from_exception(
+            operation=operation,
+            kind=kind,
+            artifact_name=artifact_name,
+            error=error,
+        )
+
+    @staticmethod
+    def _artifact_capture_error(failure: ArtifactCaptureFailure) -> KitaruRuntimeError:
+        return failure.as_error()
+
+    @staticmethod
+    def _event_persistence_warning(failure: EventPersistenceFailure) -> str:
+        target = (
+            f" artifact {failure.artifact_name}"
+            if failure.artifact_name is not None
+            else ""
+        )
+        return (
+            "Claude event/log persistence failed for "
+            f"{failure.operation}{target}: "
+            f"{failure.exception_type}: {failure.message}"
+        )
+
+    @classmethod
+    def _event_persistence_error(
+        cls, failures: list[EventPersistenceFailure]
+    ) -> KitaruRuntimeError:
+        failure_summary = "; ".join(
+            cls._event_persistence_warning(failure) for failure in failures
+        )
+        return KitaruRuntimeError(failure_summary)
+
+    @classmethod
+    def _apply_event_persistence_failures(
+        cls,
+        result: ClaudeRunResult,
+        failures: list[EventPersistenceFailure],
+    ) -> ClaudeRunResult:
+        if not failures:
+            return result
+        failure_metadata = [failure.as_metadata() for failure in failures]
+        metadata = {
+            **result.metadata,
+            "event_persistence_failures": failure_metadata,
+        }
+        updates: dict[str, Any] = {
+            "warnings": [
+                *result.warnings,
+                *(cls._event_persistence_warning(failure) for failure in failures),
+            ],
+            "metadata": metadata,
+        }
+        if any(failure.operation == "save_event_log" for failure in failures):
+            updates["event_log_artifact_name"] = None
+        if any(failure.operation == "save_run_summary" for failure in failures):
+            updates["run_summary_artifact_name"] = None
+        return result.model_copy(update=updates)
 
     def _build_options(self, request: ClaudeRunRequest) -> Any | None:
         if self._options_factory is not None:
@@ -391,13 +620,23 @@ class KitaruClaudeRunner:
         )
 
     def _require_invocation_scope(self, api_name: str) -> None:
-        if is_inside_flow() or is_inside_checkpoint():
+        if is_inside_checkpoint():
+            if self._allow_direct_execution_inside_checkpoint:
+                return
+            raise KitaruUsageError(
+                f"{api_name} was called from inside an existing Kitaru "
+                "checkpoint. By default the Claude Agent SDK adapter refuses "
+                "this because it cannot create its own invocation checkpoint "
+                "inside another checkpoint. Move the call to the flow body, or "
+                "set allow_direct_execution_inside_checkpoint=True to run "
+                "Claude directly inside the existing checkpoint and accept "
+                "that replaying the outer checkpoint can call Claude again."
+            )
+        if is_inside_flow():
             return
         raise KitaruUsageError(
-            f"{api_name} must be called inside a Kitaru flow or checkpoint. "
-            "Claude Agent SDK v0.1 durability is one invocation per checkpoint; "
-            "wrap the call in @kitaru.flow, or call it from an existing "
-            "@kitaru.checkpoint."
+            f"{api_name} must be called inside a Kitaru flow body so the "
+            "adapter can create one checkpoint around the Claude invocation."
         )
 
     def _track_completed(

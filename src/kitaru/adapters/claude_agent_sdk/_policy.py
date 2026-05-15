@@ -16,3 +16,5 @@ class ClaudeCapturePolicy(BaseModel):
     save_final_output: bool = True
     save_usage: bool = True
     redact_options_manifest: bool = True
+    fail_on_artifact_capture_error: bool = False
+    fail_on_event_persistence_error: bool = False

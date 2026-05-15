@@ -60,6 +60,7 @@ def test_public_import_surface_uses_invocation_vocabulary(
     signature = inspect.signature(claude_adapter.KitaruClaudeRunner)
     assert "checkpoint_strategy" in signature.parameters
     assert "options_factory" in signature.parameters
+    assert "allow_direct_execution_inside_checkpoint" in signature.parameters
     assert "durability_mode" not in signature.parameters
 
 
@@ -145,6 +146,16 @@ def test_runner_rejects_options_and_factory_together(
         )
 
 
+def test_runner_rejects_non_boolean_nested_checkpoint_opt_in(
+    claude_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="must be a boolean"):
+        claude_adapter.KitaruClaudeRunner(
+            name="claude",
+            allow_direct_execution_inside_checkpoint="yes",
+        )
+
+
 def test_run_sync_rejects_running_event_loop(claude_adapter: types.ModuleType) -> None:
     runner = claude_adapter.KitaruClaudeRunner(name="claude")
     request = claude_adapter.ClaudeRunRequest.start("hello")
@@ -162,7 +173,7 @@ def test_run_sync_requires_flow_or_checkpoint_scope(
     runner = claude_adapter.KitaruClaudeRunner(name="claude")
     request = claude_adapter.ClaudeRunRequest.start("hello")
 
-    with pytest.raises(KitaruUsageError, match="inside a Kitaru flow or checkpoint"):
+    with pytest.raises(KitaruUsageError, match="inside a Kitaru flow body"):
         runner.run_sync(request)
 
 
@@ -191,6 +202,18 @@ def test_claude_run_request_start_and_resume_validation(
         claude_adapter.ClaudeRunRequest(kind="resume", prompt="hello")
     with pytest.raises(ValidationError, match="positive"):
         claude_adapter.ClaudeRunRequest.start("hello", max_turns=0)
+
+
+def test_capture_policy_accepts_strict_capture_failure_knobs(
+    claude_adapter: types.ModuleType,
+) -> None:
+    policy = claude_adapter.ClaudeCapturePolicy(
+        fail_on_artifact_capture_error=True,
+        fail_on_event_persistence_error=True,
+    )
+
+    assert policy.fail_on_artifact_capture_error is True
+    assert policy.fail_on_event_persistence_error is True
 
 
 def test_capture_policy_rejects_unknown_fields(

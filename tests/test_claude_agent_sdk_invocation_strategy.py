@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
 def _purge_claude_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,14 +98,13 @@ def _patch_inline_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tracking_module, "is_inside_checkpoint", lambda: True)
 
 
-def test_runner_invocation_extracts_result_and_artifact_names(
-    claude_adapter: types.ModuleType,
-    fake_sdk: types.ModuleType,
+def _patch_direct_execution_persistence(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    save_artifact: Any | None = None,
+    save_event: Any | None = None,
+    log_event: Any | None = None,
 ) -> None:
-    _patch_inline_scope(monkeypatch)
-    saved: list[tuple[str, object, str]] = []
-    logs: list[dict[str, object]] = []
     agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
     tracking_module = importlib.import_module(
         "kitaru.adapters.claude_agent_sdk._tracking"
@@ -113,19 +112,119 @@ def test_runner_invocation_extracts_result_and_artifact_names(
     monkeypatch.setattr(
         agent_module.KitaruClaudeRunner,
         "_save_artifact",
-        staticmethod(lambda name, value, *, type: saved.append((name, value, type))),
+        staticmethod(save_artifact or (lambda name, value, *, type: None)),
     )
     monkeypatch.setattr(
         tracking_module.kitaru,
         "save",
-        lambda name, value, *, type: saved.append((name, value, type)),
+        save_event or (lambda name, value, *, type: None),
     )
     monkeypatch.setattr(
-        tracking_module.kitaru, "log", lambda **kwargs: logs.append(kwargs)
+        tracking_module.kitaru,
+        "log",
+        log_event or (lambda **kwargs: None),
+    )
+
+
+def _raise_runtime_error(message: str) -> None:
+    raise RuntimeError(message)
+
+
+def test_nested_checkpoint_rejected_before_sdk_call_by_default(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+
+    with pytest.raises(KitaruUsageError, match="existing Kitaru checkpoint"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert fake_sdk.__dict__["calls"] == []
+
+
+def test_nested_checkpoint_explicit_opt_in_runs_directly_with_warning(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    checkpoint_calls: list[dict[str, object]] = []
+
+    def fake_run_sync_in_checkpoint(**kwargs: object) -> None:
+        checkpoint_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        agent_module, "run_sync_in_checkpoint", fake_run_sync_in_checkpoint
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert fake_sdk.__dict__["calls"] == [{"prompt": "hello", "options": None}]
+    assert checkpoint_calls == []
+    assert result.metadata["direct_execution_inside_checkpoint"] is True
+    assert any(
+        "ran directly inside an existing" in warning for warning in result.warnings
+    )
+
+
+def test_options_manifest_redacts_sequence_pairs(
+    claude_adapter: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._serialization"
+    )
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+
+    manifest = serialization.redacted_options_manifest(
+        {
+            "headers": [
+                ("Authorization", "Bearer secret"),
+                ["x-api-key", "api-secret"],
+                ("User-Agent", "kitaru-test"),
+            ],
+            "env": (("COOKIE", "session=abc"), ("PATH", "/usr/bin")),
+        },
+        request,
+    )
+
+    options = cast(dict[str, Any], manifest["options"])
+    assert options["headers"] == [
+        ["Authorization", "[REDACTED]"],
+        ["x-api-key", "[REDACTED]"],
+        ["User-Agent", "kitaru-test"],
+    ]
+    assert options["env"] == [["COOKIE", "[REDACTED]"], ["PATH", "/usr/bin"]]
+
+
+def test_runner_invocation_extracts_result_and_artifact_names(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    saved: list[str] = []
+    logs: list[dict[str, object]] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_artifact=lambda name, value, *, type: saved.append(name),
+        save_event=lambda name, value, *, type: saved.append(name),
+        log_event=lambda **kwargs: logs.append(kwargs),
     )
 
     options = SimpleNamespace(api_key="secret-key", allowed_tools=["Read"])
-    runner = claude_adapter.KitaruClaudeRunner(name="Claude Reviewer", options=options)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="Claude Reviewer",
+        options=options,
+    )
     request = claude_adapter.ClaudeRunRequest.start("review this")
 
     result = runner.run_sync(request)
@@ -146,10 +245,143 @@ def test_runner_invocation_extracts_result_and_artifact_names(
     assert result.messages_artifact_name is not None
     assert result.options_manifest_artifact_name is not None
     assert result.output_artifact_name is not None
-    assert any(name == result.messages_artifact_name for name, _, _ in saved)
-    assert any(name == result.options_manifest_artifact_name for name, _, _ in saved)
-    assert any(name == result.event_log_artifact_name for name, _, _ in saved)
+    assert result.messages_artifact_name in saved
+    assert result.options_manifest_artifact_name in saved
+    assert result.event_log_artifact_name in saved
     assert logs
+
+
+def test_artifact_capture_failure_is_non_fatal_by_default(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+
+    def fake_save(name: str, value: object, *, type: str) -> None:
+        if name.endswith("messages"):
+            raise RuntimeError("simulated capture failure")
+
+    _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert result.messages_artifact_name is None
+    assert result.output_artifact_name is not None
+    assert any("messages artifact" in warning for warning in result.warnings)
+    failures = cast(list[dict[str, str]], result.metadata["capture_failures"])
+    assert failures[0]["kind"] == "messages"
+    assert failures[0]["exception_type"] == "RuntimeError"
+
+
+def test_artifact_capture_failure_can_be_strict(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+
+    def fail_save_artifact(name: str, value: object, *, type: str) -> None:
+        _raise_runtime_error("strict capture failure")
+
+    _patch_direct_execution_persistence(monkeypatch, save_artifact=fail_save_artifact)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="artifact capture failed"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+
+def test_failed_invocation_capture_failure_preserves_sdk_error(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    result_message = fake_sdk.__dict__["ResultMessage"]
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [
+        result_message(is_error=True, result="permission denied")
+    ]
+
+    def fail_save_artifact(name: str, value: object, *, type: str) -> None:
+        _raise_runtime_error("manifest save failed")
+
+    _patch_direct_execution_persistence(monkeypatch, save_artifact=fail_save_artifact)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
+    )
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+
+def test_event_persistence_failure_is_non_fatal_by_default(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+
+    def fake_event_save(name: str, value: object, *, type: str) -> None:
+        if name.endswith("event_log"):
+            raise RuntimeError("event log save failed")
+
+    def fail_log_event(**kwargs: object) -> None:
+        _raise_runtime_error("log failed")
+
+    _patch_direct_execution_persistence(
+        monkeypatch, save_event=fake_event_save, log_event=fail_log_event
+    )
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert result.event_log_artifact_name is None
+    assert result.run_summary_artifact_name is not None
+    failures = cast(
+        list[dict[str, str | None]],
+        result.metadata["event_persistence_failures"],
+    )
+    assert {failure["operation"] for failure in failures} == {
+        "save_event_log",
+        "log_metadata",
+    }
+    assert any("event/log persistence failed" in warning for warning in result.warnings)
+
+
+def test_event_persistence_failure_can_be_strict(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+
+    def fail_log_event(**kwargs: object) -> None:
+        _raise_runtime_error("log failed")
+
+    _patch_direct_execution_persistence(monkeypatch, log_event=fail_log_event)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        capture=claude_adapter.ClaudeCapturePolicy(
+            fail_on_event_persistence_error=True
+        ),
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="log failed"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+    assert fake_sdk.__dict__["calls"] == [{"prompt": "hello", "options": None}]
 
 
 def test_options_factory_receives_request_and_redacts_manifest(
@@ -158,22 +390,12 @@ def test_options_factory_receives_request_and_redacts_manifest(
 ) -> None:
     _patch_inline_scope(monkeypatch)
     manifests: list[dict[str, object]] = []
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
 
     def fake_save(name: str, value: object, *, type: str) -> None:
         if name.endswith("options_manifest") and isinstance(value, dict):
             manifests.append(cast(dict[str, object], value))
 
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner, "_save_artifact", staticmethod(fake_save)
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
+    _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
 
     seen_requests = []
 
@@ -187,6 +409,7 @@ def test_options_factory_receives_request_and_redacts_manifest(
         }
 
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         options_factory=options_factory,
     )
@@ -213,20 +436,11 @@ def test_request_scoped_fields_build_claude_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
     )
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner,
-        "_save_artifact",
-        staticmethod(lambda name, value, *, type: None),
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
-    runner = claude_adapter.KitaruClaudeRunner(name="claude")
 
     runner.run_sync(
         claude_adapter.ClaudeRunRequest.resume(
@@ -249,6 +463,7 @@ def test_static_options_reject_request_scoped_fields(
 ) -> None:
     _patch_inline_scope(monkeypatch)
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         options=SimpleNamespace(cwd="/tmp/static"),
     )
@@ -266,24 +481,14 @@ def test_emit_events_false_suppresses_event_artifacts_and_log(
     _patch_inline_scope(monkeypatch)
     saved: list[str] = []
     logs: list[dict[str, object]] = []
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner,
-        "_save_artifact",
-        staticmethod(lambda name, value, *, type: saved.append(name)),
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru,
-        "save",
-        lambda name, value, *, type: saved.append(name),
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru, "log", lambda **kwargs: logs.append(kwargs)
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_artifact=lambda name, value, *, type: saved.append(name),
+        save_event=lambda name, value, *, type: saved.append(name),
+        log_event=lambda **kwargs: logs.append(kwargs),
     )
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         capture=claude_adapter.ClaudeCapturePolicy(emit_events=False),
     )
@@ -321,6 +526,7 @@ def test_synthetic_checkpoint_is_used_from_flow_scope(
         agent_module, "run_sync_in_checkpoint", fake_run_sync_in_checkpoint
     )
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         checkpoint_config={"cache": False, "retries": 1},
     )
@@ -340,22 +546,13 @@ def test_missing_transcript_file_adds_warning(
     tmp_path: Path,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner,
-        "_save_artifact",
-        staticmethod(lambda name, value, *, type: None),
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
+    _patch_direct_execution_persistence(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
     result = runner.run_sync(
         claude_adapter.ClaudeRunRequest.start("hello", cwd=str(tmp_path / "repo"))
     )
@@ -374,15 +571,7 @@ def test_transcript_file_is_captured_when_available(
 ) -> None:
     _patch_inline_scope(monkeypatch)
     captured: dict[str, object] = {}
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
 
     cwd = tmp_path / "repo"
     cwd.mkdir()
@@ -398,10 +587,11 @@ def test_transcript_file_is_captured_when_available(
         if name.endswith("transcript"):
             captured["value"] = value
 
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner, "_save_artifact", staticmethod(fake_save)
+    _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
     )
-    runner = claude_adapter.KitaruClaudeRunner(name="claude")
 
     result = runner.run_sync(
         claude_adapter.ClaudeRunRequest.start("hello", cwd=str(cwd))
@@ -421,20 +611,8 @@ def test_transcript_lookup_uses_static_options_cwd_when_request_cwd_missing(
     tmp_path: Path,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner,
-        "_save_artifact",
-        staticmethod(lambda name, value, *, type: None),
-    )
+    _patch_direct_execution_persistence(monkeypatch)
 
     options_cwd = tmp_path / "static-options-cwd"
     options_cwd.mkdir()
@@ -447,6 +625,7 @@ def test_transcript_lookup_uses_static_options_cwd_when_request_cwd_missing(
     transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
 
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         options=SimpleNamespace(cwd=str(options_cwd)),
     )
@@ -461,20 +640,8 @@ def test_transcript_lookup_uses_options_factory_cwd_when_request_cwd_missing(
     tmp_path: Path,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
-    monkeypatch.setattr(
-        agent_module.KitaruClaudeRunner,
-        "_save_artifact",
-        staticmethod(lambda name, value, *, type: None),
-    )
+    _patch_direct_execution_persistence(monkeypatch)
 
     factory_cwd = tmp_path / "factory-cwd"
     factory_cwd.mkdir()
@@ -487,6 +654,7 @@ def test_transcript_lookup_uses_options_factory_cwd_when_request_cwd_missing(
     transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
 
     runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
         name="claude",
         options_factory=lambda request: {"cwd": str(factory_cwd)},
     )
@@ -501,18 +669,15 @@ def test_runner_raises_when_sdk_returns_no_result_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    tracking_module = importlib.import_module(
-        "kitaru.adapters.claude_agent_sdk._tracking"
-    )
-    monkeypatch.setattr(
-        tracking_module.kitaru, "save", lambda name, value, *, type: None
-    )
-    monkeypatch.setattr(tracking_module.kitaru, "log", lambda **kwargs: None)
+    _patch_direct_execution_persistence(monkeypatch)
     assistant_message = fake_sdk.__dict__["AssistantMessage"]
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [
         assistant_message("not final")
     ]
-    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
 
     with pytest.raises(RuntimeError, match="did not return a final ResultMessage"):
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
@@ -535,7 +700,10 @@ def test_runner_raises_when_sdk_result_is_error(
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [
         result_message(is_error=True, result="permission denied")
     ]
-    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
 
     with pytest.raises(RuntimeError, match="error ResultMessage"):
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
