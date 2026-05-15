@@ -86,6 +86,8 @@ class AnalyticsEvent(StrEnum):
     OPENAI_AGENTS_WRAPPED = "Kitaru OpenAI Agents wrapped"
     OPENAI_AGENTS_RUN_COMPLETED = "Kitaru OpenAI Agents run completed"
     OPENAI_AGENTS_CALL_CHECKPOINTED = "Kitaru OpenAI Agents call checkpointed"
+    CLAUDE_AGENT_SDK_WRAPPED = "Kitaru Claude Agent SDK wrapped"
+    CLAUDE_AGENT_SDK_RUN_COMPLETED = "Kitaru Claude Agent SDK run completed"
 
 
 def set_source(suffix_or_source: str) -> None:
