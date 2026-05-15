@@ -17,6 +17,7 @@
     "secrets",
     "pydantic-ai-adapter",
     "openai-agents-adapter",
+    "claude-agent-sdk-adapter",
     "news-scout"
   ]
 }
