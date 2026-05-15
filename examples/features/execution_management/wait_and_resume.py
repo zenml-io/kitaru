@@ -19,7 +19,6 @@ from pydantic import BaseModel
 
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.runtime import _get_current_execution_id
 
 
 class ReleaseDetails(BaseModel):
@@ -46,7 +45,7 @@ def wait_for_approval_flow(topic: str) -> str:
     """Gate publication behind a durable human-approval wait."""
     draft = draft_release_note(topic)
 
-    exec_id = _get_current_execution_id()
+    exec_id = kitaru.current_execution_id()
     print("\nTo approve remotely, run in another terminal:")
     print(f"  kitaru executions input {exec_id} --value true")
     print(f"  kitaru executions resume {exec_id}")

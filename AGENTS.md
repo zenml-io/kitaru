@@ -195,3 +195,5 @@ Runs on manual dispatch, push to `main` (production deploy), and PRs touching `s
 ## Security & Configuration Notes
 
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.
+
+Do not commit RepoPrompt/orchestration scratch documents such as plans, reviews, handoffs, or prompt exports. In particular, do not add `docs/plans/*.md`, `docs/reviews/*.md`, `docs/investigations/*.md`, `prompt-exports/*.md`, or ad-hoc handoff Markdown files unless the user explicitly asks for that artifact to be part of the repository history.
