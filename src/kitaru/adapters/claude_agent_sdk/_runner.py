@@ -158,12 +158,12 @@ def _load_transcript(
 
 
 def _resolve_effective_cwd(*, request: ClaudeRunRequest, options: Any | None) -> str:
-    if request.cwd:
-        return request.cwd
-
     options_cwd = _extract_cwd_from_options(options)
     if options_cwd:
         return options_cwd
+
+    if request.cwd:
+        return request.cwd
 
     return str(Path.cwd())
 

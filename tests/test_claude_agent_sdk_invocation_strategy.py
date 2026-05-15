@@ -175,6 +175,32 @@ def test_nested_checkpoint_explicit_opt_in_runs_directly_with_warning(
     )
 
 
+def test_cache_identity_is_deterministic_for_live_option_objects(
+    claude_adapter: types.ModuleType,
+) -> None:
+    class LiveOptions:
+        def __init__(self, *, cwd: str, allowed_tools: list[str]) -> None:
+            self.cwd = cwd
+            self.allowed_tools = allowed_tools
+            self.callback = test_cache_identity_is_deterministic_for_live_option_objects
+
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+
+    first_key = runner._invocation_cache_key(
+        request, options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read"])
+    )
+    second_key = runner._invocation_cache_key(
+        request, options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read"])
+    )
+    changed_key = runner._invocation_cache_key(
+        request, options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read", "Grep"])
+    )
+
+    assert first_key == second_key
+    assert changed_key != first_key
+
+
 def test_options_manifest_redacts_sequence_pairs(
     claude_adapter: types.ModuleType,
 ) -> None:
@@ -202,6 +228,31 @@ def test_options_manifest_redacts_sequence_pairs(
         ["User-Agent", "kitaru-test"],
     ]
     assert options["env"] == [["COOKIE", "[REDACTED]"], ["PATH", "/usr/bin"]]
+
+
+def test_options_manifest_redacts_name_value_secret_dicts(
+    claude_adapter: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._serialization"
+    )
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+
+    manifest = serialization.redacted_options_manifest(
+        {
+            "env": [
+                {"name": "ANTHROPIC_API_KEY", "value": "secret"},
+                {"name": "PATH", "value": "/usr/bin"},
+            ]
+        },
+        request,
+    )
+
+    options = cast(dict[str, Any], manifest["options"])
+    assert options["env"] == [
+        {"name": "ANTHROPIC_API_KEY", "value": "[REDACTED]"},
+        {"name": "PATH", "value": "/usr/bin"},
+    ]
 
 
 def test_runner_invocation_extracts_result_and_artifact_names(
@@ -278,6 +329,54 @@ def test_artifact_capture_failure_is_non_fatal_by_default(
     assert failures[0]["exception_type"] == "RuntimeError"
 
 
+def test_options_manifest_build_failure_is_non_fatal_by_default(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HostileOptions(dict[str, object]):
+        def items(self):
+            raise RuntimeError("manifest build failed")
+
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options=HostileOptions(),
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert result.options_manifest_artifact_name is None
+    assert any("options_manifest artifact" in warning for warning in result.warnings)
+    failures = cast(list[dict[str, str]], result.metadata["capture_failures"])
+    assert failures[0]["kind"] == "options_manifest"
+    assert failures[0]["operation"] == "build_artifact_payload"
+    assert failures[0]["exception_type"] == "RuntimeError"
+
+
+def test_options_manifest_build_failure_can_be_strict_after_success(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HostileOptions(dict[str, object]):
+        def items(self):
+            raise RuntimeError("manifest build failed")
+
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options=HostileOptions(),
+        capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="artifact capture failed"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+
 def test_artifact_capture_failure_can_be_strict(
     claude_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -295,6 +394,32 @@ def test_artifact_capture_failure_can_be_strict(
     )
 
     with pytest.raises(KitaruRuntimeError, match="artifact capture failed"):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+
+def test_failed_invocation_manifest_build_failure_preserves_sdk_error(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HostileOptions(dict[str, object]):
+        def items(self):
+            raise RuntimeError("manifest build failed")
+
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    result_message = fake_sdk.__dict__["ResultMessage"]
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [
+        result_message(is_error=True, result="permission denied")
+    ]
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options=HostileOptions(),
+        capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
+    )
+
+    with pytest.raises(RuntimeError, match="permission denied"):
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
 
 
@@ -630,6 +755,39 @@ def test_transcript_lookup_uses_static_options_cwd_when_request_cwd_missing(
         options=SimpleNamespace(cwd=str(options_cwd)),
     )
     result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.transcript_path == str(transcript_file)
+
+
+def test_transcript_lookup_prefers_options_factory_cwd_over_request_cwd(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _patch_direct_execution_persistence(monkeypatch)
+
+    request_cwd = tmp_path / "request-cwd"
+    request_cwd.mkdir()
+    factory_cwd = tmp_path / "factory-cwd"
+    factory_cwd.mkdir()
+    encoded_cwd = "".join(
+        char if char.isalnum() else "-" for char in str(factory_cwd.resolve())
+    )
+    transcript_dir = tmp_path / ".claude" / "projects" / encoded_cwd
+    transcript_dir.mkdir(parents=True)
+    transcript_file = transcript_dir / "session-123.jsonl"
+    transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
+
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options_factory=lambda request: {"cwd": str(factory_cwd)},
+    )
+    result = runner.run_sync(
+        claude_adapter.ClaudeRunRequest.start("hello", cwd=str(request_cwd))
+    )
 
     assert result.transcript_path == str(transcript_file)
 

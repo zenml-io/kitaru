@@ -2,7 +2,8 @@
 
 import dataclasses
 import hashlib
-from collections.abc import Callable, Mapping, Sequence
+import json
+from collections.abc import Callable, Mapping, Sequence, Set
 from typing import Any
 
 from pydantic_core import to_jsonable_python
@@ -20,6 +21,7 @@ _SECRET_FRAGMENTS = (
     "anthropic",
     "openai",
 )
+_PRIMITIVE_TYPES = str | int | float | bool
 
 
 def _to_jsonable_or_fallback(
@@ -45,15 +47,20 @@ def to_json_safe(value: Any) -> Any:
 
 
 def to_cache_identity(value: Any) -> Any:
-    """Best-effort stable identity for synthetic checkpoint cache keys."""
-    return _to_jsonable_or_fallback(
-        value,
-        on_error=lambda original, _exc: {
-            "python_type": f"{type(original).__module__}.{type(original).__qualname__}",
-            "name": getattr(original, "name", None),
-            "serialization_error": "cache_identity_serialization_failed",
-        },
-    )
+    """Best-effort stable identity for synthetic checkpoint cache keys.
+
+    Live Claude SDK option objects can contain process-local Python objects. This
+    helper records their visible configuration shape without falling back to
+    object reprs, which often contain memory addresses and would make cache keys
+    change across equivalent fresh objects.
+    """
+    try:
+        return _cache_identity(value, seen=set())
+    except Exception as exc:
+        return {
+            "python_type": _python_type(value),
+            "cache_identity_error": type(exc).__name__,
+        }
 
 
 def redacted_options_manifest(
@@ -82,16 +89,113 @@ def redacted_options_manifest(
     }
 
 
+def _cache_identity(value: Any, *, seen: set[int]) -> Any:
+    if value is None or isinstance(value, _PRIMITIVE_TYPES):
+        return value
+    if callable(value):
+        return _callable_manifest(value)
+
+    value_id = id(value)
+    if value_id in seen:
+        return {"python_type": _python_type(value), "cycle": True}
+    seen.add(value_id)
+    try:
+        if isinstance(value, Mapping):
+            return {
+                str(key): _cache_identity(nested, seen=seen)
+                for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return {
+                "python_type": _python_type(value),
+                "fields": {
+                    field.name: _cache_identity(getattr(value, field.name), seen=seen)
+                    for field in dataclasses.fields(value)
+                    if not field.name.startswith("_")
+                },
+            }
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return {
+                    "python_type": _python_type(value),
+                    "fields": _cache_identity(model_dump(mode="python"), seen=seen),
+                }
+            except Exception as exc:
+                return {
+                    "python_type": _python_type(value),
+                    "model_dump_error": type(exc).__name__,
+                }
+        if isinstance(value, Set) and not isinstance(value, str | bytes | bytearray):
+            normalized_items = [_cache_identity(item, seen=seen) for item in value]
+            return sorted(normalized_items, key=_stable_json_sort_key)
+        if isinstance(value, Sequence) and not isinstance(
+            value, str | bytes | bytearray
+        ):
+            return [_cache_identity(item, seen=seen) for item in value]
+
+        fields = _public_object_fields(value, seen=seen)
+        if fields:
+            return {"python_type": _python_type(value), "fields": fields}
+        return {"python_type": _python_type(value)}
+    finally:
+        seen.remove(value_id)
+
+
+def _public_object_fields(value: Any, *, seen: set[int]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    instance_dict = getattr(value, "__dict__", None)
+    if isinstance(instance_dict, Mapping):
+        for key, nested in sorted(instance_dict.items(), key=lambda item: str(item[0])):
+            key_str = str(key)
+            if not key_str.startswith("_"):
+                fields[key_str] = _cache_identity(nested, seen=seen)
+
+    for slot_name in _public_slot_names(value):
+        if slot_name in fields:
+            continue
+        try:
+            slot_value = getattr(value, slot_name)
+        except AttributeError:
+            continue
+        fields[slot_name] = _cache_identity(slot_value, seen=seen)
+
+    server_name = getattr(value, "name", None)
+    if "name" not in fields and isinstance(server_name, _PRIMITIVE_TYPES):
+        fields["name"] = server_name
+    return fields
+
+
+def _public_slot_names(value: Any) -> list[str]:
+    slot_names: list[str] = []
+    for cls in type(value).__mro__:
+        slots = getattr(cls, "__slots__", ())
+        candidates = [slots] if isinstance(slots, str) else list(slots)
+        for candidate in candidates:
+            if isinstance(candidate, str) and not candidate.startswith("_"):
+                slot_names.append(candidate)
+    return sorted(set(slot_names))
+
+
+def _stable_json_sort_key(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) -> Any:
     if redact and key_hint is not None and _is_secret_key(key_hint):
         return "[REDACTED]"
-    if value is None or isinstance(value, str | int | float | bool):
+    if value is None or isinstance(value, _PRIMITIVE_TYPES):
         return value
     if callable(value):
         return _callable_manifest(value)
     if isinstance(value, Mapping):
+        redact_name_value = redact and _is_secret_name_value_mapping(value)
         return {
-            str(key): _manifest_value(nested, redact=redact, key_hint=str(key))
+            str(key): (
+                "[REDACTED]"
+                if redact_name_value and str(key).lower() == "value"
+                else _manifest_value(nested, redact=redact, key_hint=str(key))
+            )
             for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
         }
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -132,6 +236,23 @@ def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) ->
     if server_name is not None:
         return {"python_type": _python_type(value), "name": server_name}
     return {"python_type": _python_type(value)}
+
+
+def _is_secret_name_value_mapping(value: Mapping[Any, Any]) -> bool:
+    name_value = _case_insensitive_mapping_get(value, "name")
+    has_value = _case_insensitive_mapping_get(value, "value") is not _MISSING
+    return has_value and name_value is not _MISSING and _is_secret_key(str(name_value))
+
+
+_MISSING = object()
+
+
+def _case_insensitive_mapping_get(value: Mapping[Any, Any], key: str) -> Any:
+    lowered_key = key.lower()
+    for candidate_key, candidate_value in value.items():
+        if str(candidate_key).lower() == lowered_key:
+            return candidate_value
+    return _MISSING
 
 
 def _is_key_value_sequence(value: Sequence[Any]) -> bool:

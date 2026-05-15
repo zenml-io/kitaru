@@ -298,10 +298,11 @@ runner = KitaruClaudeRunner(
 Treat messages and transcripts as conversation data. They may contain prompts,
 retrieved document snippets, tool arguments, command output, and model output.
 The options manifest is redacted by default, including common secret-bearing
-mapping keys and key/value sequence pairs such as
-`[("Authorization", "Bearer ...")]`, `[("x-api-key", "...")]`, or cookie/env
-pairs. Message/transcript artifacts are not a secret store; turn them off when
-the conversation itself is sensitive.
+mapping keys, key/value sequence pairs such as
+`[("Authorization", "Bearer ...")]`, `[("x-api-key", "...")]`, cookie/env
+pairs, and env-list entries shaped like
+`{"name": "ANTHROPIC_API_KEY", "value": "..."}`. Message/transcript artifacts
+are not a secret store; turn them off when the conversation itself is sensitive.
 
 Artifact, event-log, run-summary, and metadata persistence are best-effort by
 default. That matters for replay safety: if Claude has already completed and a

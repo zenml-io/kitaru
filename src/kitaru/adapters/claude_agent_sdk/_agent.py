@@ -42,7 +42,7 @@ _DIRECT_EXECUTION_WARNING = (
     "edits, or API cost."
 )
 
-ArtifactCaptureOperation = Literal["save_artifact"]
+ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
 
 
 @dataclass(frozen=True)
@@ -267,8 +267,8 @@ class KitaruClaudeRunner:
                 self._record_failed_invocation(
                     tracker,
                     error=error,
-                    manifest=(
-                        get_manifest() if self._capture.save_options_manifest else None
+                    manifest_factory=(
+                        get_manifest if self._capture.save_options_manifest else None
                     ),
                     request=request,
                     duration_ms=elapsed_ms(started_at),
@@ -378,7 +378,7 @@ class KitaruClaudeRunner:
             key: ArtifactKind,
             *,
             enabled: bool,
-            payload_value: Any,
+            payload_factory: Callable[[], Any],
             type: str,
         ) -> None:
             if not enabled:
@@ -386,6 +386,20 @@ class KitaruClaudeRunner:
             artifact_name = tracker.artifact_name(key)
             if not is_inside_checkpoint():
                 artifacts[key] = artifact_name
+                return
+            try:
+                payload_value = payload_factory()
+            except Exception as error:
+                failure = self._capture_failure(
+                    operation="build_artifact_payload",
+                    kind=key,
+                    artifact_name=artifact_name,
+                    error=error,
+                )
+                if self._capture.fail_on_artifact_capture_error:
+                    raise self._artifact_capture_error(failure) from error
+                failures.append(failure)
+                warnings.append(failure.warning())
                 return
             try:
                 self._save_artifact(artifact_name, payload_value, type=type)
@@ -410,7 +424,7 @@ class KitaruClaudeRunner:
         _maybe_register_artifact(
             "messages",
             enabled=self._capture.save_messages,
-            payload_value=messages_payload,
+            payload_factory=lambda: messages_payload,
             type="context",
         )
         _maybe_register_artifact(
@@ -419,27 +433,26 @@ class KitaruClaudeRunner:
                 self._capture.save_transcript_file
                 and payload.transcript_payload is not None
             ),
-            payload_value=payload.transcript_payload,
+            payload_factory=lambda: payload.transcript_payload,
             type="context",
         )
-        if self._capture.save_options_manifest:
-            _maybe_register_artifact(
-                "options_manifest",
-                enabled=True,
-                payload_value=get_manifest(),
-                type="context",
-            )
+        _maybe_register_artifact(
+            "options_manifest",
+            enabled=self._capture.save_options_manifest,
+            payload_factory=get_manifest,
+            type="context",
+        )
         _maybe_register_artifact(
             "output",
             enabled=self._capture.save_final_output,
-            payload_value=payload.final_text,
+            payload_factory=lambda: payload.final_text,
             type="response",
         )
         _maybe_register_artifact(
             "usage",
             enabled=self._capture.save_usage
             and (payload.usage is not None or payload.model_usage is not None),
-            payload_value={
+            payload_factory=lambda: {
                 "usage": payload.usage,
                 "model_usage": payload.model_usage,
                 "cost_usd": payload.cost_usd,
@@ -454,21 +467,21 @@ class KitaruClaudeRunner:
         tracker: EventTracker,
         *,
         error: BaseException,
-        manifest: dict[str, Any] | None,
+        manifest_factory: Callable[[], dict[str, Any]] | None,
         request: ClaudeRunRequest,
         duration_ms: float,
     ) -> None:
         artifacts: dict[str, str] = {}
         capture_failures: list[ArtifactCaptureFailure] = []
         warnings: list[str] = []
-        if self._capture.save_options_manifest:
+        if self._capture.save_options_manifest and manifest_factory is not None:
             artifact_name = tracker.artifact_name("options_manifest")
             if is_inside_checkpoint():
                 try:
-                    self._save_artifact(artifact_name, manifest, type="context")
+                    manifest = manifest_factory()
                 except Exception as capture_error:
                     failure = self._capture_failure(
-                        operation="save_artifact",
+                        operation="build_artifact_payload",
                         kind="options_manifest",
                         artifact_name=artifact_name,
                         error=capture_error,
@@ -476,7 +489,19 @@ class KitaruClaudeRunner:
                     capture_failures.append(failure)
                     warnings.append(failure.warning())
                 else:
-                    artifacts["options_manifest"] = artifact_name
+                    try:
+                        self._save_artifact(artifact_name, manifest, type="context")
+                    except Exception as capture_error:
+                        failure = self._capture_failure(
+                            operation="save_artifact",
+                            kind="options_manifest",
+                            artifact_name=artifact_name,
+                            error=capture_error,
+                        )
+                        capture_failures.append(failure)
+                        warnings.append(failure.warning())
+                    else:
+                        artifacts["options_manifest"] = artifact_name
             else:
                 artifacts["options_manifest"] = artifact_name
         if self._capture.emit_events:
