@@ -28,9 +28,6 @@ class TestPublicExports:
     def test_llm_exists(self) -> None:
         assert hasattr(kitaru, "llm")
 
-    def test_memory_exists(self) -> None:
-        assert hasattr(kitaru, "memory")
-
     def test_save_exists(self) -> None:
         assert hasattr(kitaru, "save")
 
@@ -57,6 +54,9 @@ class TestPublicExports:
 
     def test_current_stack_exists(self) -> None:
         assert hasattr(kitaru, "current_stack")
+
+    def test_current_execution_id_exists(self) -> None:
+        assert hasattr(kitaru, "current_execution_id")
 
     def test_use_stack_exists(self) -> None:
         assert hasattr(kitaru, "use_stack")
@@ -89,7 +89,6 @@ class TestPublicExports:
             "KitaruExecutionError",
             "KitaruFeatureNotAvailableError",
             "KitaruLogRetrievalError",
-            "KitaruMemoryArtifactUnavailableError",
             "KitaruRuntimeError",
             "KitaruStackIntegrationDependencyError",
             "KitaruStateError",
@@ -104,6 +103,7 @@ class TestPublicExports:
             "connect",
             "create_secret",
             "create_stack",
+            "current_execution_id",
             "current_stack",
             "delete_secret",
             "delete_stack",
@@ -111,7 +111,6 @@ class TestPublicExports:
             "get_secret",
             "list_stacks",
             "llm",
-            "memory",
             "load",
             "log",
             "save",
@@ -357,4 +356,3 @@ class TestPlaceholderBehavior:
         client = kitaru.KitaruClient()
         assert hasattr(client, "executions")
         assert hasattr(client, "artifacts")
-        assert hasattr(client, "memories")

@@ -55,7 +55,6 @@ durable.
 - **Durable execution:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off without re-running expensive work
 - **Replay from failure:** Re-run only the failed part of a flow by replaying from a checkpoint instead of starting from scratch
 - **Wait and resume:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents pause for a human, another system, or later input; after the polling timeout, compute is released and the run resumes when input lands
-- **Durable memory:** [`kitaru.memory`](/guides/memory) stores scoped, versioned key-value state you can seed, inspect, compact, and reuse across executions
 - **Artifact lineage:** Every checkpoint output is written to your object store as a typed, versioned artifact — step through runs, diff outputs across runs, and trace a bad final output back to the exact step that produced it
 - **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel executions from code or CLI
 - **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and token/latency logging
@@ -70,86 +69,81 @@ durable.
   <Card
     title="Installation"
     description="Install Kitaru with uv or pip"
-    href="/getting-started/installation"
+    href="/getting-started/installation/"
   />
   <Card
     title="Quickstart"
     description="Run a tiny flow end to end"
-    href="/getting-started/quickstart"
+    href="/getting-started/quickstart/"
   />
   <Card
     title="Examples"
     description="Browse runnable workflows grouped by goal"
-    href="/getting-started/examples"
+    href="/getting-started/examples/"
   />
   <Card
     title="Harness, Runtime, Platform"
     description="Where Kitaru fits in an agent stack, and where it doesn't"
-    href="/concepts/harness-runtime-platform"
+    href="/concepts/harness-runtime-platform/"
   />
   <Card
     title="How It Works"
     description="Server, runner, execution targets, and what lives where in local dev vs production"
-    href="/concepts/how-it-works"
+    href="/concepts/how-it-works/"
   />
   <Card
     title="Core Concepts"
     description="Flows, checkpoints, and the execution model"
-    href="/concepts"
+    href="/concepts/"
   />
   <Card
     title="Execution Management"
     description="Inspect runs, replay, retry, resume, and fetch logs"
-    href="/guides/execution-management"
-  />
-  <Card
-    title="Memory"
-    description="Seed and inspect durable, versioned key-value state across Python, CLI, and MCP"
-    href="/guides/memory"
+    href="/guides/execution-management/"
   />
   <Card
     title="Wait, Input, and Resume"
     description="Pause flows for external input and continue the same execution"
-    href="/guides/wait-and-resume"
+    href="/guides/wait-and-resume/"
   />
   <Card
     title="Tracked LLM Calls"
     description="Use kitaru.llm() with aliases, secrets, and captured artifacts"
-    href="/guides/llm-calls"
+    href="/guides/llm-calls/"
   />
   <Card
     title="Secrets + Model Registration"
     description="Store provider credentials, register a model alias, and use kitaru.llm()"
-    href="/guides/secrets-and-model-registration"
+    href="/guides/secrets-and-model-registration/"
   />
   <Card
     title="Configuration"
     description="Set runtime defaults and understand override precedence"
-    href="/guides/configuration"
+    href="/guides/configuration/"
   />
   <Card
     title="Stacks"
     description="Create, inspect, switch, and clean up local and remote stacks across Kubernetes, AWS, GCP, and Azure"
-    href="/stacks"
+    href="/stacks/"
   />
   <Card
     title="MCP Server"
     description="Query and manage executions via MCP tools"
-    href="/agent-native/mcp-server"
+    href="/agent-native/mcp-server/"
   />
   <Card
     title="Claude Code Skills"
     description="Install the Kitaru scoping and authoring skills"
-    href="/agent-native/claude-code-skill"
+    href="/agent-native/claude-code-skill/"
   />
   <Card
     title="CLI Reference"
     description="Browse the generated command reference"
-    href="/cli"
+    href="/cli/"
   />
   <Card
     title="Blog"
     description="Read essays on durable execution, long-running agents, and Kitaru's design"
-    href="https://kitaru.ai/blog"
+    href="https://kitaru.ai/blog/"
   />
 </Cards>

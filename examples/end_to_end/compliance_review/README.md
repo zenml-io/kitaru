@@ -4,13 +4,12 @@ A Claude agent audits a fictional company's documents against a set of standards
 
 A real compliance audit calls Claude many times, uses tools to read policy documents, runs for minutes, and costs real money per turn. Without durability, a crash halfway through means you restart Anthropic billing from zero, re-read every document, and re-derive every finding you already had. With Kitaru, each meaningful agent turn becomes a checkpoint: the transcript is persisted, the result is cached, and a replay from a later failure reuses everything Claude has already figured out.
 
-This example walks through that idea in four stages, each adding one durable-execution capability on top of the last.
+This example walks through that idea in three runnable stages, each adding one durable-execution capability on top of the last.
 
 ## What you'll learn
 
 - **Stage 1** — wrap one Claude turn in one Kitaru checkpoint so a crash doesn't burn the turn. This is the minimum viable durable agent.
 - **Stage 2** — run four sequential domain checkpoints plus a synthesis checkpoint, and replay from a single failed step instead of re-running the whole audit.
-- **Stage 3** — give the flow a memory of its own prior findings so a weekly re-audit can tell you whether the gaps you flagged last week are still there.
 - **Stage 4** — turn the audit into a durable conversation. `kitaru.wait()` pauses the flow between Claude turns; `resume=session_id` keeps the model's full context across the gap, even if the process died in between.
 
 Each stage builds on the previous one. The Claude boundary is the same from Stage 1 onwards: every Claude-running checkpoint returns a `ClaudeAgentResult` Pydantic model, and every later stage reuses that shape rather than inventing a new one.
@@ -33,7 +32,6 @@ Pick a stage and run it:
 |---|---|---|
 | 1 | `stage_1_single_turn.py` | One Claude turn as one checkpoint. |
 | 2 | `stage_2_multi_domain.py` | Four sequential domain checkpoints + saved report artifact, with partial replay. |
-| 3 | `stage_3_memory.py` | HR + IT audit with flow-scoped memory across runs. |
 | 4 | `stage_4_conversational.py` | Wait/resume conversational loop over a single Claude session. |
 
 ```bash
@@ -83,31 +81,6 @@ kitaru executions replay <exec-id> --from check_insurance
 ```
 
 Everything before that checkpoint returns its cached `ClaudeAgentResult`; everything at or after re-runs. For a 5-turn audit that costs a few cents per turn, this is the difference between a cheap retry and a full restart.
-
-## Stage 3 — memory across runs
-
-The audit should get smarter each time it runs. The second run shouldn't just re-check the same gaps in isolation; it should know what the first run found and ask "is that still true?"
-
-Stage 3 uses **flow-scoped memory**: the `audit_with_memory` flow has its own memory keyed by flow id, not a shared namespace. The flow body reads prior findings before dispatching checkpoints, passes them in as arguments, and writes the fresh findings back after the checkpoints complete. A final change-report checkpoint compares current to prior.
-
-By default those reads are lenient: if an older memory entry exists but its backing artifact store is unreachable from the current runtime, Kitaru warns and Stage 3 treats it like \"no prior finding\" so the audit can continue. If you are driving the flow programmatically, `strict_memory=True` switches that to fail-fast behavior.
-
-Inspect and seed memory from the CLI:
-
-```bash
-# Find this flow's scope id from its latest execution.
-kitaru executions list --flow audit_with_memory --limit 1 --output json
-
-# List, seed, or compact entries for that scope.
-kitaru memory list --scope <flow-scope-id> --scope-type flow
-kitaru memory set findings/it_security \
-  '{"status":"known_gap","summary":"Data retention schedule missing"}' \
-  --scope <flow-scope-id> --scope-type flow
-kitaru memory compact --scope <flow-scope-id> --scope-type flow \
-  --key findings/it_security --source-mode history
-```
-
-The checkpoints themselves never touch `kitaru.memory` — memory is flow-body business, which keeps the checkpoints pure and replayable.
 
 ## Stage 4 — durable conversation
 

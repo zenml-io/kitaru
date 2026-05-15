@@ -1,13 +1,16 @@
 import { source } from '@/lib/source';
+import { canonicalDocsUrl, isRetiredRedirectedDocsPath } from '@/lib/seo';
 import type { MetadataRoute } from 'next';
 
 export const revalidate = false;
 
-const baseUrl = 'https://kitaru.ai';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  return source.getPages().map((page) => ({
-    url: `${baseUrl}/docs${page.url}`,
-    lastModified: new Date(),
-  }));
+  return source
+    .getPages()
+    .filter((page) => !isRetiredRedirectedDocsPath(page.url))
+    .map((page) => ({
+      url: canonicalDocsUrl(page.url),
+      lastModified: new Date(),
+    }));
 }

@@ -16,19 +16,6 @@ from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.login.credentials_store import get_credentials_store
 
-from kitaru._interface_memory import (
-    compact_memory_payload,
-    compaction_log_memory_payload,
-    delete_memory_payload,
-    get_memory_payload,
-    history_memory_payload,
-    list_memory_payload,
-    purge_memory_payload,
-    purge_scope_memory_payload,
-    reindex_memory_payload,
-    scopes_memory_payload,
-    set_memory_payload,
-)
 from kitaru._interface_secrets import resolve_secret_exact as _resolve_secret_exact
 from kitaru._local_server import (
     start_or_connect_local_server,
@@ -82,17 +69,6 @@ _ORIGINAL_LEGACY_ATTRS: dict[str, Any] = {
     "register_model_alias": register_model_alias,
     "list_model_aliases": list_model_aliases,
     "_resolve_secret_exact": _resolve_secret_exact,
-    "scopes_memory_payload": scopes_memory_payload,
-    "list_memory_payload": list_memory_payload,
-    "get_memory_payload": get_memory_payload,
-    "set_memory_payload": set_memory_payload,
-    "delete_memory_payload": delete_memory_payload,
-    "purge_memory_payload": purge_memory_payload,
-    "purge_scope_memory_payload": purge_scope_memory_payload,
-    "reindex_memory_payload": reindex_memory_payload,
-    "compact_memory_payload": compact_memory_payload,
-    "compaction_log_memory_payload": compaction_log_memory_payload,
-    "history_memory_payload": history_memory_payload,
 }
 
 
@@ -261,72 +237,6 @@ class CLIDependencies:
     def resolve_secret_exact(self, *args: Any, **kwargs: Any) -> Any:
         """Resolve one secret by exact name or exact ID."""
         return self._legacy_attr("_resolve_secret_exact", _resolve_secret_exact)(
-            *args,
-            **kwargs,
-        )
-
-    def scopes_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("scopes_memory_payload", scopes_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def list_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("list_memory_payload", list_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def get_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("get_memory_payload", get_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def set_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("set_memory_payload", set_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def delete_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("delete_memory_payload", delete_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def purge_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("purge_memory_payload", purge_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def purge_scope_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr(
-            "purge_scope_memory_payload",
-            purge_scope_memory_payload,
-        )(*args, **kwargs)
-
-    def reindex_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("reindex_memory_payload", reindex_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def compact_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("compact_memory_payload", compact_memory_payload)(
-            *args,
-            **kwargs,
-        )
-
-    def compaction_log_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr(
-            "compaction_log_memory_payload",
-            compaction_log_memory_payload,
-        )(*args, **kwargs)
-
-    def history_memory_payload(self, *args: Any, **kwargs: Any) -> Any:
-        return self._legacy_attr("history_memory_payload", history_memory_payload)(
             *args,
             **kwargs,
         )

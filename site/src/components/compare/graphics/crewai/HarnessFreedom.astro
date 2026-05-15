@@ -1,0 +1,125 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">CrewAI · adopt the abstractions</span>
+      <span class="panel-sub">Model agents as Agents, Tasks, Crews, and Flows</span>
+    </div>
+    <pre class="code"><span class="kw">from</span> <span class="mod">crewai</span> <span class="kw">import</span> Agent, Task, Crew
+
+researcher = <span class="cls">Agent</span>(role=<span class="str">"Researcher"</span>, ...)
+writer     = <span class="cls">Agent</span>(role=<span class="str">"Writer"</span>, ...)
+
+research = <span class="cls">Task</span>(agent=researcher, ...)
+draft    = <span class="cls">Task</span>(agent=writer, ...)
+
+crew = <span class="cls">Crew</span>(agents=[researcher, writer],
+            tasks=[research, draft])
+crew.<span class="fn">kickoff</span>(inputs=&#123;<span class="str">"topic"</span>: <span class="str">"agents"</span>&#125;)</pre>
+    <div class="foot">Your agent code is built inside CrewAI's model.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · wrap whatever you already use</span>
+      <span class="panel-sub">@flow + @checkpoint over ordinary Python</span>
+    </div>
+    <pre class="code"><span class="hl"><span class="cmt"># A CrewAI crew inside a Kitaru checkpoint</span></span>
+<span class="hl"><span class="dec">@checkpoint</span></span>
+<span class="kw">def</span> <span class="fn">run_crew</span>(topic: <span class="cls">str</span>) -&gt; <span class="cls">str</span>:
+    <span class="kw">return</span> crew.<span class="fn">kickoff</span>(inputs=&#123;<span class="str">"topic"</span>: topic&#125;).raw
+
+<span class="hl"><span class="cmt"># A PydanticAI agent inside a Kitaru checkpoint</span></span>
+<span class="hl"><span class="dec">@checkpoint</span></span>
+<span class="kw">def</span> <span class="fn">critique</span>(text: <span class="cls">str</span>) -&gt; <span class="cls">str</span>:
+    <span class="kw">return</span> pydantic_agent.<span class="fn">run_sync</span>(text).output
+
+<span class="hl"><span class="cmt"># An OpenAI Agents SDK call inside a Kitaru checkpoint</span></span>
+<span class="hl"><span class="dec">@checkpoint</span></span>
+<span class="kw">def</span> <span class="fn">decide</span>(text: <span class="cls">str</span>) -&gt; <span class="cls">str</span>:
+    <span class="kw">return</span> Runner.<span class="fn">run_sync</span>(agent, text).final_output</pre>
+    <div class="foot foot--accent">One durable runtime under whatever harness you picked.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 12px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .code {
+    flex: 1;
+    margin: 0 0 10px;
+    padding: 14px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-bg);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--color-primary);
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+  .panel--kitaru .code {
+    border-color: var(--color-accent);
+    background: var(--color-surface);
+  }
+  .kw  { color: var(--color-accent); font-weight: 600; }
+  .dec { color: var(--color-accent-deep); font-weight: 600; }
+  .fn  { color: var(--color-primary); font-weight: 600; }
+  .cls { color: var(--color-accent-deep); }
+  .mod { color: var(--color-secondary); }
+  .str { color: var(--color-secondary); }
+  .cmt { color: var(--color-muted); font-style: italic; }
+  .hl  { display: inline-block; }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+    .code { font-size: 10.5px; }
+  }
+</style>

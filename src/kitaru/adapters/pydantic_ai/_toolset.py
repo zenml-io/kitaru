@@ -117,6 +117,22 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             return self
         return replace(self, wrapped=new_wrapped)
 
+    def _should_use_tool_checkpoint(
+        self,
+        *,
+        name: str,
+        ctx: RunContext[AgentDepsT],
+        tool: ToolsetTool[AgentDepsT],
+        checkpoint_config: CheckpointConfig | None,
+    ) -> bool:
+        """Return whether this tool call should open an adapter checkpoint."""
+        del name, ctx, tool
+        return (
+            checkpoint_config is not None
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        )
+
     async def call_tool(
         self,
         name: str,
@@ -135,11 +151,13 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             default=self.tool_checkpoint_config,
             by_name=self.tool_checkpoint_config_by_name,
         )
-        if (
-            checkpoint_config is not None
-            and is_inside_flow()
-            and not is_inside_checkpoint()
+        if self._should_use_tool_checkpoint(
+            name=name,
+            ctx=ctx,
+            tool=tool,
+            checkpoint_config=checkpoint_config,
         ):
+            assert checkpoint_config is not None
 
             async def _in_checkpoint() -> Any:
                 return await self._call_tool_tracked(
@@ -476,6 +494,9 @@ def kitaruify_toolset(
         )
 
     try:
+        from ._mcp_compat import ensure_pydantic_ai_mcp_import_compat
+
+        ensure_pydantic_ai_mcp_import_compat()
         from pydantic_ai.mcp import MCPServer
     except ImportError:  # pragma: no cover
         MCPServer = None

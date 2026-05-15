@@ -1,7 +1,7 @@
 """Integration test for the wait/resume example workflow.
 
 This test drives the same flow and APIs programmatically so CI can validate
-the full wait -> input -> optional resume -> result sequence without human
+the full wait -> input -> result sequence without human
 interaction.
 
 The example has two wait points:
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import threading
 import time
-from contextlib import suppress
 
 import pytest
 from examples.features.execution_management.wait_and_resume import (
@@ -21,7 +20,7 @@ from examples.features.execution_management.wait_and_resume import (
 )
 
 from kitaru.client import KitaruClient
-from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
+from kitaru.errors import KitaruFeatureNotAvailableError
 from kitaru.wait import _resolve_zenml_wait
 
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
@@ -70,7 +69,7 @@ def _wait_for_pending_wait(
 
 
 def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
-    """Verify wait input resumes the same execution and produces output."""
+    """Verify wait input lets the same active execution produce output."""
     try:
         _resolve_zenml_wait()
     except KitaruFeatureNotAvailableError:
@@ -102,9 +101,6 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
             value=True,
         )
 
-        with suppress(KitaruStateError):
-            client.executions.resume(exec_id)
-
         # --- Wait 2: structured input ("release_details") ---
         exec_id = _wait_for_pending_wait(client=client, topic=topic, state=state)
 
@@ -115,9 +111,6 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
             wait=pending[0].wait_id,
             value={"notes": "Bug fixes", "major_version": 2},
         )
-
-        with suppress(KitaruStateError):
-            client.executions.resume(exec_id)
     finally:
         starter.join(timeout=60.0)
 

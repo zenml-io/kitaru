@@ -3,11 +3,10 @@
 We don't run the agent itself here — PydanticAI's granular-mode dispatch
 path is already exercised in ``test_phase17_pydantic_ai_adapter.py``.
 These tests focus on the example-specific wiring: that the module imports
-cleanly under the expected env vars, that ``seed_profile`` writes to the
-configured namespace scope, and that ``SCOUT_IMAGE`` carries the right
-non-secret env + pinned requirements (provider API keys travel via
-``secret_environment_from`` on remote stacks only, not via
-``ImageSettings.environment``).
+cleanly under the expected env vars, that interests are CLI/default driven,
+and that ``SCOUT_IMAGE`` carries the right non-secret env + pinned
+requirements (provider API keys travel via ``secret_environment_from`` on
+remote stacks only, not via ``ImageSettings.environment``).
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -28,13 +28,7 @@ _EXAMPLE_DIR = (
 
 
 def _load_scout_from_path() -> ModuleType:
-    """Load ``examples/end_to_end/news_scout/scout.py`` by file path.
-
-    We avoid a bare ``import scout`` because the example directory isn't on
-    the package search path at static-analysis time, which trips the type
-    checker. Loading by path makes the import explicit to both static tools
-    and the reader.
-    """
+    """Load ``examples/end_to_end/news_scout/scout.py`` by file path."""
     spec = importlib.util.spec_from_file_location("scout", _EXAMPLE_DIR / "scout.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -47,10 +41,9 @@ def _load_scout_from_path() -> ModuleType:
 def scout_module(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Import examples/end_to_end/news_scout/scout.py with env vars pre-set.
 
-    The module constructs a PydanticAI Agent at import time, which
-    requires an ANTHROPIC_API_KEY in the environment even to initialize.
-    Set dummy keys before import and evict the cached submodules so the
-    fresh env is picked up.
+    The module constructs a PydanticAI Agent at import time, which requires an
+    ANTHROPIC_API_KEY in the environment even to initialize. Set dummy keys
+    before import and evict the cached submodules so the fresh env is picked up.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("XAI_API_KEY", "test-xai-key")
@@ -84,25 +77,75 @@ def test_scout_module_imports_and_wires_the_agent(scout_module: Any) -> None:
     assert scout_module.SCOUT_IMAGE is not None
 
 
-@pytest.mark.usefixtures("primed_zenml")
-def test_seed_profile_writes_namespace_memory(
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("robotics,biotech", ["robotics", "biotech"]),
+        (" robotics, , biotech ", ["robotics", "biotech"]),
+        (" , ", []),
+    ],
+)
+def test_parse_interests_splits_comma_separated_cli_values(
     scout_module: Any,
-    capsys: pytest.CaptureFixture[str],
+    raw: str | None,
+    expected: list[str] | None,
 ) -> None:
-    """``seed_profile`` writes interests to namespace memory and reports them."""
-    from kitaru import memory
+    """The CLI accepts a compact comma-separated interest list."""
+    assert scout_module._parse_interests(raw) == expected
 
-    interests = ["alpha", "beta"]
-    scout_module.seed_profile(interests)
 
-    captured = capsys.readouterr()
-    assert "alpha" in captured.out
-    assert "beta" in captured.out
-    assert "news_scout" in captured.out
+def test_main_uses_default_interests_when_no_cli_override(
+    monkeypatch: pytest.MonkeyPatch,
+    scout_module: Any,
+) -> None:
+    """A plain run should pass the built-in interests into the flow."""
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=None)
+    monkeypatch.setattr(scout_module, "news_scout", fake_flow)
+    monkeypatch.setattr(scout_module, "_image_override_for_active_stack", lambda: None)
 
-    memory.configure(scope="news_scout", scope_type="namespace")
-    stored = memory.get("interests")
-    assert stored == interests
+    assert scout_module.main([]) == 0
+
+    fake_flow.run.assert_called_once_with(interests=scout_module.DEFAULT_INTERESTS)
+
+
+def test_main_uses_cli_interests_without_persisting_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    scout_module: Any,
+) -> None:
+    """CLI interests are per-run arguments, not persisted profile writes."""
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=None)
+    monkeypatch.setattr(scout_module, "news_scout", fake_flow)
+    monkeypatch.setattr(scout_module, "_image_override_for_active_stack", lambda: None)
+
+    assert scout_module.main(["--interests", "robotics, biotech"]) == 0
+
+    fake_flow.run.assert_called_once_with(interests=["robotics", "biotech"])
+
+
+def test_main_attaches_remote_image_override(
+    monkeypatch: pytest.MonkeyPatch,
+    scout_module: Any,
+) -> None:
+    """Remote-stack secret injection still travels through the flow run call."""
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=None)
+    image_override = {"secret_environment_from": ["news-scout-keys"]}
+    monkeypatch.setattr(scout_module, "news_scout", fake_flow)
+    monkeypatch.setattr(
+        scout_module,
+        "_image_override_for_active_stack",
+        lambda: image_override,
+    )
+
+    assert scout_module.main(["--interests", "ai"]) == 0
+
+    fake_flow.run.assert_called_once_with(
+        interests=["ai"],
+        image=image_override,
+    )
 
 
 def test_image_settings_carries_non_secret_env_and_pinned_requirements(
@@ -120,7 +163,7 @@ def test_image_settings_carries_non_secret_env_and_pinned_requirements(
     # Non-secret model overrides are propagated into remote images.
     assert env.get("KITARU_SCOUT_MODEL") == "anthropic:claude-sonnet-4-6"
 
-    # Provider keys MUST NOT be present — refactor moved them to secrets.
+    # Provider keys MUST NOT be present — they travel through secrets.
     assert "ANTHROPIC_API_KEY" not in env
     assert "XAI_API_KEY" not in env
 

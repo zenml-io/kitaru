@@ -13,7 +13,7 @@ export async function getStaticPaths() {
       .filter((p) => p.id !== post.id)
       .slice(0, 2)
       .map((p) => ({
-        href: `/blog/${p.id}`,
+        href: `/blog/${p.id}/`,
         title: p.data.title,
         author: p.data.author,
         readTime: readingTime(p.body ?? ''),

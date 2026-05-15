@@ -11,6 +11,7 @@ on:
       - docs/**
       - scripts/generate_*.py
       - scripts/merge_site.sh
+      - scripts/validate_seo_build.mjs
       - CHANGELOG.md
       - wrangler.toml
   pull_request_target:
@@ -43,7 +44,7 @@ jobs:
       - run: uv run python scripts/generate_changelog_docs.py
 
       # --- Build docs (Node) ---
-      - uses: pnpm/action-setup@903f9c1a6ebcba6cf41d87230be49611ac97822e  # v6.0.3
+      - uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d  # v6.0.5
         with:
           version: 10.33.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
@@ -70,9 +71,15 @@ jobs:
       # --- Merge docs into site ---
       - run: bash scripts/merge_site.sh
 
+      # --- Validate SEO invariants in merged output ---
+      - name: Validate SEO output
+        run: node scripts/validate_seo_build.mjs
+
       # --- Check internal links in built output ---
       - name: Check internal links
-        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2
+        # Keep this SHA in sync with .github/workflows/ci.yml — see the
+        # comment there for why we pin a post-v2.8.0 master commit.
+        uses: lycheeverse/lychee-action@b40e218fdac9481d3c13098d4e1ee56f3b589356  # master @ 2026-05-03
         with:
           args: --offline --root-dir site/dist --no-progress --verbose --index-files
             index.html 'site/dist/**/*.html'
