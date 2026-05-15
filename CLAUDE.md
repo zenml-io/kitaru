@@ -328,4 +328,5 @@ CLI output uses [Rich](https://rich.readthedocs.io/) for styled terminal output 
 - Prefer Pydantic models for data structures
 - Return values from checkpoints must be serializable (prefer Pydantic models or JSON-compatible types)
 - Design docs live in `design/` — this folder is gitignored and must never be committed
+- Never commit RepoPrompt/orchestration scratch Markdown such as plans, reviews, investigations, handoffs, or prompt exports. Keep `docs/plans/*.md`, `docs/reviews/*.md`, `docs/investigations/*.md`, `prompt-exports/*.md`, and ad-hoc handoff files out of repo history unless the user explicitly asks for that artifact to be committed.
 - Follow Google Python style for docstrings
