@@ -16,8 +16,10 @@ from ._tracking import artifact_name, get_current_tracker
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
+    adapter_checkpoint_artifact_refs,
     checkpoint_cache_key,
     elapsed_ms,
+    get_adapter_checkpoint_artifact_refs,
     resolve_tool_checkpoint_config,
     run_async_in_checkpoint,
     safe_step_name,
@@ -93,16 +95,35 @@ def _wrap_function_tool(
             and is_inside_flow()
             and not is_inside_checkpoint()
         ):
+            input_envelope = (
+                _tool_input_envelope(
+                    tool=tool,
+                    tool_call_id=tool_call_id,
+                    input_json=input_json,
+                )
+                if capture.save_input
+                else None
+            )
+            checkpoint_inputs = (
+                {"tool_args": input_envelope} if input_envelope is not None else None
+            )
+            input_artifacts = {"input": "tool_args"} if capture.save_input else {}
+            output_artifacts = {"result": "output"} if capture.save_final_output else {}
 
             async def _in_checkpoint() -> Any:
-                return await _tracked_tool_call(
-                    original_callback,
-                    context,
-                    input_json,
-                    tool=tool,
-                    capture=capture,
-                    tool_call_id=tool_call_id,
-                )
+                with adapter_checkpoint_artifact_refs(
+                    input_artifacts=input_artifacts,
+                    output_artifacts=output_artifacts,
+                ):
+                    return await _tracked_tool_call(
+                        original_callback,
+                        context,
+                        input_json,
+                        tool=tool,
+                        capture=capture,
+                        tool_call_id=tool_call_id,
+                        input_envelope=input_envelope,
+                    )
 
             return await run_async_in_checkpoint(
                 config=with_default_type(checkpoint_config, "tool_call"),
@@ -117,6 +138,7 @@ def _wrap_function_tool(
                         "input_json": input_json,
                     }
                 ),
+                checkpoint_inputs=checkpoint_inputs,
             )
         return await _tracked_tool_call(
             original_callback,
@@ -140,6 +162,7 @@ async def _tracked_tool_call(
     tool: FunctionTool,
     capture: OpenAICapturePolicy,
     tool_call_id: str | None,
+    input_envelope: dict[str, Any] | None = None,
 ) -> Any:
     tracker = get_current_tracker()
     should_track = (
@@ -151,20 +174,19 @@ async def _tracked_tool_call(
     assert tracker is not None
     event_id, event_context = tracker.start_tool_event(tool_call_id=tool_call_id)
     artifacts: dict[str, str] = {}
-    parsed_args = _parse_json(input_json)
+    adapter_refs = get_adapter_checkpoint_artifact_refs()
     if capture.save_input:
-        args_key = artifact_name(event_id, "input")
-        kitaru.save(
-            args_key,
-            {
-                "tool_name": tool.name,
-                "tool_call_id": tool_call_id,
-                "raw_args": input_json,
-                "parsed_args": parsed_args,
-            },
-            type="input",
-        )
-        artifacts["input"] = args_key
+        if adapter_refs is not None and "input" in adapter_refs.input_artifacts:
+            artifacts["input"] = adapter_refs.input_artifacts["input"]
+        else:
+            input_envelope = input_envelope or _tool_input_envelope(
+                tool=tool,
+                tool_call_id=tool_call_id,
+                input_json=input_json,
+            )
+            args_key = artifact_name(event_id, "input")
+            kitaru.save(args_key, input_envelope, type="input")
+            artifacts["input"] = args_key
 
     started_at = time.perf_counter()
     try:
@@ -183,9 +205,12 @@ async def _tracked_tool_call(
         raise
 
     if capture.save_final_output:
-        result_key = artifact_name(event_id, "result")
-        kitaru.save(result_key, to_json_safe(result), type="output")
-        artifacts["result"] = result_key
+        if adapter_refs is not None and "result" in adapter_refs.output_artifacts:
+            artifacts["result"] = adapter_refs.output_artifacts["result"]
+        else:
+            result_key = artifact_name(event_id, "result")
+            kitaru.save(result_key, to_json_safe(result), type="output")
+            artifacts["result"] = result_key
 
     tracker.record_event(
         event_id,
@@ -202,6 +227,20 @@ async def _tracked_tool_call(
         },
     )
     return result
+
+
+def _tool_input_envelope(
+    *,
+    tool: FunctionTool,
+    tool_call_id: str | None,
+    input_json: str,
+) -> dict[str, Any]:
+    return {
+        "tool_name": tool.name,
+        "tool_call_id": tool_call_id,
+        "raw_args": input_json,
+        "parsed_args": _parse_json(input_json),
+    }
 
 
 def _tool_checkpoint_sequence() -> int | None:

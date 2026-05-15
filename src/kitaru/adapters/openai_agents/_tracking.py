@@ -25,6 +25,7 @@ from ._events import (
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 
 _NON_WORD_PATTERN = re.compile(r"\W+")
+_EVENT_ID_DISPLAY_PATTERN = re.compile(r"^(.+)_(llm_call|tool_call)_(\d+)$")
 ArtifactKind = Literal["input", "result", "response", "usage", "error"]
 
 
@@ -34,7 +35,11 @@ def normalize_agent_name(agent_name: str | None) -> str:
 
 
 def artifact_name(event_id: str, kind: ArtifactKind) -> str:
-    return f"{event_id}_{kind}"
+    match = _EVENT_ID_DISPLAY_PATTERN.match(event_id)
+    if match is None:
+        return f"{event_id}_{kind}"
+    namespace, event_kind, sequence_index = match.groups()
+    return f"{event_kind}_{sequence_index}_{kind}__{namespace}"
 
 
 @dataclass(frozen=True)
@@ -83,11 +88,11 @@ class EventTracker:
 
     @property
     def event_log_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_event_log"
+        return f"event_log__{self.agent_name}_{self.run_label}"
 
     @property
     def run_summary_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_run_summary"
+        return f"run_summary__{self.agent_name}_{self.run_label}"
 
     def _next_event_id(self, event_kind: str) -> tuple[str, int]:
         self._counter += 1

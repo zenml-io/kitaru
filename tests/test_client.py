@@ -134,6 +134,7 @@ class _DummyStep:
         name: str,
         status: Any,
         outputs: dict[str, list[_DummyArtifact]],
+        inputs: dict[str, list[_DummyArtifact]] | None = None,
         step_id: UUID | None = None,
         original_step_run_id: UUID | None = None,
         run_metadata: dict[str, Any] | None = None,
@@ -149,6 +150,7 @@ class _DummyStep:
         self.run_metadata = run_metadata or {}
         self.original_step_run_id = original_step_run_id
         self.parent_step_ids: list[UUID] = []
+        self.inputs = inputs or {}
         self.outputs = outputs
         self.spec = spec
         self.type = step_type

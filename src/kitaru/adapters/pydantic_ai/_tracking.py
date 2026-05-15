@@ -81,7 +81,7 @@ def normalize_agent_name(agent_name: str | None) -> str:
 def _with_namespace(name: str, namespace: str | None) -> str:
     if namespace is None:
         return name
-    return f"{namespace}_{name}"
+    return f"{name}__{namespace}"
 
 
 def _event_artifact_base_name(event_id: str, kind: ArtifactKind) -> str:

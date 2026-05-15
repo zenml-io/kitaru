@@ -46,7 +46,7 @@ def normalize_runner_name(runner_name: str | None) -> str:
 
 
 def artifact_name(runner_name: str, run_label: str, kind: ArtifactKind) -> str:
-    return f"{normalize_runner_name(runner_name)}_{run_label}_{kind}"
+    return f"{kind}__{normalize_runner_name(runner_name)}_{run_label}"
 
 
 @dataclass(frozen=True)

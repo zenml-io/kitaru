@@ -130,6 +130,18 @@ def _raise_runtime_error(message: str) -> None:
     raise RuntimeError(message)
 
 
+def test_claude_artifact_names_use_role_first_suffix_namespace() -> None:
+    from kitaru.adapters.claude_agent_sdk._tracking import EventTracker, artifact_name
+
+    assert (
+        artifact_name("Claude Reviewer", "abc123", "messages")
+        == "messages__Claude_Reviewer_abc123"
+    )
+    tracker = EventTracker(runner_name="Claude Reviewer", run_label="abc123")
+    assert tracker.event_log_artifact_name == "event_log__Claude_Reviewer_abc123"
+    assert tracker.run_summary_artifact_name == "run_summary__Claude_Reviewer_abc123"
+
+
 def test_nested_checkpoint_rejected_before_sdk_call_by_default(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,
@@ -261,12 +273,12 @@ def test_runner_invocation_extracts_result_and_artifact_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    saved: list[str] = []
+    saved: list[tuple[str, str]] = []
     logs: list[dict[str, object]] = []
     _patch_direct_execution_persistence(
         monkeypatch,
-        save_artifact=lambda name, value, *, type: saved.append(name),
-        save_event=lambda name, value, *, type: saved.append(name),
+        save_artifact=lambda name, value, *, type: saved.append((name, type)),
+        save_event=lambda name, value, *, type: saved.append((name, type)),
         log_event=lambda **kwargs: logs.append(kwargs),
     )
 
@@ -296,9 +308,16 @@ def test_runner_invocation_extracts_result_and_artifact_names(
     assert result.messages_artifact_name is not None
     assert result.options_manifest_artifact_name is not None
     assert result.output_artifact_name is not None
-    assert result.messages_artifact_name in saved
-    assert result.options_manifest_artifact_name in saved
-    assert result.event_log_artifact_name in saved
+    assert (result.messages_artifact_name, "context") in saved
+    assert (result.options_manifest_artifact_name, "context") in saved
+    if result.transcript_artifact_name is not None:
+        assert (result.transcript_artifact_name, "context") in saved
+    assert (result.usage_artifact_name, "context") in saved
+    assert (result.output_artifact_name, "response") in saved
+    assert (result.event_log_artifact_name, "context") in saved
+    assert (result.run_summary_artifact_name, "context") in saved
+    assert result.messages_artifact_name.startswith("messages__")
+    assert result.output_artifact_name.startswith("output__")
     assert logs
 
 
@@ -309,7 +328,7 @@ def test_artifact_capture_failure_is_non_fatal_by_default(
     _patch_inline_scope(monkeypatch)
 
     def fake_save(name: str, value: object, *, type: str) -> None:
-        if name.endswith("messages"):
+        if name.startswith("messages__"):
             raise RuntimeError("simulated capture failure")
 
     _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
@@ -455,7 +474,7 @@ def test_event_persistence_failure_is_non_fatal_by_default(
     _patch_inline_scope(monkeypatch)
 
     def fake_event_save(name: str, value: object, *, type: str) -> None:
-        if name.endswith("event_log"):
+        if name.startswith("event_log__"):
             raise RuntimeError("event log save failed")
 
     def fail_log_event(**kwargs: object) -> None:
@@ -517,7 +536,7 @@ def test_options_factory_receives_request_and_redacts_manifest(
     manifests: list[dict[str, object]] = []
 
     def fake_save(name: str, value: object, *, type: str) -> None:
-        if name.endswith("options_manifest") and isinstance(value, dict):
+        if name.startswith("options_manifest__") and isinstance(value, dict):
             manifests.append(cast(dict[str, object], value))
 
     _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
@@ -622,8 +641,8 @@ def test_emit_events_false_suppresses_event_artifacts_and_log(
 
     assert result.event_log_artifact_name is None
     assert result.run_summary_artifact_name is None
-    assert not any(name.endswith("event_log") for name in saved)
-    assert not any(name.endswith("run_summary") for name in saved)
+    assert not any(name.startswith("event_log__") for name in saved)
+    assert not any(name.startswith("run_summary__") for name in saved)
     assert logs == []
 
 
@@ -709,7 +728,7 @@ def test_transcript_file_is_captured_when_available(
     transcript_file.write_text('{"type":"result"}\n', encoding="utf-8")
 
     def fake_save(name: str, value: object, *, type: str) -> None:
-        if name.endswith("transcript"):
+        if name.startswith("transcript__"):
             captured["value"] = value
 
     _patch_direct_execution_persistence(monkeypatch, save_artifact=fake_save)
