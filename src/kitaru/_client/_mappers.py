@@ -558,13 +558,18 @@ def _map_execution(
                 )
             )
 
-        seen_artifact_ids: set[str] = set()
+        artifact_indexes_by_id: dict[str, int] = {}
         for checkpoint in checkpoints:
             for artifact in checkpoint.artifacts:
-                if artifact.artifact_id in seen_artifact_ids:
+                existing_index = artifact_indexes_by_id.get(artifact.artifact_id)
+                if existing_index is None:
+                    artifact_indexes_by_id[artifact.artifact_id] = len(artifacts)
+                    artifacts.append(artifact)
                     continue
-                seen_artifact_ids.add(artifact.artifact_id)
-                artifacts.append(artifact)
+
+                existing = artifacts[existing_index]
+                if existing.direction == "input" and artifact.direction == "output":
+                    artifacts[existing_index] = artifact
 
     metadata = _to_plain_dict(run.run_metadata)
 

@@ -1960,6 +1960,50 @@ def test_get_maps_execution_details() -> None:
     assert artifact_ref.kind == "context"
 
 
+def test_get_prefers_output_artifact_ref_when_input_seen_first() -> None:
+    artifact = _DummyArtifact(
+        name="content_flow::research::output",
+        save_type=ArtifactSaveType.STEP_OUTPUT,
+        value="notes about kitaru",
+        metadata={"kitaru_artifact_type": "context"},
+    )
+    consumer_step = _DummyStep(
+        name="write_draft",
+        status=ZenMLExecutionStatus.COMPLETED,
+        inputs={"research_notes": [artifact]},
+        outputs={},
+    )
+    producer_step = _DummyStep(
+        name="research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": [artifact]},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        steps={consumer_step.name: consumer_step, producer_step.name: producer_step},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert len(execution.artifacts) == 1
+    artifact_ref = execution.artifacts[0]
+    assert artifact_ref.name == "content_flow::research::output"
+    assert artifact_ref.direction == "output"
+    assert artifact_ref.producing_call == "research"
+
+
 def test_get_surfaces_checkpoint_attempt_history() -> None:
     attempt_one = _DummyStep(
         name="research",
