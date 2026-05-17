@@ -35,6 +35,8 @@ class OpenAIRunEvent(BaseModel):
     sequence_index: int
     run_label: str
     agent_name: str
+    checkpoint_id: str | None = None
+    checkpoint_name: str | None = None
     duration_ms: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     artifacts: dict[str, str] = Field(default_factory=dict)

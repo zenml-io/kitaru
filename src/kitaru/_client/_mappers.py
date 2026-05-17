@@ -265,6 +265,19 @@ def _map_artifact_ref(
     )
 
 
+def _adapter_structural_input_kind(
+    *,
+    checkpoint_type: str | None,
+    input_name: str,
+) -> str | None:
+    """Return public kind for adapter structural inputs, if exposable."""
+    if checkpoint_type == "llm_call" and input_name == "input":
+        return "prompt"
+    if checkpoint_type == "tool_call" and input_name == "tool_args":
+        return "input"
+    return None
+
+
 def _map_checkpoint_call(
     *,
     step: StepRunResponse,
@@ -278,17 +291,18 @@ def _map_checkpoint_call(
     artifacts: list[ArtifactRef] = []
 
     for input_name, input_artifacts in step.inputs.items():
+        input_kind = _adapter_structural_input_kind(
+            checkpoint_type=checkpoint_type,
+            input_name=input_name,
+        )
+        if input_kind is None:
+            continue
         for artifact in input_artifacts:
             artifact_id = str(artifact.id)
             if artifact_id in seen_artifact_ids:
                 continue
             seen_artifact_ids.add(artifact_id)
             input_type = getattr(getattr(artifact, "input_type", None), "value", None)
-            input_kind = (
-                "prompt"
-                if checkpoint_type == "llm_call" and input_name == "messages"
-                else "input"
-            )
             artifacts.append(
                 _map_artifact_ref(
                     artifact=artifact,
@@ -614,6 +628,7 @@ __all__ = [
     "_CHECKPOINT_SOURCE_ALIAS_PREFIX",
     "_PIPELINE_SOURCE_ALIAS_PREFIX",
     "_WAIT_CONDITION_STATUS_PENDING",
+    "_adapter_structural_input_kind",
     "_checkpoint_lineage_key",
     "_coerce_status_filter",
     "_first_pending_wait",

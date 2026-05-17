@@ -182,6 +182,61 @@ def test_openai_artifact_names_use_role_first_suffix_namespace() -> None:
     assert tracker.run_summary_artifact_name == "run_summary__Agent_Name_ab12cd34"
 
 
+def test_openai_event_tracker_records_checkpoint_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.openai_agents import _tracking
+
+    checkpoint_ids = iter(["checkpoint-model", "checkpoint-tool"])
+    checkpoint_names = iter(
+        [
+            "agent_openai_model_call",
+            "agent_double_value_tool_call",
+        ]
+    )
+    monkeypatch.setattr(_tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(
+        _tracking,
+        "get_current_checkpoint_id",
+        lambda: next(checkpoint_ids),
+    )
+    monkeypatch.setattr(
+        _tracking,
+        "get_current_checkpoint_name",
+        lambda: next(checkpoint_names),
+    )
+
+    tracker = _tracking.EventTracker(agent_name="Agent Name", run_label="ab12cd34")
+    model_id, model_context = tracker.start_llm_event()
+    tool_id, tool_context = tracker.start_tool_event(tool_call_id="call_1")
+    tracker.record_event(
+        model_id,
+        model_context,
+        kind="llm_call",
+        status="completed",
+        duration_ms=1.0,
+        artifacts={"response": "output"},
+    )
+    tracker.record_event(
+        tool_id,
+        tool_context,
+        kind="tool_call",
+        status="completed",
+        duration_ms=1.0,
+        artifacts={"result": "output"},
+    )
+
+    events = list(tracker.events)
+    assert [event.checkpoint_id for event in events] == [
+        "checkpoint-model",
+        "checkpoint-tool",
+    ]
+    assert [event.checkpoint_name for event in events] == [
+        "agent_openai_model_call",
+        "agent_double_value_tool_call",
+    ]
+
+
 class TestOpenAIEventTrackerToolCallOrdering:
     def _record_completed_model(self, tracker: Any) -> tuple[str, Any]:
         event_id, event_context = tracker.start_llm_event()
@@ -830,6 +885,18 @@ def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
         and event["artifacts"].get("input") == "tool_args"
         and event["artifacts"].get("result") == "output"
         for event in events
+    )
+    output_events = [
+        event
+        for event in events
+        if event["artifacts"].get("response") == "output"
+        or event["artifacts"].get("result") == "output"
+    ]
+    assert len(output_events) >= 2
+    assert all(event.get("checkpoint_id") for event in output_events)
+    assert all(event.get("checkpoint_name") for event in output_events)
+    assert len({event["checkpoint_id"] for event in output_events}) == len(
+        output_events
     )
     artifact_names = _artifact_names(first_hydrated)
     assert not any(

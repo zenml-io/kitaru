@@ -340,7 +340,7 @@ def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
         original_step_run_id=None,
         parent_step_ids=[],
         type=SimpleNamespace(value="llm_call"),
-        inputs={"messages": [input_artifact]},
+        inputs={"input": [input_artifact]},
         outputs={"output": [output_artifact]},
     )
 
@@ -353,7 +353,7 @@ def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
     assert [
         (artifact.name, artifact.direction) for artifact in checkpoint.artifacts
     ] == [
-        ("messages", "input"),
+        ("input", "input"),
         ("output", "output"),
     ]
     input_ref = checkpoint.artifacts[0]
@@ -363,7 +363,53 @@ def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
     assert checkpoint.artifacts[1].kind == "response"
 
 
-def test_checkpoint_mapping_does_not_label_generic_messages_input_as_prompt() -> None:
+def test_checkpoint_mapping_includes_tool_call_structural_input_artifacts() -> None:
+    input_artifact = SimpleNamespace(
+        id="input-artifact-id",
+        name="raw-zenml-tool-args-artifact-name",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+        input_type=SimpleNamespace(value="step_output"),
+    )
+    output_artifact = SimpleNamespace(
+        id="output-artifact-id",
+        name="output",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+    )
+    step = SimpleNamespace(
+        id="step-id",
+        name="agent_tool_call",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={"tool_args": [input_artifact]},
+        outputs={"output": [output_artifact]},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert [
+        (artifact.name, artifact.direction) for artifact in checkpoint.artifacts
+    ] == [
+        ("tool_args", "input"),
+        ("output", "output"),
+    ]
+    assert checkpoint.artifacts[0].kind == "input"
+    assert checkpoint.artifacts[0].producing_call is None
+    assert checkpoint.artifacts[0].input_type == "step_output"
+    assert checkpoint.artifacts[1].kind == "output"
+
+
+def test_checkpoint_mapping_does_not_expose_generic_input_artifacts() -> None:
     input_artifact = SimpleNamespace(
         id="input-artifact-id",
         name="raw-zenml-input-artifact-name",
@@ -391,8 +437,7 @@ def test_checkpoint_mapping_does_not_label_generic_messages_input_as_prompt() ->
         attempts_by_lineage={},
     )
 
-    assert checkpoint.artifacts[0].name == "messages"
-    assert checkpoint.artifacts[0].kind == "input"
+    assert checkpoint.artifacts == []
 
 
 def test_serialize_artifact_value_json_contract() -> None:
