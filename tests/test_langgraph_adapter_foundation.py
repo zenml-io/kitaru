@@ -32,6 +32,7 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.KitaruGraphRunner
     assert langgraph_adapter.LangGraphRunRequest
     assert langgraph_adapter.LangGraphRunResult
+    assert langgraph_adapter.LangGraphCallCheckpointPolicy
     assert langgraph_adapter.LangGraphCapturePolicy
     assert langgraph_adapter.LangGraphDurabilityPolicy
     assert langgraph_adapter.build_resume_request
@@ -42,6 +43,7 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
 
     signature = inspect.signature(langgraph_adapter.KitaruGraphRunner)
     assert "checkpoint_strategy" in signature.parameters
+    assert "call_checkpoint_policy" in signature.parameters
     assert "durability_mode" not in signature.parameters
     assert not hasattr(langgraph_adapter.KitaruGraphRunner, "stream")
     assert not hasattr(langgraph_adapter.KitaruGraphRunner, "astream")
@@ -64,20 +66,105 @@ def test_runner_requires_stable_name(langgraph_adapter: types.ModuleType) -> Non
         langgraph_adapter.KitaruGraphRunner(SimpleNamespace(invoke=lambda *_: None))
 
 
-def test_runner_only_accepts_graph_call_strategy(
+def test_runner_accepts_only_graph_call_and_calls_strategies(
     langgraph_adapter: types.ModuleType,
 ) -> None:
-    runner = langgraph_adapter.KitaruGraphRunner(
+    graph_runner = langgraph_adapter.KitaruGraphRunner(
         SimpleNamespace(name="graph", invoke=lambda *_args, **_kwargs: {}),
         checkpoint_strategy="graph_call",
     )
+    calls_runner = langgraph_adapter.KitaruGraphRunner(
+        SimpleNamespace(name="graph", invoke=lambda *_args, **_kwargs: {}),
+        checkpoint_strategy="calls",
+    )
 
-    assert runner.checkpoint_strategy == "graph_call"
-    with pytest.raises(KitaruUsageError, match="graph_call"):
+    assert graph_runner.checkpoint_strategy == "graph_call"
+    assert calls_runner.checkpoint_strategy == "calls"
+    with pytest.raises(KitaruUsageError, match=r"graph_call.*calls"):
         langgraph_adapter.KitaruGraphRunner(
             SimpleNamespace(name="graph", invoke=lambda *_args, **_kwargs: {}),
             checkpoint_strategy="nodes",
         )
+
+
+def test_runner_rejects_incompatible_graph_call_and_calls_configs(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    policy = langgraph_adapter.LangGraphCallCheckpointPolicy()
+
+    with pytest.raises(KitaruUsageError, match="run_checkpoint_config"):
+        langgraph_adapter.KitaruGraphRunner(
+            SimpleNamespace(name="graph", invoke=lambda *_args, **_kwargs: {}),
+            checkpoint_strategy="calls",
+            run_checkpoint_config={"type": "custom"},
+        )
+    with pytest.raises(KitaruUsageError, match="call_checkpoint_policy"):
+        langgraph_adapter.KitaruGraphRunner(
+            SimpleNamespace(name="graph", invoke=lambda *_args, **_kwargs: {}),
+            checkpoint_strategy="graph_call",
+            call_checkpoint_policy=policy,
+        )
+
+
+def test_call_checkpoint_policy_and_capture_flags_are_dependency_safe(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    policy_module = importlib.import_module("kitaru.adapters.langgraph._policy")
+
+    capture = langgraph_adapter.LangGraphCapturePolicy()
+    assert capture.emit_call_events is True
+    assert capture.save_model_input is True
+    assert capture.save_model_response is True
+    assert capture.save_model_usage is True
+    assert capture.save_tool_args is True
+    assert capture.save_tool_result is True
+
+    policy = langgraph_adapter.LangGraphCallCheckpointPolicy(
+        model_checkpoint_config=False,
+        tool_checkpoint_config={"type": "toolish"},
+        tool_checkpoint_config_by_name={"skip_me": False, "custom": {"cache": False}},
+        summary_checkpoint_config={"retries": 1},
+    )
+    assert policy_module.resolve_model_checkpoint_config(policy) is None
+    assert (
+        policy_module.resolve_tool_call_checkpoint_config(policy, tool_name="skip_me")
+        is None
+    )
+    assert policy_module.resolve_tool_call_checkpoint_config(
+        policy, tool_name="plain"
+    ) == {"type": "toolish"}
+    assert policy_module.resolve_tool_call_checkpoint_config(
+        policy, tool_name="custom"
+    ) == {"cache": False, "type": "tool_call"}
+    assert policy_module.resolve_summary_checkpoint_config(policy) == {
+        "retries": 1,
+        "type": "langgraph_summary",
+    }
+
+    with pytest.raises(ValidationError, match="runtime='isolated'"):
+        langgraph_adapter.LangGraphCallCheckpointPolicy(
+            model_checkpoint_config={"runtime": "isolated"}
+        )
+    with pytest.raises(ValidationError, match="runtime='isolated'"):
+        langgraph_adapter.LangGraphCallCheckpointPolicy(
+            summary_checkpoint_config={"runtime": "isolated"}
+        )
+
+
+def test_structural_checkpoint_artifact_refs_are_adapter_local(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    utils = importlib.import_module("kitaru.adapters.langgraph._utils")
+
+    assert utils.get_adapter_checkpoint_artifact_refs() is None
+    with utils.adapter_checkpoint_artifact_refs(
+        input_artifacts={"model_input": "model_input"},
+        output_artifacts={"output": "output"},
+    ) as refs:
+        assert utils.get_adapter_checkpoint_artifact_refs() is refs
+        assert refs.input_artifacts == {"model_input": "model_input"}
+        assert refs.output_artifacts == {"output": "output"}
+    assert utils.get_adapter_checkpoint_artifact_refs() is None
 
 
 def test_run_request_start_resume_and_config_merge(
@@ -220,6 +307,229 @@ def test_event_tracker_uses_role_first_artifact_names(
 
     assert tracker.event_log_artifact_name == "event_log__Fake_Graph_ab12cd34"
     assert tracker.run_summary_artifact_name == "run_summary__Fake_Graph_ab12cd34"
+
+
+def test_event_tracker_records_model_and_tool_calls_in_reserved_order(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+
+    tracker = tracking.EventTracker(graph_name="Fake Graph", run_label="ab12cd34")
+    model_id, model_context = tracker.start_model_event()
+    tracker.reserve_tool_call_order(
+        parent_model_event_id=model_id,
+        tool_call_ids=["call-a", "call-b"],
+    )
+    tool_b_id, tool_b_context = tracker.start_tool_event(tool_call_id="call-b")
+    tracker.record_tool_event(
+        tool_b_id,
+        tool_b_context,
+        status="completed",
+        duration_ms=2.0,
+        tool_name="second_tool",
+        tool_call_id="call-b",
+        checkpoint_mode="metadata_only",
+    )
+    tool_a_id, tool_a_context = tracker.start_tool_event(tool_call_id="call-a")
+    tracker.record_tool_event(
+        tool_a_id,
+        tool_a_context,
+        status="completed",
+        duration_ms=1.0,
+        tool_name="first_tool",
+        tool_call_id="call-a",
+        checkpoint_mode="true",
+    )
+    tracker.record_model_event(
+        model_id,
+        model_context,
+        status="completed",
+        duration_ms=3.0,
+        model_name="fake-model",
+        source="unit-test",
+    )
+
+    events = [event.model_dump(mode="json") for event in tracker.events]
+    assert [event["kind"] for event in events] == [
+        "model_call",
+        "tool_call",
+        "tool_call",
+    ]
+    assert [event["tool_call_id"] for event in events[1:]] == ["call-a", "call-b"]
+    assert events[1]["parent_event_ids"] == [model_id]
+    assert events[2]["parent_event_ids"] == [model_id]
+    assert events[1]["checkpoint_mode"] == "true"
+    assert events[2]["checkpoint_mode"] == "metadata_only"
+
+    summary = tracker.build_run_summary()
+    assert summary["model_call_count"] == 1
+    assert summary["tool_call_count"] == 2
+    assert summary["event_ids_in_order"] == [
+        model_id,
+        tool_a_id,
+        tool_b_id,
+    ]
+
+
+def test_calls_mode_sets_active_context_and_skips_outer_graph_checkpoint(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    checkpoint_names: list[str] = []
+    seen_context: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            seen_context["tracker"] = tracking.get_current_tracker()
+            seen_context["policy"] = tracking.get_active_call_checkpoint_policy()
+            seen_context["capture"] = tracking.get_active_capture_policy()
+            return {"echo": input}
+
+    def fake_run_sync_in_checkpoint(**kwargs: object) -> object:
+        checkpoint_names.append(cast(str, kwargs["step_name"]))
+        body = cast(Callable[[], object], kwargs["body"])
+        return body()
+
+    def fake_log(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module, "run_sync_in_checkpoint", fake_run_sync_in_checkpoint
+    )
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(tracking.kitaru, "log", fake_log)
+
+    policy = langgraph_adapter.LangGraphCallCheckpointPolicy()
+    capture = langgraph_adapter.LangGraphCapturePolicy(save_context=True)
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=policy,
+        capture=capture,
+    )
+
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.output == {"echo": {"input": "value"}}
+    assert seen_context["tracker"] is not None
+    assert seen_context["policy"] is policy
+    assert seen_context["capture"] is capture
+    assert tracking.get_current_tracker() is None
+    assert tracking.get_active_call_checkpoint_policy() is None
+    assert tracking.get_active_capture_policy() is None
+    assert not any(name.endswith("_langgraph_call") for name in checkpoint_names)
+    assert any(name.startswith("langgraph_summary__fake_") for name in checkpoint_names)
+
+
+def test_calls_mode_nested_checkpoint_policy_controls_validation(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    called = False
+    active_policy: object | None = None
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            nonlocal active_policy, called
+            called = True
+            active_policy = tracking.get_active_call_checkpoint_policy()
+            return input
+
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: True)
+
+    error_runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        checkpoint_strategy="calls",
+    )
+    with pytest.raises(KitaruUsageError, match="nested_checkpoint_policy"):
+        error_runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"input": "value"},
+                thread_id="thread-1",
+            )
+        )
+    assert called is False
+
+    metadata_runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=langgraph_adapter.LangGraphCallCheckpointPolicy(
+            nested_checkpoint_policy="metadata_only"
+        ),
+    )
+    result = metadata_runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+    assert result.output == {"input": "value"}
+    assert called is True
+    assert active_policy is not None
+    assert active_policy.model_checkpoint_config is False
+    assert active_policy.tool_checkpoint_config is False
+
+
+def test_calls_mode_strict_summary_failure_preserves_original_graph_exception(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    checkpoint_names: list[str] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, _input: object, **_kwargs: object) -> object:
+            raise ValueError("graph boom")
+
+    def fake_run_sync_in_checkpoint(**kwargs: object) -> object:
+        checkpoint_names.append(cast(str, kwargs["step_name"]))
+        raise RuntimeError("summary unavailable")
+
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module, "run_sync_in_checkpoint", fake_run_sync_in_checkpoint
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        checkpoint_strategy="calls",
+        capture=langgraph_adapter.LangGraphCapturePolicy(
+            fail_on_event_persistence_error=True
+        ),
+    )
+
+    with pytest.raises(ValueError, match="graph boom") as exc_info:
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"input": "value"},
+                thread_id="thread-1",
+            )
+        )
+
+    assert any(name.startswith("langgraph_summary__fake_") for name in checkpoint_names)
+    assert any("summary unavailable" in note for note in exc_info.value.__notes__)
 
 
 def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(

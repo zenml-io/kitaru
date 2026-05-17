@@ -10,7 +10,10 @@ import hashlib
 import json
 import re
 import sys
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from pydantic_core import to_jsonable_python
@@ -21,7 +24,7 @@ from kitaru._source_aliases import build_checkpoint_source_alias
 from kitaru.errors import KitaruUsageError
 
 CheckpointRuntime = Literal["inline", "isolated"]
-GraphCheckpointStrategy = Literal["graph_call"]
+GraphCheckpointStrategy = Literal["graph_call", "calls"]
 
 
 class CheckpointConfig(TypedDict, total=False):
@@ -33,8 +36,25 @@ class CheckpointConfig(TypedDict, total=False):
     cache: bool
 
 
+ToolCheckpointOverride = CheckpointConfig | Literal[False]
+ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
+
+
+@dataclass(frozen=True)
+class AdapterCheckpointArtifactRefs:
+    """Display references for artifacts owned by a synthetic checkpoint."""
+
+    input_artifacts: Mapping[str, str]
+    output_artifacts: Mapping[str, str]
+
+
+_ADAPTER_CHECKPOINT_ARTIFACT_REFS: ContextVar[AdapterCheckpointArtifactRefs | None] = (
+    ContextVar("kitaru_langgraph_adapter_checkpoint_artifact_refs", default=None)
+)
+
 _ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({"runtime", "retries", "type", "cache"})
-_VALID_CHECKPOINT_STRATEGIES = frozenset({"graph_call"})
+_VALID_CHECKPOINT_STRATEGIES = frozenset({"graph_call", "calls"})
+_VALID_CHECKPOINT_STRATEGY_DISPLAY = ("graph_call", "calls")
 _NON_WORD_PATTERN = re.compile(r"\W+")
 
 # Synthetic checkpoint functions are registered dynamically from this module.
@@ -49,9 +69,10 @@ def validate_checkpoint_strategy(value: str) -> GraphCheckpointStrategy:
     """Validate the public LangGraph checkpoint vocabulary."""
     if value in _VALID_CHECKPOINT_STRATEGIES:
         return cast(GraphCheckpointStrategy, value)
+    expected = "', '".join(_VALID_CHECKPOINT_STRATEGY_DISPLAY)
     raise KitaruUsageError(
-        "Unsupported LangGraph checkpoint strategy "
-        f"{value!r}. Expected `checkpoint_strategy='graph_call'`."
+        f"Unsupported LangGraph checkpoint strategy {value!r}. "
+        f"Expected one of: '{expected}'."
     )
 
 
@@ -105,6 +126,62 @@ def validate_checkpoint_config(
     return validated
 
 
+def validate_tool_checkpoint_overrides(
+    overrides: ToolCheckpointOverrides | None,
+    *,
+    context: str,
+) -> dict[str, ToolCheckpointOverride] | None:
+    """Return validated per-tool checkpoint overrides."""
+    if overrides is None:
+        return None
+    if not isinstance(overrides, Mapping):
+        raise KitaruUsageError(f"{context} must be a mapping.")
+    normalized: dict[str, ToolCheckpointOverride] = {}
+    for tool_name, override in overrides.items():
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise KitaruUsageError(
+                f"{context} keys must be non-empty tool name strings."
+            )
+        if override is False:
+            normalized[tool_name] = False
+            continue
+        validated = validate_checkpoint_config(
+            override, context=f"{context}[{tool_name!r}]"
+        )
+        normalized[tool_name] = validated if validated is not None else {}
+    return normalized
+
+
+def with_default_type(config: CheckpointConfig, default_type: str) -> CheckpointConfig:
+    """Return ``config`` with ``type`` defaulted to ``default_type``."""
+    if "type" in config:
+        return config
+    return {**config, "type": default_type}
+
+
+@contextmanager
+def adapter_checkpoint_artifact_refs(
+    *,
+    input_artifacts: Mapping[str, str] | None = None,
+    output_artifacts: Mapping[str, str] | None = None,
+) -> Iterator[AdapterCheckpointArtifactRefs]:
+    """Expose structural/canonical artifact slot names inside a checkpoint."""
+    refs = AdapterCheckpointArtifactRefs(
+        input_artifacts=input_artifacts or {},
+        output_artifacts=output_artifacts or {},
+    )
+    token = _ADAPTER_CHECKPOINT_ARTIFACT_REFS.set(refs)
+    try:
+        yield refs
+    finally:
+        _ADAPTER_CHECKPOINT_ARTIFACT_REFS.reset(token)
+
+
+def get_adapter_checkpoint_artifact_refs() -> AdapterCheckpointArtifactRefs | None:
+    """Return granular checkpoint artifact slot references, if any."""
+    return _ADAPTER_CHECKPOINT_ARTIFACT_REFS.get()
+
+
 def merge_config(request: Any) -> dict[str, Any]:
     """Merge request config while forcing the stable LangGraph thread ID."""
     config = dict(request.config)
@@ -152,16 +229,48 @@ def safe_step_name(value: str) -> str:
 
 
 def _build_checkpoint_step(
-    *, config: CheckpointConfig, step_name: str, body: Callable[[], Any]
+    *,
+    config: CheckpointConfig,
+    step_name: str,
+    body: Callable[[], Any],
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Callable[..., Any]:
-    def _call(_cache_key: str | None = None) -> Any:
-        return body()
+    input_names = frozenset(checkpoint_inputs or {})
+    if input_names == frozenset():
 
-    _call.__name__ = safe_step_name(step_name)
-    checkpoint_def = kitaru.checkpoint(**config)(_call)
+        def _call_without_inputs(_cache_key: str | None = None) -> Any:
+            return body()
+
+        call = _call_without_inputs
+    elif input_names == {"model_input"}:
+
+        def _call_with_model_input(
+            model_input: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        call = _call_with_model_input
+    elif input_names == {"tool_args"}:
+
+        def _call_with_tool_args(
+            tool_args: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        call = _call_with_tool_args
+    else:
+        unsupported = ", ".join(sorted(input_names))
+        raise KitaruUsageError(
+            f"Unsupported synthetic checkpoint inputs: {unsupported}."
+        )
+
+    call.__name__ = safe_step_name(step_name)
+    checkpoint_def = kitaru.checkpoint(**config)(call)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
-        alias = build_checkpoint_source_alias(_call.__name__)
+        alias = build_checkpoint_source_alias(call.__name__)
         for module_name in {__name__, f"src.{__name__}"}:
             module = sys.modules.get(module_name)
             if module is not None:
@@ -175,14 +284,18 @@ def run_sync_in_checkpoint(
     step_name: str,
     body: Callable[[], Any],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run a sync body inside a synthetic ``@kitaru.checkpoint``."""
     checkpoint_def = _build_checkpoint_step(
         config=config,
         step_name=step_name,
         body=body,
+        checkpoint_inputs=checkpoint_inputs,
     )
-    return materialize_step_output(checkpoint_def(cache_key))
+    return materialize_step_output(
+        checkpoint_def(**(checkpoint_inputs or {}), _cache_key=cache_key)
+    )
 
 
 async def run_async_in_checkpoint(
@@ -191,6 +304,7 @@ async def run_async_in_checkpoint(
     step_name: str,
     body: Callable[[], Coroutine[Any, Any, Any]],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run an async body inside a synthetic ``@kitaru.checkpoint``."""
     # Kitaru checkpoints are currently sync callables. The checkpoint body owns
@@ -200,6 +314,11 @@ async def run_async_in_checkpoint(
         config=config,
         step_name=step_name,
         body=lambda: asyncio.run(body()),
+        checkpoint_inputs=checkpoint_inputs,
     )
-    step_output = await asyncio.to_thread(checkpoint_def, cache_key)
+    step_output = await asyncio.to_thread(
+        checkpoint_def,
+        **(checkpoint_inputs or {}),
+        _cache_key=cache_key,
+    )
     return materialize_step_output(step_output)

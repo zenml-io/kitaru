@@ -356,8 +356,10 @@ run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
 
 section_header "LangGraph adapter"
 
-run_test "examples/integrations/langgraph_agent/langgraph_adapter.py" \
-    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py
+run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \
+    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
+    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 
 section_header "OpenAI Agents adapter"
 

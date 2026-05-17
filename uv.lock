@@ -3,7 +3,8 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-05-14T14:14:14.976285Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
 zenml = false
@@ -1219,6 +1220,7 @@ claude-agent-sdk = [
     { name = "claude-agent-sdk" },
 ]
 langgraph = [
+    { name = "langchain" },
     { name = "langgraph" },
 ]
 llm = [
@@ -1248,6 +1250,7 @@ dev = [
     { name = "claude-agent-sdk" },
     { name = "griffe" },
     { name = "griffe-typingdoc" },
+    { name = "langchain" },
     { name = "langgraph" },
     { name = "openai" },
     { name = "openai-agents" },
@@ -1270,6 +1273,7 @@ requires-dist = [
     { name = "cyclopts", specifier = ">=3.0" },
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
     { name = "kitaru", extras = ["openai"], marker = "extra == 'llm'" },
+    { name = "langchain", marker = "extra == 'langgraph'", specifier = ">=1.0,<2" },
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=1.1,<2" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.19.0,<1.20.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0,<3" },
@@ -1289,6 +1293,7 @@ dev = [
     { name = "claude-agent-sdk", specifier = ">=0.1.58,<0.2" },
     { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
     { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
+    { name = "langchain", specifier = ">=1.0,<2" },
     { name = "langgraph", specifier = ">=1.1,<2" },
     { name = "openai", specifier = ">=1.0.0,<3" },
     { name = "openai-agents", specifier = ">=0.15.0,<0.16.0" },
@@ -1302,6 +1307,20 @@ dev = [
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
     { name = "zenml", extras = ["server"], specifier = ">=0.94.3" },
+]
+
+[[package]]
+name = "langchain"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/74/03fd4c07993c49c4b80635bb4c723643ff78af81c9471d1266f879f68df1/langchain-1.3.0.tar.gz", hash = "sha256:8ec70ee0cef94255f3e522423b254093a3dd34509638d353c50f3d9dd498debc", size = 580604, upload-time = "2026-05-12T14:45:50.7Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/6f/b9a9721c27fbb6d29a6a7cd89d6a41eeffc7c79b49b9a5cf5beb1d60952d/langchain-1.3.0-py3-none-any.whl", hash = "sha256:9ce48828c706c00c586304b519fbd910e75d9f5ab3f319c31834e42107437f43", size = 114079, upload-time = "2026-05-12T14:45:48.818Z" },
 ]
 
 [[package]]

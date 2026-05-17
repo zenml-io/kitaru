@@ -2,6 +2,7 @@
 
 import inspect
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from functools import lru_cache
 from importlib import metadata
 from typing import Any, cast
@@ -10,7 +11,12 @@ from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
-from ._policy import LangGraphCapturePolicy, LangGraphDurabilityPolicy
+from ._policy import (
+    LangGraphCallCheckpointPolicy,
+    LangGraphCapturePolicy,
+    LangGraphDurabilityPolicy,
+    resolve_summary_checkpoint_config,
+)
 from ._serialization import redact_config, to_cache_identity, to_json_safe
 from ._tracking import EventTracker, tracker_scope
 from ._types import (
@@ -60,6 +66,7 @@ class KitaruGraphRunner:
         capture: LangGraphCapturePolicy | None = None,
         durability: LangGraphDurabilityPolicy | None = None,
         run_checkpoint_config: CheckpointConfig | None = None,
+        call_checkpoint_policy: LangGraphCallCheckpointPolicy | None = None,
         config_factory: Callable[[LangGraphRunRequest], dict[str, Any]] | None = None,
         context_factory: Callable[[LangGraphRunRequest], Any] | None = None,
         cost_calculator: Callable[[LangGraphUsageSummary], float | None] | None = None,
@@ -73,9 +80,16 @@ class KitaruGraphRunner:
             )
         self._name = resolved_name
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
+        self._validate_strategy_config(
+            run_checkpoint_config=run_checkpoint_config,
+            call_checkpoint_policy=call_checkpoint_policy,
+        )
         self._capture = capture or LangGraphCapturePolicy()
         self._capture_summary = self._capture.model_dump(mode="json")
         self._durability = durability or LangGraphDurabilityPolicy()
+        self._call_checkpoint_policy = (
+            call_checkpoint_policy or LangGraphCallCheckpointPolicy()
+        )
         self._run_checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             run_checkpoint_config,
             context="run_checkpoint_config",
@@ -118,6 +132,10 @@ class KitaruGraphRunner:
     def durability(self) -> LangGraphDurabilityPolicy:
         return self._durability
 
+    @property
+    def call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
+        return self._call_checkpoint_policy
+
     def invoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
         """Invoke the wrapped graph synchronously."""
         self._validate_request(request, required_method="invoke")
@@ -125,7 +143,9 @@ class KitaruGraphRunner:
         def _body() -> LangGraphRunResult:
             return self._invoke_graph_sync(request)
 
-        if is_inside_flow() and not is_inside_checkpoint():
+        if self._checkpoint_strategy == "calls":
+            result = _body()
+        elif is_inside_flow() and not is_inside_checkpoint():
             result = run_sync_in_checkpoint(
                 config=self._graph_call_checkpoint_config(),
                 step_name=f"{self._name}_langgraph_call",
@@ -144,7 +164,9 @@ class KitaruGraphRunner:
         async def _body() -> LangGraphRunResult:
             return await self._invoke_graph_async(request)
 
-        if is_inside_flow() and not is_inside_checkpoint():
+        if self._checkpoint_strategy == "calls":
+            result = await _body()
+        elif is_inside_flow() and not is_inside_checkpoint():
             result = await run_async_in_checkpoint(
                 config=self._graph_call_checkpoint_config(),
                 step_name=f"{self._name}_langgraph_call",
@@ -167,7 +189,15 @@ class KitaruGraphRunner:
         input_or_command = request.input if request.kind == "start" else request.command
         warnings = self._checkpointer_warnings()
 
-        with tracker_scope(self._name) as tracker:
+        with tracker_scope(
+            self._name,
+            call_checkpoint_policy=(
+                self._effective_call_checkpoint_policy()
+                if self._checkpoint_strategy == "calls"
+                else None
+            ),
+            capture=self._capture if self._checkpoint_strategy == "calls" else None,
+        ) as tracker:
             tracker.record(
                 "graph_call_started",
                 metadata=self._safe_event_metadata(request, config=config),
@@ -220,7 +250,15 @@ class KitaruGraphRunner:
         input_or_command = request.input if request.kind == "start" else request.command
         warnings = self._checkpointer_warnings()
 
-        with tracker_scope(self._name) as tracker:
+        with tracker_scope(
+            self._name,
+            call_checkpoint_policy=(
+                self._effective_call_checkpoint_policy()
+                if self._checkpoint_strategy == "calls"
+                else None
+            ),
+            capture=self._capture if self._checkpoint_strategy == "calls" else None,
+        ) as tracker:
             tracker.record(
                 "graph_call_started",
                 metadata=self._safe_event_metadata(request, config=config),
@@ -557,6 +595,28 @@ class KitaruGraphRunner:
         self._method_allowed_kwargs[method_name] = allowed_kwargs
         return allowed_kwargs
 
+    def _validate_strategy_config(
+        self,
+        *,
+        run_checkpoint_config: CheckpointConfig | None,
+        call_checkpoint_policy: LangGraphCallCheckpointPolicy | None,
+    ) -> None:
+        if self._checkpoint_strategy == "calls" and run_checkpoint_config is not None:
+            raise KitaruUsageError(
+                "`run_checkpoint_config` applies only to "
+                "`checkpoint_strategy='graph_call'`. Use `call_checkpoint_policy` "
+                "for calls-mode model/tool/summary checkpoints."
+            )
+        if (
+            self._checkpoint_strategy == "graph_call"
+            and call_checkpoint_policy is not None
+        ):
+            raise KitaruUsageError(
+                "`call_checkpoint_policy` applies only to "
+                "`checkpoint_strategy='calls'`. Remove it or set "
+                "`checkpoint_strategy='calls'`."
+            )
+
     def _validate_request(
         self,
         request: LangGraphRunRequest,
@@ -567,9 +627,16 @@ class KitaruGraphRunner:
             raise KitaruUsageError(
                 "LangGraph requests require a stable non-empty `thread_id`."
             )
-        if self._checkpoint_strategy != "graph_call":
+        if (
+            self._checkpoint_strategy == "calls"
+            and is_inside_checkpoint()
+            and self._call_checkpoint_policy.nested_checkpoint_policy == "error"
+        ):
             raise KitaruUsageError(
-                "Only `checkpoint_strategy='graph_call'` is supported in v1."
+                "`checkpoint_strategy='calls'` opens model/tool checkpoints and "
+                "must run from a flow body, not from inside another checkpoint. "
+                "Set `call_checkpoint_policy.nested_checkpoint_policy` to "
+                "'metadata_only' to record metadata without inner checkpoints."
             )
         if not callable(getattr(self._graph, required_method, None)):
             raise KitaruUsageError(
@@ -580,6 +647,26 @@ class KitaruGraphRunner:
                 "LangGraph durability policy requires a graph checkpointer, but "
                 "none was detected on the wrapped graph."
             )
+
+    def _effective_call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
+        if not (
+            self._checkpoint_strategy == "calls"
+            and is_inside_checkpoint()
+            and self._call_checkpoint_policy.nested_checkpoint_policy == "metadata_only"
+        ):
+            return self._call_checkpoint_policy
+        return self._call_checkpoint_policy.model_copy(
+            update={
+                "model_checkpoint_config": False,
+                "tool_checkpoint_config": False,
+                "tool_checkpoint_config_by_name": {
+                    tool_name: False
+                    for tool_name in (
+                        self._call_checkpoint_policy.tool_checkpoint_config_by_name
+                    )
+                },
+            }
+        )
 
     def _graph_call_checkpoint_config(self) -> CheckpointConfig:
         return {
@@ -679,7 +766,8 @@ class KitaruGraphRunner:
         config: dict[str, Any],
         context: Any | None,
     ) -> None:
-        tracker.persist(
+        self._persist_tracker_summary(
+            tracker,
             {
                 **self._run_summary_metadata(
                     request=request,
@@ -696,7 +784,6 @@ class KitaruGraphRunner:
                 "output": self._captured_output(result),
                 "warnings": result.warnings,
             },
-            fail_on_error=self._capture.fail_on_event_persistence_error,
         )
 
     def _persist_failure_tracker(
@@ -709,7 +796,8 @@ class KitaruGraphRunner:
         context: Any | None,
         warnings: list[str],
     ) -> None:
-        tracker.persist(
+        self._persist_tracker_summary(
+            tracker,
             {
                 **self._run_summary_metadata(
                     request=request,
@@ -724,7 +812,89 @@ class KitaruGraphRunner:
                 "error_type": type(error).__name__,
                 "error_message": str(error),
             },
-            fail_on_error=self._capture.fail_on_event_persistence_error,
+        )
+
+    def _persist_tracker_summary(
+        self,
+        tracker: EventTracker,
+        extra_summary: dict[str, object],
+    ) -> None:
+        fail_on_error = self._capture.fail_on_event_persistence_error
+        if (
+            self._checkpoint_strategy == "calls"
+            and self._call_checkpoint_policy.persist_run_artifacts
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        ):
+
+            def _body() -> None:
+                tracker.persist(extra_summary, fail_on_error=fail_on_error)
+
+            summary_step_name = (
+                f"langgraph_summary__{tracker.graph_name}_{tracker.run_label}"
+            )
+            summary_config = self._calls_summary_checkpoint_config()
+            try:
+                run_sync_in_checkpoint(
+                    config=summary_config,
+                    step_name=summary_step_name,
+                    body=_body,
+                    cache_key=self._calls_summary_cache_key(
+                        tracker,
+                        extra_summary,
+                        enabled=summary_config.get("cache", False),
+                    ),
+                )
+            except Exception as error:
+                if fail_on_error:
+                    raise
+                previous_failures = extra_summary.get("persistence_failures")
+                persistence_failures = (
+                    [*previous_failures] if isinstance(previous_failures, list) else []
+                )
+                persistence_failures.append(
+                    {
+                        "operation": "save_run_summary",
+                        "artifact_name": summary_step_name,
+                        "exception_type": type(error).__name__,
+                        "message": str(error),
+                    }
+                )
+                fallback_summary = {
+                    **extra_summary,
+                    "persistence_failures": persistence_failures,
+                    "summary_checkpoint_failed": True,
+                }
+                with suppress(Exception):
+                    tracker.persist(fallback_summary, fail_on_error=False)
+            return
+        tracker.persist(extra_summary, fail_on_error=fail_on_error)
+
+    def _calls_summary_checkpoint_config(self) -> CheckpointConfig:
+        config = resolve_summary_checkpoint_config(self._call_checkpoint_policy)
+        return {
+            **config,
+            "retries": config.get("retries", 0),
+            "cache": config.get("cache", False),
+            "runtime": config.get("runtime", "inline"),
+        }
+
+    def _calls_summary_cache_key(
+        self,
+        tracker: EventTracker,
+        extra_summary: dict[str, object],
+        *,
+        enabled: bool,
+    ) -> str | None:
+        if not enabled:
+            return None
+        return checkpoint_cache_key(
+            {
+                "adapter": "langgraph",
+                "checkpoint_strategy": "calls",
+                "summary": extra_summary,
+                "event_ids": [event.event_id for event in tracker.events],
+            }
         )
 
     def _handle_graph_call_failure(
@@ -738,14 +908,23 @@ class KitaruGraphRunner:
         warnings: list[str],
     ) -> None:
         tracker.record("graph_call_failed", status="failed", error=error)
-        self._persist_failure_tracker(
-            tracker,
-            error,
-            request=request,
-            config=config,
-            context=context,
-            warnings=warnings,
-        )
+        try:
+            self._persist_failure_tracker(
+                tracker,
+                error,
+                request=request,
+                config=config,
+                context=context,
+                warnings=warnings,
+            )
+        except Exception as persistence_error:
+            note = (
+                "LangGraph failure-summary persistence also failed: "
+                f"{type(persistence_error).__name__}: {persistence_error}"
+            )
+            add_note = getattr(error, "add_note", None)
+            if callable(add_note):
+                add_note(note)
 
     def _run_summary_metadata(
         self,

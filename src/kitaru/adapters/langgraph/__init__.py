@@ -16,7 +16,11 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
 from ._agent import KitaruGraphRunner
 from ._events import LangGraphAdapterEvent, LangGraphEventError, LangGraphRunEvent
 from ._hitl import build_resume_request, wait_for_interrupt
-from ._policy import LangGraphCapturePolicy, LangGraphDurabilityPolicy
+from ._policy import (
+    LangGraphCallCheckpointPolicy,
+    LangGraphCapturePolicy,
+    LangGraphDurabilityPolicy,
+)
 from ._types import (
     LangGraphInterruptSummary,
     LangGraphPendingState,
@@ -40,6 +44,7 @@ __all__ = [
     "GraphCheckpointStrategy",
     "KitaruGraphRunner",
     "LangGraphAdapterEvent",
+    "LangGraphCallCheckpointPolicy",
     "LangGraphCapturePolicy",
     "LangGraphDurabilityPolicy",
     "LangGraphEventError",
