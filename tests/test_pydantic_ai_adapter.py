@@ -175,6 +175,191 @@ class TestTurnCacheKeyCallSites:
         assert captured["run_cache_key"] == "cache-async"
 
 
+class TestPydanticAIAutoFlowNaming:
+    def _install_inline_model_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def fake_checkpoint(*, body: Any, **_kwargs: Any) -> Any:
+            return await body()
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+
+    def _install_fake_auto_flow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> list[str]:
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+        from kitaru.runtime import _flow_scope
+
+        flow_names: list[str] = []
+
+        class FakeHandle:
+            def __init__(self, result: Any) -> None:
+                self._result = result
+
+            def wait(self) -> Any:
+                return self._result
+
+        class FakeAutoFlow:
+            def __init__(self, agent_name: str) -> None:
+                self.flow_name = agent_module._auto_flow_name_for_agent(agent_name)
+
+            def run(
+                self,
+                run_id: str,
+                serialized_body_path: str | None = None,
+            ) -> FakeHandle:
+                flow_names.append(self.flow_name)
+                with _flow_scope(name=self.flow_name):
+                    result = agent_module._run_auto_flow_body(
+                        run_id,
+                        serialized_body_path,
+                    )
+                return FakeHandle(result)
+
+        def fake_auto_flow_for_agent(agent_name: str) -> FakeAutoFlow:
+            return FakeAutoFlow(agent_name)
+
+        monkeypatch.setattr(
+            agent_module,
+            "_auto_flow_for_agent",
+            fake_auto_flow_for_agent,
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_try_serialize_auto_flow_body",
+            lambda _body: None,
+        )
+        return flow_names
+
+    def test_auto_flow_name_helper_uses_flow_name_normalization(self) -> None:
+        from kitaru.adapters.pydantic_ai._agent import _auto_flow_name_for_agent
+
+        assert _auto_flow_name_for_agent("research_agent") == "research_agent_flow"
+        assert _auto_flow_name_for_agent("research agent") == "research_agent_flow"
+        assert _auto_flow_name_for_agent("123") == "flow_123_flow"
+
+    def test_direct_run_sync_uses_wrapped_agent_name_when_wrapper_name_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(Agent(TestModel(), name="wrapped_agent"))
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapped_agent_flow"]
+
+    def test_direct_run_sync_wrapper_name_wins_over_wrapped_agent_name(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="wrapped_agent"),
+            name="wrapper_agent",
+        )
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapper_agent_flow"]
+
+    def test_direct_run_sync_accepts_equal_wrapper_and_wrapped_names(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="shared_agent"),
+            name="shared_agent",
+        )
+        agent.run_sync("hello")
+
+        assert flow_names == ["shared_agent_flow"]
+
+    def test_direct_run_sync_uses_wrapper_name_when_wrapped_agent_is_unnamed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(Agent(TestModel()), name="wrapper_only")
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapper_only_flow"]
+
+    def test_unnamed_wrapper_and_wrapped_agent_still_raise(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UserError
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(UserError, match="requires a stable `name`"):
+            KitaruAgent(Agent(TestModel()))
+
+    def test_inside_explicit_flow_does_not_open_auto_flow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+        from kitaru.runtime import _flow_scope
+
+        def fail_auto_flow(_agent_name: str) -> Any:
+            raise AssertionError("explicit flow should not use auto-flow")
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        monkeypatch.setattr(agent_module, "_auto_flow_for_agent", fail_auto_flow)
+        agent = KitaruAgent(Agent(TestModel(), name="explicit_agent"))
+
+        with _flow_scope(name="explicit_flow"):
+            agent.run_sync("hello")
+
+    def test_real_auto_flow_factory_caches_and_registers_source_alias(self) -> None:
+        from kitaru._source_aliases import build_pipeline_source_alias
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+
+        flow_name = agent_module._auto_flow_name_for_agent("source alias agent")
+        source_alias = build_pipeline_source_alias(flow_name)
+
+        first = agent_module._auto_flow_for_agent("source alias agent")
+        second = agent_module._auto_flow_for_agent("source alias agent")
+
+        assert first is second
+        assert getattr(agent_module, flow_name).__name__ == flow_name
+        assert getattr(agent_module, source_alias) is first._pipeline
+
+
 class TestStreamingHookCapabilities:
     def test_detects_configured_streaming_hooks(self) -> None:
         from pydantic_ai.capabilities.hooks import Hooks
