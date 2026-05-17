@@ -138,7 +138,13 @@ For pull requests, use a clear human-readable title and include:
 
 Link related issues (for example `Fixes #123`) when applicable.
 
-Never include a "[Codex] " prefix to PR titles. Also all PR descriptions should include a "Reviewer Notes" H2 or H3 section which explains what they should take care to check out during their reviews (i.e. code highlights) and ideally it also includes a code snippet they can run (you can assume they have both the ability to run flows locally as well as against a Kubernetes remote stack) to reproduce either the fix or the error etc.
+Never include a "[Codex] " prefix to PR titles.
+
+Every PR description should include a "Reviewer Notes" H2 or H3 section. Treat that section as a narrative guide for a human reviewer, not a file-by-file checklist:
+- Start with the story of the change: where the important behavior now happens, what used to go wrong, and what would break if the implementation is wrong.
+- Point reviewers toward the genuinely tricky or high-risk areas. Mention files only when the file name helps the story, and explain what to inspect there.
+- Include a concrete "Reproduction" subsection either inside Reviewer Notes or immediately after it. Prefer an example, CLI flow, or UI path that proves the behavior end to end. For example: run a specific `examples/...` script, then open the UI or run `kitaru executions list` / `kitaru executions logs` and describe the exact thing the reviewer should see.
+- Do not use a standalone "Verification" section as a substitute for reproduction when it only says `just check`, `just test`, or `/simplify`. Those commands are useful local hygiene, but they do not tell the reviewer how to see the feature or bug fix. If they are worth mentioning, keep them as a short "Local checks run" note after the reproduction steps.
 
 ### Feature completion checklist
 
