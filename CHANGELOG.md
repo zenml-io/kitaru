@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Claude Agent SDK adapter (`kitaru.adapters.claude_agent_sdk`) for invocation-level durability: wrap a Claude SDK query in one Kitaru checkpoint, capture the session ID, final result, usage/cost, messages/transcript artifacts when available, and a redacted run manifest. Includes a guide, integration example, and smoke-test coverage while explicitly documenting that Claude-internal Bash, MCP, custom tool, and workspace side effects are not granular replay boundaries.
 - Added `kitaru.current_execution_id()` as the public way to read the active Kitaru execution ID inside a running flow or checkpoint.
 
+### Fixed
+- PydanticAI granular checkpoints now store model messages and tool arguments as structural checkpoint inputs and use the returned checkpoint output as the canonical response/result artifact, avoiding duplicate manual artifacts in new runs.
+- OpenAI Agents `checkpoint_strategy="calls"` now stores model inputs and function-tool arguments as structural checkpoint inputs, and adapter-generated artifact names now put the human-readable role first across PydanticAI, OpenAI Agents, and Claude Agent SDK captures.
+
 ## [0.11.0] - 2026-05-12
 
 ### Fixed
