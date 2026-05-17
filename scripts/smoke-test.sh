@@ -215,8 +215,20 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk --extra langgraph" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk --extra langgraph
+    UV_SYNC_EXTRAS=(
+        --extra local
+        --extra llm
+        --extra mcp
+        --extra pydantic-ai
+        --extra openai-agents
+        --extra claude-agent-sdk
+        --extra langgraph
+    )
+    if [[ "$HAS_OPENAI" == true ]]; then
+        UV_SYNC_EXTRAS+=(--extra langgraph-openai)
+    fi
+    run_test "uv sync --python $PY ${UV_SYNC_EXTRAS[*]}" \
+        uv sync --python "$PY" "${UV_SYNC_EXTRAS[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -358,8 +370,12 @@ section_header "LangGraph adapter"
 
 run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \
     $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
-run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
-    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
+        $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+else
+    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" "OPENAI_API_KEY not set"
+fi
 
 section_header "OpenAI Agents adapter"
 

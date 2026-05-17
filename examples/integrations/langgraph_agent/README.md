@@ -1,29 +1,67 @@
-# LangGraph adapter example (local, deterministic)
+# LangGraph adapter example
 
-This example shows the two LangGraph checkpoint strategies side by side:
+This example shows how to run LangGraph and LangChain work inside a Kitaru flow.
 
-- `--strategy graph_call` — one Kitaru checkpoint around each outer LangGraph invocation.
-- `--strategy calls` — Kitaru checkpoints around synchronous LangChain model/tool handler calls, using `KitaruLangGraphMiddleware`.
+The basic story is simple:
 
-No provider API key, credentials, or network calls are required. The `calls` demo uses LangChain's fake local chat model.
+1. Your Python script starts a normal Kitaru flow.
+2. Inside that flow, the code runs a LangGraph graph or a LangChain agent.
+3. Kitaru records what happened as checkpoints and artifacts, so you can inspect the run later in the Kitaru dashboard or through the SDK.
+
+That matters because LangGraph already has its own idea of state: threads, checkpointers, interrupts, and resumes. Kitaru should not barge in and pretend to own all of that. Instead, the adapter gives you two safe ways to draw the boundary between the Kitaru world and the LangGraph world.
+
+Think of the two modes as two different camera positions:
+
+- `graph_call` films the whole LangGraph box from the outside. Kitaru records, "I called this graph with this thread id; it interrupted or completed; here is the latest graph checkpoint metadata." This is the safest first mode and needs no model provider API key.
+- `calls` puts a smaller camera at the LangChain model/tool doorway. Kitaru records the actual model call and local tool calls as their own checkpoints. This mode uses a real OpenAI-backed LangChain agent, while the tools stay deterministic local Python functions.
+
+In other words: start with `graph_call` if you want to see Kitaru wrap a LangGraph run. Try `calls` when you want to see Kitaru checkpoint the model/tool calls inside a LangChain agent.
+
+This README is enough to run the example and know what to look for. For the fuller design explanation, see the [LangGraph Adapter guide](https://kitaru.ai/docs/guides/langgraph-adapter).
+
+## The two runs in this example
+
+- `--strategy graph_call` — local interrupt/resume graph with one Kitaru checkpoint around each outer LangGraph invocation. No provider API key is needed.
+- `--strategy calls` — real OpenAI-backed LangChain support agent with Kitaru checkpoints around synchronous model/tool handler calls. Requires `OPENAI_API_KEY`.
 
 ## Run it
 
-From the repository root:
+From the repository root, install the dependencies for the strategy you want.
+
+For the local `graph_call` demo:
 
 ```bash
 uv sync --extra local --extra langgraph
 uv run kitaru init
 uv run kitaru login
 uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+```
+
+For the OpenAI-backed `calls` demo:
+
+```bash
+uv sync --extra local --extra langgraph-openai
+uv run kitaru init
+uv run kitaru login
+export OPENAI_API_KEY='sk-...'
+# Optional: override the default gpt-5-nano model.
+export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
-From this directory, the script path is shorter:
+From this directory, the script path is shorter.
+
+After the local `graph_call` setup above, run:
 
 ```bash
 cd examples/integrations/langgraph_agent
 uv run langgraph_adapter.py --strategy graph_call
+```
+
+After the OpenAI-backed `calls` setup above, including `OPENAI_API_KEY`, run:
+
+```bash
+cd examples/integrations/langgraph_agent
 uv run langgraph_adapter.py --strategy calls
 ```
 
@@ -55,25 +93,30 @@ This is the safe universal mode. Kitaru treats the whole graph call as the repla
 
 ## `calls` mode: LangChain model/tool checkpoints
 
-The calls demo builds a deterministic LangChain agent with:
+The calls demo builds a LangChain agent with:
 
-- a fake local chat model;
-- one local `approve_ticket(...)` tool;
+- a real OpenAI chat model through `langchain-openai`;
+- the default model `gpt-5-nano`, overridable with `LANGGRAPH_AGENT_MODEL`;
+- local deterministic `lookup_ticket(...)` and `approve_ticket(...)` tools;
 - `KitaruLangGraphMiddleware` installed as LangChain middleware;
 - `KitaruGraphRunner(..., checkpoint_strategy="calls")`.
 
-The fake model is scripted to do this:
+The story is deliberately small and inspectable:
 
-1. receive the user message;
-2. request the `approve_ticket` tool;
-3. receive the tool result;
-4. return a final approval message.
+1. The user asks the agent to handle `ticket-42`.
+2. The model is instructed to call `lookup_ticket` first.
+3. The local tool returns stable ticket details: status, priority, customer, and issue.
+4. If the status is `needs_escalation`, the model is instructed to call `approve_ticket`.
+5. The final answer summarizes the ticket status, approval result, and next step.
+
+The model is real, so its exact wording and exact tool sequence may vary. The tools are local and deterministic, so the side-effect story is still easy to understand.
 
 What to expect in Kitaru:
 
 - one flow execution;
 - model-call checkpoints with names beginning `model_call__...`;
-- one tool-call checkpoint with a name beginning `tool_call__approve_ticket_...`;
+- a ticket lookup checkpoint with a name beginning `tool_call__lookup_ticket_...` when the model follows the lookup instruction;
+- an approval checkpoint with a name beginning `tool_call__approve_ticket_...` when the model follows the escalation instruction for a ticket that needs escalation;
 - one calls-mode summary checkpoint with a name beginning `langgraph_summary__langgraph_local_calls_demo_...`;
 - event/run-summary artifacts, with names like
   `event_log__langgraph_local_calls_demo_...` and
@@ -126,10 +169,11 @@ For graph-call mode, the script prints:
 For calls mode, the script prints:
 
 - execution id;
+- model name;
 - status (`completed`);
-- a JSON-safe summary of the fake LangChain messages;
-- the final fake-model message;
-- expected call checkpoint name prefixes.
+- a JSON-safe summary of the LangChain messages;
+- the final model message;
+- typical and model-dependent call checkpoint name prefixes.
 
 For the conceptual walkthrough, see the guide:
 [LangGraph Adapter](https://kitaru.ai/docs/guides/langgraph-adapter).

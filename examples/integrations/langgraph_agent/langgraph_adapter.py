@@ -1,12 +1,16 @@
-"""Local LangGraph + Kitaru adapter example (no external model API)."""
+"""LangGraph + Kitaru adapter example.
+
+The `graph_call` strategy is local and needs no provider API key. The `calls`
+strategy uses a real OpenAI-backed LangChain agent with deterministic local
+Python tools so Kitaru can checkpoint actual model/tool handler calls.
+"""
 
 import argparse
+import os
 import time
 from typing import Any, Literal, cast
 
 from langchain.agents import create_agent
-from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -26,26 +30,28 @@ THREAD_ID = "langgraph-local-demo-thread"
 SUMMARY_ARTIFACT = "summary__langgraph_demo"
 GRAPH_CALL_RUNNER_NAME = "langgraph_local_interrupt_demo"
 CALLS_RUNNER_NAME = "langgraph_local_calls_demo"
+DEFAULT_LANGGRAPH_AGENT_MODEL = "gpt-5-nano"
+
+TICKETS: dict[str, dict[str, str]] = {
+    "ticket-42": {
+        "customer": "Amina",
+        "issue": "Delayed shipment for order ORD-1007",
+        "status": "needs_escalation",
+        "priority": "high",
+    },
+    "ticket-17": {
+        "customer": "Jonas",
+        "issue": "Address correction requested before dispatch",
+        "status": "open",
+        "priority": "normal",
+    },
+}
 
 
 class ReviewState(TypedDict, total=False):
     ticket: str
     decision: dict[str, Any]
     status: str
-
-
-class ToolCallingFakeModel(FakeMessagesListChatModel):
-    """Fake chat model that supports LangChain tool binding for this demo."""
-
-    def bind_tools(
-        self,
-        tools: Any,
-        *,
-        tool_choice: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Return self so LangChain can run deterministic fake tool calls."""
-        return self
 
 
 def build_interrupt_graph() -> Any:
@@ -73,34 +79,71 @@ def build_interrupt_graph() -> Any:
     return builder.compile(checkpointer=InMemorySaver())
 
 
-def approve_ticket(ticket: str) -> str:
-    """Approve a ticket and return a deterministic local tool result."""
-    return f"approved:{ticket}"
+def lookup_ticket(ticket: str) -> str:
+    """Look up local support ticket details before deciding on escalation."""
+    record = TICKETS.get(ticket)
+    if record is None:
+        return (
+            f"Ticket {ticket} was not found. Ask the user for a valid ticket id "
+            "before approving any escalation."
+        )
+    return (
+        f"Ticket {ticket}: customer={record['customer']}, issue={record['issue']}, "
+        f"status={record['status']}, priority={record['priority']}"
+    )
+
+
+def approve_ticket(ticket: str, reason: str | None = None) -> str:
+    """Approve a local ticket escalation after looking up the ticket details."""
+    record = TICKETS.get(ticket)
+    if record is None:
+        return f"not_approved:{ticket}:ticket_not_found"
+    if record["status"] != "needs_escalation":
+        return f"not_approved:{ticket}:status_{record['status']}"
+    approval_reason = reason or "replacement-authorized"
+    return f"approved:{ticket}:{approval_reason}"
+
+
+def _require_openai_api_key() -> None:
+    if os.getenv("OPENAI_API_KEY"):
+        return
+    raise SystemExit(
+        "Missing OPENAI_API_KEY.\n"
+        "Set it first, then rerun:\n"
+        "  export OPENAI_API_KEY='sk-...'"
+    )
+
+
+def _langgraph_agent_model_name() -> str:
+    return os.getenv("LANGGRAPH_AGENT_MODEL", DEFAULT_LANGGRAPH_AGENT_MODEL)
 
 
 def build_calls_agent(ticket: str) -> Any:
-    """Build a deterministic LangChain agent that makes one tool call."""
-    model = ToolCallingFakeModel(
-        responses=[
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "approve_ticket",
-                        "args": {"ticket": ticket},
-                        "id": "call-approve-ticket",
-                    }
-                ],
-            ),
-            AIMessage(content=f"Ticket {ticket} approved by fake local model."),
-        ]
-    )
+    """Build an OpenAI-backed LangChain agent with local ticket tools."""
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as error:
+        raise SystemExit(
+            "Missing LangChain OpenAI provider.\n"
+            "Install it with:\n"
+            "  uv sync --extra local --extra langgraph-openai"
+        ) from error
+
+    model = ChatOpenAI(model=_langgraph_agent_model_name())
     return create_agent(
         model=model,
-        tools=[approve_ticket],
+        tools=[lookup_ticket, approve_ticket],
         middleware=[KitaruLangGraphMiddleware(graph_name=CALLS_RUNNER_NAME)],
         checkpointer=InMemorySaver(),
-        name="fake_ticket_agent",
+        name="openai_ticket_agent",
+        system_prompt=(
+            "You are a careful customer support assistant. "
+            f"The current ticket is {ticket}. "
+            "Always call lookup_ticket first. "
+            "If the ticket status is needs_escalation, call approve_ticket. "
+            "In the final response, include the ticket id, status, approval result, "
+            "and next step."
+        ),
     )
 
 
@@ -175,6 +218,8 @@ def _run_graph_call_demo(ticket: str) -> dict[str, Any]:
 
 def _run_calls_demo(ticket: str) -> dict[str, Any]:
     """Run the granular LangChain middleware calls-mode demo."""
+    _require_openai_api_key()
+    model_name = _langgraph_agent_model_name()
     runner = KitaruGraphRunner(
         build_calls_agent(ticket),
         name=CALLS_RUNNER_NAME,
@@ -186,7 +231,11 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
                 "messages": [
                     {
                         "role": "user",
-                        "content": f"Please decide whether to approve {ticket}.",
+                        "content": (
+                            f"Please handle support ticket {ticket}. Look up the "
+                            "ticket first, approve it if escalation is needed, and "
+                            "then give me the status, approval result, and next step."
+                        ),
                     }
                 ]
             },
@@ -201,6 +250,7 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
     return {
         "strategy": "calls",
         "thread_id": THREAD_ID,
+        "model": model_name,
         "status": result.status,
         "message_count": len(messages),
         "messages": messages,
@@ -208,10 +258,13 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
         "latest_checkpoint_id": result.latest_checkpoint_id,
         "event_artifact": result.event_log_artifact_name,
         "run_summary_artifact": result.run_summary_artifact_name,
-        "expected_kitaru_call_checkpoint_prefixes": [
+        "typical_kitaru_call_checkpoint_prefixes": [
             "model_call__...",
+            "tool_call__lookup_ticket_...",
+            "langgraph_summary__...",
+        ],
+        "model_dependent_kitaru_call_checkpoint_prefixes": [
             "tool_call__approve_ticket_...",
-            "model_call__...",
         ],
     }
 
@@ -241,6 +294,9 @@ def run_workflow(
     ticket: str = "ticket-42",
 ) -> tuple[str, dict[str, Any]]:
     """Run the flow and load the saved summary artifact."""
+    if strategy == "calls":
+        _require_openai_api_key()
+
     handle = run_demo_flow.run(strategy, ticket)
     while not handle.status.is_finished:
         time.sleep(1)
@@ -264,9 +320,9 @@ def parse_args() -> argparse.Namespace:
         choices=["graph_call", "calls"],
         default="graph_call",
         help=(
-            "graph_call runs the existing interrupt/resume demo; calls runs a "
-            "deterministic LangChain middleware demo with model/tool call "
-            "checkpoints."
+            "graph_call runs the local interrupt/resume demo; calls runs a real "
+            "OpenAI-backed LangChain agent with local ticket tools and requires "
+            "OPENAI_API_KEY."
         ),
     )
     parser.add_argument("--ticket", default="ticket-42")
@@ -277,6 +333,6 @@ if __name__ == "__main__":
     args = parse_args()
     execution_id, summary = run_workflow(args.strategy, args.ticket)
     print(f"Execution ID: {execution_id}")
-    print(f"LangGraph adapter local demo summary ({args.strategy}):")
+    print(f"LangGraph adapter demo summary ({args.strategy}):")
     for key, value in summary.items():
         print(f"- {key}: {value}")

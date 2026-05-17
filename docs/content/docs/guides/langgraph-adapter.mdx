@@ -3,50 +3,29 @@ title: LangGraph Adapter
 description: Run LangGraph graphs inside Kitaru flows with either coarse graph-call checkpoints or granular LangChain call checkpoints
 ---
 
-Kitaru's LangGraph adapter lets you run an existing [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) graph from a Kitaru flow without taking LangGraph's state machinery away from LangGraph.
+The [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) framework gives you a graph-based agent runtime: nodes execute, state flows between them, the graph can pause for human input through `interrupt(...)`, and LangGraph checkpointers persist that paused state so the same conversation can be resumed later. LangChain agents built with `create_agent(...)` are LangGraph runnables underneath. Kitaru does **not** replace any of that.
 
-There are two checkpoint strategies:
+Kitaru adds an outer durable execution boundary around the graph invocation:
 
-- **`graph_call`** — the default. Kitaru puts one durable checkpoint around the outer `graph.invoke(...)` or `graph.ainvoke(...)` call. This works for any compatible LangGraph graph.
-- **`calls`** — opt-in. Kitaru does **not** create the outer graph-call checkpoint. Instead, synchronous LangChain model/tool calls can become their own Kitaru checkpoints when the graph was built with `KitaruLangGraphMiddleware`.
-
-The important boundary is concrete:
-
-- **LangGraph** keeps owning graph state: `thread_id`, checkpointers, super-step snapshots, interrupts, stores, and graph-local replay.
-- **Kitaru** records the Kitaru flow around the graph: checkpoints, run metadata, artifacts, deployment/runtime placement, and Kitaru-friendly observability.
-
-So Kitaru is not replacing LangGraph persistence. It is adding Kitaru durability and observability at the places where Kitaru can safely stand.
-
-```python
-from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest
-
-runner = KitaruGraphRunner(graph, name="review_graph")
-result = runner.invoke(
-    LangGraphRunRequest.start({"ticket": "ticket-42"}, thread_id="ticket-42")
-)
+```text
+one completed graph.invoke(...) = one Kitaru checkpoint
 ```
 
-## Install
+That boundary is useful when a LangGraph call is one part of a larger workflow. Imagine this flow:
 
-Add the `langgraph` extra — and `local` if you want the local dashboard/server:
-
-```bash
-uv sync --extra local --extra langgraph
+```text
+load ticket → run LangGraph triage agent → write report → notify customer
 ```
 
-The `langgraph` extra includes the LangChain package used by calls mode.
+If the agent finishes its work and the later `write report` checkpoint fails, Kitaru can replay the flow and reuse the completed graph result instead of running the agent again. The graph might have called paid model APIs and sent a real Slack message; replaying the whole thing from scratch would burn money and risk a duplicate notification. The Kitaru boundary lets you say "that graph already finished, here is its output, move on."
 
-Initialize the project once:
-
-```bash
-kitaru init
-kitaru login        # local server; add a URL to connect to a deployed one
-kitaru status
-```
+The adapter focuses on the completed graph invocation as the durable unit: an input enters the graph, the graph finishes or interrupts for human input, and Kitaru stores what came out plus a small capture envelope describing the call.
 
 ## The mental model
 
-Think of `graph_call` as putting one Kitaru shipping label on the whole LangGraph box.
+Think of LangGraph as the **graph engine** and Kitaru as the **trip recorder and checkpoint gate around the whole graph call**.
+
+By default, Kitaru puts one shipping label on the whole LangGraph box:
 
 ```text
 Kitaru flow
@@ -58,11 +37,9 @@ Kitaru flow
   └─ Kitaru checkpoint: persist_summary
 ```
 
-Kitaru can see and record the box: when it started, whether it completed or interrupted, which `thread_id` was used, and which latest LangGraph checkpoint ID was observed.
+Kitaru can see and record the box: when it started, whether it completed or interrupted, which `thread_id` was used, and which latest LangGraph checkpoint ID was observed. LangGraph controls what happens inside the box: node execution, graph state, checkpoint history, and where resume should continue. This is the **`graph_call`** strategy. It is the default, and it works for any compatible LangGraph graph or LangChain-agent runnable.
 
-LangGraph controls what happens inside the box: node execution, graph state, checkpoint history, and where resume should continue.
-
-`calls` mode is different. Kitaru still does not split open arbitrary LangGraph nodes. Instead, you put Kitaru middleware at the LangChain model/tool call seam:
+There is also a narrower opt-in strategy, **`calls`**, for when you want Kitaru checkpoints around the synchronous LangChain model and tool calls inside an agent graph:
 
 ```text
 Kitaru flow
@@ -77,9 +54,63 @@ Kitaru flow
        └─ Kitaru checkpoint: langgraph_summary__...
 ```
 
-That second picture is the key. Kitaru is not magically seeing through LangGraph. The middleware is physically around the real LangChain handler call, so Kitaru can create a true checkpoint there.
+That second picture is the key. Kitaru is not magically seeing through LangGraph. The `calls` strategy works because `KitaruLangGraphMiddleware` is physically wrapped around the real LangChain model/tool handler call, so Kitaru can open a true checkpoint at that exact seam.
 
-This avoids a dangerous double-replay problem. Imagine a graph node sends a Slack message, the process crashes, LangGraph resumes from its last checkpoint, and Kitaru also retries the same node. The message might be sent twice. The default `graph_call` strategy avoids that by using one Kitaru boundary around the graph call. The `calls` strategy is narrower: it only checkpoints calls where Kitaru middleware is actually wrapped around the model/tool handler.
+This boundary discipline avoids a dangerous double-replay problem. Imagine a graph node sends a Slack message, the process crashes, LangGraph resumes from its last checkpoint, and Kitaru also retries the same node. The message might be sent twice. The default `graph_call` strategy avoids that by using one Kitaru boundary around the whole graph call. The `calls` strategy is narrower: it only checkpoints calls where Kitaru middleware is actually wrapped around the model/tool handler. Outside those middleware-wrapped calls, LangGraph's own replay logic remains the source of truth.
+
+So the high-level rule is:
+
+- **LangGraph** keeps owning graph state: `thread_id`, checkpointers, super-step snapshots, interrupts, stores, and graph-local replay.
+- **Kitaru** records the Kitaru flow around the graph: checkpoints, run metadata, artifacts, deployment/runtime placement, and Kitaru-friendly observability.
+
+Kitaru is not replacing LangGraph persistence. It is adding Kitaru durability and observability at the places where Kitaru can safely stand.
+
+## What you get
+
+The adapter gives existing LangGraph users:
+
+- one durable Kitaru checkpoint around each completed `graph.invoke(...)` / `graph.ainvoke(...)` call (the default `graph_call` strategy)
+- optional granular Kitaru checkpoints around synchronous LangChain model and tool calls (the opt-in `calls` strategy with `KitaruLangGraphMiddleware`)
+- a typed `LangGraphRunResult` with status, output, observed LangGraph `thread_id` and latest checkpoint ID, interrupt summaries, pending-state metadata, and warnings
+- a `build_resume_request(...)` helper that turns an interrupted result into a `Command(resume=...)`-backed resume request
+- a `wait_for_interrupt(...)` bridge that pauses the Kitaru flow through `kitaru.wait(...)` and produces the resume request
+- preservation of the LangGraph `thread_id` across start and resume calls
+- Kitaru event-log and run-summary artifacts summarizing the graph run
+- redacted config/context metadata captured by default, plus opt-in deeper capture through `LangGraphCapturePolicy`
+
+LangGraph's own docs are still the source of truth for graph-internal behavior:
+
+- [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview)
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [LangChain custom middleware](https://docs.langchain.com/oss/python/langchain/middleware/custom)
+
+## Install
+
+Add the provider-neutral `langgraph` extra — and `local` if you want the local dashboard/server:
+
+```bash
+uv sync --extra local --extra langgraph
+```
+
+That is enough for raw LangGraph graphs and the local `graph_call` example. If you want the OpenAI-backed `calls` example, install the OpenAI provider extra and set an API key:
+
+```bash
+uv sync --extra local --extra langgraph-openai
+export OPENAI_API_KEY='sk-...'
+# Optional: override the default model used by the example.
+export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
+```
+
+The base `langgraph` extra does not install a model provider. Use `langgraph-openai` for OpenAI-backed LangChain agents, or `langgraph-anthropic` when you are building Anthropic-backed LangChain agents.
+
+Initialize the project once:
+
+```bash
+kitaru init
+kitaru login        # local server; add a URL to connect to a deployed one
+kitaru status
+```
 
 ## Minimal `graph_call` flow pattern
 
@@ -144,7 +175,7 @@ from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
 
 agent_graph = create_agent(
     model=model,
-    tools=[approve_ticket],
+    tools=[lookup_ticket, approve_ticket],
     middleware=[KitaruLangGraphMiddleware()],
     checkpointer=InMemorySaver(),
 )
@@ -430,13 +461,22 @@ For this adapter, the contract is:
 
 If you are using Deep Agents' virtual filesystem or sandbox backends, Kitaru records the graph call or the LangChain calls that middleware can see. It does not automatically snapshot the sandbox filesystem. See the official [Deep Agents backends guide](https://docs.langchain.com/oss/python/deepagents/backends) for how those files are stored.
 
-## Runnable local example
+## Runnable example
 
-The included example is intentionally deterministic. It uses no provider API key.
+The included example has two strategy paths. The `graph_call` path is local and needs no provider API key:
 
 ```bash
 uv sync --extra local --extra langgraph
 uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+```
+
+The `calls` path uses a real OpenAI-backed LangChain agent with deterministic local ticket tools:
+
+```bash
+uv sync --extra local --extra langgraph-openai
+export OPENAI_API_KEY='sk-...'
+# Optional: override the default gpt-5-nano model.
+export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
@@ -451,40 +491,46 @@ uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy cal
 
 `--strategy calls` runs the LangChain middleware demo:
 
-1. Builds a deterministic LangChain agent with a fake local chat model.
-2. The fake model requests one `approve_ticket` tool call.
-3. `KitaruLangGraphMiddleware` creates sync call checkpoints around the model/tool handlers.
-4. Kitaru records `model_call__...`, `tool_call__approve_ticket_...`, and `langgraph_summary__...` checkpoints.
-5. The flow saves the same user-facing `summary__langgraph_demo` artifact.
+1. Builds an OpenAI-backed LangChain support agent.
+2. The model is instructed to call the local `lookup_ticket` tool first.
+3. If the ticket needs escalation, the model is instructed to call the local `approve_ticket` tool.
+4. `KitaruLangGraphMiddleware` creates sync call checkpoints around the real model/tool handlers.
+5. Kitaru records the model-call checkpoints it observes and writes a `langgraph_summary__...` checkpoint.
+6. When the model follows the lookup instruction, Kitaru records `tool_call__lookup_ticket_...`; if it also follows the escalation instruction, Kitaru records `tool_call__approve_ticket_...`.
+7. The flow saves the same user-facing `summary__langgraph_demo` artifact.
 
 You should see output like:
 
 ```text
 Kitaru: Checkpoint `langgraph_local_interrupt_demo_langgraph_call` started.
 Kitaru: Checkpoint `persist_summary` started.
-LangGraph adapter local demo summary (graph_call):
+LangGraph adapter demo summary (graph_call):
 - strategy: graph_call
 - first_status: interrupted
 - resume_status: completed
 ```
 
-or:
+or, for a typical calls-mode run where the model follows the lookup instruction:
 
 ```text
 Kitaru: Checkpoint `model_call__...` started.
-Kitaru: Checkpoint `tool_call__approve_ticket_...` started.
+Kitaru: Checkpoint `tool_call__lookup_ticket_...` started.
 Kitaru: Checkpoint `langgraph_summary__...` started.
-LangGraph adapter local demo summary (calls):
+LangGraph adapter demo summary (calls):
 - strategy: calls
-- final_message: Ticket ticket-42 approved by fake local model.
+- model: gpt-5-nano
+- final_message: <OpenAI model response summarizing the ticket and next step>
 ```
+
+If the model follows the escalation instruction, you should also see a `tool_call__approve_ticket_...` checkpoint.
 
 For the full catalog, see [Examples](/getting-started/examples).
 
 ## Troubleshooting
 
 - **"requires optional dependency `langgraph`"** — install with `uv sync --extra langgraph`, or include `local` too if you want the local Kitaru server.
-- **"requires LangChain"** — calls mode middleware needs LangChain. Install the `langgraph` extra, which includes it.
+- **"Missing LangChain OpenAI provider"** or **"No module named `langchain_openai`"** — install with `uv sync --extra local --extra langgraph-openai` before running the OpenAI-backed `calls` example.
+- **"Missing OPENAI_API_KEY"** — set `OPENAI_API_KEY` before running `--strategy calls`. The local `--strategy graph_call` path does not need it.
 - **"requires a stable non-empty `thread_id`"** — pass a stable application key such as a ticket ID, user conversation ID, or workflow session ID.
 - **The graph resumes from the beginning** — check that start and resume use the same `thread_id`, and that the graph was compiled with a checkpointer.
 - **Restart durability does not work with `InMemorySaver`** — use a persistent LangGraph checkpointer/store. `InMemorySaver` is only in-memory, so a new process or Kubernetes pod cannot see the old graph state.
