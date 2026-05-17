@@ -14,6 +14,8 @@ You can create deployments from three surfaces:
 - Python SDK: `flow_name.deploy(...)`
 - MCP: `kitaru_deployments_deploy(target="path/to/file.py:flow_name", ...)`
 
+The CLI also has `kitaru build path/to/file.py:flow_name` for the narrower case where you want to create an immutable deployment version **without** attaching a route yet. Think of it as putting a sealed build artifact on the shelf. It exists, it has a version, but nobody reaches it through `default`, `stable`, or `canary` until you attach a tag later with `kitaru flow tag`.
+
 You can then invoke the deployed flow without the original target path:
 
 - CLI: `kitaru invoke flow_name`
@@ -235,7 +237,7 @@ For a remote Kitaru server, authenticate once and choose the project you want to
 work in:
 
 ```bash
-kitaru login https://kitaru.example.com --api-key kat_abc123 --project production
+kitaru login https://kitaru.example.com --api-key KITARU_API_KEY_VALUE --project production
 kitaru status
 ```
 
@@ -244,7 +246,7 @@ variables:
 
 ```bash
 export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_abc123
+export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 

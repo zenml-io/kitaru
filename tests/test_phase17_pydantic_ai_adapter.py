@@ -98,12 +98,13 @@ def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
 
 
 def _assert_event_artifacts_use_display_names(
-    event_map: dict[str, list[dict[str, Any]]], artifact_names: list[str]
+    event_map: dict[str, list[dict[str, Any]]], allowed_refs: list[str] | set[str]
 ) -> None:
+    allowed = set(allowed_refs)
     for event in _events(event_map):
         event_id = event["event_id"]
         for artifact_name in event.get("artifacts", {}).values():
-            assert artifact_name in artifact_names
+            assert artifact_name in allowed
             assert not artifact_name.startswith(f"{event_id}_")
 
 
@@ -123,19 +124,26 @@ def test_phase17_event_artifact_names_use_short_display_shape() -> None:
             "stream_transcript",
             namespace="agent_ab12cd34_tracker_2",
         )
-        == "agent_ab12cd34_tracker_2_llm_call_1_stream_transcript"
+        == "llm_call_1_stream_transcript__agent_ab12cd34_tracker_2"
     )
 
 
-def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
+def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The adapter should mirror and forward Pydantic AI's per-run capabilities."""
+    """The adapter should mirror and forward Pydantic AI per-run kwargs."""
     durable_agent = _make_wrapped_agent(
         name_prefix="capability_agent", granular_checkpoints=True
     )
     capabilities = [Hooks()]
-    captured: dict[str, object] = {}
+    conversation_id = "conversation-phase17"
+    output_retries = 2
+    expected_forwarded_kwargs = {
+        "capabilities": capabilities,
+        "conversation_id": conversation_id,
+        "output_retries": output_retries,
+    }
+    captured: dict[str, dict[str, object]] = {}
     run_result = object()
     stream_result = object()
     iter_result = object()
@@ -146,22 +154,25 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     def run_sync_direct(body: Any, **_: Any) -> Any:
         return body()
 
+    def capture_forwarded_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+        return {key: kwargs[key] for key in expected_forwarded_kwargs}
+
     async def fake_run(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run"] = kwargs["capabilities"]
+        captured["run"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     def fake_run_sync(self: Any, *args: Any, **kwargs: Any) -> object:
-        captured["run_sync"] = kwargs["capabilities"]
+        captured["run_sync"] = capture_forwarded_kwargs(kwargs)
         return run_result
 
     @asynccontextmanager
     async def fake_run_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
-        captured["run_stream"] = kwargs["capabilities"]
+        captured["run_stream"] = capture_forwarded_kwargs(kwargs)
         yield stream_result
 
     @asynccontextmanager
     async def fake_iter(*args: Any, **kwargs: Any) -> Any:
-        captured["iter"] = kwargs["capabilities"]
+        captured["iter"] = capture_forwarded_kwargs(kwargs)
         yield iter_result
 
     monkeypatch.setattr(durable_agent, "_run_async", run_async_direct)
@@ -179,23 +190,44 @@ def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
     monkeypatch.setattr(durable_agent.wrapped, "iter", fake_iter)
 
     async def exercise_async_surfaces() -> None:
-        result = await durable_agent.run("prompt", capabilities=capabilities)
+        result = await durable_agent.run(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
         assert result is run_result
         async with durable_agent.run_stream(
-            "prompt", capabilities=capabilities
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
         ) as streamed_result:
             assert streamed_result is stream_result
-        async with durable_agent.iter("prompt", capabilities=capabilities) as agent_run:
+        async with durable_agent.iter(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        ) as agent_run:
             assert agent_run is iter_result
 
     asyncio.run(exercise_async_surfaces())
-    assert durable_agent.run_sync("prompt", capabilities=capabilities) is run_result
+    assert (
+        durable_agent.run_sync(
+            "prompt",
+            capabilities=capabilities,
+            conversation_id=conversation_id,
+            output_retries=output_retries,
+        )
+        is run_result
+    )
 
     assert captured == {
-        "run": capabilities,
-        "run_stream": capabilities,
-        "iter": capabilities,
-        "run_sync": capabilities,
+        "run": expected_forwarded_kwargs,
+        "run_stream": expected_forwarded_kwargs,
+        "iter": expected_forwarded_kwargs,
+        "run_sync": expected_forwarded_kwargs,
     }
 
 
@@ -226,24 +258,24 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     artifact_names = _artifact_names(hydrated_run)
     run_label = summary["run_label"]
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_event_log", name)
+        re.fullmatch(rf"event_log__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_run_summary", name)
+        re.fullmatch(rf"run_summary__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        re.fullmatch(rf"llm_call_1_prompt__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
+        re.fullmatch(rf"llm_call_1_response__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
-    assert any(re.fullmatch(r".*_tool_call_\d+_args", name) for name in artifact_names)
+    assert any(re.fullmatch(r"tool_call_\d+_args__.*", name) for name in artifact_names)
     assert any(
-        re.fullmatch(r".*_tool_call_\d+_result", name) for name in artifact_names
+        re.fullmatch(r"tool_call_\d+_result__.*", name) for name in artifact_names
     )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
 
@@ -275,8 +307,8 @@ def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
         for inputs in inputs_by_step
     )
     artifact_names = _artifact_names(hydrated_run)
-    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
-    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_response__") for name in artifact_names)
 
 
 def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
@@ -301,8 +333,8 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
     assert not _has_step_input(hydrated_run, "user_prompt")
     assert not _has_step_input(hydrated_run, "message_history")
     artifact_names = _artifact_names(hydrated_run)
-    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
-    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_response__") for name in artifact_names)
 
 
 def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
@@ -327,23 +359,28 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
     artifact_names = _artifact_names(hydrated_run)
-    run_label = summary["run_label"]
     assert len(hydrated_run.steps) >= 2
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
-        for name in artifact_names
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert not any(name.startswith("llm_call_1_response__") for name in artifact_names)
+    assert not any(
+        re.fullmatch(r"tool_call_\d+_args__.*", name) for name in artifact_names
     )
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
-        for name in artifact_names
+    assert not any(
+        re.fullmatch(r"tool_call_\d+_result__.*", name) for name in artifact_names
     )
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
+    assert all(
+        event.get("checkpoint_name")
+        for event in _events(event_map)
+        if "output" in event.get("artifacts", {}).values()
+    )
     assert "event_log" not in artifact_names
     assert "run_summary" not in artifact_names
-    assert not any(name.endswith("_event_log") for name in artifact_names)
-    assert not any(name.endswith("_run_summary") for name in artifact_names)
+    assert not any(name.startswith("event_log__") for name in artifact_names)
+    assert not any(name.startswith("run_summary__") for name in artifact_names)
 
 
 _AUTO_FLOW_AGENT: KitaruAgent[Any, str] | None = None
@@ -418,25 +455,22 @@ def test_phase17_multiple_tracker_scopes_at_flow_scope_get_unique_namespaces(
     run_labels = {summary["run_label"] for summary in summaries}
     assert len(run_labels) == 2
 
-    model_artifact_names = [
+    model_artifact_refs = [
         stored_name
         for event in _events(event_map)
         if event["kind"] == "llm_call"
         for stored_name in event.get("artifacts", {}).values()
     ]
-    assert model_artifact_names
-    assert len(model_artifact_names) == len(set(model_artifact_names))
-    assert all(stored_name in artifact_names for stored_name in model_artifact_names)
-    assert all(
-        any(run_label in stored_name for stored_name in model_artifact_names)
-        for run_label in run_labels
-    )
-    assert all("_tracker_1_" in stored_name for stored_name in model_artifact_names)
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
-    assert not any(name.endswith("_event_log") for name in artifact_names)
-    assert not any(name.endswith("_run_summary") for name in artifact_names)
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    assert model_artifact_refs
+    assert {"messages", "output"} <= set(model_artifact_refs)
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert not any(name.startswith("llm_call_1_response__") for name in artifact_names)
+    assert not any(name.startswith("event_log__") for name in artifact_names)
+    assert not any(name.startswith("run_summary__") for name in artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
 
 
 def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
@@ -474,22 +508,22 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     assert len(run_labels) == 2
     for tracker_index in (1, 2):
         assert any(
-            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_event_log", name)
+            re.fullmatch(rf"event_log__[a-zA-Z0-9_]+_tracker_{tracker_index}", name)
             for name in artifact_names
         )
         assert any(
-            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_run_summary", name)
+            re.fullmatch(rf"run_summary__[a-zA-Z0-9_]+_tracker_{tracker_index}", name)
             for name in artifact_names
         )
         assert any(
             re.fullmatch(
-                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_prompt", name
+                rf"llm_call_1_prompt__[a-zA-Z0-9_]+_tracker_{tracker_index}", name
             )
             for name in artifact_names
         )
         assert any(
             re.fullmatch(
-                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_response", name
+                rf"llm_call_1_response__[a-zA-Z0-9_]+_tracker_{tracker_index}", name
             )
             for name in artifact_names
         )
@@ -503,13 +537,15 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
         for stored_name in event.get("artifacts", {}).values()
     ]
     assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_tracker_2_llm_call_1_prompt", name)
+        re.fullmatch(r"llm_call_1_prompt__[a-zA-Z0-9_]+_tracker_2", name)
         for name in event_artifact_names
     )
 
-    event_log_names = [name for name in artifact_names if name.endswith("event_log")]
+    event_log_names = [
+        name for name in artifact_names if name.startswith("event_log__")
+    ]
     run_summary_names = [
-        name for name in artifact_names if name.endswith("run_summary")
+        name for name in artifact_names if name.startswith("run_summary__")
     ]
     assert len(event_log_names) == 2
     assert len(run_summary_names) == 2

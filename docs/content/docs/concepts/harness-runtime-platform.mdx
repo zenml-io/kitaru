@@ -53,7 +53,7 @@ naming the overlap before drawing the distinction.
   a packaged platform. Kitaru ships just the runtime primitives so platform
   teams bring their own auth, sandbox provider, and governance.
 - **Temporal** is a battle-tested polyglot durable workflow engine. Kitaru is
-  Python-first, agent-shaped (first-class `kitaru.llm()`, memory, `kitaru.wait()`,
+  Python-first, agent-shaped (first-class `kitaru.llm()`, `kitaru.wait()`,
   artifact lineage), with a simpler single-service deployment.
 - **DBOS** is a Postgres-backed durable workflow library with deterministic
   workflow bodies. Kitaru flows are plain Python with no determinism
@@ -64,7 +64,7 @@ naming the overlap before drawing the distinction.
 ```text
 Harness-first
   "Let's give developers a better way to build agents"
-    → agent logic → tools → memory → state → deployment
+    → agent logic → tools → state → deployment
 
 Runtime-first (Kitaru)
   "Agent work is long-running infrastructure work"
@@ -169,7 +169,7 @@ Or the even shorter version:
 ## Related
 
 <Cards>
-  <Card title="How It Works" href="/concepts/how-it-works" description="Server, runner, execution targets; three planes; local dev vs production." />
-  <Card title="Flows" href="/concepts/flows" description="The outer durable boundary." />
-  <Card title="Checkpoints" href="/concepts/checkpoints" description="The contract between the runtime and your code." />
+  <Card title="How It Works" href="/concepts/how-it-works/" description="Server, runner, execution targets; three planes; local dev vs production." />
+  <Card title="Flows" href="/concepts/flows/" description="The outer durable boundary." />
+  <Card title="Checkpoints" href="/concepts/checkpoints/" description="The contract between the runtime and your code." />
 </Cards>

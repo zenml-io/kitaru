@@ -121,7 +121,6 @@ def _build_checkpoint_extra(checkpoint_type: str | None) -> dict[str, Any]:
 _KNOWN_STEP_TYPES: dict[str, StepType] = {
     "llm_call": StepType.LLM_CALL,
     "tool_call": StepType.TOOL_CALL,
-    "memory_call": StepType.MEMORY_CALL,
 }
 
 

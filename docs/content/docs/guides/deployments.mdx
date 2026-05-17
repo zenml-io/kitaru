@@ -96,6 +96,23 @@ kitaru flow deployments show research_agent
 
 `show` defaults to the `default` tag when you do not pass `--version` or `--tag`.
 
+### Build a version without routing it
+
+Sometimes you want the saved deployment version first, but you do **not** want consumers to hit it yet. Use `kitaru build` for that:
+
+```bash
+kitaru build flows/research.py:research_agent \
+  --input '{"topic": "durable execution"}'
+```
+
+That creates the immutable version but leaves it untagged. Later, after review or smoke testing, attach a route explicitly:
+
+```bash
+kitaru flow tag research_agent canary --version 2 --exclusive
+```
+
+The practical difference is simple: `kitaru deploy` creates a version **and** one route; `kitaru build` creates only the version.
+
 ## Step 2: invoke the default route
 
 Now invoke the deployed flow by name:
@@ -305,14 +322,14 @@ Store the one-time `key` value from the create response in your secret manager.
 Then provide the connection by logging in once:
 
 ```bash
-kitaru login https://kitaru.example.com --api-key kat_abc123 --project production
+kitaru login https://kitaru.example.com --api-key KITARU_API_KEY_VALUE --project production
 ```
 
 Or, in CI and other headless environments, with environment variables:
 
 ```bash
 export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_abc123
+export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 
@@ -427,7 +444,7 @@ kitaru status
 For a remote workspace:
 
 ```bash
-kitaru login my-workspace --api-key kat_abc123 --project production
+kitaru login my-workspace --api-key KITARU_API_KEY_VALUE --project production
 kitaru status
 ```
 
@@ -435,7 +452,7 @@ For headless environments:
 
 ```bash
 export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_abc123
+export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 

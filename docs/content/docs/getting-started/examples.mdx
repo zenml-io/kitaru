@@ -3,65 +3,60 @@ title: Examples
 description: Runnable Kitaru examples and what each one demonstrates
 ---
 
-The Kitaru repo includes runnable examples that demonstrate each primitive.
-Each example is a standalone project — clone the repo, `cd` into the example
-you want, and run it directly.
+The Kitaru repo includes runnable examples that demonstrate each primitive, from the smallest `@flow` to full agent workflows.
 
-## Get the examples
+Clone the repo, install dependencies with `uv`, initialize the project once, and then run the example you want.
 
 ```bash
 git clone https://github.com/zenml-io/kitaru.git
-cd kitaru/examples/features/basic_flow
-kitaru init
-python first_working_flow.py
+cd kitaru
+uv sync --extra local
+uv run kitaru init
+uv run examples/features/basic_flow/first_working_flow.py
 ```
 
 <Callout type="info">
-  Run `kitaru init` once before your first example to set up the local
-  execution environment.
+  Run `uv run kitaru init` once in the repo checkout before your first example.
+  It creates the project marker Kitaru uses when replaying or resolving flow
+  source from a saved execution.
 </Callout>
 
-Every example uses imports relative to its own directory, so always `cd` into
-the example folder before running.
+Most examples can be run from the repository root with `uv run path/to/script.py`. Some end-to-end examples tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 ## Connection context
 
 Examples use whatever Kitaru connection context is already active.
 
-- If you are just trying Kitaru locally, run them as-is.
-- If you already have a deployed Kitaru server and want the examples to use it,
-  connect first and verify the active context before running the example.
+- If you are just trying Kitaru locally, run `uv run kitaru login` and use them as-is.
+- If you already have a deployed Kitaru server and want the examples to use it, connect first and verify the active context before running the example.
 
 ```bash
-kitaru login https://my-server.example.com
-kitaru status
+uv run kitaru login https://my-server.example.com
+uv run kitaru status
 ```
 
 ## Browse by goal
 
 | I want to... | Example | Run |
 |---|---|---|
-| Start with the smallest runnable flow | `features/basic_flow/` | `python first_working_flow.py` |
-| See structured metadata logging | `features/basic_flow/` | `python flow_with_logging.py` |
-| Persist and reload data across executions | `features/basic_flow/` | `python flow_with_artifacts.py` |
-| Seed, inspect, compact, and purge durable memory | `features/memory/` | `python flow_with_memory.py` |
-| Set runtime configuration defaults | `features/basic_flow/` | `python flow_with_configuration.py` |
-| Inspect and manage past executions | `features/execution_management/` | `python client_execution_management.py` |
-| Pause for human input and resume later | `features/execution_management/` | `python wait_and_resume.py` |
-| Replay from a checkpoint with overrides | `features/replay/` | `python replay_with_overrides.py` |
-| Track a model call inside a flow | `features/llm/` | `python flow_with_llm.py` |
-| Wrap a PydanticAI agent | `integrations/pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
-| Wrap an OpenAI Agents SDK agent | `integrations/openai_agents_agent/` | `python openai_agents_adapter.py` |
-| Wrap a local LangGraph graph (interrupt/resume) | `integrations/langgraph_agent/` | `python langgraph_adapter.py` |
-| Run a multi-agent OpenAI research bot | `end_to_end/openai_research_bot/` | `python research_bot.py "Your query" --max-searches 2` |
-| Query executions from an MCP client | `features/mcp/` | `python mcp_query_tools.py` |
-
-For example:
-
-```bash
-cd examples/features/basic_flow
-python first_working_flow.py
-```
+| Start with the smallest runnable flow | `features/basic_flow/` | `uv run examples/features/basic_flow/first_working_flow.py` |
+| See structured metadata logging | `features/basic_flow/` | `uv run examples/features/basic_flow/flow_with_logging.py` |
+| Persist and reload data across executions | `features/basic_flow/` | `uv run examples/features/basic_flow/flow_with_artifacts.py` |
+| Run one checkpoint in an isolated runtime | `features/basic_flow/` | `uv run examples/features/basic_flow/flow_with_checkpoint_runtime.py` |
+| Set runtime configuration defaults | `features/basic_flow/` | `uv run examples/features/basic_flow/flow_with_configuration.py` |
+| Inspect and manage past executions | `features/execution_management/` | `uv run examples/features/execution_management/client_execution_management.py` |
+| Pause for human input and resume later | `features/execution_management/` | `uv run examples/features/execution_management/wait_and_resume.py` |
+| Replay from a checkpoint with overrides | `features/replay/` | `uv run examples/features/replay/replay_with_overrides.py` |
+| Track a model call inside a flow | `features/llm/` | `uv run examples/features/llm/flow_with_llm.py` |
+| Wrap a PydanticAI agent | `integrations/pydantic_ai_agent/` | `uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py` |
+| Wrap an OpenAI Agents SDK agent | `integrations/openai_agents_agent/` | `uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py` |
+| Wrap a Claude Agent SDK invocation | `integrations/claude_agent_sdk_agent/` | `uv run examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` |
+| Wrap a local LangGraph graph (interrupt/resume) | `integrations/langgraph_agent/` | `uv run examples/integrations/langgraph_agent/langgraph_adapter.py` |
+| Run a basic coding agent | `end_to_end/coding_agent/` | `uv run examples/end_to_end/coding_agent/agent.py "add tests for this function"` |
+| Run an agentic news monitor | `end_to_end/news_scout/` | `cd examples/end_to_end/news_scout && uv run python scout.py` |
+| Run a multi-agent OpenAI research bot | `end_to_end/openai_research_bot/` | `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` |
+| Run the staged compliance-review agent | `end_to_end/compliance_review/` | `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` |
+| Query executions from an MCP client | `features/mcp/` | `uv run examples/features/mcp/mcp_query_tools.py` |
 
 ## Core workflow basics
 
@@ -70,13 +65,8 @@ python first_working_flow.py
 | `features/basic_flow/first_working_flow.py` | Smallest `@flow` + `@checkpoint` example | [Quickstart](/getting-started/quickstart) |
 | `features/basic_flow/flow_with_logging.py` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging](/concepts/logging) |
 | `features/basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
+| `features/basic_flow/flow_with_checkpoint_runtime.py` | `@checkpoint(runtime="isolated")` for work that should run outside the runner process | [Checkpoints](/concepts/checkpoints) |
 | `features/basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](/guides/configuration) |
-
-## Durable shared state
-
-| Example | Demonstrates | Related docs |
-|---|---|---|
-| `features/memory/flow_with_memory.py` | Outside-flow seeding, in-flow `kitaru.memory`, detached post-run execution-scope writes, explicit-scope inspection, and post-run maintenance (compact, purge, audit log) via `KitaruClient.memories` | [Use Memory](/guides/memory) |
 
 ## Execution lifecycle and recovery
 
@@ -91,15 +81,19 @@ python first_working_flow.py
 | Example | Demonstrates | Related docs |
 |---|---|---|
 | `features/llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
-| `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
-| `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with Kitaru call-level or runner-call durability in a real API-backed support flow (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [OpenAI Agents Adapter](/guides/openai-agents-adapter) |
+| `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with granular Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
+| `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](/guides/openai-agents-adapter) |
+| `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](/guides/claude-agent-sdk-adapter) |
 | `integrations/langgraph_agent/langgraph_adapter.py` | Local deterministic LangGraph interrupt/resume run with stable `thread_id`, `InMemorySaver`, and adapter checkpoint metadata (no API keys) | [LangGraph Adapter](/guides/langgraph-adapter) |
-| `end_to_end/openai_research_bot/research_bot.py` | Run a multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and a published report (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
+| `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](/guides/llm-calls) |
+| `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [News Scout](/guides/news-scout) |
+| `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
+| `end_to_end/compliance_review/README.md` | Four-stage Claude Agent SDK audit: checkpointed turns, partial replay, and durable wait/resume conversation | [Replay and Overrides](/guides/replay-and-overrides) |
 | `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">
-  The LLM and adapter examples require additional dependencies — check each
-  example's README for setup instructions.
+  The LLM and adapter examples require additional dependencies and provider API
+  keys. Check each example's README before running a real model-backed example.
 </Callout>
 
 ## Recommended path
@@ -109,13 +103,15 @@ If you are learning Kitaru from scratch:
 1. `features/basic_flow/first_working_flow.py` — [Quickstart](/getting-started/quickstart)
 2. `features/basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
 3. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
-4. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory)
+4. `features/basic_flow/flow_with_checkpoint_runtime.py` — [Checkpoints](/concepts/checkpoints)
 5. `features/execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
 6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
 7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
 8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
 9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
 10. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/guides/openai-agents-adapter)
-11. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](/guides/langgraph-adapter)
-12. `end_to_end/openai_research_bot/research_bot.py` — [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example)
-13. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+11. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](/guides/claude-agent-sdk-adapter)
+12. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](/guides/langgraph-adapter)
+13. `end_to_end/news_scout/scout.py` — [News Scout](/guides/news-scout)
+14. `end_to_end/openai_research_bot/research_bot.py` — [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example)
+15. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)

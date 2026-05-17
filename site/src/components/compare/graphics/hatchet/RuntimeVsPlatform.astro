@@ -1,0 +1,182 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">Hatchet · platform across the stack</span>
+      <span class="panel-sub">Engine, workers, queues, and dashboard packaged together</span>
+    </div>
+
+    <div class="block block--hatchet">
+      <span class="block-title">Hatchet platform</span>
+      <div class="block-rows">
+        <span class="block-row">events · cron · webhooks</span>
+        <span class="block-row">durable engine · workers · queues</span>
+        <span class="block-row">concurrency · rate limits · priority</span>
+        <span class="block-row">dashboard · OTEL · alerts</span>
+      </div>
+    </div>
+
+    <div class="under">your app re-shapes around the engine</div>
+
+    <div class="foot">Adopt the platform, get the runtime as one part of it.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · runtime, one layer of four</span>
+      <span class="panel-sub">Owns the runtime, leaves harness and platform untouched</span>
+    </div>
+
+    <div class="layers">
+      <div class="layer">
+        <span class="layer-key">Platform</span>
+        <span class="layer-val">your auth, entitlements, observability</span>
+      </div>
+      <div class="layer">
+        <span class="layer-key">Harness</span>
+        <span class="layer-val">Pydantic AI, OpenAI, Claude, LangGraph, raw Python</span>
+      </div>
+      <div class="layer layer--accent">
+        <span class="layer-key">Runtime</span>
+        <span class="layer-val">Kitaru: <code>@flow</code>, <code>@checkpoint</code>, <code>llm()</code>, <code>wait()</code>, <code>save/load</code></span>
+      </div>
+      <div class="layer">
+        <span class="layer-key">Model</span>
+        <span class="layer-val">OpenAI, Anthropic, Google, open-weights</span>
+      </div>
+    </div>
+
+    <div class="foot foot--accent">Kitaru owns one layer. The rest of your stack stays as you picked it.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 12px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .block {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--color-surface);
+    margin-bottom: 10px;
+  }
+  .block-title {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: 8px;
+  }
+  .block-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .block-row {
+    font-size: 10.5px;
+    color: var(--color-secondary);
+    padding: 4px 8px;
+    background: var(--color-bg);
+    border-radius: 4px;
+  }
+  .under {
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+    text-align: center;
+    margin-bottom: 10px;
+  }
+
+  .layers {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .layer {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+  }
+  .layer--accent {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+  }
+  .layer-key {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .layer--accent .layer-key { color: var(--color-accent); }
+  .layer-val {
+    font-size: 10.5px;
+    color: var(--color-secondary);
+  }
+  .layer-val code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-primary);
+    background: var(--color-surface);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 70px 1fr; }
+  }
+</style>

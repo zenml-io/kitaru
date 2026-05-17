@@ -16,7 +16,7 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
-from kitaru import memory
+import kitaru
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru._config._core import ExecutionStackSource
 from kitaru.analytics import AnalyticsEvent
@@ -2032,6 +2032,28 @@ def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
     assert _get_current_flow() is None
 
 
+def test_public_current_execution_id_reads_flow_scope_only() -> None:
+    def _user_flow() -> str | None:
+        return kitaru.current_execution_id()
+
+    wrapped = _wrap_flow_entrypoint(_user_flow)
+
+    with patch(
+        "kitaru.runtime.DynamicPipelineRunContext.get",
+        return_value=SimpleNamespace(
+            run=SimpleNamespace(
+                id="exec-public-123",
+                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+            ),
+            pipeline=SimpleNamespace(id=None, name=None),
+        ),
+    ):
+        result = wrapped()
+
+    assert result == "exec-public-123"
+    assert kitaru.current_execution_id() is None
+
+
 def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> None:
     def _user_flow() -> None:
         assert _is_inside_flow()
@@ -2051,62 +2073,6 @@ def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> N
     assert not _is_inside_flow()
     assert _get_current_flow() is None
     assert _get_current_execution_id() is None
-
-
-def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
-    flow_id = "flow-reset-test"
-
-    def first_flow() -> None:
-        memory.configure(scope="repo_a")
-        memory.list()
-
-    def second_flow() -> None:
-        memory.list()
-
-    wrapped_first = _wrap_flow_entrypoint(first_flow)
-    wrapped_second = _wrap_flow_entrypoint(second_flow)
-
-    with (
-        patch("kitaru.runtime.StepContext.get", return_value=None),
-        patch(
-            "kitaru.runtime.DynamicPipelineRunContext.get",
-            return_value=SimpleNamespace(
-                run=SimpleNamespace(
-                    pipeline=SimpleNamespace(id=flow_id, name="test_flow"),
-                ),
-                pipeline=SimpleNamespace(id=None, name=None),
-            ),
-        ),
-        patch(
-            "kitaru.memory._steps._memory_list_step", return_value=[]
-        ) as memory_list_step,
-    ):
-        wrapped_first()
-        wrapped_second()
-
-    assert memory_list_step.call_args_list == [
-        call("repo_a", "namespace"),
-        call(flow_id, "flow"),
-    ]
-
-
-def test_wrapped_flow_uses_outside_flow_seeded_memory_scope() -> None:
-    def seeded_flow() -> None:
-        memory.list()
-
-    memory.configure(scope="repo_seed")
-    wrapped = _wrap_flow_entrypoint(seeded_flow)
-
-    with (
-        patch("kitaru.runtime.StepContext.get", return_value=None),
-        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
-        patch(
-            "kitaru.memory._steps._memory_list_step", return_value=[]
-        ) as memory_list_step,
-    ):
-        wrapped()
-
-    memory_list_step.assert_called_once_with("repo_seed", "namespace")
 
 
 def test_execution_id_lookup_requires_active_kitaru_scope() -> None:

@@ -7,10 +7,10 @@
     <div class="pb-header" data-reveal>
       <span class="section-eyebrow">THE MISSING LAYER</span>
       <h2 class="section-title">
-        Most enterprises already own platform and infrastructure. Runtime is the gap.
+        The inner harness is getting absorbed. The outer runtime is still missing.
       </h2>
       <p class="pb-desc">
-        Keep your SSO, RBAC, cloud accounts, buckets, clusters, and agent SDKs. Kitaru fills the layer between them: how agent work survives, waits, recovers, and moves across execution targets.
+        Models and SDKs increasingly own the inner loop &mdash; call, tool, observe, repeat. The layer around it stays unsolved: recovery, sandboxes, approvals, replay, cheap waiting. Keep your SSO, RBAC, cloud accounts, and agent SDKs. Kitaru fills the gap.
       </p>
     </div>
 
@@ -87,12 +87,53 @@
 
     </div>
 
+    <div class="pb-why-grid">
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Durable agent state" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <span class="why-card-tag">Recovery</span>
+          <h3>Agent died at hour 11? Resume from hour 10.</h3>
+          <p>Every durable checkpoint persists its inputs and outputs. Fix the failure and replay from the boundary that broke instead of re-running every model call and tool call upstream.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="One agent, three runtimes" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <span class="why-card-tag">Trust boundaries</span>
+          <h3>The brain and the hand should not share a process.</h3>
+          <p>Run risky tools in controlled execution targets while the durable runner owns state, replay, and policy hooks. A sandbox failure becomes one failed checkpoint, not a lost agent.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="5">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Runs you can actually compare" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <span class="why-card-tag">Cheap waiting</span>
+          <h3>Wait on humans, webhooks, or agents without burning compute.</h3>
+          <p><code>wait()</code> suspends the run and releases the worker. When the input arrives minutes, hours, or days later, Kitaru rehydrates the execution and continues.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="pb-callout" data-reveal data-reveal-delay="4">
       <p class="pb-callout-line">
         Kitaru isn&rsquo;t an agent platform. It&rsquo;s the runtime layer your platform runs agents on.
       </p>
       <p class="pb-callout-sub">
         Kubernetes can restart a pod. It cannot replay an agent from checkpoint 10 or wait three days for a human approval without burning compute.
+      </p>
+      <p class="pb-callout-sub">
+        Bundled agent platforms ship one model, one harness, one cloud. Kitaru is the open assembled stack &mdash; same primitives, your stack.
       </p>
       <p class="pb-callout-sub">
         Open source. Self-hosted. No lock-in to a model, harness, or platform.
@@ -282,6 +323,35 @@
     line-height: 1.65;
   }
 
+  /* ─── Why-cards grid (folded in from former ProblemStatement) ─── */
+  .pb-why-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 48px;
+  }
+
+  .why-card-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    padding: 3px 9px;
+    background: oklch(0.65 0.16 45 / 0.08);
+    border: 1px solid oklch(0.65 0.16 45 / 0.2);
+    border-radius: 100px;
+    margin-bottom: 12px;
+  }
+
+  @media (max-width: 768px) {
+    .pb-why-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 600px) {
     .pb-layer {
       padding: 18px 20px;
@@ -294,3 +364,8 @@
     }
   }
 </style>
+
+<script>
+  import { setupCardGlow } from '../scripts/card-glow';
+  setupCardGlow('.pb-section .why-card');
+</script>
