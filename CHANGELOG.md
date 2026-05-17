@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `kitaru.current_execution_id()` as the public way to read the active Kitaru execution ID inside a running flow or checkpoint.
 
 ### Fixed
+- LangGraph adapter event logs and run summaries are now saved as real role-first Kitaru context artifacts inside checkpoint scope, with best-effort event persistence by default and hardened config/context redaction for unusual values.
 - PydanticAI granular checkpoints now store model messages and tool arguments as structural checkpoint inputs and use the returned checkpoint output as the canonical response/result artifact, avoiding duplicate manual artifacts in new runs.
 - OpenAI Agents `checkpoint_strategy="calls"` now stores model inputs and function-tool arguments as structural checkpoint inputs, and adapter-generated artifact names now put the human-readable role first across PydanticAI, OpenAI Agents, and Claude Agent SDK captures.
 

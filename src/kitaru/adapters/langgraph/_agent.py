@@ -695,7 +695,8 @@ class KitaruGraphRunner:
                 ),
                 "output": self._captured_output(result),
                 "warnings": result.warnings,
-            }
+            },
+            fail_on_error=self._capture.fail_on_event_persistence_error,
         )
 
     def _persist_failure_tracker(
@@ -722,7 +723,8 @@ class KitaruGraphRunner:
                 "warnings": warnings,
                 "error_type": type(error).__name__,
                 "error_message": str(error),
-            }
+            },
+            fail_on_error=self._capture.fail_on_event_persistence_error,
         )
 
     def _handle_graph_call_failure(
@@ -797,8 +799,8 @@ class KitaruGraphRunner:
             "has_checkpointer": self._checkpointer_label() is not None,
             "has_store": self._store_label() is not None,
             "thread_id_present": bool(request.thread_id),
-            "configurable_keys": sorted(
-                str(key) for key in _mapping_get(config, "configurable", {})
+            "configurable_keys": _safe_key_labels(
+                _mapping_get(config, "configurable", {})
             ),
         }
 
@@ -916,6 +918,23 @@ def _safe_string_list(value: Any) -> list[str]:
     if isinstance(value, list | tuple):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def _safe_key_labels(value: Any) -> list[str]:
+    """Return stable-ish mapping key labels without breaking observability."""
+    if not isinstance(value, Mapping):
+        return []
+    try:
+        keys = list(value)
+    except Exception:
+        return [f"<unavailable keys for {_type_label(value)}>"]
+    labels: list[str] = []
+    for key in keys:
+        try:
+            labels.append(str(key))
+        except Exception:
+            labels.append(f"<unprintable key {_type_label(key)}>")
+    return sorted(labels)
 
 
 def _type_label(value: Any) -> str:

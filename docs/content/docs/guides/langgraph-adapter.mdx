@@ -243,11 +243,23 @@ Important defaults:
 | `save_state_values` | `False` | Do not save full LangGraph state values unless you opt in. |
 | `save_state_tasks` | `True` | Save safe task metadata summaries, not raw task internals. |
 | `save_usage` | `True` | Try to extract token usage from graph output. |
+| `fail_on_event_persistence_error` | `False` | Best-effort by default: event/run-summary persistence failures do not fail the graph call. Set to `True` when missing observability artifacts should fail the run. |
 | `capture_mode` | `"metadata"` | Metadata mode summarizes task IDs, node names, paths, interrupt counts, and error labels. `"full"` opts into raw JSON-safe task serialization. |
 
 Here is the practical safety story. By default, Kitaru records enough to answer, "Which graph call ran? Which thread did it use? Did it finish, fail, or interrupt? What checkpoint ID did LangGraph report?" It does **not** dump full LangGraph task objects by default, because those task objects can contain prompts, tool outputs, customer data, or SDK internals. If you set `capture_mode="full"`, treat the run summaries as potentially sensitive.
 
 If your graph state contains prompts, tool outputs, customer data, or secrets, be careful with `save_state_values=True` and `capture_mode="full"`.
+
+## Observability artifacts
+
+When the adapter persists from checkpoint scope, it saves two Kitaru context artifacts for each graph call:
+
+- `event_log__<graph>_<run_label>` — the ordered LangGraph adapter events, such as `graph_call_started`, `graph_call_completed`, `graph_interrupted`, or `graph_call_failed`.
+- `run_summary__<graph>_<run_label>` — the run summary: thread ID, status, captured config/context fields, output or failure details, warnings, and observed LangGraph checkpoint metadata.
+
+Inside checkpoint scope, Kitaru logs lightweight metadata pointers to those artifacts for search and debugging. If you call the runner outside checkpoint scope, Kitaru cannot call `kitaru.save(...)`; in that case the adapter logs the full event/run-summary payload as scope-appropriate metadata instead.
+
+By default, event persistence is best-effort. A graph result should not disappear just because the observability write had a problem. If you want strict behavior, set `LangGraphCapturePolicy(fail_on_event_persistence_error=True)`.
 
 ## What Kitaru does and does not do in v1
 
@@ -257,6 +269,7 @@ If your graph state contains prompts, tool outputs, customer data, or secrets, b
 - Create one outer Kitaru checkpoint per `runner.invoke(...)` / `runner.ainvoke(...)` call.
 - Preserve and record the LangGraph `thread_id` used for the call.
 - Record status, interrupt summaries, latest checkpoint ID, and run-summary metadata.
+- Save event logs and run summaries as role-first Kitaru context artifacts when the graph call is captured inside checkpoint scope.
 - Persist failure summaries for graph calls that raise, including the exception type/message and the safe run metadata captured before the failure.
 - Bridge LangGraph interrupts into resume requests, and optionally into `kitaru.wait(...)`.
 - Let you deploy the flow using the same Kitaru stacks as other workflows.
@@ -272,15 +285,15 @@ If your graph state contains prompts, tool outputs, customer data, or secrets, b
 
 ## LangChain and Deep Agents
 
-The adapter is named `langgraph` because LangGraph is the runtime seam. LangChain agents and Deep Agents are built on top of LangGraph-style execution, but they add their own higher-level concepts.
+The adapter is named `langgraph` because LangGraph is the runtime seam. LangChain agents and Deep Agents are built on top of LangGraph-style execution, but they add their own higher-level concepts. This release only ships the `langgraph` extra; if your graph depends on LangChain or Deep Agents packages, install those packages directly in your project.
 
 For v1, the contract is:
 
 | Layer | Kitaru support story |
 |---|---|
 | Raw LangGraph compiled graph | First-class target for this adapter. |
-| LangChain `create_agent(...)` | Supported only when the returned object behaves like a compatible LangGraph runnable with `invoke` / `ainvoke` / `get_state`. |
-| Deep Agents | Invocation can be wrapped if compatible, but Deep Agents filesystem, sandbox, and backend semantics remain Deep Agents-owned. |
+| LangChain `create_agent(...)` | Not a separate Kitaru extra. You can try wrapping the returned object only if it behaves like a compatible LangGraph runnable with `invoke` / `ainvoke` / `get_state`. |
+| Deep Agents | Not a separate Kitaru extra. Invocation can be wrapped if compatible, but Deep Agents filesystem, sandbox, and backend semantics remain Deep Agents-owned. |
 
 If you are using Deep Agents' virtual filesystem or sandbox backends, Kitaru records the outer graph call. It does not automatically snapshot the sandbox filesystem. See the official [Deep Agents backends guide](https://docs.langchain.com/oss/python/deepagents/backends) for how those files are stored.
 
@@ -299,7 +312,7 @@ What it does:
 2. Starts the graph with `thread_id="langgraph-local-demo-thread"`.
 3. The graph interrupts and asks whether to approve a ticket escalation.
 4. The flow resumes the graph with `build_resume_request(...)`.
-5. The flow saves a `langgraph_demo_summary` artifact.
+5. The flow saves a `summary__langgraph_demo` artifact.
 6. The script loads and prints that artifact through `KitaruClient`.
 
 You should see output like:

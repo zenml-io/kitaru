@@ -18,6 +18,7 @@ class LangGraphCapturePolicy(BaseModel):
     save_state_values: bool = False
     save_state_tasks: bool = True
     save_usage: bool = True
+    fail_on_event_persistence_error: bool = False
     capture_mode: Literal["metadata", "full"] = "metadata"
 
 

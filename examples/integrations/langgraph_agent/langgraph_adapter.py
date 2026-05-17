@@ -17,7 +17,7 @@ from kitaru.adapters.langgraph import (
 )
 
 THREAD_ID = "langgraph-local-demo-thread"
-SUMMARY_ARTIFACT = "langgraph_demo_summary"
+SUMMARY_ARTIFACT = "summary__langgraph_demo"
 
 
 class ReviewState(TypedDict, total=False):

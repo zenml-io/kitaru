@@ -31,7 +31,7 @@ That means Kitaru records two outer graph-call checkpoints in one flow execution
 
 After the second call, the flow saves a user-facing summary artifact:
 
-- artifact name: `langgraph_demo_summary`
+- artifact name: `summary__langgraph_demo`
 
 The script then loads that artifact via `KitaruClient` and prints it.
 
@@ -56,7 +56,7 @@ If the key changes, LangGraph treats it as a different thread and your paused ru
 
 - Kitaru flow execution metadata
 - two adapter graph-call checkpoints (start and resume)
-- summary artifact (`langgraph_demo_summary`)
+- summary artifact (`summary__langgraph_demo`)
 - adapter metadata such as status and latest checkpoint id
 
 ### Not checkpointed by this example

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import sys
 import types
 from collections.abc import Callable
@@ -14,7 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.analytics import AnalyticsEvent
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
 @pytest.fixture
@@ -208,6 +209,231 @@ def test_outer_checkpoint_overrides_are_honored(
         "type": "custom",
         "runtime": "inline",
     }
+
+
+def test_event_tracker_uses_role_first_artifact_names(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+
+    tracker = tracking.EventTracker(graph_name="Fake Graph", run_label="ab12cd34")
+
+    assert tracker.event_log_artifact_name == "event_log__Fake_Graph_ab12cd34"
+    assert tracker.run_summary_artifact_name == "run_summary__Fake_Graph_ab12cd34"
+
+
+def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constants = importlib.import_module("kitaru.adapters.langgraph._constants")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    saved: list[tuple[str, object, str]] = []
+    logged: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"echo": input}
+
+    def fake_save(name: str, value: object, *, type: str) -> None:
+        saved.append((name, value, type))
+
+    def fake_log(**kwargs: object) -> None:
+        logged.update(kwargs)
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(tracking.kitaru, "save", fake_save)
+    monkeypatch.setattr(tracking.kitaru, "log", fake_log)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.output == {"echo": {"input": "value"}}
+    assert result.event_log_artifact_name is not None
+    assert result.run_summary_artifact_name is not None
+    assert result.event_log_artifact_name.startswith("event_log__fake_")
+    assert result.run_summary_artifact_name.startswith("run_summary__fake_")
+    assert [(name, type_) for name, _value, type_ in saved] == [
+        (result.event_log_artifact_name, "context"),
+        (result.run_summary_artifact_name, "context"),
+    ]
+    assert logged
+
+    event_log = cast(list[dict[str, object]], saved[0][1])
+    run_summary = cast(dict[str, object], saved[1][1])
+    assert [event["kind"] for event in event_log] == [
+        "graph_call_started",
+        "graph_call_completed",
+    ]
+    assert run_summary["status"] == "completed"
+    assert run_summary["thread_id"] == "thread-1"
+
+    logged_events = cast(
+        dict[str, dict[str, object]],
+        logged[constants.LANGGRAPH_EVENTS_METADATA_KEY],
+    )
+    logged_summaries = cast(
+        dict[str, dict[str, object]],
+        logged[constants.LANGGRAPH_RUN_SUMMARIES_METADATA_KEY],
+    )
+    event_metadata = next(iter(logged_events.values()))
+    summary_metadata = next(iter(logged_summaries.values()))
+    assert event_metadata["artifact_name"] == result.event_log_artifact_name
+    assert event_metadata["event_count"] == 2
+    assert "kind" not in event_metadata
+    assert summary_metadata["artifact_name"] == result.run_summary_artifact_name
+    assert summary_metadata["status"] == "completed"
+    assert summary_metadata["thread_id"] == "thread-1"
+
+
+def test_failed_graph_call_saves_event_artifacts_in_checkpoint_scope(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    saved: list[tuple[str, object, str]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, _input: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+    def fake_save(name: str, value: object, *, type: str) -> None:
+        saved.append((name, value, type))
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(tracking.kitaru, "save", fake_save)
+    monkeypatch.setattr(tracking.kitaru, "log", lambda **_kwargs: None)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"input": "value"},
+                thread_id="thread-1",
+            )
+        )
+
+    assert [(name.split("__", 1)[0], type_) for name, _value, type_ in saved] == [
+        ("event_log", "context"),
+        ("run_summary", "context"),
+    ]
+    event_log = cast(list[dict[str, object]], saved[0][1])
+    run_summary = cast(dict[str, object], saved[1][1])
+    assert [event["kind"] for event in event_log] == [
+        "graph_call_started",
+        "graph_call_failed",
+    ]
+    assert run_summary["status"] == "failed"
+    assert run_summary["thread_id"] == "thread-1"
+    assert run_summary["error_type"] == "RuntimeError"
+    assert run_summary["error_message"] == "boom"
+
+
+def test_event_persistence_save_failure_is_best_effort_by_default(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constants = importlib.import_module("kitaru.adapters.langgraph._constants")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    logged: dict[str, object] = {}
+    saved_names: list[str] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    def fake_save(name: str, _value: object, *, type: str) -> None:
+        assert type == "context"
+        saved_names.append(name)
+        if name.startswith("event_log__"):
+            raise RuntimeError("artifact store unavailable")
+
+    def fake_log(**kwargs: object) -> None:
+        logged.update(kwargs)
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(tracking.kitaru, "save", fake_save)
+    monkeypatch.setattr(tracking.kitaru, "log", fake_log)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.output == {"input": "value"}
+    assert any(name.startswith("event_log__fake_") for name in saved_names)
+    assert any(name.startswith("run_summary__fake_") for name in saved_names)
+
+    summaries = cast(
+        dict[str, dict[str, object]],
+        logged[constants.LANGGRAPH_RUN_SUMMARIES_METADATA_KEY],
+    )
+    summary_metadata = next(iter(summaries.values()))
+    failures = cast(list[dict[str, object]], summary_metadata["persistence_failures"])
+    assert failures[0]["operation"] == "save_event_log"
+    assert failures[0]["artifact_name"] == result.event_log_artifact_name
+
+
+def test_event_persistence_can_fail_strictly(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    def fake_save(name: str, _value: object, *, type: str) -> None:
+        assert type == "context"
+        if name.startswith("event_log__"):
+            raise RuntimeError("artifact store unavailable")
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(tracking.kitaru, "save", fake_save)
+    monkeypatch.setattr(tracking.kitaru, "log", lambda **_kwargs: None)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        capture=langgraph_adapter.LangGraphCapturePolicy(
+            fail_on_event_persistence_error=True
+        ),
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="LangGraph event/log persistence"):
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"input": "value"},
+                thread_id="thread-1",
+            )
+        )
 
 
 def test_durability_policy_supplies_default_graph_durability(
@@ -507,6 +733,44 @@ def test_build_resume_request_uses_selected_interrupt_id(
     )
 
     assert request.command.resume == {"interrupt-1": {"approved": True}}
+
+
+def test_redaction_handles_non_serializable_values_and_odd_keys(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module("kitaru.adapters.langgraph._serialization")
+
+    class BadRepr:
+        def __repr__(self) -> str:
+            raise RuntimeError("repr exploded")
+
+    class OddKey:
+        def __str__(self) -> str:
+            raise RuntimeError("key exploded")
+
+    cyclic: dict[str, object] = {"api_key": "SECRET-IN-CYCLE"}
+    cyclic["self"] = cyclic
+
+    redacted = serialization.redact_config(
+        {
+            "api_key": BadRepr(),
+            "payload": BadRepr(),
+            OddKey(): "value",
+            "items": {BadRepr()},
+            "cycle": cyclic,
+        }
+    )
+
+    assert redacted["api_key"] == "[REDACTED]"
+    payload = cast(dict[str, str], redacted["payload"])
+    assert payload["python_type"].endswith("BadRepr")
+    assert "repr" not in payload
+    assert any(key.startswith("<unprintable key") for key in redacted)
+    cycle = cast(dict[str, object], redacted["cycle"])
+    assert cycle["api_key"] == "[REDACTED]"
+    cycle_self = cast(dict[str, str], cycle["self"])
+    assert cycle_self["serialization_error"] == "cycle_detected"
+    assert "SECRET-IN-CYCLE" not in json.dumps(redacted)
 
 
 def test_redaction_handles_common_secret_key_forms(
