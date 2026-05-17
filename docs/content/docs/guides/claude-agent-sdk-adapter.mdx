@@ -540,7 +540,7 @@ For a richer workflow, see the compliance-review example:
 uv run examples/end_to_end/compliance_review/stage_1_single_turn.py
 ```
 
-That example shows staged audit checkpoints, memory, and wait/resume around
+That example shows staged audit checkpoints, artifact persistence, and wait/resume around
 Claude turns. It uses the same high-level boundary: one Claude SDK invocation is
 one Kitaru checkpoint. It also has a custom transcript materializer for its
 multi-turn remote-stack story. That extra materializer is example-specific; the
