@@ -215,8 +215,8 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk
+    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk --extra langgraph" \
+        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents --extra claude-agent-sdk --extra langgraph
 fi
 
 # ---------------------------------------------------------------------------
@@ -353,6 +353,11 @@ section_header "PydanticAI adapter"
 
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
+
+section_header "LangGraph adapter"
+
+run_test "examples/integrations/langgraph_agent/langgraph_adapter.py" \
+    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py
 
 section_header "OpenAI Agents adapter"
 

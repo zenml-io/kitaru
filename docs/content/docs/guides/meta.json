@@ -18,6 +18,7 @@
     "pydantic-ai-adapter",
     "openai-agents-adapter",
     "claude-agent-sdk-adapter",
+    "langgraph-adapter",
     "news-scout"
   ]
 }
