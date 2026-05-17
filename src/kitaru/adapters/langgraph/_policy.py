@@ -37,7 +37,13 @@ class LangGraphCapturePolicy(BaseModel):
 
 
 class LangGraphCallCheckpointPolicy(BaseModel):
-    """Checkpoint settings for LangGraph calls-mode model/tool boundaries."""
+    """Checkpoint settings for LangGraph calls-mode model/tool boundaries.
+
+    Async LangChain hooks are currently metadata-only. The
+    ``async_checkpoint_policy`` field is present to make that explicit and to
+    leave room for a future opt-in mode, but the only accepted value today is
+    ``"metadata_only"``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -49,7 +55,14 @@ class LangGraphCallCheckpointPolicy(BaseModel):
     summary_checkpoint_config: CheckpointConfig | None = None
     persist_run_artifacts: bool = True
     nested_checkpoint_policy: Literal["error", "metadata_only"] = "error"
-    async_checkpoint_policy: Literal["metadata_only"] = "metadata_only"
+    async_checkpoint_policy: Literal["metadata_only"] = Field(
+        default="metadata_only",
+        description=(
+            "Async LangChain model/tool hooks do not open true Kitaru "
+            "checkpoints yet; the only supported policy today is "
+            "'metadata_only'."
+        ),
+    )
 
     def model_post_init(self, __context: object) -> None:
         self.model_checkpoint_config = _validate_optional_call_config(

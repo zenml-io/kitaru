@@ -209,9 +209,15 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
             effective_config = _checkpoint_config_with_defaults(
                 cast(CheckpointConfig, checkpoint_config)
             )
-            tool_args = _tool_args_envelope(request) if capture.save_tool_args else None
+            persisted_tool_args = (
+                _persisted_tool_args_envelope(request)
+                if capture.save_tool_args
+                else None
+            )
             checkpoint_inputs = (
-                {"tool_args": tool_args} if tool_args is not None else None
+                {"tool_args": persisted_tool_args}
+                if persisted_tool_args is not None
+                else None
             )
             input_artifacts = (
                 {"tool_args": "tool_args"} if capture.save_tool_args else {}
@@ -599,7 +605,7 @@ def _tool_cache_key(
             "kind": "tool_call",
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
-            "tool_args": to_cache_identity(_tool_args_envelope(request)),
+            "tool_args": _tool_cache_identity_envelope(request),
         }
     )
 
@@ -657,10 +663,15 @@ def _tool_checkpoint_name(
         else safe_step_name(graph_name or "graph")
     )
     run_label = tracker.run_label if tracker is not None else "standalone"
-    sequence = tool_call_id or (
+    event_sequence = (
         str(event_context.sequence_index) if event_context is not None else "0"
     )
-    return safe_step_name(f"tool_call__{tool_name}_{sequence}__{graph}_{run_label}")
+    call_disambiguator = (
+        f"{tool_call_id}_{event_sequence}" if tool_call_id else event_sequence
+    )
+    return safe_step_name(
+        f"tool_call__{tool_name}_{call_disambiguator}__{graph}_{run_label}"
+    )
 
 
 def _model_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
@@ -756,12 +767,35 @@ def _model_input_envelope(request: Any) -> dict[str, Any]:
     }
 
 
-def _tool_args_envelope(request: Any) -> dict[str, Any]:
+def _persisted_tool_args_envelope(request: Any) -> dict[str, Any]:
+    """Return the redacted tool payload safe to persist as checkpoint input."""
+    return _tool_payload_envelope(
+        request,
+        args=redact_config(_tool_args(request)),
+        tool_call=redact_config(getattr(request, "tool_call", None)),
+    )
+
+
+def _tool_cache_identity_envelope(request: Any) -> dict[str, Any]:
+    """Return the raw-enough tool payload used only for immediate cache hashing."""
+    return _tool_payload_envelope(
+        request,
+        args=to_cache_identity(_tool_args(request)),
+        tool_call=to_cache_identity(getattr(request, "tool_call", None)),
+    )
+
+
+def _tool_payload_envelope(
+    request: Any,
+    *,
+    args: Any,
+    tool_call: Any,
+) -> dict[str, Any]:
     return {
         "tool_name": _tool_name(request),
         "tool_call_id": _tool_call_id(request),
-        "args": to_json_safe(_tool_args(request)),
-        "tool_call": to_json_safe(getattr(request, "tool_call", None)),
+        "args": args,
+        "tool_call": tool_call,
     }
 
 

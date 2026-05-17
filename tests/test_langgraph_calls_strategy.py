@@ -178,7 +178,7 @@ def test_runner_calls_mode_uses_middleware_without_outer_graph_checkpoint(
     assert not any(name.endswith("_langgraph_call") for name in all_step_names)
     assert any(name.startswith("model_call__") for name in all_step_names)
     assert any(
-        name.startswith("tool_call__alpha_call_alpha__") for name in all_step_names
+        name.startswith("tool_call__alpha_call_alpha_") for name in all_step_names
     )
     assert any(
         name.startswith("langgraph_summary__calls_graph_") for name in all_step_names
@@ -351,9 +351,7 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     assert result.status == "completed"
     assert not any(name.endswith("_langgraph_call") for name in all_step_names)
     assert any(name.startswith("model_call__") for name in all_step_names)
-    assert any(
-        name.startswith("tool_call__add_one_call_1__") for name in all_step_names
-    )
+    assert any(name.startswith("tool_call__add_one_call_1_") for name in all_step_names)
     assert any(
         name.startswith("langgraph_summary__real_langchain_agent_")
         for name in all_step_names
@@ -419,6 +417,100 @@ def test_checkpoint_cache_identity_does_not_collapse_when_capture_is_disabled(
     cache_keys = [checkpoint["cache_key"] for checkpoint in checkpoints]
     assert cache_keys[0] != cache_keys[1]
     assert cache_keys[2] != cache_keys[3]
+
+
+def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    with tracking.tracker_scope(
+        "privacy_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(),
+    ):
+        first_result = middleware.wrap_tool_call(
+            _tool_request(
+                name="secret-tool",
+                call_id="reused-call-id",
+                args={
+                    "value": 2,
+                    "api_key": "SECRET-ONE",
+                    "nested": {"password": "PASSWORD-ONE", "safe": "same"},
+                },
+            ),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            _tool_request(
+                name="secret-tool",
+                call_id="reused-call-id",
+                args={
+                    "value": 2,
+                    "api_key": "SECRET-TWO",
+                    "nested": {"password": "PASSWORD-TWO", "safe": "same"},
+                },
+            ),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    persisted_inputs = [checkpoint["checkpoint_inputs"] for checkpoint in checkpoints]
+    expected_redacted_tool_args = {
+        "tool_name": "secret-tool",
+        "tool_call_id": "reused-call-id",
+        "args": {
+            "value": 2,
+            "api_key": "[REDACTED]",
+            "nested": {"password": "[REDACTED]", "safe": "same"},
+        },
+        "tool_call": {
+            "name": "secret-tool",
+            "args": {
+                "value": 2,
+                "api_key": "[REDACTED]",
+                "nested": {"password": "[REDACTED]", "safe": "same"},
+            },
+            "id": "reused-call-id",
+        },
+    }
+    assert persisted_inputs == [
+        {"tool_args": expected_redacted_tool_args},
+        {"tool_args": expected_redacted_tool_args},
+    ]
+    assert "SECRET-" not in repr(persisted_inputs)
+    assert "PASSWORD-" not in repr(persisted_inputs)
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_tool_checkpoint_names_include_sequence_for_duplicate_tool_call_ids(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+
+    with tracking.tracker_scope(
+        "duplicate_id_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(),
+        capture=LangGraphCapturePolicy(),
+    ):
+        middleware.wrap_tool_call(
+            _tool_request(name="alpha", call_id="repeated-call"),
+            lambda _request: "first",
+        )
+        middleware.wrap_tool_call(
+            _tool_request(name="alpha", call_id="repeated-call"),
+            lambda _request: "second",
+        )
+
+    step_names = [cast(str, checkpoint["step_name"]) for checkpoint in checkpoints]
+    assert len(step_names) == 2
+    assert len(set(step_names)) == 2
+    assert "tool_call__alpha_repeated_call_1__" in step_names[0]
+    assert "tool_call__alpha_repeated_call_2__" in step_names[1]
 
 
 def test_calls_mode_summary_checkpoint_failure_falls_back_to_logged_metadata(

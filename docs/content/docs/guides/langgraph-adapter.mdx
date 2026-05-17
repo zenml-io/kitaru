@@ -307,11 +307,13 @@ runner = KitaruGraphRunner(
 )
 ```
 
-The default call checkpoint types are `model_call`, `tool_call`, and `langgraph_summary`. Adapter-created call checkpoints run inline and default to no cache/no retries.
+The default call checkpoint types are `model_call`, `tool_call`, and `langgraph_summary`. Adapter-created call checkpoints run inline and default to no cache/no retries. Tool-argument checkpoint inputs are redacted before persistence; if caching is enabled for a tool checkpoint, Kitaru hashes a separate raw-enough cache identity so different calls do not collapse into the same cache entry.
 
 ### Async calls mode
 
 `runner.ainvoke(...)` and async LangChain middleware hooks currently record call metadata only. They do **not** open true async model/tool checkpoints yet.
+
+`LangGraphCallCheckpointPolicy.async_checkpoint_policy` exists to make that boundary explicit, but it only accepts `"metadata_only"` today. It is not a hidden switch for enabling async checkpoints.
 
 The reason is safety. A true Kitaru checkpoint needs to be wrapped around the actual handler execution in a way that Kitaru can replay cleanly. Sync middleware is proven for this PR. Async call checkpointing is deliberately metadata-only until that replay boundary is proven safe.
 
@@ -360,7 +362,7 @@ Important defaults:
 | `save_model_input` | `True` | In sync calls mode, store model input as a structural checkpoint input when a true model checkpoint is opened. |
 | `save_model_response` | `True` | In sync calls mode, record the model checkpoint output as the canonical response artifact reference. |
 | `save_model_usage` | `True` | Include model usage metadata when the response exposes it. |
-| `save_tool_args` | `True` | In sync calls mode, store tool arguments as a structural checkpoint input when a true tool checkpoint is opened. |
+| `save_tool_args` | `True` | In sync calls mode, store redacted tool arguments as a structural checkpoint input when a true tool checkpoint is opened. Secret-like nested keys are redacted. |
 | `save_tool_result` | `True` | In sync calls mode, record the tool checkpoint output as the canonical result artifact reference. |
 | `fail_on_event_persistence_error` | `False` | Best-effort by default: event/run-summary persistence failures do not fail the graph call. Set to `True` when missing observability artifacts should fail the run. |
 | `capture_mode` | `"metadata"` | Metadata mode summarizes task IDs, node names, paths, interrupt counts, and error labels. `"full"` opts into raw JSON-safe task serialization. |
@@ -381,7 +383,11 @@ The checkpoint shape depends on the strategy:
 - In `graph_call` mode, these artifacts are saved from the outer graph-call checkpoint.
 - In `calls` mode, model/tool checkpoints are separate, and the aggregate event/run artifacts are saved from a `langgraph_summary__<graph>_<run_label>` checkpoint when possible.
 
-Inside checkpoint scope, Kitaru logs lightweight metadata pointers to those artifacts for search and debugging. If you call the runner outside checkpoint scope, Kitaru cannot call `kitaru.save(...)`; in that case the adapter logs the full event/run-summary payload as scope-appropriate metadata instead.
+Inside checkpoint scope, Kitaru logs lightweight metadata pointers to those artifacts for search and debugging.
+
+If the graph call is inside a Kitaru flow body but outside an active checkpoint, the adapter cannot call `kitaru.save(...)` for these context artifacts. In that case it may log the event/run-summary metadata payloads directly as flow metadata instead.
+
+If you call the runner outside any Kitaru flow, the graph runs normally, but there is no Kitaru execution context where the adapter can persist artifacts or log Kitaru metadata.
 
 By default, event persistence is best-effort. A graph result should not disappear just because the observability write had a problem. If you want strict behavior, set `LangGraphCapturePolicy(fail_on_event_persistence_error=True)`.
 
