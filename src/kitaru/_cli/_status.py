@@ -239,6 +239,22 @@ def _clear_persisted_store_configuration(gc: Any) -> None:
     gc._write_config()
 
 
+def _reset_to_local_store(gc: Any) -> bool:
+    """Reset persisted connection state to the local default store.
+
+    Returns whether the normal local fallback store was available. If the
+    local ZenML store backend cannot be imported, clear persisted store fields
+    directly so logout still removes stale remote/local-server connection
+    state.
+    """
+    try:
+        gc.set_default_store()
+    except ImportError:
+        _clear_persisted_store_configuration(gc)
+        return False
+    return True
+
+
 def _get_connected_server_url() -> str | None:
     """Read the currently configured remote server URL, if available."""
     deps = cli_dependencies()
@@ -503,8 +519,10 @@ def _logout_current_connection() -> LogoutResult:
     stop_result = deps.stop_registered_local_server()
 
     if was_connected_to_local_server:
+        local_fallback_available = _reset_to_local_store(gc)
         return LogoutResult(
             mode="local_server",
+            local_fallback_available=local_fallback_available,
             local_server_stopped=stop_result.stopped,
             local_server_url=stop_result.url,
         )
@@ -524,12 +542,7 @@ def _logout_current_connection() -> LogoutResult:
             local_server_url=stop_result.url,
         )
 
-    local_fallback_available = True
-    try:
-        gc.set_default_store()
-    except ImportError:
-        local_fallback_available = False
-        _clear_persisted_store_configuration(gc)
+    local_fallback_available = _reset_to_local_store(gc)
 
     if _is_localhost_url(server_url or connected_server_url):
         return LogoutResult(

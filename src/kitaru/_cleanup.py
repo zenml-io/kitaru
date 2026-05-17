@@ -713,14 +713,11 @@ def execute_cleanup_plan(
             server_result = stop_registered_local_server_for_cleanup(timeout=10)
             server_stopped = server_result.stopped
             force_killed_pid = server_result.force_killed_pid
-            if force_killed_pid is not None:
+            if not server_result.stopped:
                 warnings.append(
-                    "Local server did not shut down gracefully. "
-                    f"Force-killed process {force_killed_pid}."
-                )
-            elif not server_result.stopped:
-                warnings.append(
-                    "Could not stop the local server. The database backup "
+                    "Could not stop the local server. Kitaru did not kill "
+                    "the stored PID because PID-only evidence can be stale "
+                    "and may refer to another process. The database backup "
                     "may be incomplete if the server is still writing."
                 )
 

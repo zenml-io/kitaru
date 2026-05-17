@@ -162,12 +162,60 @@ class TestDeployAndConnect:
         assert captured_env["analytics"] == "kitaru-api"
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
 
         assert result == LocalServerConnectionResult(
             url="http://127.0.0.1:9090", action="started"
         )
         deployer.connect_to_server.assert_called_once()
+
+    def test_restores_preexisting_env_vars_after_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        captured_env: dict[str, str | None] = {}
+        fake_ui_dir = Path("/fake/ui/dist")
+
+        def capture_env_during_deploy(_config: Any, **_kw: Any) -> SimpleNamespace:
+            captured_env["deploy_dashboard"] = os.environ.get(
+                "ZENML_SERVER_DASHBOARD_FILES_PATH"
+            )
+            captured_env["deploy_analytics"] = os.environ.get(
+                "ZENML_DEFAULT_ANALYTICS_SOURCE"
+            )
+            return SimpleNamespace(status=SimpleNamespace(url="http://127.0.0.1:9090"))
+
+        def capture_env_during_connect() -> None:
+            captured_env["connect_dashboard"] = os.environ.get(
+                "ZENML_SERVER_DASHBOARD_FILES_PATH"
+            )
+            captured_env["connect_analytics"] = os.environ.get(
+                "ZENML_DEFAULT_ANALYTICS_SOURCE"
+            )
+
+        deployer = MagicMock()
+        deployer.deploy_server.side_effect = capture_env_during_deploy
+        deployer.connect_to_server.side_effect = capture_env_during_connect
+
+        with patch.object(ls_mod, "_resolve_bundled_ui_dir", return_value=fake_ui_dir):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=9090,
+                timeout=30,
+                action="started",
+            )
+
+        assert captured_env["deploy_dashboard"] == str(fake_ui_dir)
+        assert captured_env["deploy_analytics"] == "kitaru-api"
+        assert captured_env["connect_dashboard"] == str(fake_ui_dir)
+        assert captured_env["connect_analytics"] == "kitaru-api"
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
 
     def test_cleans_up_env_on_deploy_failure(
         self, monkeypatch: pytest.MonkeyPatch
@@ -194,7 +242,35 @@ class TestDeployAndConnect:
             )
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
+
+    def test_restores_preexisting_env_vars_on_deploy_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        deployer = MagicMock()
+        deployer.deploy_server.side_effect = RuntimeError("connection refused")
+
+        with (
+            patch.object(
+                ls_mod, "_resolve_bundled_ui_dir", return_value=Path("/fake/ui/dist")
+            ),
+            pytest.raises(KitaruBackendError, match="failed to start"),
+        ):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=8383,
+                timeout=30,
+                action="started",
+            )
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
+        deployer.connect_to_server.assert_not_called()
 
     def test_cleans_up_env_on_connect_failure(
         self, monkeypatch: pytest.MonkeyPatch
@@ -224,7 +300,37 @@ class TestDeployAndConnect:
             )
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
+
+    def test_restores_preexisting_env_vars_on_connect_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        deployer = MagicMock()
+        deployer.deploy_server.return_value = SimpleNamespace(
+            status=SimpleNamespace(url="http://127.0.0.1:8383")
+        )
+        deployer.connect_to_server.side_effect = RuntimeError("refused")
+
+        with (
+            patch.object(
+                ls_mod, "_resolve_bundled_ui_dir", return_value=Path("/fake/ui/dist")
+            ),
+            pytest.raises(KitaruBackendError, match="failed to start"),
+        ):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=8383,
+                timeout=30,
+                action="started",
+            )
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
 
     def test_restart_action_produces_restart_error_message(
         self, monkeypatch: pytest.MonkeyPatch

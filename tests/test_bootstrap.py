@@ -60,6 +60,21 @@ def test_ui_package_scaffold_exists() -> None:
     assert ui_init.is_file(), f"Missing tracked file: {ui_init}"
 
 
+def test_typed_classifier_matches_pep_561_marker_and_wheel_package() -> None:
+    """The typed classifier should have a marker inside the packaged SDK."""
+    repo_root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads(_PYPROJECT_PATH.read_text())
+
+    classifiers = pyproject["project"].get("classifiers", [])
+    marker = repo_root / "src" / "kitaru" / "py.typed"
+    wheel_target = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]
+    packages = wheel_target.get("packages", [])
+
+    assert "Typing :: Typed" in classifiers
+    assert marker.is_file(), f"Missing PEP 561 marker: {marker}"
+    assert "src/kitaru" in packages
+
+
 def test_cli_entrypoint_populates_version_before_dispatch() -> None:
     """The package CLI entrypoint should set the version before running the app."""
     import kitaru.cli as cli_module

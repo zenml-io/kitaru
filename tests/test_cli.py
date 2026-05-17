@@ -3667,7 +3667,45 @@ def test_logout_returns_local_server_mode_for_local_connection() -> None:
     ):
         result = _logout_current_connection()
 
+    fake_gc.set_default_store.assert_called_once_with()
     assert result.mode == "local_server"
+    assert result.local_fallback_available is True
+    assert result.local_server_stopped is True
+    assert str(result) == "Logged out from the local Kitaru server."
+
+
+def test_logout_local_server_branch_clears_store_on_missing_fallback() -> None:
+    """Local-server logout should clear persisted state if local fallback is absent."""
+    fake_gc = Mock()
+    fake_gc.set_default_store.side_effect = ImportError("sqlalchemy missing")
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=True),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://127.0.0.1:8383",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    assert fake_gc.store is None
+    assert fake_gc._zen_store is None
+    assert fake_gc.active_stack_id is None
+    assert fake_gc.active_project_id is None
+    assert fake_gc._active_stack is None
+    assert fake_gc._active_project is None
+    fake_gc._write_config.assert_called_once_with()
+    assert result.mode == "local_server"
+    assert result.local_fallback_available is False
     assert result.local_server_stopped is True
     assert str(result) == "Logged out from the local Kitaru server."
 
@@ -4451,12 +4489,13 @@ def test_secrets_list_renders_all_pages_sorted(
         app(["secrets", "list"])
 
     assert exc_info.value.code == 0
-    fake_client.list_secrets.assert_has_calls(
-        [
-            call(page=1),
-            call(page=2, size=1),
-        ]
-    )
+    calls = fake_client.list_secrets.call_args_list
+    assert len(calls) == 2
+    backend_scan_size = calls[0].kwargs["size"]
+    assert calls == [
+        call(page=1, size=backend_scan_size),
+        call(page=2, size=backend_scan_size),
+    ]
     output = capsys.readouterr().out
     assert "Kitaru secrets" in output
     assert "alpha: secret-a (private)" in output
@@ -4464,6 +4503,45 @@ def test_secrets_list_renders_all_pages_sorted(
     assert output.index("alpha: secret-a (private)") < output.index(
         "zeta: secret-z (public)"
     )
+
+
+def test_secrets_list_uses_stable_backend_page_size(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Backend scan pagination should not switch sizes after the first page."""
+    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
+    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
+    observed_sizes: list[int] = []
+
+    def list_secrets(*, page: int, size: int | None = None) -> SimpleNamespace:
+        if size is None:
+            raise AssertionError("backend scan calls must pass an explicit size")
+        observed_sizes.append(size)
+        if page == 1:
+            return SimpleNamespace(
+                items=[secret_z],
+                total_pages=2,
+                max_size=size + 100,
+            )
+        if page == 2 and size == observed_sizes[0]:
+            return SimpleNamespace(items=[secret_a], total_pages=2, max_size=size + 100)
+        return SimpleNamespace(items=[], total_pages=2, max_size=size + 100)
+
+    fake_client = Mock()
+    fake_client.list_secrets.side_effect = list_secrets
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list"])
+
+    assert exc_info.value.code == 0
+    assert len(observed_sizes) == 2
+    assert observed_sizes[0] == observed_sizes[1]
+    output = capsys.readouterr().out
+    assert "alpha: secret-a (private)" in output
+    assert "zeta: secret-z (public)" in output
 
 
 def test_secrets_list_paginates_after_sorting(
@@ -7423,6 +7501,50 @@ class TestExecuteCleanupPlan:
         assert not config_root.exists()
         assert str(config_root) in result.deleted_paths
 
+    def test_global_cleanup_warns_when_local_server_cannot_stop_safely(
+        self, tmp_path: Path
+    ) -> None:
+        """Cleanup should warn and continue instead of killing a stored PID."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+        from kitaru._local_server import LocalServerCleanupResult
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            model_registry_alias_count=0,
+            local_server_would_stop=True,
+        )
+
+        with (
+            patch("kitaru._cleanup._reset_global_config"),
+            patch(
+                "kitaru._local_server.stop_registered_local_server_for_cleanup",
+                return_value=LocalServerCleanupResult(
+                    stopped=False,
+                    url="http://localhost:8383",
+                    force_killed_pid=None,
+                ),
+            ),
+        ):
+            result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        assert not result.aborted
+        assert result.local_server_stopped is False
+        assert result.local_server_force_killed_pid is None
+        assert str(config_root) in result.deleted_paths
+        assert any(
+            "did not kill the stored PID" in warning
+            and "PID-only evidence can be stale" in warning
+            for warning in result.warnings
+        )
+
     def test_reinit_failure_produces_warning(self, tmp_path: Path) -> None:
         """Failed re-initialization should add a warning."""
         from kitaru._cleanup import (
@@ -7601,117 +7723,6 @@ class TestExecuteCleanupPlan:
             execute_cleanup_plan(plan, yes=True, force=True)
 
 
-class TestForceKillServerProcess:
-    """Tests for _force_kill_server_process."""
-
-    def test_kill_succeeds_returns_pid(self) -> None:
-        """Successful kill returns the PID."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result == 12345
-        # Signal 0 probe + SIGKILL
-        assert mock_kill.call_count == 2
-
-    def test_pid_from_config_fallback(self) -> None:
-        """PID should be resolved from config when status.pid is missing."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=None),
-            config=SimpleNamespace(pid=99999),
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result == 99999
-        assert mock_kill.call_count == 2
-
-    def test_no_pid_returns_none(self) -> None:
-        """When no PID is available, should return None without killing."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(status=None, config=None)
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_pid_zero_returns_none(self) -> None:
-        """PID <= 0 should be rejected to prevent os.kill(0, SIGKILL)."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=0),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_negative_pid_returns_none(self) -> None:
-        """Negative PIDs should be rejected."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=-1),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_process_already_exited_returns_none(self) -> None:
-        """ProcessLookupError on probe means process is gone."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        with patch("os.kill", side_effect=ProcessLookupError):
-            result = _force_kill_server_process(server)
-
-        assert result is None
-
-    def test_permission_error_returns_none(self) -> None:
-        """OSError (e.g. EPERM) on kill returns None."""
-        import signal
-
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        def selective_kill(pid: int, sig: int) -> None:
-            if sig == signal.SIGKILL:
-                raise PermissionError("Operation not permitted")
-
-        with patch("os.kill", side_effect=selective_kill):
-            result = _force_kill_server_process(server)
-
-        assert result is None
-
-
 class TestStopRegisteredLocalServerForCleanup:
     """Tests for stop_registered_local_server_for_cleanup."""
 
@@ -7733,9 +7744,10 @@ class TestStopRegisteredLocalServerForCleanup:
 
         assert result.stopped is True
         assert result.force_killed_pid is None
+        mock_deployer.return_value.remove_server.assert_called_once_with(timeout=5)
 
-    def test_graceful_fails_force_kill_succeeds(self) -> None:
-        """When graceful fails but force-kill works, stopped=True with PID."""
+    def test_graceful_fails_does_not_kill_stored_pid(self) -> None:
+        """When graceful shutdown fails, cleanup does not kill by PID only."""
         from kitaru._local_server import stop_registered_local_server_for_cleanup
 
         mock_deployer_cls = MagicMock()
@@ -7750,32 +7762,15 @@ class TestStopRegisteredLocalServerForCleanup:
                 "kitaru._local_server._load_local_server_runtime",
                 return_value=(mock_deployer_cls, None, None, lambda: mock_server),
             ),
-            patch("os.kill"),
-        ):
-            result = stop_registered_local_server_for_cleanup(timeout=5)
-
-        assert result.stopped is True
-        assert result.force_killed_pid == 42
-
-    def test_graceful_fails_force_kill_fails_stopped_false(self) -> None:
-        """When both graceful and force-kill fail, stopped=False."""
-        from kitaru._local_server import stop_registered_local_server_for_cleanup
-
-        mock_deployer_cls = MagicMock()
-        mock_deployer_cls.return_value.remove_server.side_effect = RuntimeError("fail")
-        mock_server = SimpleNamespace(
-            status=SimpleNamespace(url="http://localhost:8383", pid=None),
-            config=None,
-        )
-
-        with patch(
-            "kitaru._local_server._load_local_server_runtime",
-            return_value=(mock_deployer_cls, None, None, lambda: mock_server),
+            patch("os.kill") as mock_kill,
         ):
             result = stop_registered_local_server_for_cleanup(timeout=5)
 
         assert result.stopped is False
+        assert result.url == "http://localhost:8383"
         assert result.force_killed_pid is None
+        mock_deployer_cls.return_value.remove_server.assert_called_once_with(timeout=5)
+        mock_kill.assert_not_called()
 
     def test_import_error_returns_not_stopped(self) -> None:
         """ImportError from loading runtime should return stopped=False."""
@@ -7802,6 +7797,28 @@ class TestStopRegisteredLocalServerForCleanup:
             result = stop_registered_local_server_for_cleanup(timeout=5)
 
         assert result.stopped is False
+
+    def test_inspection_error_returns_not_stopped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Failures while inspecting the registered server should not raise."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        def raise_inspection_error() -> None:
+            raise RuntimeError("corrupt daemon registration")
+
+        mock_deployer = MagicMock()
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            return_value=(mock_deployer, None, None, raise_inspection_error),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is False
+        assert result.url is None
+        assert "Could not inspect registered local server" in caplog.text
+        mock_deployer.return_value.remove_server.assert_not_called()
 
 
 class TestPathSafety:
