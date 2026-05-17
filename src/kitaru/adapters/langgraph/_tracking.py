@@ -133,6 +133,7 @@ class EventTracker:
     _has_failure_event: bool = False
     _model_call_count: int = 0
     _tool_call_count: int = 0
+    _checkpoint_sequence: int = 0
     _tool_checkpoint_sequence: int = 0
     _current_model_event_id: str | None = None
     _pending_tool_event_ids: list[str] = field(default_factory=list)
@@ -404,6 +405,12 @@ class EventTracker:
                     error=error_from_exception(error) if error is not None else None,
                 )
             )
+
+    def next_checkpoint_sequence(self) -> int:
+        """Return a deterministic per-run fallback checkpoint sequence."""
+        with self._lock:
+            self._checkpoint_sequence += 1
+            return self._checkpoint_sequence
 
     def next_tool_checkpoint_sequence(self) -> int:
         """Return a deterministic per-run fallback tool checkpoint sequence."""

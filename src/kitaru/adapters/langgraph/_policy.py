@@ -27,11 +27,31 @@ class LangGraphCapturePolicy(BaseModel):
     save_state_tasks: bool = True
     save_usage: bool = True
     emit_call_events: bool = True
-    save_model_input: bool = True
-    save_model_response: bool = True
+    save_model_input: bool = Field(
+        default=True,
+        description=(
+            "Persist a redacted structural model-input envelope for sync "
+            "calls-mode checkpoints; raw message/system text is omitted."
+        ),
+    )
+    save_model_response: bool = Field(
+        default=True,
+        description=(
+            "Record the true model checkpoint output as an event artifact "
+            "reference. Disabling this removes the event reference only; the "
+            "checkpoint still stores its return value for replay."
+        ),
+    )
     save_model_usage: bool = True
     save_tool_args: bool = True
-    save_tool_result: bool = True
+    save_tool_result: bool = Field(
+        default=True,
+        description=(
+            "Record the true tool checkpoint output as an event artifact "
+            "reference. Disabling this removes the event reference only; the "
+            "checkpoint still stores its return value for replay."
+        ),
+    )
     fail_on_event_persistence_error: bool = False
     capture_mode: Literal["metadata", "full"] = "metadata"
 
@@ -53,7 +73,14 @@ class LangGraphCallCheckpointPolicy(BaseModel):
         default_factory=dict
     )
     summary_checkpoint_config: CheckpointConfig | None = None
-    persist_run_artifacts: bool = True
+    persist_run_artifacts: bool = Field(
+        default=True,
+        description=(
+            "In calls mode, persist the aggregate event log and run summary. "
+            "Set to False to skip both summary checkpoint persistence and "
+            "direct event/run-summary metadata persistence."
+        ),
+    )
     nested_checkpoint_policy: Literal["error", "metadata_only"] = "error"
     async_checkpoint_policy: Literal["metadata_only"] = Field(
         default="metadata_only",

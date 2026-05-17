@@ -109,7 +109,9 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                 cast(CheckpointConfig, checkpoint_config)
             )
             model_input = (
-                _model_input_envelope(request) if capture.save_model_input else None
+                _persisted_model_input_envelope(request)
+                if capture.save_model_input
+                else None
             )
             checkpoint_inputs = (
                 {"model_input": model_input} if model_input is not None else None
@@ -308,7 +310,8 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
         if tracker is None or event_id is None or event_context is None:
             return handler(request)
 
-        artifacts = _model_artifacts(capture)
+        input_artifacts = _model_artifacts(capture, include_output=False)
+        output_artifacts = _model_artifacts(capture, include_output=True)
         started_at = time.perf_counter()
         try:
             response = handler(request)
@@ -318,7 +321,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                 event_context,
                 status="failed",
                 duration_ms=_elapsed_ms(started_at),
-                artifacts=artifacts,
+                artifacts=input_artifacts,
                 metadata=_model_metadata(
                     request,
                     capture=capture,
@@ -347,7 +350,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
             event_context,
             status="completed",
             duration_ms=_elapsed_ms(started_at),
-            artifacts=artifacts,
+            artifacts=output_artifacts,
             metadata=_model_metadata(
                 request,
                 capture=capture,
@@ -441,7 +444,8 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
         if tracker is None or event_id is None or event_context is None:
             return handler(request)
 
-        artifacts = _tool_artifacts(capture)
+        input_artifacts = _tool_artifacts(capture, include_output=False)
+        output_artifacts = _tool_artifacts(capture, include_output=True)
         started_at = time.perf_counter()
         try:
             result = handler(request)
@@ -451,7 +455,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                 event_context,
                 status="failed",
                 duration_ms=_elapsed_ms(started_at),
-                artifacts=artifacts,
+                artifacts=input_artifacts,
                 metadata=_tool_metadata(request, capture=capture, result=None),
                 error=error,
                 checkpoint_id=_current_checkpoint_id(checkpoint_mode),
@@ -471,7 +475,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
             event_context,
             status="completed",
             duration_ms=_elapsed_ms(started_at),
-            artifacts=artifacts,
+            artifacts=output_artifacts,
             metadata=_tool_metadata(request, capture=capture, result=result),
             checkpoint_id=_current_checkpoint_id(checkpoint_mode),
             checkpoint_name=_current_checkpoint_name(checkpoint_mode, checkpoint_name),
@@ -584,7 +588,7 @@ def _model_cache_key(request: Any, *, enabled: bool) -> str | None:
             "integration": "langchain",
             "kind": "model_call",
             "model": _model_identity(request),
-            "input": to_cache_identity(_model_input_envelope(request)),
+            "input": _model_cache_identity_envelope(request),
         }
     )
 
@@ -645,7 +649,13 @@ def _model_checkpoint_name(
         else safe_step_name(graph_name or "graph")
     )
     run_label = tracker.run_label if tracker is not None else "standalone"
-    sequence = event_context.sequence_index if event_context is not None else 0
+    sequence = (
+        event_context.sequence_index
+        if event_context is not None
+        else tracker.next_checkpoint_sequence()
+        if tracker is not None
+        else 0
+    )
     return safe_step_name(f"model_call__{model_label}_{sequence}__{graph}_{run_label}")
 
 
@@ -663,8 +673,12 @@ def _tool_checkpoint_name(
         else safe_step_name(graph_name or "graph")
     )
     run_label = tracker.run_label if tracker is not None else "standalone"
-    event_sequence = (
-        str(event_context.sequence_index) if event_context is not None else "0"
+    event_sequence = str(
+        event_context.sequence_index
+        if event_context is not None
+        else tracker.next_checkpoint_sequence()
+        if tracker is not None
+        else 0
     )
     call_disambiguator = (
         f"{tool_call_id}_{event_sequence}" if tool_call_id else event_sequence
@@ -674,7 +688,9 @@ def _tool_checkpoint_name(
     )
 
 
-def _model_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
+def _model_artifacts(
+    capture: LangGraphCapturePolicy, *, include_output: bool
+) -> dict[str, str]:
     refs = get_adapter_checkpoint_artifact_refs()
     artifacts: dict[str, str] = {}
     if (
@@ -684,7 +700,8 @@ def _model_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
     ):
         artifacts["model_input"] = refs.input_artifacts["model_input"]
     if (
-        capture.save_model_response
+        include_output
+        and capture.save_model_response
         and refs is not None
         and "output" in refs.output_artifacts
     ):
@@ -692,7 +709,9 @@ def _model_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
     return artifacts
 
 
-def _tool_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
+def _tool_artifacts(
+    capture: LangGraphCapturePolicy, *, include_output: bool
+) -> dict[str, str]:
     refs = get_adapter_checkpoint_artifact_refs()
     artifacts: dict[str, str] = {}
     if (
@@ -702,7 +721,8 @@ def _tool_artifacts(capture: LangGraphCapturePolicy) -> dict[str, str]:
     ):
         artifacts["tool_args"] = refs.input_artifacts["tool_args"]
     if (
-        capture.save_tool_result
+        include_output
+        and capture.save_tool_result
         and refs is not None
         and "output" in refs.output_artifacts
     ):
@@ -755,16 +775,87 @@ def _tool_metadata(
     return metadata
 
 
-def _model_input_envelope(request: Any) -> dict[str, Any]:
+def _persisted_model_input_envelope(request: Any) -> dict[str, Any]:
+    """Return model-call input metadata safe to persist as checkpoint input.
+
+    Prompts and system messages are free text, so they can contain secrets even
+    when their field names do not look secret-like. Persist only structural
+    details here. The raw-enough values used for cache identity live in
+    ``_model_cache_identity_envelope`` and are hashed immediately instead of
+    being stored in Kitaru artifacts or event metadata.
+    """
+    messages = _request_messages(request)
     return {
         "model": _model_identity(request),
-        "messages": to_json_safe(getattr(request, "messages", None)),
-        "system_message": to_json_safe(getattr(request, "system_message", None)),
-        "tool_choice": to_json_safe(getattr(request, "tool_choice", None)),
+        "message_count": len(messages),
+        "messages": [_message_summary(message) for message in messages],
+        "system_message": _system_message_summary(
+            getattr(request, "system_message", None)
+        ),
+        "tool_choice": redact_config(getattr(request, "tool_choice", None)),
         "tools": [_tool_identity(tool) for tool in _request_tools(request)],
-        "response_format": to_json_safe(getattr(request, "response_format", None)),
+        "response_format": redact_config(getattr(request, "response_format", None)),
         "model_settings": redact_config(getattr(request, "model_settings", None)),
     }
+
+
+def _model_cache_identity_envelope(request: Any) -> dict[str, Any]:
+    """Return raw-enough model-call identity used only for cache hashing."""
+    return {
+        "model": _model_identity(request),
+        "messages": to_cache_identity(getattr(request, "messages", None)),
+        "system_message": to_cache_identity(getattr(request, "system_message", None)),
+        "tool_choice": to_cache_identity(getattr(request, "tool_choice", None)),
+        "tools": to_cache_identity(getattr(request, "tools", None)),
+        "response_format": to_cache_identity(getattr(request, "response_format", None)),
+        "model_settings": to_cache_identity(getattr(request, "model_settings", None)),
+    }
+
+
+def _request_messages(request: Any) -> list[Any]:
+    messages = getattr(request, "messages", None)
+    if isinstance(messages, list | tuple):
+        return list(messages)
+    return []
+
+
+def _message_summary(message: Any) -> dict[str, Any]:
+    tool_calls = _message_tool_calls(message)
+    return {
+        "type": _short_type_label(message),
+        "role": _string_or_none(
+            _call_value(message, "role") or _call_value(message, "type")
+        ),
+        "name": _string_or_none(_call_value(message, "name")),
+        "content": (
+            "[OMITTED]" if _call_value(message, "content") is not None else None
+        ),
+        "tool_call_count": len(tool_calls),
+        "tool_call_ids": _tool_call_ids_from_call_payloads(tool_calls),
+    }
+
+
+def _system_message_summary(system_message: Any) -> dict[str, Any]:
+    if system_message is None:
+        return {"present": False, "content": None}
+    return {
+        "present": True,
+        "type": _short_type_label(system_message),
+        "content": "[OMITTED]",
+    }
+
+
+def _tool_call_ids_from_call_payloads(tool_calls: list[Any]) -> list[str]:
+    ids: list[str] = []
+    for tool_call in tool_calls:
+        tool_call_id = _call_value(tool_call, "id") or _call_value(
+            tool_call, "tool_call_id"
+        )
+        if tool_call_id is None:
+            tool_call_id = _call_value(tool_call, "call_id")
+        if tool_call_id is not None:
+            ids.append(str(tool_call_id))
+    return ids
 
 
 def _persisted_tool_args_envelope(request: Any) -> dict[str, Any]:
@@ -974,6 +1065,18 @@ def _mapping_string(value: Mapping[str, Any], key: str) -> str | None:
 def _object_string(value: Any, attr: str) -> str | None:
     nested = getattr(value, attr, None)
     return nested if isinstance(nested, str) and nested.strip() else None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _short_type_label(value: Any) -> str:
+    if value is None:
+        return "NoneType"
+    return type(value).__qualname__
 
 
 def _type_label(value: Any) -> str:

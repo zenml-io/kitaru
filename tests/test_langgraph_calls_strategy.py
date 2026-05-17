@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from collections.abc import Callable
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -237,8 +238,18 @@ def test_sync_model_and_tool_checkpoints_use_structural_refs_and_tool_overrides(
                     "model_name": "fake-model",
                     "python_type": "types.SimpleNamespace",
                 },
-                "messages": [{"role": "user", "content": "hello"}],
-                "system_message": None,
+                "message_count": 1,
+                "messages": [
+                    {
+                        "type": "dict",
+                        "role": "user",
+                        "name": None,
+                        "content": "[OMITTED]",
+                        "tool_call_count": 0,
+                        "tool_call_ids": [],
+                    }
+                ],
+                "system_message": {"present": False, "content": None},
                 "tool_choice": None,
                 "tools": [
                     {"name": "alpha", "python_type": "dict"},
@@ -374,6 +385,52 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     assert events[2]["tool_call_id"] == "call-1"
 
 
+def test_model_checkpoint_input_omits_raw_prompt_and_system_text(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    request = _model_request()
+    request.messages = [
+        {
+            "role": "user",
+            "name": "analyst",
+            "content": "user secret: sk-user-secret",
+            "tool_calls": [{"id": "tool-secret", "name": "alpha", "args": {}}],
+        }
+    ]
+    request.system_message = {"role": "system", "content": "system secret"}
+
+    with tracking.tracker_scope(
+        "model_input_privacy_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(),
+        capture=LangGraphCapturePolicy(),
+    ):
+        middleware.wrap_model_call(request, lambda _request: _model_response())
+
+    model_input = cast(dict[str, object], checkpoints[0]["checkpoint_inputs"])[
+        "model_input"
+    ]
+    assert "sk-user-secret" not in repr(model_input)
+    assert "system secret" not in repr(model_input)
+    assert cast(dict[str, object], model_input)["message_count"] == 1
+    assert cast(dict[str, object], model_input)["system_message"] == {
+        "present": True,
+        "type": "dict",
+        "content": "[OMITTED]",
+    }
+    assert cast(dict[str, object], model_input)["messages"] == [
+        {
+            "type": "dict",
+            "role": "user",
+            "name": "analyst",
+            "content": "[OMITTED]",
+            "tool_call_count": 1,
+            "tool_call_ids": ["tool-secret"],
+        }
+    ]
+
+
 def test_checkpoint_cache_identity_does_not_collapse_when_capture_is_disabled(
     monkeypatch,
 ) -> None:
@@ -399,6 +456,18 @@ def test_checkpoint_cache_identity_does_not_collapse_when_capture_is_disabled(
             second_request,
             lambda _request: _model_response(),
         )
+        third_request = _model_request()
+        third_request.model_settings = {"api_key": "SECRET-A", "safe": "same"}
+        middleware.wrap_model_call(
+            third_request,
+            lambda _request: _model_response(),
+        )
+        fourth_request = _model_request()
+        fourth_request.model_settings = {"api_key": "SECRET-B", "safe": "same"}
+        middleware.wrap_model_call(
+            fourth_request,
+            lambda _request: _model_response(),
+        )
         middleware.wrap_tool_call(
             _tool_request(args={"value": 1}, call_id="call-1"),
             lambda _request: "one",
@@ -413,10 +482,162 @@ def test_checkpoint_cache_identity_does_not_collapse_when_capture_is_disabled(
         None,
         None,
         None,
+        None,
+        None,
     ]
     cache_keys = [checkpoint["cache_key"] for checkpoint in checkpoints]
     assert cache_keys[0] != cache_keys[1]
     assert cache_keys[2] != cache_keys[3]
+    assert cache_keys[4] != cache_keys[5]
+
+
+def test_model_cache_identity_distinguishes_tool_definition_changes(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+
+    with tracking.tracker_scope(
+        "tool_schema_cache_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(
+            model_checkpoint_config={"cache": True},
+        ),
+        capture=LangGraphCapturePolicy(save_model_input=False),
+    ):
+        first_request = _model_request()
+        first_request.tools = [
+            {"name": "lookup_ticket", "description": "Lookup by numeric id"}
+        ]
+        middleware.wrap_model_call(
+            first_request,
+            lambda _request: _model_response(),
+        )
+        second_request = _model_request()
+        second_request.tools = [
+            {"name": "lookup_ticket", "description": "Lookup by ticket slug"}
+        ]
+        middleware.wrap_model_call(
+            second_request,
+            lambda _request: _model_response(),
+        )
+
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_failed_true_call_events_do_not_advertise_output_artifacts(
+    monkeypatch,
+) -> None:
+    _, tracking, _checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+
+    with tracking.tracker_scope(
+        "failed_artifact_refs_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(),
+        capture=LangGraphCapturePolicy(),
+    ) as tracker:
+        with suppress(RuntimeError):
+            middleware.wrap_model_call(
+                _model_request(),
+                lambda _request: (_ for _ in ()).throw(RuntimeError("model boom")),
+            )
+        with suppress(RuntimeError):
+            middleware.wrap_tool_call(
+                _tool_request(name="boom", call_id="call-boom"),
+                lambda _request: (_ for _ in ()).throw(RuntimeError("tool boom")),
+            )
+        events = [event.model_dump(mode="json") for event in tracker.events]
+
+    assert events[0]["status"] == "failed"
+    assert events[0]["artifacts"] == {"model_input": "model_input"}
+    assert events[1]["status"] == "failed"
+    assert events[1]["artifacts"] == {"tool_args": "tool_args"}
+
+
+def test_calls_mode_run_summary_omits_message_free_text(monkeypatch) -> None:
+    agent_module, logged = _patch_runner_summary_runtime(monkeypatch)
+
+    class FakeGraph:
+        name = "run_summary_privacy"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"echo": input}
+
+    def fake_summary_checkpoint(**kwargs: object) -> object:
+        body = cast(Callable[[], object], kwargs["body"])
+        return body()
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_summary_checkpoint)
+
+    runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
+    runner.invoke(
+        LangGraphRunRequest.start(
+            {
+                "messages": [{"role": "user", "content": "user secret sk-run-summary"}],
+                "system_message": {"content": "system secret run summary"},
+                "ticket_id": "TICKET-1",
+            },
+            thread_id="thread-1",
+        )
+    )
+
+    constants = importlib.import_module("kitaru.adapters.langgraph._constants")
+    summaries = cast(
+        dict[str, dict[str, object]],
+        logged[constants.LANGGRAPH_RUN_SUMMARIES_METADATA_KEY],
+    )
+    summary = next(iter(summaries.values()))
+    assert "sk-run-summary" not in repr(summary)
+    assert "system secret run summary" not in repr(summary)
+    assert summary["input"] == {
+        "messages": [
+            {
+                "type": "dict",
+                "role": "user",
+                "name": None,
+                "content": "[OMITTED]",
+                "tool_call_count": 0,
+            }
+        ],
+        "system_message": {"present": True, "type": "dict", "content": "[OMITTED]"},
+        "ticket_id": "TICKET-1",
+    }
+
+
+def test_calls_mode_run_summary_handles_cyclic_payloads(monkeypatch) -> None:
+    agent_module, logged = _patch_runner_summary_runtime(monkeypatch)
+
+    class FakeGraph:
+        name = "run_summary_cycle"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"echo": input}
+
+    def fake_summary_checkpoint(**kwargs: object) -> object:
+        body = cast(Callable[[], object], kwargs["body"])
+        return body()
+
+    payload: dict[str, object] = {
+        "messages": [{"role": "user", "content": "secret in cyclic payload"}],
+    }
+    payload["self"] = payload
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_summary_checkpoint)
+
+    runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
+    runner.invoke(LangGraphRunRequest.start(payload, thread_id="thread-cycle"))
+
+    constants = importlib.import_module("kitaru.adapters.langgraph._constants")
+    summaries = cast(
+        dict[str, dict[str, object]],
+        logged[constants.LANGGRAPH_RUN_SUMMARIES_METADATA_KEY],
+    )
+    summary = next(iter(summaries.values()))
+    assert "secret in cyclic payload" not in repr(summary)
+    assert cast(dict[str, object], summary["input"])["self"] == {
+        "serialization_error": "cycle_detected"
+    }
 
 
 def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct(
@@ -511,6 +732,129 @@ def test_tool_checkpoint_names_include_sequence_for_duplicate_tool_call_ids(
     assert len(set(step_names)) == 2
     assert "tool_call__alpha_repeated_call_1__" in step_names[0]
     assert "tool_call__alpha_repeated_call_2__" in step_names[1]
+
+
+def test_emit_call_events_false_still_uses_unique_true_checkpoint_names(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+
+    with tracking.tracker_scope(
+        "quiet_events_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(),
+        capture=LangGraphCapturePolicy(emit_call_events=False),
+    ) as tracker:
+        assert (
+            middleware.wrap_model_call(
+                _model_request(),
+                lambda _request: _model_response(),
+            )
+            .result[0]
+            .content
+            == "ok"
+        )
+        assert (
+            middleware.wrap_model_call(
+                _model_request(),
+                lambda _request: _model_response(),
+            )
+            .result[0]
+            .content
+            == "ok"
+        )
+        assert (
+            middleware.wrap_tool_call(
+                _tool_request(name="alpha", call_id="same-call"),
+                lambda _request: "first",
+            )
+            == "first"
+        )
+        assert (
+            middleware.wrap_tool_call(
+                _tool_request(name="alpha", call_id="same-call"),
+                lambda _request: "second",
+            )
+            == "second"
+        )
+        events = [event.model_dump(mode="json") for event in tracker.events]
+
+    step_names = [cast(str, checkpoint["step_name"]) for checkpoint in checkpoints]
+    assert len(step_names) == 4
+    assert len(set(step_names)) == 4
+    assert [event["kind"] for event in events] == []
+    assert any("model_call__fake_model_1__" in name for name in step_names)
+    assert any("model_call__fake_model_2__" in name for name in step_names)
+    assert any("tool_call__alpha_same_call_3__" in name for name in step_names)
+    assert any("tool_call__alpha_same_call_4__" in name for name in step_names)
+
+
+def test_response_and_result_capture_flags_suppress_event_refs_only(
+    monkeypatch,
+) -> None:
+    _, tracking, _checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+
+    with tracking.tracker_scope(
+        "artifact_ref_graph",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(),
+        capture=LangGraphCapturePolicy(
+            save_model_response=False,
+            save_tool_result=False,
+        ),
+    ) as tracker:
+        response = middleware.wrap_model_call(
+            _model_request(),
+            lambda _request: _model_response("call-alpha"),
+        )
+        tool_result = middleware.wrap_tool_call(
+            _tool_request(name="alpha", call_id="call-alpha"),
+            lambda _request: {"tool": "ok"},
+        )
+        events = [event.model_dump(mode="json") for event in tracker.events]
+
+    assert response.result[0].content == "ok"
+    assert tool_result == {"tool": "ok"}
+    assert events[0]["artifacts"] == {"model_input": "model_input"}
+    assert events[1]["artifacts"] == {"tool_args": "tool_args"}
+    assert "output" not in events[0]["artifacts"]
+    assert "output" not in events[1]["artifacts"]
+
+
+def test_calls_mode_can_disable_run_artifact_persistence(monkeypatch) -> None:
+    agent_module, logged = _patch_runner_summary_runtime(monkeypatch)
+    checkpoints: list[str] = []
+
+    class FakeGraph:
+        name = "no_run_artifacts"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    def fake_summary_checkpoint(**kwargs: object) -> object:
+        checkpoints.append(cast(str, kwargs["step_name"]))
+        body = cast(Callable[[], object], kwargs["body"])
+        return body()
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_summary_checkpoint)
+
+    runner = KitaruGraphRunner(
+        FakeGraph(),
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(
+            persist_run_artifacts=False,
+        ),
+    )
+    result = runner.invoke(
+        LangGraphRunRequest.start({"input": "value"}, thread_id="thread-1")
+    )
+
+    assert result.status == "completed"
+    assert result.event_log_artifact_name is None
+    assert result.run_summary_artifact_name is None
+    assert checkpoints == []
+    assert logged == {}
 
 
 def test_calls_mode_summary_checkpoint_failure_falls_back_to_logged_metadata(

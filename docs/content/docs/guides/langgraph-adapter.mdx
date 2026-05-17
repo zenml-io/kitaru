@@ -338,7 +338,7 @@ runner = KitaruGraphRunner(
 )
 ```
 
-The default call checkpoint types are `model_call`, `tool_call`, and `langgraph_summary`. Adapter-created call checkpoints run inline and default to no cache/no retries. Tool-argument checkpoint inputs are redacted before persistence; if caching is enabled for a tool checkpoint, Kitaru hashes a separate raw-enough cache identity so different calls do not collapse into the same cache entry.
+The default call checkpoint types are `model_call`, `tool_call`, and `langgraph_summary`. Adapter-created call checkpoints run inline and default to no cache/no retries. Model-input checkpoint inputs are structural by default: message and system-message free text is omitted before persistence. Tool-argument checkpoint inputs are redacted before persistence. If caching is enabled for a model or tool checkpoint, Kitaru hashes a separate raw-enough cache identity so different calls do not collapse into the same cache entry.
 
 ### Async calls mode
 
@@ -381,7 +381,7 @@ Important defaults:
 
 | Option | Default | Meaning |
 |---|---:|---|
-| `save_input` | `True` | Include the start input, or resume command payload, in the adapter run summary. |
+| `save_input` | `True` | Include the start input, or resume command payload, in the adapter run summary. In calls mode, message-shaped start inputs omit raw message/system text by default. |
 | `save_output` | `True` | Include completed graph output in the adapter run summary. Interrupted and failed runs do not store output. |
 | `save_config` | `True` | Include redacted config metadata, including `thread_id`. Secret-like keys are redacted. |
 | `save_context` | `False` | Do not persist arbitrary runtime context by default. |
@@ -390,11 +390,11 @@ Important defaults:
 | `save_state_tasks` | `True` | Save safe task metadata summaries, not raw task internals. |
 | `save_usage` | `True` | Try to extract token usage from graph output. |
 | `emit_call_events` | `True` | In calls mode, record `model_call` and `tool_call` events when middleware observes them. |
-| `save_model_input` | `True` | In sync calls mode, store model input as a structural checkpoint input when a true model checkpoint is opened. |
-| `save_model_response` | `True` | In sync calls mode, record the model checkpoint output as the canonical response artifact reference. |
+| `save_model_input` | `True` | In sync calls mode, store a redacted structural model-input envelope when a true model checkpoint is opened. Raw message and system-message text is omitted by default. |
+| `save_model_response` | `True` | In sync calls mode, include the model checkpoint output in event artifact references. Setting this to `False` removes that event reference only; the true checkpoint still stores its return value for replay. |
 | `save_model_usage` | `True` | Include model usage metadata when the response exposes it. |
 | `save_tool_args` | `True` | In sync calls mode, store redacted tool arguments as a structural checkpoint input when a true tool checkpoint is opened. Secret-like nested keys are redacted. |
-| `save_tool_result` | `True` | In sync calls mode, record the tool checkpoint output as the canonical result artifact reference. |
+| `save_tool_result` | `True` | In sync calls mode, include the tool checkpoint output in event artifact references. Setting this to `False` removes that event reference only; the true checkpoint still stores its return value for replay. |
 | `fail_on_event_persistence_error` | `False` | Best-effort by default: event/run-summary persistence failures do not fail the graph call. Set to `True` when missing observability artifacts should fail the run. |
 | `capture_mode` | `"metadata"` | Metadata mode summarizes task IDs, node names, paths, interrupt counts, and error labels. `"full"` opts into raw JSON-safe task serialization. |
 
@@ -412,7 +412,7 @@ When the adapter persists from checkpoint scope, it saves two Kitaru context art
 The checkpoint shape depends on the strategy:
 
 - In `graph_call` mode, these artifacts are saved from the outer graph-call checkpoint.
-- In `calls` mode, model/tool checkpoints are separate, and the aggregate event/run artifacts are saved from a `langgraph_summary__<graph>_<run_label>` checkpoint when possible.
+- In `calls` mode, model/tool checkpoints are separate, and the aggregate event/run artifacts are saved from a `langgraph_summary__<graph>_<run_label>` checkpoint when possible. Set `LangGraphCallCheckpointPolicy(persist_run_artifacts=False)` to suppress that calls-mode event/run-summary persistence; in that case the run result does not advertise event-log or run-summary artifact names.
 
 Inside checkpoint scope, Kitaru logs lightweight metadata pointers to those artifacts for search and debugging.
 

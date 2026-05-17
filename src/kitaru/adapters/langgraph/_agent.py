@@ -368,8 +368,16 @@ class KitaruGraphRunner:
             state_summary=state_summary,
             state_artifact_name=None,
             output_artifact_name=None,
-            event_log_artifact_name=tracker.event_log_artifact_name,
-            run_summary_artifact_name=tracker.run_summary_artifact_name,
+            event_log_artifact_name=(
+                tracker.event_log_artifact_name
+                if self._will_persist_run_artifacts()
+                else None
+            ),
+            run_summary_artifact_name=(
+                tracker.run_summary_artifact_name
+                if self._will_persist_run_artifacts()
+                else None
+            ),
             usage=usage,
             estimated_cost_usd=estimated_cost,
             warnings=warnings,
@@ -819,6 +827,8 @@ class KitaruGraphRunner:
         tracker: EventTracker,
         extra_summary: dict[str, object],
     ) -> None:
+        if not self._will_persist_run_artifacts():
+            return
         fail_on_error = self._capture.fail_on_event_persistence_error
         if (
             self._checkpoint_strategy == "calls"
@@ -869,6 +879,12 @@ class KitaruGraphRunner:
                     tracker.persist(fallback_summary, fail_on_error=False)
             return
         tracker.persist(extra_summary, fail_on_error=fail_on_error)
+
+    def _will_persist_run_artifacts(self) -> bool:
+        return not (
+            self._checkpoint_strategy == "calls"
+            and not self._call_checkpoint_policy.persist_run_artifacts
+        )
 
     def _calls_summary_checkpoint_config(self) -> CheckpointConfig:
         config = resolve_summary_checkpoint_config(self._call_checkpoint_policy)
@@ -952,12 +968,16 @@ class KitaruGraphRunner:
         if not self._capture.save_input:
             return None
         if request.kind == "start":
+            if self._checkpoint_strategy == "calls":
+                return _calls_mode_input_capture(request.input)
             return to_json_safe(request.input)
         return self._command_capture(request.command)
 
     def _captured_output(self, result: LangGraphRunResult) -> Any | None:
         if not self._capture.save_output or result.status != "completed":
             return None
+        if self._checkpoint_strategy == "calls":
+            return _calls_mode_payload_capture(result.output)
         return to_json_safe(result.output)
 
     def _command_capture(self, command: Any) -> Any:
@@ -1061,6 +1081,115 @@ class KitaruGraphRunner:
         return request.checkpoint_ns
 
 
+def _calls_mode_input_capture(value: Any) -> Any:
+    """Capture graph input while omitting LangChain message free text."""
+    return _calls_mode_payload_capture(value)
+
+
+def _calls_mode_payload_capture(
+    value: Any,
+    *,
+    seen: set[int] | None = None,
+) -> Any:
+    """Capture calls-mode payloads while omitting message free text.
+
+    In calls mode, graph inputs and outputs often contain ``messages`` lists.
+    Those messages can hold the same prompt text that model-call checkpoint
+    inputs deliberately omit, so run summaries use structural message summaries
+    for message-shaped values and leave non-message values unchanged.
+    """
+    seen = seen or set()
+    if _is_message_like(value):
+        return _message_input_summary(value)
+    if isinstance(value, Mapping):
+        value_id = id(value)
+        if value_id in seen:
+            return {"serialization_error": "cycle_detected"}
+        seen.add(value_id)
+        try:
+            captured: dict[str, Any] = {}
+            for key, nested in value.items():
+                key_text = _safe_key_text(key)
+                if key_text == "system_message":
+                    captured[key_text] = _system_input_summary(nested)
+                else:
+                    captured[key_text] = _calls_mode_payload_capture(
+                        nested,
+                        seen=seen,
+                    )
+            return captured
+        finally:
+            seen.remove(value_id)
+    if isinstance(value, list | tuple):
+        value_id = id(value)
+        if value_id in seen:
+            return {"serialization_error": "cycle_detected"}
+        seen.add(value_id)
+        try:
+            return [_calls_mode_payload_capture(item, seen=seen) for item in value]
+        finally:
+            seen.remove(value_id)
+    return to_json_safe(value)
+
+
+def _is_message_like(value: Any) -> bool:
+    content = _mapping_get(value, "content")
+    if content is None:
+        content = getattr(value, "content", None)
+    if content is None:
+        return False
+    return any(
+        marker is not None
+        for marker in (
+            _mapping_get(value, "role"),
+            _mapping_get(value, "type"),
+            _mapping_get(value, "tool_calls"),
+            getattr(value, "type", None),
+            getattr(value, "tool_calls", None),
+        )
+    )
+
+
+def _message_input_summary(message: Any) -> dict[str, Any]:
+    return {
+        "type": _short_type_label(message),
+        "role": _string_or_none(
+            _mapping_get(message, "role") or getattr(message, "type", None)
+        ),
+        "name": _string_or_none(
+            _mapping_get(message, "name") or getattr(message, "name", None)
+        ),
+        "content": (
+            "[OMITTED]"
+            if _mapping_get(message, "content") is not None
+            or getattr(message, "content", None) is not None
+            else None
+        ),
+        "tool_call_count": _len_or_count(
+            _mapping_get(message, "tool_calls")
+            or getattr(message, "tool_calls", None)
+            or ()
+        ),
+    }
+
+
+def _system_input_summary(system_message: Any) -> dict[str, Any]:
+    if system_message is None:
+        return {"present": False, "content": None}
+    return {
+        "present": True,
+        "type": _short_type_label(system_message),
+        "content": "[OMITTED]",
+    }
+
+
+def _safe_key_text(key: Any) -> str:
+    try:
+        return str(key)
+    except Exception:
+        return f"<unprintable key {_type_label(key)}>"
+
+
 def _mapping_get(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(key, default)
@@ -1114,6 +1243,12 @@ def _safe_key_labels(value: Any) -> list[str]:
         except Exception:
             labels.append(f"<unprintable key {_type_label(key)}>")
     return sorted(labels)
+
+
+def _short_type_label(value: Any) -> str:
+    if value is None:
+        return "NoneType"
+    return type(value).__qualname__
 
 
 def _type_label(value: Any) -> str:

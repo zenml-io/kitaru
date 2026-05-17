@@ -118,6 +118,16 @@ def test_call_checkpoint_policy_and_capture_flags_are_dependency_safe(
     assert capture.save_model_usage is True
     assert capture.save_tool_args is True
     assert capture.save_tool_result is True
+    capture_fields = langgraph_adapter.LangGraphCapturePolicy.model_fields
+    assert "raw message/system text is omitted" in cast(
+        str, capture_fields["save_model_input"].description
+    )
+    assert "event artifact reference" in cast(
+        str, capture_fields["save_model_response"].description
+    )
+    assert "event artifact reference" in cast(
+        str, capture_fields["save_tool_result"].description
+    )
 
     policy = langgraph_adapter.LangGraphCallCheckpointPolicy(
         model_checkpoint_config=False,
@@ -140,6 +150,13 @@ def test_call_checkpoint_policy_and_capture_flags_are_dependency_safe(
         "retries": 1,
         "type": "langgraph_summary",
     }
+    assert policy.persist_run_artifacts is True
+    assert "skip both summary checkpoint persistence" in cast(
+        str,
+        langgraph_adapter.LangGraphCallCheckpointPolicy.model_fields[
+            "persist_run_artifacts"
+        ].description,
+    )
 
     with pytest.raises(ValidationError, match="runtime='isolated'"):
         langgraph_adapter.LangGraphCallCheckpointPolicy(
