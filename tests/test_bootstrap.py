@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.metadata
+import subprocess
 import tomllib
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -73,6 +75,23 @@ def test_typed_classifier_matches_pep_561_marker_and_wheel_package() -> None:
     assert "Typing :: Typed" in classifiers
     assert marker.is_file(), f"Missing PEP 561 marker: {marker}"
     assert "src/kitaru" in packages
+
+
+def test_built_wheel_contains_pep_561_marker(tmp_path: Path) -> None:
+    """The built wheel should ship the PEP 561 marker file."""
+    repo_root = Path(__file__).resolve().parents[1]
+
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel_path = next(tmp_path.glob("*.whl"))
+
+    with zipfile.ZipFile(wheel_path) as wheel:
+        assert "kitaru/py.typed" in wheel.namelist()
 
 
 def test_cli_entrypoint_populates_version_before_dispatch() -> None:

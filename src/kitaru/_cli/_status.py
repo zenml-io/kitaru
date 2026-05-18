@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 from cyclopts import Parameter
 
 from kitaru._interface_errors import run_with_cli_error_boundary
+from kitaru._local_server import LocalServerStopResult
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import (
     KITARU_AUTH_TOKEN_ENV,
@@ -45,6 +47,8 @@ from ._helpers import (
     _print_success,
     _resolve_output_format,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -510,64 +514,81 @@ def _environment_rows(
     return [(entry.name, entry.value) for entry in environment]
 
 
+def _stop_registered_local_server_best_effort(deps: Any) -> LocalServerStopResult:
+    """Stop the registered local daemon without blocking logout state reset."""
+    try:
+        return deps.stop_registered_local_server()
+    except Exception:
+        logger.warning(
+            "Could not stop registered local server during logout", exc_info=True
+        )
+        return LocalServerStopResult(stopped=False, url=None)
+
+
+def _finalize_logout_result(result: LogoutResult, deps: Any) -> LogoutResult:
+    """Attach best-effort local-server stop details to a logout result."""
+    stop_result = _stop_registered_local_server_best_effort(deps)
+    return replace(
+        result,
+        local_server_stopped=stop_result.stopped,
+        local_server_url=stop_result.url or result.local_server_url,
+    )
+
+
 def _logout_current_connection() -> LogoutResult:
     """Reset the active connection and clear current stored credentials."""
     deps = cli_dependencies()
     gc = deps.global_configuration()
     connected_server_url = deps.get_connected_server_url()
     was_connected_to_local_server = deps.connected_to_local_server()
-    stop_result = deps.stop_registered_local_server()
 
     if was_connected_to_local_server:
         local_fallback_available = _reset_to_local_store(gc)
-        return LogoutResult(
-            mode="local_server",
-            local_fallback_available=local_fallback_available,
-            local_server_stopped=stop_result.stopped,
-            local_server_url=stop_result.url,
+        return _finalize_logout_result(
+            LogoutResult(
+                mode="local_server",
+                local_fallback_available=local_fallback_available,
+            ),
+            deps,
         )
 
     try:
         if gc.uses_local_store:
-            return LogoutResult(
-                mode="local_store",
-                local_server_stopped=stop_result.stopped,
-                local_server_url=stop_result.url,
-            )
+            return _finalize_logout_result(LogoutResult(mode="local_store"), deps)
         server_url = gc.store_configuration.url.rstrip("/")
     except ImportError:
-        return LogoutResult(
-            mode="unavailable",
-            local_server_stopped=stop_result.stopped,
-            local_server_url=stop_result.url,
-        )
+        return _finalize_logout_result(LogoutResult(mode="unavailable"), deps)
 
     local_fallback_available = _reset_to_local_store(gc)
 
     if _is_localhost_url(server_url or connected_server_url):
-        return LogoutResult(
-            mode="local_server",
-            local_fallback_available=local_fallback_available,
-            local_server_stopped=stop_result.stopped,
-            local_server_url=stop_result.url or server_url,
+        return _finalize_logout_result(
+            LogoutResult(
+                mode="local_server",
+                local_fallback_available=local_fallback_available,
+                local_server_url=server_url,
+            ),
+            deps,
         )
 
     if server_url.startswith(("http://", "https://")):
         deps.get_credentials_store().clear_credentials(server_url)
-        return LogoutResult(
-            mode="remote_server",
-            target=server_url,
-            local_fallback_available=local_fallback_available,
-            local_server_stopped=stop_result.stopped,
-            local_server_url=stop_result.url,
+        return _finalize_logout_result(
+            LogoutResult(
+                mode="remote_server",
+                target=server_url,
+                local_fallback_available=local_fallback_available,
+            ),
+            deps,
         )
 
-    return LogoutResult(
-        mode="remote_store",
-        target=server_url,
-        local_fallback_available=local_fallback_available,
-        local_server_stopped=stop_result.stopped,
-        local_server_url=stop_result.url,
+    return _finalize_logout_result(
+        LogoutResult(
+            mode="remote_store",
+            target=server_url,
+            local_fallback_available=local_fallback_available,
+        ),
+        deps,
     )
 
 

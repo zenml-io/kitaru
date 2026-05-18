@@ -3646,6 +3646,39 @@ def test_logout_resets_remote_connection() -> None:
     )
 
 
+def test_logout_resets_remote_connection_when_daemon_stop_fails() -> None:
+    """Remote logout should reset persisted state even if daemon stop fails."""
+    fake_gc = Mock()
+    fake_gc.uses_local_store = False
+    fake_gc.store_configuration = SimpleNamespace(url="https://example.com/")
+    fake_credentials_store = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.cli._get_connected_server_url", return_value="https://example.com"
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            side_effect=RuntimeError("daemon stop failed"),
+        ),
+        patch(
+            "kitaru.cli.get_credentials_store",
+            return_value=fake_credentials_store,
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    fake_credentials_store.clear_credentials.assert_called_once_with(
+        "https://example.com"
+    )
+    assert result.mode == "remote_server"
+    assert result.local_server_stopped is False
+    assert str(result) == "Logged out from Kitaru server: https://example.com"
+
+
 def test_logout_returns_local_server_mode_for_local_connection() -> None:
     """Local logout should report local-server mode and stop the daemon."""
     fake_gc = Mock()
@@ -7327,7 +7360,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -7359,7 +7392,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -7394,7 +7427,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -7402,6 +7435,44 @@ class TestCleanGlobal:
         assert exc_info.value.code == 0
         output = capsys.readouterr().out
         assert "Backup" in output or "backup" in output
+
+    def test_dry_run_surfaces_local_server_inspection_failure(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Dry-run should warn when local-server state cannot be inspected."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "kitaru.yaml").write_text("version: 1\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=0,
+            ),
+            patch(
+                "zenml.utils.server_utils.get_local_server",
+                side_effect=RuntimeError("registry unreadable"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "global", "--dry-run", "-o", "json"])
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        item = payload["item"]
+        assert "inspection failed: registry unreadable" in item["local_server_status"]
+        assert any(
+            "Could not inspect the registered local server" in warning
+            for warning in item["warnings"]
+        )
 
 
 class TestCleanAll:
@@ -7430,7 +7501,7 @@ class TestCleanAll:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -7544,6 +7615,69 @@ class TestExecuteCleanupPlan:
             and "PID-only evidence can be stale" in warning
             for warning in result.warnings
         )
+
+    def test_global_cleanup_inspection_failure_warning_uses_explicit_state(
+        self, tmp_path: Path
+    ) -> None:
+        """Inspection-failure warnings should not depend on status text."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+        from kitaru._local_server import LocalServerCleanupResult
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            model_registry_alias_count=0,
+            local_server_status="local server state could not be read",
+            local_server_would_stop=True,
+            local_server_inspection_failed=True,
+        )
+
+        with (
+            patch("kitaru._cleanup._reset_global_config"),
+            patch(
+                "kitaru._local_server.stop_registered_local_server_for_cleanup",
+                return_value=LocalServerCleanupResult(
+                    stopped=True,
+                    url=None,
+                    force_killed_pid=None,
+                ),
+            ) as mock_stop,
+        ):
+            result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        mock_stop.assert_called_once_with(timeout=10)
+        assert result.local_server_inspection_failed is True
+        assert any(
+            "Could not inspect the registered local server" in warning
+            and "local server state could not be read" in warning
+            for warning in result.warnings
+        )
+
+    def test_preview_warning_does_not_parse_unknown_status_prefix(self) -> None:
+        """Display text alone should not create an inspection-failure warning."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            build_cleanup_preview_result,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            local_server_status="unknown (inspection failed: display text only)",
+            local_server_inspection_failed=False,
+        )
+
+        result = build_cleanup_preview_result(plan)
+
+        assert result.local_server_inspection_failed is False
+        assert result.warnings == ()
 
     def test_reinit_failure_produces_warning(self, tmp_path: Path) -> None:
         """Failed re-initialization should add a warning."""
