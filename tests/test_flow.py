@@ -1003,6 +1003,28 @@ def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None
     }
 
 
+def test_flow_return_coercion_preserves_mixed_tuple_outputs() -> None:
+    """Mixed artifact/plain tuples should remain tuple-shaped pipeline outputs."""
+    handle = OutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="produce_value",
+        output_name="output",
+    )
+    saved_plain = object()
+
+    with patch("kitaru.flow.save_artifact", return_value=saved_plain) as save_mock:
+        result = _coerce_flow_return_for_zenml((handle, 1))
+
+    assert result == (handle, saved_plain)
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs == {
+        "data": 1,
+        "name": f"{_FLOW_RESULT_ARTIFACT_NAME}_1",
+        "artifact_type": ArtifactType.DATA,
+        "user_metadata": {"kitaru_artifact_type": "output"},
+    }
+
+
 def test_checkpoint_cache_survives_pipeline_with_options_when_execution_unset() -> None:
     """Mixed ``@checkpoint(cache=...)`` values must survive ``with_options``.
 

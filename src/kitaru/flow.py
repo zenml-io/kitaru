@@ -248,6 +248,16 @@ def _is_zenml_pipeline_output_artifact(value: Any) -> bool:
     return isinstance(value, ArtifactVersionResponse | OutputArtifact)
 
 
+def _save_flow_result_artifact(value: Any, *, name: str) -> ArtifactVersionResponse:
+    """Persist one plain flow result value as a ZenML artifact."""
+    return save_artifact(
+        data=value,
+        name=name,
+        artifact_type=ArtifactType.DATA,
+        user_metadata={"kitaru_artifact_type": "output"},
+    )
+
+
 def _coerce_flow_return_for_zenml(value: Any) -> Any:
     """Convert a user flow return value into a ZenML 0.94.4-compatible output.
 
@@ -260,17 +270,18 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
         return None
     if _is_zenml_pipeline_output_artifact(value):
         return value
-    if isinstance(value, tuple) and all(
-        _is_zenml_pipeline_output_artifact(item) for item in value
-    ):
-        return value
+    if isinstance(value, tuple):
+        return tuple(
+            item
+            if _is_zenml_pipeline_output_artifact(item)
+            else _save_flow_result_artifact(
+                item,
+                name=f"{_FLOW_RESULT_ARTIFACT_NAME}_{index}",
+            )
+            for index, item in enumerate(value)
+        )
 
-    return save_artifact(
-        data=value,
-        name=_FLOW_RESULT_ARTIFACT_NAME,
-        artifact_type=ArtifactType.DATA,
-        user_metadata={"kitaru_artifact_type": "output"},
-    )
+    return _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
