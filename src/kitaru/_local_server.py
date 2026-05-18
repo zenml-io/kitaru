@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+from kitaru._env import ZENML_DEFAULT_ANALYTICS_SOURCE_ENV, _temporary_env
 from kitaru.errors import KitaruBackendError, KitaruUsageError
 
 logger = logging.getLogger(__name__)
@@ -184,24 +184,23 @@ def _deploy_and_connect(
         provider_type=provider_type,
         port=port,
     )
+    env_overlay = {ZENML_DEFAULT_ANALYTICS_SOURCE_ENV: "kitaru-api"}
+    if ui_dir := _resolve_bundled_ui_dir():
+        env_overlay["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
+        logger.info("Kitaru UI directory: %s", ui_dir)
+    else:
+        logger.debug(
+            "No bundled Kitaru UI found (expected at %s); "
+            "server will use default ZenML dashboard",
+            Path(__file__).parent / "_ui" / "dist",
+        )
+
     try:
-        if ui_dir := _resolve_bundled_ui_dir():
-            os.environ["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
-            logger.info("Kitaru UI directory: %s", ui_dir)
-        else:
-            logger.debug(
-                "No bundled Kitaru UI found (expected at %s); "
-                "server will use default ZenML dashboard",
-                Path(__file__).parent / "_ui" / "dist",
-            )
-        os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
-        deployed_server = deployer.deploy_server(config, timeout=timeout)
-        deployer.connect_to_server()
+        with _temporary_env(env_overlay):
+            deployed_server = deployer.deploy_server(config, timeout=timeout)
+            deployer.connect_to_server()
     except Exception as exc:
         raise _local_server_start_error(action=action, exc=exc) from exc
-    finally:
-        os.environ.pop("ZENML_SERVER_DASHBOARD_FILES_PATH", None)
-        os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-python"
 
     deployed_url = (
         _existing_local_server_url(deployed_server)
@@ -300,59 +299,15 @@ class LocalServerCleanupResult:
     force_killed_pid: int | None = None
 
 
-def _force_kill_server_process(local_server: Any) -> int | None:
-    """Attempt to force-kill the local server daemon process.
-
-    Returns the killed PID, or None if the PID could not be resolved
-    or the kill failed.
-    """
-    import signal
-
-    pid: int | None = None
-
-    status = getattr(local_server, "status", None)
-    if status is not None:
-        pid = getattr(status, "pid", None)
-
-    if pid is None:
-        config = getattr(local_server, "config", None)
-        if config is not None:
-            pid = getattr(config, "pid", None)
-
-    if pid is None or not isinstance(pid, int) or pid <= 0:
-        return None
-
-    # Verify the process still exists before sending SIGKILL.
-    # Note: this cannot confirm it's the *same* server process (the PID
-    # may have been recycled), but it avoids killing a non-existent PID.
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        logger.debug("Server PID %d no longer exists", pid)
-        return None
-    except OSError:
-        pass  # EPERM means the process exists but we may not own it
-
-    try:
-        os.kill(pid, signal.SIGKILL)
-        return pid
-    except ProcessLookupError:
-        # Process already exited — don't claim we killed it
-        return None
-    except OSError:
-        logger.warning("Could not force-kill server process %d", pid, exc_info=True)
-        return None
-
-
 def stop_registered_local_server_for_cleanup(
     *,
     timeout: int = 10,
 ) -> LocalServerCleanupResult:
-    """Stop the registered local server for cleanup, with force-kill fallback.
+    """Stop the registered local server for cleanup.
 
     Unlike ``stop_registered_local_server``, this function:
     - uses a timeout on graceful shutdown
-    - force-kills the daemon if graceful stop fails
+    - never force-kills a PID-only daemon record
     - never raises; always returns a result
     """
     try:
@@ -360,24 +315,26 @@ def stop_registered_local_server_for_cleanup(
     except ImportError:
         return LocalServerCleanupResult(stopped=False, url=None)
 
-    local_server = get_local_server()
-    if local_server is None:
-        return LocalServerCleanupResult(stopped=False, url=None)
+    try:
+        local_server = get_local_server()
+        if local_server is None:
+            return LocalServerCleanupResult(stopped=False, url=None)
 
-    url = _existing_local_server_url(local_server)
+        url = _existing_local_server_url(local_server)
+    except Exception:
+        logger.warning("Could not inspect registered local server", exc_info=True)
+        return LocalServerCleanupResult(stopped=False, url=None)
 
     try:
         local_server_deployer_cls().remove_server(timeout=timeout)
         return LocalServerCleanupResult(stopped=True, url=url)
     except Exception:
-        logger.warning("Graceful local server shutdown failed; attempting force-kill")
-
-    killed_pid = _force_kill_server_process(local_server)
-    return LocalServerCleanupResult(
-        stopped=killed_pid is not None,
-        url=url,
-        force_killed_pid=killed_pid,
-    )
+        logger.warning(
+            "Graceful local server shutdown failed; not killing the stored PID "
+            "because PID-only evidence can be stale",
+            exc_info=True,
+        )
+        return LocalServerCleanupResult(stopped=False, url=url)
 
 
 def stop_registered_local_server() -> LocalServerStopResult:

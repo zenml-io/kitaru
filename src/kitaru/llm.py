@@ -10,12 +10,12 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from kitaru._env import _temporary_env
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import checkpoint
@@ -258,24 +258,6 @@ def _normalize_messages(
 # ---------------------------------------------------------------------------
 # Provider SDK helpers (lazy imports)
 # ---------------------------------------------------------------------------
-
-
-@contextmanager
-def _temporary_env(additions: Mapping[str, str]) -> Any:
-    """Temporarily add/override environment variables for one call."""
-    previous_values: dict[str, str | None] = {}
-    for key, value in additions.items():
-        previous_values[key] = os.environ.get(key)
-        os.environ[key] = value
-
-    try:
-        yield
-    finally:
-        for key, previous in previous_values.items():
-            if previous is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = previous
 
 
 def _call_openai(
