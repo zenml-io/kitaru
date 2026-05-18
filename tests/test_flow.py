@@ -13,7 +13,8 @@ from uuid import uuid4
 
 import pytest
 from zenml.config.docker_settings import DockerSettings
-from zenml.enums import ExecutionStatus
+from zenml.enums import ArtifactType, ExecutionStatus
+from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
 
 import kitaru
@@ -43,10 +44,12 @@ from kitaru.errors import (
     format_recovery_hint,
 )
 from kitaru.flow import (
+    _FLOW_RESULT_ARTIFACT_NAME,
     FlowHandle,
     _build_kitaru_execution_url,
     _build_pipeline_options,
     _checkpoint_count_from_run,
+    _coerce_flow_return_for_zenml,
     _duration_metadata_from_run,
     _extract_run_pipeline_id,
     _guard_implicit_active_stack_fallback,
@@ -964,6 +967,40 @@ def test_flow_run_omits_secrets_when_none_configured() -> None:
 
     call_kwargs = base_pipeline.with_options.call_args.kwargs
     assert "secrets" not in call_kwargs
+
+
+def test_flow_return_coercion_preserves_zenml_output_handles() -> None:
+    """Compilation-time checkpoint output handles must not be re-saved."""
+    artifact = OutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="produce_value",
+        output_name="output",
+    )
+
+    with patch("kitaru.flow.save_artifact") as save_mock:
+        result = _coerce_flow_return_for_zenml(artifact)
+        tuple_result = _coerce_flow_return_for_zenml((artifact,))
+
+    assert result is artifact
+    assert tuple_result == (artifact,)
+    save_mock.assert_not_called()
+
+
+def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None:
+    """Plain Kitaru flow results must satisfy ZenML pipeline output validation."""
+    artifact = object()
+
+    with patch("kitaru.flow.save_artifact", return_value=artifact) as save_mock:
+        result = _coerce_flow_return_for_zenml({"answer": 42})
+
+    assert result is artifact
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs == {
+        "data": {"answer": 42},
+        "name": _FLOW_RESULT_ARTIFACT_NAME,
+        "artifact_type": ArtifactType.DATA,
+        "user_metadata": {"kitaru_artifact_type": "output"},
+    }
 
 
 def test_checkpoint_cache_survives_pipeline_with_options_when_execution_unset() -> None:

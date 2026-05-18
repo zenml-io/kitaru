@@ -20,13 +20,17 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ConfigDict, create_model
+from zenml.artifacts.utils import save_artifact
 from zenml.client import Client
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.config.retry_config import StepRetryConfig
 from zenml.constants import DEFAULT_STACK_AND_COMPONENT_NAME
+from zenml.enums import ArtifactType
+from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
+from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
@@ -236,6 +240,39 @@ def _register_pipeline_source_alias(
     setattr(module, alias, pipeline_obj)
 
 
+_FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
+
+
+def _is_zenml_pipeline_output_artifact(value: Any) -> bool:
+    """Return whether ``value`` is already valid as a ZenML pipeline output."""
+    return isinstance(value, ArtifactVersionResponse | OutputArtifact)
+
+
+def _coerce_flow_return_for_zenml(value: Any) -> Any:
+    """Convert a user flow return value into a ZenML 0.94.4-compatible output.
+
+    ZenML 0.94.4 validates dynamic pipeline return values and only accepts
+    artifact references (or tuples of artifact references). Kitaru flows expose
+    normal Python return values, so plain values need to be persisted manually
+    before they are handed back to ZenML's pipeline finalizer.
+    """
+    if value is None:
+        return None
+    if _is_zenml_pipeline_output_artifact(value):
+        return value
+    if isinstance(value, tuple) and all(
+        _is_zenml_pipeline_output_artifact(item) for item in value
+    ):
+        return value
+
+    return save_artifact(
+        data=value,
+        name=_FLOW_RESULT_ARTIFACT_NAME,
+        artifact_type=ArtifactType.DATA,
+        user_metadata={"kitaru_artifact_type": "output"},
+    )
+
+
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a flow entrypoint with Kitaru flow runtime scope."""
 
@@ -244,7 +281,8 @@ def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
         with _flow_scope(name=flow_name):
-            return func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            return _coerce_flow_return_for_zenml(result)
 
     return _wrapped
 
