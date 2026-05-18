@@ -270,7 +270,9 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
         return None
     if _is_zenml_pipeline_output_artifact(value):
         return value
-    if isinstance(value, tuple):
+    if isinstance(value, tuple) and any(
+        _is_zenml_pipeline_output_artifact(item) for item in value
+    ):
         return tuple(
             item
             if _is_zenml_pipeline_output_artifact(item)

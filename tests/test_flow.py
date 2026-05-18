@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections import namedtuple
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -1001,6 +1002,38 @@ def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None
         "artifact_type": ArtifactType.DATA,
         "user_metadata": {"kitaru_artifact_type": "output"},
     }
+
+
+def test_flow_return_coercion_preserves_plain_tuple_as_one_artifact() -> None:
+    """Plain tuples are ordinary Python return values, not pipeline fan-out."""
+    saved_tuple = object()
+
+    with patch("kitaru.flow.save_artifact", return_value=saved_tuple) as save_mock:
+        result = _coerce_flow_return_for_zenml((1,))
+
+    assert result is saved_tuple
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs == {
+        "data": (1,),
+        "name": _FLOW_RESULT_ARTIFACT_NAME,
+        "artifact_type": ArtifactType.DATA,
+        "user_metadata": {"kitaru_artifact_type": "output"},
+    }
+
+
+def test_flow_return_coercion_preserves_namedtuple_as_one_artifact() -> None:
+    """Tuple subclasses should keep their user-facing object semantics."""
+    Pair = namedtuple("Pair", ["left", "right"])
+    value = Pair(left=1, right=2)
+    saved_pair = object()
+
+    with patch("kitaru.flow.save_artifact", return_value=saved_pair) as save_mock:
+        result = _coerce_flow_return_for_zenml(value)
+
+    assert result is saved_pair
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs["data"] == value
+    assert save_mock.call_args.kwargs["name"] == _FLOW_RESULT_ARTIFACT_NAME
 
 
 def test_flow_return_coercion_preserves_mixed_tuple_outputs() -> None:
