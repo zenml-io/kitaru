@@ -2052,14 +2052,20 @@ def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
 
     wrapped = _wrap_flow_entrypoint(_user_flow)
 
-    with patch(
-        "kitaru.runtime.DynamicPipelineRunContext.get",
-        return_value=SimpleNamespace(
-            run=SimpleNamespace(
-                id="exec-123",
-                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+    with (
+        patch(
+            "kitaru.runtime.DynamicPipelineRunContext.get",
+            return_value=SimpleNamespace(
+                run=SimpleNamespace(
+                    id="exec-123",
+                    pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+                ),
+                pipeline=SimpleNamespace(id=None, name=None),
             ),
-            pipeline=SimpleNamespace(id=None, name=None),
+        ),
+        patch(
+            "kitaru.flow._coerce_flow_return_for_zenml",
+            side_effect=lambda value: value,
         ),
     ):
         result = wrapped()
@@ -2075,14 +2081,20 @@ def test_public_current_execution_id_reads_flow_scope_only() -> None:
 
     wrapped = _wrap_flow_entrypoint(_user_flow)
 
-    with patch(
-        "kitaru.runtime.DynamicPipelineRunContext.get",
-        return_value=SimpleNamespace(
-            run=SimpleNamespace(
-                id="exec-public-123",
-                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+    with (
+        patch(
+            "kitaru.runtime.DynamicPipelineRunContext.get",
+            return_value=SimpleNamespace(
+                run=SimpleNamespace(
+                    id="exec-public-123",
+                    pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+                ),
+                pipeline=SimpleNamespace(id=None, name=None),
             ),
-            pipeline=SimpleNamespace(id=None, name=None),
+        ),
+        patch(
+            "kitaru.flow._coerce_flow_return_for_zenml",
+            side_effect=lambda value: value,
         ),
     ):
         result = wrapped()
