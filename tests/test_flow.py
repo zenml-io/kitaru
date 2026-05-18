@@ -5,10 +5,11 @@ from __future__ import annotations
 import sys
 import threading
 from collections import namedtuple
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
@@ -46,12 +47,14 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     _FLOW_RESULT_ARTIFACT_NAME,
+    _FLOW_RESULT_TUPLE_METADATA_MARKER,
     FlowHandle,
     _build_kitaru_execution_url,
     _build_pipeline_options,
     _checkpoint_count_from_run,
     _coerce_flow_return_for_zenml,
     _duration_metadata_from_run,
+    _extract_flow_result,
     _extract_run_pipeline_id,
     _guard_implicit_active_stack_fallback,
     _inject_model_registry_env,
@@ -545,6 +548,59 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
     )
 
 
+def test_flow_deploy_prepare_does_not_persist_flow_result_artifacts() -> None:
+    """Deployment snapshot preparation is a dry run, not a flow execution."""
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {"x": 1}
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    captured: dict[str, Callable[..., Any]] = {}
+
+    def _decorate(entrypoint: Callable[..., Any]) -> object:
+        captured["entrypoint"] = entrypoint
+        return base_pipeline
+
+    def _prepare(*args: Any, **kwargs: Any) -> None:
+        captured["entrypoint"](*args, **kwargs)
+
+    configured_pipeline.prepare.side_effect = _prepare
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(side_effect=_decorate)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=object()))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.flow.save_artifact") as save_mock,
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: {"answer": x})
+        wrapped.deploy(1)
+
+    configured_pipeline.prepare.assert_called_once_with(1)
+    save_mock.assert_not_called()
+    configured_pipeline._create_snapshot.assert_called_once()
+    deployments_api.create.assert_called_once()
+
+
 def test_flow_deploy_resolves_invocation_image_and_threads_it_to_with_options() -> None:
     """Deploy should pass image overrides into config resolution and Docker settings."""
     source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
@@ -977,14 +1033,20 @@ def test_flow_return_coercion_preserves_zenml_output_handles() -> None:
         step_name="produce_value",
         output_name="output",
     )
+    tuple_metadata = object()
 
-    with patch("kitaru.flow.save_artifact") as save_mock:
+    with patch("kitaru.flow.save_artifact", return_value=tuple_metadata) as save_mock:
         result = _coerce_flow_return_for_zenml(artifact)
         tuple_result = _coerce_flow_return_for_zenml((artifact,))
 
     assert result is artifact
-    assert tuple_result == (artifact,)
-    save_mock.assert_not_called()
+    assert tuple_result == (artifact, tuple_metadata)
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs["data"] == {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 1,
+    }
 
 
 def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None:
@@ -1002,6 +1064,17 @@ def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None
         "artifact_type": ArtifactType.DATA,
         "user_metadata": {"kitaru_artifact_type": "output"},
     }
+
+
+def test_flow_return_coercion_wraps_artifact_save_failures() -> None:
+    """Internal result-artifact failures should not look like user-code errors."""
+    with (
+        patch("kitaru.flow.save_artifact", side_effect=RuntimeError("store down")),
+        pytest.raises(KitaruRuntimeError, match="could not persist") as exc_info,
+    ):
+        _coerce_flow_return_for_zenml({"answer": 42})
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 def test_flow_return_coercion_preserves_plain_tuple_as_one_artifact() -> None:
@@ -1044,18 +1117,76 @@ def test_flow_return_coercion_preserves_mixed_tuple_outputs() -> None:
         output_name="output",
     )
     saved_plain = object()
+    tuple_metadata = object()
 
-    with patch("kitaru.flow.save_artifact", return_value=saved_plain) as save_mock:
+    with patch(
+        "kitaru.flow.save_artifact",
+        side_effect=[saved_plain, tuple_metadata],
+    ) as save_mock:
         result = _coerce_flow_return_for_zenml((handle, 1))
 
-    assert result == (handle, saved_plain)
-    save_mock.assert_called_once()
-    assert save_mock.call_args.kwargs == {
+    assert result == (handle, saved_plain, tuple_metadata)
+    assert save_mock.call_count == 2
+    assert save_mock.call_args_list[0].kwargs == {
         "data": 1,
         "name": f"{_FLOW_RESULT_ARTIFACT_NAME}_1",
         "artifact_type": ArtifactType.DATA,
         "user_metadata": {"kitaru_artifact_type": "output"},
     }
+    assert save_mock.call_args_list[1].kwargs["data"] == {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 2,
+    }
+
+
+def test_flow_result_extraction_restores_singleton_tuple_outputs() -> None:
+    """Hidden tuple metadata keeps one-item artifact tuples tuple-shaped."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("step", "output_0", "value"),
+            (
+                "step",
+                "output_1",
+                {
+                    "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+                    "version": 1,
+                    "length": 1,
+                },
+            ),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == ("value",)
+
+
+def test_flow_result_extraction_preserves_marker_shaped_single_output() -> None:
+    """A user value shaped like tuple metadata should still round-trip as data."""
+    value = {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 0,
+    }
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("step", "output", value)],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == value
+
+
+def test_flow_return_coercion_rejects_mixed_tuple_subclasses() -> None:
+    """Tuple subclasses with handles would otherwise lose their field semantics."""
+    Pair = namedtuple("Pair", ["left", "right"])
+    handle = OutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="produce_value",
+        output_name="output",
+    )
+
+    with pytest.raises(KitaruUsageError, match="tuple subclass"):
+        _coerce_flow_return_for_zenml(Pair(handle, 1))
 
 
 def test_checkpoint_cache_survives_pipeline_with_options_when_execution_unset() -> None:
@@ -1950,6 +2081,32 @@ def test_flow_handle_get_raises_with_failure_context() -> None:
     assert exc_info.value.status == KitaruExecutionStatus.FAILED
     assert isinstance(exc_info.value.status, KitaruExecutionStatus)
     assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
+
+
+def test_flow_handle_get_classifies_result_save_failure_as_runtime() -> None:
+    """Kitaru's internal result save failures should not blame user code."""
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        status_reason="Kitaru could not persist the flow return value",
+        traceback=(
+            "Traceback\n"
+            "kitaru.errors.KitaruRuntimeError: Kitaru could not persist "
+            "the flow return value as a ZenML artifact. The user flow returned "
+            "successfully, but the backend artifact save failed: store down"
+        ),
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        pytest.raises(KitaruExecutionError, match="could not persist") as exc_info,
+    ):
+        handle.get()
+
+    assert not isinstance(exc_info.value, KitaruUserCodeError)
+    assert exc_info.value.failure_origin == FailureOrigin.RUNTIME
 
 
 def test_flow_handle_get_returns_tuple_for_multiple_outputs() -> None:
