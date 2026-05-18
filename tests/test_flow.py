@@ -5,8 +5,9 @@ from __future__ import annotations
 import sys
 import threading
 from collections import namedtuple
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -47,7 +48,10 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     _FLOW_RESULT_ARTIFACT_NAME,
+    _FLOW_RESULT_ROLE_METADATA_KEY,
+    _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
     _FLOW_RESULT_TUPLE_METADATA_MARKER,
+    _FLOW_RESULT_TUPLE_METADATA_ROLE,
     FlowHandle,
     _build_kitaru_execution_url,
     _build_pipeline_options,
@@ -59,6 +63,7 @@ from kitaru.flow import (
     _guard_implicit_active_stack_fallback,
     _inject_model_registry_env,
     _is_multiple_terminal_steps_output_error,
+    _suspend_flow_return_coercion,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
@@ -122,9 +127,26 @@ class _ClientWithMissingStackDependency:
         )
 
 
+@dataclass(frozen=True)
+class _DummyOutput:
+    step_name: str
+    output_name: str
+    value: object
+    artifact_name: str | None = None
+    run_metadata: Mapping[str, object] | None = None
+
+
 class _DummyArtifact:
-    def __init__(self, value: object) -> None:
+    def __init__(
+        self,
+        value: object,
+        *,
+        name: str = "output",
+        run_metadata: dict[str, object] | None = None,
+    ) -> None:
         self._value = value
+        self.name = name
+        self.run_metadata = run_metadata or {}
 
     def load(self) -> object:
         return self._value
@@ -135,7 +157,7 @@ class _DummyRun:
         self,
         *,
         status: ExecutionStatus,
-        outputs: list[tuple[str, str, object]] | None = None,
+        outputs: list[tuple[str, str, object] | _DummyOutput] | None = None,
         run_id: object | None = None,
         pipeline_id: object | None = None,
         pipeline: object | None = None,
@@ -161,11 +183,26 @@ class _DummyRun:
         outputs = outputs or []
         output_specs: list[SimpleNamespace] = []
         step_outputs: dict[str, dict[str, _DummyArtifact]] = {}
-        for step_name, output_name, value in outputs:
+        for output in outputs:
+            if isinstance(output, _DummyOutput):
+                step_name = output.step_name
+                output_name = output.output_name
+                value = output.value
+                artifact_name = output.artifact_name or output_name
+                run_metadata = dict(output.run_metadata or {})
+            else:
+                step_name, output_name, value = output
+                artifact_name = output_name
+                run_metadata = None
+
             output_specs.append(
                 SimpleNamespace(step_name=step_name, output_name=output_name)
             )
-            step_outputs.setdefault(step_name, {})[output_name] = _DummyArtifact(value)
+            step_outputs.setdefault(step_name, {})[output_name] = _DummyArtifact(
+                value,
+                name=artifact_name,
+                run_metadata=run_metadata,
+            )
 
         self.snapshot = SimpleNamespace(
             pipeline_spec=SimpleNamespace(outputs=output_specs),
@@ -599,6 +636,34 @@ def test_flow_deploy_prepare_does_not_persist_flow_result_artifacts() -> None:
     save_mock.assert_not_called()
     configured_pipeline._create_snapshot.assert_called_once()
     deployments_api.create.assert_called_once()
+
+
+def test_real_zenml_prepare_does_not_persist_flow_result_artifacts() -> None:
+    """Real ZenML prepare must stay a dry run for Kitaru result artifacts."""
+    calls: list[int] = []
+
+    @flow
+    def prepare_regression_flow(x):
+        calls.append(x)
+        return {"answer": x}
+
+    coerce_mock = MagicMock(side_effect=AssertionError("coercion called"))
+    save_mock = MagicMock(side_effect=AssertionError("save_artifact called"))
+
+    with (
+        patch("kitaru.flow._coerce_flow_return_for_zenml", coerce_mock),
+        patch("kitaru.flow.save_artifact", save_mock),
+        _suspend_flow_return_coercion(),
+    ):
+        prepare_regression_flow._pipeline.prepare(1)
+
+    # Real ZenML prepare currently compiles the dynamic pipeline without
+    # executing the user body. The deploy-level mock test above covers the
+    # defensive Kitaru suspension path if an entrypoint is invoked during
+    # preparation.
+    assert calls == []
+    coerce_mock.assert_not_called()
+    save_mock.assert_not_called()
 
 
 def test_flow_deploy_resolves_invocation_image_and_threads_it_to_with_options() -> None:
@@ -1047,6 +1112,10 @@ def test_flow_return_coercion_preserves_zenml_output_handles() -> None:
         "version": 1,
         "length": 1,
     }
+    assert save_mock.call_args.kwargs["user_metadata"] == {
+        "kitaru_artifact_type": "output",
+        _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE,
+    }
 
 
 def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None:
@@ -1074,7 +1143,37 @@ def test_flow_return_coercion_wraps_artifact_save_failures() -> None:
     ):
         _coerce_flow_return_for_zenml({"answer": 42})
 
+    message = str(exc_info.value)
+    assert "returned successfully" in message
+    assert "after user code returned" in message
+    assert "retries" in message
+    assert "side effects" in message
     assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+def test_post_return_artifact_save_failure_does_not_retry_inside_wrapper() -> None:
+    """Kitaru reports the retry risk but does not add its own inner retry."""
+    side_effects = {"count": 0}
+
+    def user_flow() -> dict[str, int]:
+        side_effects["count"] += 1
+        return {"answer": 42}
+
+    wrapped = _wrap_flow_entrypoint(user_flow)
+
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=None),
+        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
+        patch("kitaru.flow.save_artifact", side_effect=RuntimeError("store down")),
+        pytest.raises(KitaruRuntimeError) as exc_info,
+    ):
+        wrapped()
+
+    message = str(exc_info.value)
+    assert "after user code returned" in message
+    assert "retries" in message
+    assert "side effects" in message
+    assert side_effects["count"] == 1
 
 
 def test_flow_return_coercion_preserves_plain_tuple_as_one_artifact() -> None:
@@ -1138,6 +1237,10 @@ def test_flow_return_coercion_preserves_mixed_tuple_outputs() -> None:
         "version": 1,
         "length": 2,
     }
+    assert save_mock.call_args_list[1].kwargs["user_metadata"] == {
+        "kitaru_artifact_type": "output",
+        _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE,
+    }
 
 
 def test_flow_result_extraction_restores_singleton_tuple_outputs() -> None:
@@ -1146,13 +1249,17 @@ def test_flow_result_extraction_restores_singleton_tuple_outputs() -> None:
         status=ExecutionStatus.COMPLETED,
         outputs=[
             ("step", "output_0", "value"),
-            (
-                "step",
-                "output_1",
-                {
+            _DummyOutput(
+                step_name="step",
+                output_name="output_1",
+                value={
                     "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
                     "version": 1,
                     "length": 1,
+                },
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={
+                    _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
                 },
             ),
         ],
@@ -1174,6 +1281,108 @@ def test_flow_result_extraction_preserves_marker_shaped_single_output() -> None:
     )
 
     assert _extract_flow_result(_as_pipeline_run(run)) == value
+
+
+def test_flow_result_extraction_preserves_marker_shaped_last_output() -> None:
+    """Tuple metadata detection must not rely on loaded dict shape alone."""
+    marker_shaped_user_value = {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 1,
+    }
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("step", "output_0", "value"),
+            ("step", "output_1", marker_shaped_user_value),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == (
+        "value",
+        marker_shaped_user_value,
+    )
+
+
+def test_flow_result_extraction_rejects_unexpected_tuple_metadata_role() -> None:
+    """Reserved tuple metadata artifacts must not carry another Kitaru role."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("step", "output_0", "value"),
+            _DummyOutput(
+                step_name="step",
+                output_name="output_1",
+                value={
+                    "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+                    "version": 1,
+                    "length": 1,
+                },
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={_FLOW_RESULT_ROLE_METADATA_KEY: "not_tuple_metadata"},
+            ),
+        ],
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="unexpected role"):
+        _extract_flow_result(_as_pipeline_run(run))
+
+
+def test_flow_result_extraction_rejects_malformed_tuple_metadata() -> None:
+    """Reserved tuple metadata artifacts must contain valid marker payloads."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("step", "output_0", "value"),
+            _DummyOutput(
+                step_name="step",
+                output_name="output_1",
+                value={"kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER},
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={
+                    _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
+                },
+            ),
+        ],
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="valid Kitaru tuple metadata"):
+        _extract_flow_result(_as_pipeline_run(run))
+
+
+def test_flow_result_extraction_rejects_multiple_tuple_metadata_artifacts() -> None:
+    """Only one hidden tuple metadata artifact may describe a flow result."""
+    metadata_value = {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 1,
+    }
+    metadata_output = _DummyOutput(
+        step_name="step",
+        output_name="output_1",
+        value=metadata_value,
+        artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+        run_metadata={_FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE},
+    )
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("step", "output_0", "value"),
+            metadata_output,
+            _DummyOutput(
+                step_name="step",
+                output_name="output_2",
+                value=metadata_value,
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={
+                    _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
+                },
+            ),
+        ],
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="multiple Kitaru tuple metadata"):
+        _extract_flow_result(_as_pipeline_run(run))
 
 
 def test_flow_return_coercion_rejects_mixed_tuple_subclasses() -> None:
@@ -2092,7 +2301,9 @@ def test_flow_handle_get_classifies_result_save_failure_as_runtime() -> None:
             "Traceback\n"
             "kitaru.errors.KitaruRuntimeError: Kitaru could not persist "
             "the flow return value as a ZenML artifact. The user flow returned "
-            "successfully, but the backend artifact save failed: store down"
+            "successfully, but the backend artifact save failed after user "
+            "code returned. If ZenML retries this flow body, non-idempotent "
+            "side effects in the flow may run again: store down"
         ),
     )
     client_mock = MagicMock()

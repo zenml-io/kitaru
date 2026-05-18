@@ -1,7 +1,6 @@
 # Pinned ZenML server image version — bump here when upgrading.
-# Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
-# docker/Dockerfile.server-dev (those two are enforced by contract tests;
-# this Justfile value and the CI/release workflow values are not).
+# Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
+# workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
 ZENML_SERVER_TAG := "0.94.4"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
