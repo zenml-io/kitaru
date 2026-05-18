@@ -1,5 +1,6 @@
 """Focused tests for OpenAI runner-call checkpointing and RunState bridging."""
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -8,13 +9,14 @@ import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, function_tool
+from agents import Agent, RunConfig, Runner, function_tool
 from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 from zenml.client import Client
 
+import kitaru.adapters.openai_agents._runner as openai_runner
 from kitaru import flow
 from kitaru.adapters.openai_agents import (
     KitaruRunner,
@@ -69,6 +71,275 @@ def _wait_for_hydrated_run(exec_id: str) -> Any:
 
 def _step_names(hydrated_run: Any) -> set[str]:
     return set(hydrated_run.steps)
+
+
+@dataclass(frozen=True)
+class WorkerContext:
+    team_id: str
+    user_id: str
+    thread_id: str
+    worker_name: str = "support-worker"
+    is_background: bool = False
+    group_chat: bool = False
+    chat_mode: str | None = None
+    scope_user_id: str | None = None
+    scope_group_id: str | None = None
+    plugin: str | None = None
+    project_id: str | None = None
+    tool_settings: dict[str, Any] | None = None
+    message_id: str | None = None
+    doc_id: str | None = None
+
+
+@pytest.mark.anyio
+async def test_async_bridge_forwards_exact_context_to_sdk_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+    seen_contexts: list[object] = []
+
+    async def fake_run(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+        seen_contexts.append(kwargs["context"])
+        return SimpleNamespace(final_output="ok")
+
+    monkeypatch.setattr(Runner, "run", fake_run)
+
+    result = await openai_runner.run_openai_agent(
+        agent=SimpleNamespace(name="agent"),
+        input="hello",
+        max_turns=3,
+        run_config=RunConfig(tracing_disabled=True),
+        context=ctx,
+    )
+
+    assert result.final_output == "ok"
+    assert seen_contexts == [ctx]
+
+
+def test_sync_bridge_forwards_exact_context_to_sdk_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+    seen_contexts: list[object] = []
+
+    def fake_run_sync(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+        seen_contexts.append(kwargs["context"])
+        return SimpleNamespace(final_output="ok")
+
+    monkeypatch.setattr(Runner, "run_sync", fake_run_sync)
+
+    result = openai_runner.run_openai_agent_sync(
+        agent=SimpleNamespace(name="agent"),
+        input="hello",
+        max_turns=3,
+        run_config=RunConfig(tracing_disabled=True),
+        context=ctx,
+    )
+
+    assert result.final_output == "ok"
+    assert seen_contexts == [ctx]
+
+
+def test_runner_call_run_sync_forwards_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+    seen_contexts: list[object] = []
+
+    def fake_run_openai_agent_sync(**kwargs: Any) -> SimpleNamespace:
+        seen_contexts.append(kwargs["context"])
+        return SimpleNamespace(final_output="ok")
+
+    runner = KitaruRunner(
+        SimpleNamespace(name="context-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_sync.__globals__,
+        "run_openai_agent_sync",
+        fake_run_openai_agent_sync,
+    )
+
+    result = runner.run_sync(OpenAIRunRequest.start("hello"), context=ctx)
+
+    assert result.final_output == "ok"
+    assert seen_contexts == [ctx]
+
+
+def test_runner_call_cache_key_omits_context_when_context_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._agent as openai_agent_module
+
+    seen_payloads: list[dict[str, Any]] = []
+
+    def fake_checkpoint_cache_key(payload: dict[str, Any]) -> str:
+        seen_payloads.append(payload)
+        return "cache-key"
+
+    monkeypatch.setattr(
+        openai_agent_module,
+        "checkpoint_cache_key",
+        fake_checkpoint_cache_key,
+    )
+    runner = KitaruRunner(
+        SimpleNamespace(name="no-context-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    cache_key = runner._runner_call_cache_key(
+        OpenAIRunRequest.start("hello"),
+        agent=runner.agent,
+        run_config=RunConfig(tracing_disabled=True),
+        context_cache_identity=None,
+    )
+
+    assert cache_key == "cache-key"
+    assert "context" not in seen_payloads[0]
+
+
+def test_runner_call_cache_identity_varies_by_structural_context() -> None:
+    runner = KitaruRunner(
+        SimpleNamespace(name="cache-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    team_a_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=runner._context_cache_identity(
+            WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+        ),
+    )
+    team_b_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=runner._context_cache_identity(
+            WorkerContext(team_id="team-b", user_id="user-1", thread_id="thread-1")
+        ),
+    )
+
+    assert team_a_key != team_b_key
+
+
+def test_custom_context_cache_identity_can_ignore_per_run_fields() -> None:
+    runner = KitaruRunner(
+        SimpleNamespace(name="projected-agent"),
+        checkpoint_strategy="runner_call",
+        context_cache_identity=lambda ctx: {
+            "team_id": ctx.team_id,
+            "user_id": ctx.user_id,
+            "thread_id": ctx.thread_id,
+            "worker_name": ctx.worker_name,
+            "is_background": ctx.is_background,
+            "group_chat": ctx.group_chat,
+            "chat_mode": ctx.chat_mode,
+            "scope_user_id": ctx.scope_user_id,
+            "scope_group_id": ctx.scope_group_id,
+            "plugin": ctx.plugin,
+            "project_id": ctx.project_id,
+            "tool_settings": ctx.tool_settings,
+        },
+    )
+
+    first = runner._context_cache_identity(
+        WorkerContext(
+            team_id="team-a",
+            user_id="user-1",
+            thread_id="thread-1",
+            tool_settings={"enabled": True, "limit": 3},
+            message_id="msg-1",
+            doc_id="doc-1",
+        )
+    )
+    second = runner._context_cache_identity(
+        WorkerContext(
+            team_id="team-a",
+            user_id="user-1",
+            thread_id="thread-1",
+            tool_settings={"enabled": True, "limit": 3},
+            message_id="msg-2",
+            doc_id="doc-2",
+        )
+    )
+
+    assert first == second
+    assert "message_id" not in first
+    assert "doc_id" not in first
+    assert first["tool_settings"] == {"enabled": True, "limit": 3}
+
+
+def test_default_context_cache_identity_uses_pure_data_structure() -> None:
+    runner = KitaruRunner(SimpleNamespace(name="data-agent"))
+
+    first = runner._context_cache_identity(
+        WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+    )
+    second = runner._context_cache_identity(
+        WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
+    )
+
+    assert first == second
+    assert first["fields"]["team_id"] == "team-a"
+
+
+def test_context_cache_identity_sorts_sets_deterministically() -> None:
+    runner = KitaruRunner(SimpleNamespace(name="set-agent"))
+
+    first = runner._context_cache_identity({"enabled_tools": {"search", "crm"}})
+    second = runner._context_cache_identity({"enabled_tools": {"crm", "search"}})
+
+    assert first == second
+    assert first["enabled_tools"] == {
+        "collection_type": "set",
+        "items": ["crm", "search"],
+    }
+
+
+def test_context_cache_identity_is_cycle_safe() -> None:
+    runner = KitaruRunner(SimpleNamespace(name="cycle-agent"))
+    cycle: list[Any] = []
+    cycle.append(cycle)
+
+    identity = runner._context_cache_identity({"cycle": cycle})
+
+    cycle_item = identity["cycle"]["items"][0]
+    assert cycle_item["serialization_error"] == "cycle_detected"
+    assert "opaque_cache_token" in cycle_item
+
+
+def test_context_cache_identity_stops_before_oversized_collections() -> None:
+    from kitaru.adapters.openai_agents._serialization import stable_cache_identity
+
+    identity = stable_cache_identity(
+        ["first", "second", "third"],
+        opaque_objects_unique=True,
+        max_items=2,
+    )
+
+    assert identity["serialization_error"] == "max_items_exceeded"
+    assert "items" not in identity
+    assert "first" not in repr(identity)
+
+
+def test_opaque_context_cache_identity_is_distinct_per_object() -> None:
+    class OpaqueContext:
+        pass
+
+    runner = KitaruRunner(SimpleNamespace(name="opaque-agent"))
+
+    first = runner._context_cache_identity(OpaqueContext())
+    second = runner._context_cache_identity(OpaqueContext())
+
+    assert first["python_type"] == second["python_type"]
+    assert first != second
 
 
 def test_runner_call_strategy_checkpoints_outer_runner_and_caches(

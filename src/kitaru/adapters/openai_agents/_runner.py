@@ -31,6 +31,7 @@ async def run_openai_agent(
     input: Any,
     max_turns: int,
     run_config: Any,
+    context: Any | None = None,
 ) -> Any:
     from agents import Runner
 
@@ -39,6 +40,7 @@ async def run_openai_agent(
         input,
         max_turns=max_turns,
         run_config=run_config,
+        context=context,
     )
 
 
@@ -48,6 +50,7 @@ def run_openai_agent_sync(
     input: Any,
     max_turns: int,
     run_config: Any,
+    context: Any | None = None,
 ) -> Any:
     from agents import Runner
 
@@ -56,6 +59,7 @@ def run_openai_agent_sync(
         input,
         max_turns=max_turns,
         run_config=run_config,
+        context=context,
     )
 
 

@@ -34,9 +34,14 @@ def kitaruify_openai_tool(
     agent_name: str,
     tool_checkpoint_config: CheckpointConfig | None = None,
     tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
+    context_cache_identity: Any = None,
+    context_cache_key: str | None = None,
 ) -> Any:
     """Return a checkpoint-aware copy of supported OpenAI SDK tools."""
-    if getattr(tool, "_kitaru_wrapped", False):
+    original_tool = getattr(tool, "_kitaru_original_tool", None)
+    if isinstance(original_tool, FunctionTool):
+        tool = original_tool
+    elif getattr(tool, "_kitaru_wrapped", False):
         return tool
     if isinstance(tool, FunctionTool):
         return _wrap_function_tool(
@@ -45,6 +50,8 @@ def kitaruify_openai_tool(
             agent_name=agent_name,
             tool_checkpoint_config=tool_checkpoint_config,
             tool_checkpoint_config_by_name=tool_checkpoint_config_by_name,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
         )
     return tool
 
@@ -56,6 +63,8 @@ def kitaruify_openai_tools(
     agent_name: str,
     tool_checkpoint_config: CheckpointConfig | None = None,
     tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
+    context_cache_identity: Any = None,
+    context_cache_key: str | None = None,
 ) -> list[Any]:
     return [
         kitaruify_openai_tool(
@@ -64,6 +73,8 @@ def kitaruify_openai_tools(
             agent_name=agent_name,
             tool_checkpoint_config=tool_checkpoint_config,
             tool_checkpoint_config_by_name=tool_checkpoint_config_by_name,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
         )
         for tool in tools
     ]
@@ -76,9 +87,16 @@ def _wrap_function_tool(
     agent_name: str,
     tool_checkpoint_config: CheckpointConfig | None,
     tool_checkpoint_config_by_name: ToolCheckpointOverrides | None,
+    context_cache_identity: Any = None,
+    context_cache_key: str | None = None,
 ) -> FunctionTool:
     original_callback = tool.on_invoke_tool
     tool_name = tool.name
+    resolved_context_cache_key = context_cache_key
+    if resolved_context_cache_key is None and context_cache_identity is not None:
+        resolved_context_cache_key = checkpoint_cache_key(
+            {"context": context_cache_identity}
+        )
 
     async def _wrapped_callback(context: Any, input_json: str) -> Any:
         checkpoint_config = resolve_tool_checkpoint_config(
@@ -125,19 +143,21 @@ def _wrap_function_tool(
                         input_envelope=input_envelope,
                     )
 
+            cache_payload = {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "fallback_sequence": fallback_sequence,
+                "tool_namespace": getattr(tool, "_tool_namespace", None),
+                "input_json": input_json,
+            }
+            if resolved_context_cache_key is not None:
+                cache_payload["context_cache_key"] = resolved_context_cache_key
+
             return await run_async_in_checkpoint(
                 config=with_default_type(checkpoint_config, "tool_call"),
                 step_name=safe_step_name(f"{agent_name}_{tool_name}_tool_call"),
                 body=_in_checkpoint,
-                cache_key=checkpoint_cache_key(
-                    {
-                        "tool_name": tool_name,
-                        "tool_call_id": tool_call_id,
-                        "fallback_sequence": fallback_sequence,
-                        "tool_namespace": getattr(tool, "_tool_namespace", None),
-                        "input_json": input_json,
-                    }
-                ),
+                cache_key=checkpoint_cache_key(cache_payload),
                 checkpoint_inputs=checkpoint_inputs,
             )
         return await _tracked_tool_call(
@@ -151,6 +171,7 @@ def _wrap_function_tool(
 
     wrapped = replace(tool, on_invoke_tool=_wrapped_callback)
     object.__setattr__(wrapped, "_kitaru_wrapped", True)
+    object.__setattr__(wrapped, "_kitaru_original_tool", tool)
     return wrapped
 
 

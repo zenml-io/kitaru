@@ -1,6 +1,7 @@
 """Focused tests for OpenAI Agents SDK call-level checkpointing."""
 
 import re
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -9,7 +10,7 @@ import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, function_tool
+from agents import Agent, RunConfig, RunContextWrapper, function_tool
 from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
@@ -67,6 +68,16 @@ class RepeatedToolCallingModel(Model):
         raise NotImplementedError
 
 
+@dataclass(frozen=True)
+class WorkerContext:
+    team_id: str
+    user_id: str
+    thread_id: str
+    worker_name: str = "support-worker"
+    message_id: str | None = None
+    doc_id: str | None = None
+
+
 class ToolCallingModel(Model):
     def __init__(self) -> None:
         self.call_count = 0
@@ -94,6 +105,47 @@ class ToolCallingModel(Model):
 
     def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
         raise NotImplementedError
+
+
+class ContextToolCallingModel(Model):
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        sdk_input = _args[1] if len(_args) > 1 else None
+        if _contains_function_call_output(sdk_input):
+            return _text_response(
+                "context tool complete", response_id="resp_context_final"
+            )
+        return ModelResponse(
+            output=[
+                ResponseFunctionToolCall(
+                    arguments="{}",
+                    call_id="call_context_tool",
+                    id="fc_context",
+                    name="team_label",
+                    status="completed",
+                    type="function_call",
+                )
+            ],
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_context_tool_call",
+        )
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
+def _contains_function_call_output(value: Any) -> bool:
+    if isinstance(value, list | tuple):
+        return any(_contains_function_call_output(item) for item in value)
+    if isinstance(value, dict):
+        if value.get("type") == "function_call_output":
+            return True
+        return any(_contains_function_call_output(item) for item in value.values())
+    item_type = getattr(value, "type", None)
+    return item_type == "function_call_output"
 
 
 def _text_response(text: str, *, response_id: str) -> ModelResponse:
@@ -598,6 +650,7 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
 
     inside_checkpoint = False
     seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+    seen_cache_payloads: list[Any] = []
     recorded_artifacts: list[dict[str, str]] = []
     saved: list[tuple[str, str]] = []
 
@@ -640,6 +693,13 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
         finally:
             inside_checkpoint = False
 
+    original_checkpoint_cache_key = openai_tools.checkpoint_cache_key
+
+    def fake_checkpoint_cache_key(payload: Any) -> str:
+        seen_cache_payloads.append(payload)
+        return original_checkpoint_cache_key(payload)
+
+    monkeypatch.setattr(openai_tools, "checkpoint_cache_key", fake_checkpoint_cache_key)
     monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
     monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
     monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: FakeTracker())
@@ -677,7 +737,74 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
         }
     ]
     assert recorded_artifacts == [{"input": "tool_args", "result": "output"}]
+    assert "context_cache_key" not in seen_cache_payloads[0]
     assert saved == []
+
+
+@pytest.mark.anyio
+async def test_openai_tool_checkpoint_keeps_context_key_out_of_visible_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+
+    from agents.tool import FunctionTool
+
+    async def invoke_tool(_context: Any, _input_json: str) -> str:
+        return "ok"
+
+    tool = FunctionTool(
+        name="lookup_customer",
+        description="Look up a customer.",
+        params_json_schema={
+            "type": "object",
+            "properties": {"customer_id": {"type": "string"}},
+            "required": ["customer_id"],
+            "additionalProperties": False,
+        },
+        on_invoke_tool=invoke_tool,
+    )
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(
+        openai_tools, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+
+    wrapped = openai_tools._wrap_function_tool(
+        tool,
+        capture=OpenAICapturePolicy(save_final_output=False),
+        agent_name="context_agent",
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name=None,
+        context_cache_identity={"team_id": "team-a", "user_id": "user-1"},
+    )
+
+    result = await wrapped.on_invoke_tool(
+        cast(Any, SimpleNamespace(tool_call_id="call_lookup")),
+        '{"customer_id": "123"}',
+    )
+
+    assert result == "ok"
+    checkpoint_inputs = seen_checkpoint_inputs[0]
+    assert checkpoint_inputs is not None
+    tool_args = checkpoint_inputs["tool_args"]
+    assert "context_cache_key" not in tool_args
+    assert "context_cache_identity" not in tool_args
+    assert "team-a" not in repr(tool_args)
+    assert "user-1" not in repr(tool_args)
 
 
 @pytest.mark.anyio
@@ -910,6 +1037,139 @@ def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
     _wait_for_hydrated_run(second.exec_id)
     assert side_effects == [4]
     assert model.call_count == 2
+
+
+def test_calls_strategy_function_tool_receives_fresh_context(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_tool_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def context_tool_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id="team-a",
+                user_id="user-1",
+                thread_id="thread-1",
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = context_tool_flow.run("please use the context tool", "first")
+    _wait_for_hydrated_run(first.exec_id)
+
+    assert seen_team_ids == ["team-a"]
+
+
+def test_calls_strategy_tool_cache_varies_by_context_identity(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_cache_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def context_cache_flow(prompt: str, team_id: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id=team_id,
+                user_id="user-1",
+                thread_id="thread-1",
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = context_cache_flow.run("please use the context tool", "team-a", "first")
+    _wait_for_hydrated_run(first.exec_id)
+    second = context_cache_flow.run("please use the context tool", "team-b", "second")
+    _wait_for_hydrated_run(second.exec_id)
+
+    assert seen_team_ids == ["team-a", "team-b"]
+
+
+def test_calls_strategy_context_projection_can_reuse_tool_cache(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_projection_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+        context_cache_identity=lambda ctx: {
+            "team_id": ctx.team_id,
+            "user_id": ctx.user_id,
+            "thread_id": ctx.thread_id,
+            "worker_name": ctx.worker_name,
+        },
+    )
+
+    @flow
+    def projected_context_flow(prompt: str, message_id: str, doc_id: str) -> str:
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id="team-a",
+                user_id="user-1",
+                thread_id="thread-1",
+                message_id=message_id,
+                doc_id=doc_id,
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = projected_context_flow.run(
+        "please use the context tool",
+        "msg-1",
+        "doc-1",
+    )
+    _wait_for_hydrated_run(first.exec_id)
+    second = projected_context_flow.run(
+        "please use the context tool",
+        "msg-2",
+        "doc-2",
+    )
+    _wait_for_hydrated_run(second.exec_id)
+
+    assert seen_team_ids == ["team-a"]
 
 
 def test_same_args_tool_calls_without_visible_call_id_do_not_collide(

@@ -49,6 +49,90 @@ def research(prompt: str) -> str:
     return str(result.final_output)
 ```
 
+## Fresh-run context
+
+OpenAI Agents SDK tools and guardrails often use a local application context:
+for example, "which team is this user in?", "which thread is this request part
+of?", or "which plugin settings are active?" Pass that object to Kitaru the same
+way you pass it to the OpenAI SDK: as a runner-call argument, not as part of the
+serializable `OpenAIRunRequest`.
+
+```python
+from dataclasses import dataclass
+from typing import Any
+
+from agents import RunContextWrapper, function_tool
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+
+@dataclass(frozen=True)
+class WorkerContext:
+    team_id: str
+    user_id: str
+    thread_id: str
+    message_id: str
+    tool_settings: dict[str, Any]
+
+@function_tool
+def lookup_customer(ctx: RunContextWrapper[WorkerContext], customer_id: str) -> str:
+    # The context stays local to your Python process. The model only sees what
+    # your tool chooses to return.
+    return f"team={ctx.context.team_id}, customer={customer_id}"
+
+runner = KitaruRunner(
+    agent,
+    context_cache_identity=lambda ctx: {
+        "team_id": ctx.team_id,
+        "user_id": ctx.user_id,
+        "thread_id": ctx.thread_id,
+        "tool_settings": ctx.tool_settings,
+    },
+)
+
+result = runner.run_sync(
+    OpenAIRunRequest.start("Look up customer 123"),
+    context=WorkerContext(
+        team_id="team_abc",
+        user_id="user_123",
+        thread_id="thread_456",
+        message_id="msg_this_run_only",
+        tool_settings={"include_private_notes": False},
+    ),
+)
+```
+
+A concrete way to think about this: the `OpenAIRunRequest` is the written travel
+plan Kitaru can save and replay. `context=` is the live badge the worker carries
+while doing the trip. Tools and guardrails can inspect the badge through
+`RunContextWrapper.context`, but Kitaru does not save that badge as a visible
+artifact or send it to the model automatically. Kitaru still uses the context
+identity internally for safe replay, without adding your raw context or projection
+to visible tool input artifacts.
+
+Context does matter for safe replay. Imagine two teams both call
+`lookup_customer(customer_id="123")`. The visible tool arguments are identical,
+but team A and team B may be allowed to see different customer records. Kitaru
+therefore includes a context identity in adapter cache keys. If your context is
+plain data, Kitaru can derive a structural identity. For production contexts,
+prefer `context_cache_identity=` so you can include stable fields such as team,
+user, thread, project, plugin, and JSON-primitive `tool_settings`, while
+excluding per-run fields such as `message_id`, `trace_id`, or a changing
+document cursor. That keeps replay safe without making every new message miss
+the cache unnecessarily.
+
+`context=` is different from `metadata=` on `OpenAIRunRequest.start(...)`:
+metadata is Kitaru run/checkpoint metadata; context is local OpenAI Agents SDK
+runtime state for your tools, guardrails, handoffs, and hooks.
+
+Fresh context is only for new `kind="start"` requests. Interrupted/resumed runs
+use the saved OpenAI `RunState`; `context_serializer=` and
+`context_deserializer=` on `KitaruRunner` remain the way to serialize and rebuild
+context that is already inside an interrupted SDK state.
+
+One more boundary to remember: if your guardrail manually calls raw
+`agents.Runner.run(...)` for a nested evaluator, that nested call is not managed
+by Kitaru automatically. Wrap the nested evaluator with its own `KitaruRunner` if
+you need Kitaru checkpoints there too.
+
 ## Checkpoint strategy choices
 
 You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
@@ -153,7 +237,7 @@ runner = KitaruRunner(
 
 Checkpoint config accepts `retries`, `type`, and `runtime`. `runtime="isolated"` is rejected for adapter-managed checkpoints today because those synthetic checkpoint closures capture live OpenAI SDK objects; use inline runtime or omit `runtime`.
 
-If your agent context contains objects that are not JSON-serializable, pass `context_serializer=` and `context_deserializer=` to `KitaruRunner`. By default `strict_context=True`, so Kitaru fails loudly instead of saving a resume state that cannot be reconstructed later.
+For interrupted OpenAI runs, the SDK stores its own `RunState` so the run can resume later. If that saved `RunState` contains context objects that are not JSON-serializable, pass `context_serializer=` and `context_deserializer=` to `KitaruRunner`. These hooks are for serializing resume state after an interruption; they do not control the fresh-run `context=` object you pass when starting a new run. By default `strict_context=True`, so Kitaru fails loudly instead of saving a resume state that cannot be reconstructed later.
 
 ## Runnable example
 
