@@ -2,7 +2,7 @@
 # Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
 # docker/Dockerfile.server-dev (those two are enforced by contract tests;
 # this Justfile value and the CI/release workflow values are not).
-ZENML_SERVER_TAG := "0.94.3"
+ZENML_SERVER_TAG := "0.94.4"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
