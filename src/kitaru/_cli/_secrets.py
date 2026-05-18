@@ -32,6 +32,8 @@ from ._helpers import (
     _validate_pagination,
 )
 
+_SECRETS_BACKEND_SCAN_SIZE = 50
+
 
 def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
     """Parse `--KEY=value` style assignment tokens into a dictionary."""
@@ -100,12 +102,15 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
 
 
 def _list_accessible_secrets(client: Any) -> list[SecretResponse]:
-    """List all accessible secrets across all pages."""
-    first_page = client.list_secrets(page=1)
+    """List all accessible secrets across all backend pages."""
+    first_page = client.list_secrets(page=1, size=_SECRETS_BACKEND_SCAN_SIZE)
     secrets = list(first_page.items)
 
     for page_number in range(2, first_page.total_pages + 1):
-        page = client.list_secrets(page=page_number, size=first_page.max_size)
+        page = client.list_secrets(
+            page=page_number,
+            size=_SECRETS_BACKEND_SCAN_SIZE,
+        )
         secrets.extend(page.items)
 
     return secrets

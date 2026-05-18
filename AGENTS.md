@@ -138,7 +138,13 @@ For pull requests, use a clear human-readable title and include:
 
 Link related issues (for example `Fixes #123`) when applicable.
 
-Never include a "[Codex] " prefix to PR titles. Also all PR descriptions should include a "Reviewer Notes" H2 or H3 section which explains what they should take care to check out during their reviews (i.e. code highlights) and ideally it also includes a code snippet they can run (you can assume they have both the ability to run flows locally as well as against a Kubernetes remote stack) to reproduce either the fix or the error etc.
+Never include a "[Codex] " prefix to PR titles.
+
+Every PR description should include a "Reviewer Notes" H2 or H3 section. Treat that section as a narrative guide for a human reviewer, not a file-by-file checklist:
+- Start with the story of the change: where the important behavior now happens, what used to go wrong, and what would break if the implementation is wrong.
+- Point reviewers toward the genuinely tricky or high-risk areas. Mention files only when the file name helps the story, and explain what to inspect there.
+- Include a concrete "Reproduction" subsection either inside Reviewer Notes or immediately after it. Prefer an example, CLI flow, or UI path that proves the behavior end to end. For example: run a specific `examples/...` script, then open the UI or run `kitaru executions list` / `kitaru executions logs` and describe the exact thing the reviewer should see.
+- Do not use a standalone "Verification" section as a substitute for reproduction when it only says `just check`, `just test`, or `/simplify`. Those commands are useful local hygiene, but they do not tell the reviewer how to see the feature or bug fix. If they are worth mentioning, keep them as a short "Local checks run" note after the reproduction steps.
 
 ### Feature completion checklist
 
@@ -182,6 +188,8 @@ Runs on manual dispatch, push to `main` (production deploy), and PRs touching `s
 - **Only document shipped features.** No "Coming Soon" sections.
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
 - **Generated vs static docs:** generated CLI reference content, changelog output, and SDK reference pages come from generation scripts and should not be hand-edited. Static hand-written MDX pages under `docs/content/docs/` (for example `getting-started/*.mdx` or `cli/login.mdx`) are tracked and may be edited directly when the feature behavior changes. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
+- **Docs URL references:** inside `docs/content/docs/` and generated docs MDX, link to other docs pages using docs-app-root paths such as `/cli/executions/` or `/concepts/checkpoints/`, not `/docs/...`; Next's `basePath: '/docs'` adds the public prefix for HTML. From the Astro site or other public surfaces, link to docs with the full public `/docs/...` path. Public materialized Markdown is rewritten during export by `docs/scripts/materialize-markdown-pages.mjs`, and `just site-build` validates these URL shapes.
+- **Planning artifacts stay untracked:** do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. These are coordination scratchpads, not product docs.
 - **Secret docs accuracy:** only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, label it clearly as the current low-level pattern instead of implying there is already a dedicated Kitaru secret getter.
 - **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), never the generated `docs/content/docs/cli/*` output.
 - **Stack docs accuracy:** current shipped stack-create types on CLI/MCP are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` remains local-only, so docs should keep that distinction explicit.
@@ -193,3 +201,5 @@ Runs on manual dispatch, push to `main` (production deploy), and PRs touching `s
 ## Security & Configuration Notes
 
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.
+
+Do not commit RepoPrompt/orchestration scratch documents such as plans, reviews, handoffs, or prompt exports. In particular, do not add `docs/plans/*.md`, `docs/reviews/*.md`, `docs/investigations/*.md`, `prompt-exports/*.md`, or ad-hoc handoff Markdown files unless the user explicitly asks for that artifact to be part of the repository history.

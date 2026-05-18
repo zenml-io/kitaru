@@ -10,7 +10,7 @@ const {
   headline,
   eyebrow = 'The lifecycle layer underneath',
   primaryCtaText = 'Book a demo',
-  primaryCtaHref = '/book-a-demo',
+  primaryCtaHref = '/book-a-demo/',
 } = Astro.props;
 ---
 
@@ -56,7 +56,7 @@ const {
     </div>
 
     <div class="ccta-footer">
-      <a href="/docs" class="ccta-link">
+      <a href="/docs/" class="ccta-link">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -64,7 +64,7 @@ const {
         <span>Read the docs</span>
       </a>
       <span class="ccta-dot" aria-hidden="true"></span>
-      <a href="/book-a-demo" class="ccta-link">
+      <a href="/book-a-demo/" class="ccta-link">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>

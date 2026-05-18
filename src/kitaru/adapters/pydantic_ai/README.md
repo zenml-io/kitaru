@@ -281,9 +281,9 @@ With `persist_message_history=True` the adapter remembers `result.all_messages()
 ## Requirements and constraints
 
 - **Concrete model at construction time.** The wrapped agent must have a bound `Model` — late model binding and per-run `model=` overrides are not supported. If you need a different model, wrap a different agent.
-- **Stable agent name.** A `name` is required; the adapter uses it for artifact keys and auto-created flow/checkpoint names. Changing it orphans existing executions.
+- **Stable agent name.** A `name` is required; the adapter uses it for artifact keys and auto-created flow/checkpoint names. `KitaruAgent(name=...)` wins over the wrapped Pydantic AI `Agent(name=...)`; if the wrapper name is omitted, the wrapped agent name is used. Changing this stable name orphans existing executions.
 - **No nested checkpoints.** Kitaru's MVP forbids opening a checkpoint inside another. Granular mode therefore cannot coexist with an enclosing turn checkpoint — the adapter runs the agent body inline at flow scope when `granular_checkpoints=True`.
-- **Auto-flow is local-only.** When called outside any flow, `KitaruAgent` auto-opens one using an in-process registry. Remote stacks (Kubernetes, Vertex, SageMaker, AzureML) cannot see that registry — wrap the call in an explicit `@kitaru.flow` for those. Serializing an arbitrary agent closure isn't worth the machinery when a one-line decorator does the job.
+- **Auto-flow is local-only.** When called outside any flow, `KitaruAgent` auto-opens a flow named `{stable_agent_name}_flow` using an in-process registry. If you call the agent inside your own explicit `@kitaru.flow`, that outer flow keeps its own name. Remote stacks (Kubernetes, Vertex, SageMaker, AzureML) cannot see the auto-flow registry — wrap the call in an explicit `@kitaru.flow` for those. Serializing an arbitrary agent closure isn't worth the machinery when a one-line decorator does the job.
 
 ## Advanced composition
 

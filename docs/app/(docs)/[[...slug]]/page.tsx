@@ -1,4 +1,5 @@
 import { getMarkdownUrl, getPageImage, source } from '@/lib/source';
+import { canonicalDocsUrl } from '@/lib/seo';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
@@ -47,11 +48,17 @@ export async function generateMetadata(props: PageProps<'/[[...slug]]'>): Promis
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const canonicalUrl = canonicalDocsUrl(page.url);
+
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
       images: getPageImage(page).url,
+      url: canonicalUrl,
     },
   };
 }

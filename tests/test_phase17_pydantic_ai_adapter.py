@@ -98,12 +98,13 @@ def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
 
 
 def _assert_event_artifacts_use_display_names(
-    event_map: dict[str, list[dict[str, Any]]], artifact_names: list[str]
+    event_map: dict[str, list[dict[str, Any]]], allowed_refs: list[str] | set[str]
 ) -> None:
+    allowed = set(allowed_refs)
     for event in _events(event_map):
         event_id = event["event_id"]
         for artifact_name in event.get("artifacts", {}).values():
-            assert artifact_name in artifact_names
+            assert artifact_name in allowed
             assert not artifact_name.startswith(f"{event_id}_")
 
 
@@ -123,7 +124,7 @@ def test_phase17_event_artifact_names_use_short_display_shape() -> None:
             "stream_transcript",
             namespace="agent_ab12cd34_tracker_2",
         )
-        == "agent_ab12cd34_tracker_2_llm_call_1_stream_transcript"
+        == "llm_call_1_stream_transcript__agent_ab12cd34_tracker_2"
     )
 
 
@@ -257,24 +258,24 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     artifact_names = _artifact_names(hydrated_run)
     run_label = summary["run_label"]
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_event_log", name)
+        re.fullmatch(rf"event_log__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_run_summary", name)
+        re.fullmatch(rf"run_summary__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        re.fullmatch(rf"llm_call_1_prompt__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
+        re.fullmatch(rf"llm_call_1_response__[a-zA-Z0-9_]+_{run_label}_tracker_1", name)
         for name in artifact_names
     )
-    assert any(re.fullmatch(r".*_tool_call_\d+_args", name) for name in artifact_names)
+    assert any(re.fullmatch(r"tool_call_\d+_args__.*", name) for name in artifact_names)
     assert any(
-        re.fullmatch(r".*_tool_call_\d+_result", name) for name in artifact_names
+        re.fullmatch(r"tool_call_\d+_result__.*", name) for name in artifact_names
     )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
 
@@ -306,8 +307,8 @@ def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
         for inputs in inputs_by_step
     )
     artifact_names = _artifact_names(hydrated_run)
-    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
-    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_response__") for name in artifact_names)
 
 
 def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
@@ -332,8 +333,8 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
     assert not _has_step_input(hydrated_run, "user_prompt")
     assert not _has_step_input(hydrated_run, "message_history")
     artifact_names = _artifact_names(hydrated_run)
-    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
-    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert any(name.startswith("llm_call_1_response__") for name in artifact_names)
 
 
 def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
@@ -358,23 +359,28 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
     artifact_names = _artifact_names(hydrated_run)
-    run_label = summary["run_label"]
     assert len(hydrated_run.steps) >= 2
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
-        for name in artifact_names
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert not any(name.startswith("llm_call_1_response__") for name in artifact_names)
+    assert not any(
+        re.fullmatch(r"tool_call_\d+_args__.*", name) for name in artifact_names
     )
-    assert any(
-        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
-        for name in artifact_names
+    assert not any(
+        re.fullmatch(r"tool_call_\d+_result__.*", name) for name in artifact_names
     )
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
+    assert all(
+        event.get("checkpoint_name")
+        for event in _events(event_map)
+        if "output" in event.get("artifacts", {}).values()
+    )
     assert "event_log" not in artifact_names
     assert "run_summary" not in artifact_names
-    assert not any(name.endswith("_event_log") for name in artifact_names)
-    assert not any(name.endswith("_run_summary") for name in artifact_names)
+    assert not any(name.startswith("event_log__") for name in artifact_names)
+    assert not any(name.startswith("run_summary__") for name in artifact_names)
 
 
 _AUTO_FLOW_AGENT: KitaruAgent[Any, str] | None = None
@@ -449,25 +455,22 @@ def test_phase17_multiple_tracker_scopes_at_flow_scope_get_unique_namespaces(
     run_labels = {summary["run_label"] for summary in summaries}
     assert len(run_labels) == 2
 
-    model_artifact_names = [
+    model_artifact_refs = [
         stored_name
         for event in _events(event_map)
         if event["kind"] == "llm_call"
         for stored_name in event.get("artifacts", {}).values()
     ]
-    assert model_artifact_names
-    assert len(model_artifact_names) == len(set(model_artifact_names))
-    assert all(stored_name in artifact_names for stored_name in model_artifact_names)
-    assert all(
-        any(run_label in stored_name for stored_name in model_artifact_names)
-        for run_label in run_labels
-    )
-    assert all("_tracker_1_" in stored_name for stored_name in model_artifact_names)
-    assert "llm_call_1_prompt" not in artifact_names
-    assert "llm_call_1_response" not in artifact_names
-    assert not any(name.endswith("_event_log") for name in artifact_names)
-    assert not any(name.endswith("_run_summary") for name in artifact_names)
-    _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    assert model_artifact_refs
+    assert {"messages", "output"} <= set(model_artifact_refs)
+    assert _has_step_input(hydrated_run, "messages")
+    assert _has_step_input(hydrated_run, "tool_args")
+    assert not any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
+    assert not any(name.startswith("llm_call_1_response__") for name in artifact_names)
+    assert not any(name.startswith("event_log__") for name in artifact_names)
+    assert not any(name.startswith("run_summary__") for name in artifact_names)
+    allowed_event_refs = set(artifact_names) | {"messages", "tool_args", "output"}
+    _assert_event_artifacts_use_display_names(event_map, allowed_event_refs)
 
 
 def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
@@ -505,22 +508,22 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     assert len(run_labels) == 2
     for tracker_index in (1, 2):
         assert any(
-            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_event_log", name)
+            re.fullmatch(rf"event_log__[a-zA-Z0-9_]+_tracker_{tracker_index}", name)
             for name in artifact_names
         )
         assert any(
-            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_run_summary", name)
+            re.fullmatch(rf"run_summary__[a-zA-Z0-9_]+_tracker_{tracker_index}", name)
             for name in artifact_names
         )
         assert any(
             re.fullmatch(
-                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_prompt", name
+                rf"llm_call_1_prompt__[a-zA-Z0-9_]+_tracker_{tracker_index}", name
             )
             for name in artifact_names
         )
         assert any(
             re.fullmatch(
-                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_response", name
+                rf"llm_call_1_response__[a-zA-Z0-9_]+_tracker_{tracker_index}", name
             )
             for name in artifact_names
         )
@@ -534,13 +537,15 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
         for stored_name in event.get("artifacts", {}).values()
     ]
     assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_tracker_2_llm_call_1_prompt", name)
+        re.fullmatch(r"llm_call_1_prompt__[a-zA-Z0-9_]+_tracker_2", name)
         for name in event_artifact_names
     )
 
-    event_log_names = [name for name in artifact_names if name.endswith("event_log")]
+    event_log_names = [
+        name for name in artifact_names if name.startswith("event_log__")
+    ]
     run_summary_names = [
-        name for name in artifact_names if name.endswith("run_summary")
+        name for name in artifact_names if name.startswith("run_summary__")
     ]
     assert len(event_log_names) == 2
     assert len(run_summary_names) == 2

@@ -202,6 +202,10 @@ fi
 
 HAS_OPENAI=false
 [[ -n "${OPENAI_API_KEY:-}" ]] && HAS_OPENAI=true
+HAS_CLAUDE_AGENT_SDK=false
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] || [[ "${CLAUDE_CODE_USE_VERTEX:-}" == "1" ]]; then
+    HAS_CLAUDE_AGENT_SDK=true
+fi
 
 # ---------------------------------------------------------------------------
 # Install from source
@@ -211,8 +215,20 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai --extra openai-agents
+    UV_SYNC_EXTRAS=(
+        --extra local
+        --extra llm
+        --extra mcp
+        --extra pydantic-ai
+        --extra openai-agents
+        --extra claude-agent-sdk
+        --extra langgraph
+    )
+    if [[ "$HAS_OPENAI" == true ]]; then
+        UV_SYNC_EXTRAS+=(--extra langgraph-openai)
+    fi
+    run_test "uv sync --python $PY ${UV_SYNC_EXTRAS[*]}" \
+        uv sync --python "$PY" "${UV_SYNC_EXTRAS[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -350,6 +366,17 @@ section_header "PydanticAI adapter"
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
+section_header "LangGraph adapter"
+
+run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \
+    $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
+        $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+else
+    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" "OPENAI_API_KEY not set"
+fi
+
 section_header "OpenAI Agents adapter"
 
 run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
@@ -360,6 +387,20 @@ if [[ "$HAS_OPENAI" == true ]]; then
         $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
 else
     skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
+fi
+
+section_header "Claude Agent SDK adapter"
+
+run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py --help" \
+    $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py --help
+
+if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
+    run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" \
+        timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py \
+            --prompt "Explain one Kitaru checkpoint in one short sentence. Do not use tools, Bash, or files." \
+            --max-turns 1
+else
+    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then

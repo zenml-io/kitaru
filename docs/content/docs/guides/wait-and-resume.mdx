@@ -33,6 +33,20 @@ def publish_flow(topic: str) -> str:
     return f"PUBLISHED: {topic}"
 ```
 
+## Get the current execution ID inside a flow
+
+If code is already running inside a Kitaru flow or checkpoint, use
+`kitaru.current_execution_id()` to read the active execution ID:
+
+```python
+exec_id = kitaru.current_execution_id()
+print(f"kitaru executions input {exec_id} --value true")
+```
+
+This is useful when a flow needs to print follow-up CLI commands, name
+per-execution side resources, or attach the execution ID to application logs.
+Outside a running Kitaru flow or checkpoint, it returns `None`.
+
 ## Timeout behavior
 
 By default, `kitaru.wait(...)` gives the runner up to 600 seconds to receive

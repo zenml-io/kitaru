@@ -30,6 +30,13 @@ from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
+from ._constants import (
+    ARTIFACT_ROLE_PROMPT,
+    ARTIFACT_ROLE_RESPONSE,
+    ARTIFACT_ROLE_STREAM_TRANSCRIPT,
+    ARTIFACT_SLOT_MESSAGES,
+    ARTIFACT_SLOT_OUTPUT,
+)
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_model_correlation
@@ -37,7 +44,10 @@ from ._policy import CapturePolicy
 from ._tracking import EventTracker, ModelEventContext, get_current_tracker
 from ._utils import (
     CheckpointConfig,
+    adapter_checkpoint_artifact_refs,
     checkpoint_cache_key,
+    checkpoint_input_value,
+    get_adapter_checkpoint_artifact_refs,
     run_async_in_checkpoint,
     with_default_type,
 )
@@ -129,12 +139,18 @@ def _strip_message_envelope_for_cache(message: dict[str, Any]) -> dict[str, Any]
     return stable_message
 
 
+def _messages_for_cache(
+    serialized_messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return serialized messages with volatile envelope fields removed."""
+    return [
+        _strip_message_envelope_for_cache(message) for message in serialized_messages
+    ]
+
+
 def _serialize_messages_for_cache(messages: list[ModelMessage]) -> list[dict[str, Any]]:
     """Serialize messages for cache keys while preserving user payload content."""
-    return [
-        _strip_message_envelope_for_cache(message)
-        for message in _serialize_messages(messages)
-    ]
+    return _messages_for_cache(_serialize_messages(messages))
 
 
 def _serialize_model_response(response: ModelResponse) -> dict[str, Any]:
@@ -267,6 +283,7 @@ class KitaruModel(WrapperModel):
         response: ModelResponse,
         model_request_parameters: ModelRequestParameters,
         duration_ms: float,
+        checkpoint_name: str,
     ) -> None:
         tracker = get_current_tracker()
         if tracker is None or not self._capture.emit_child_events:
@@ -275,14 +292,20 @@ class KitaruModel(WrapperModel):
         event_id, event_context = tracker.start_model_event()
         if self._capture.correlate_otel_spans:
             attach_model_correlation(event_id, event_context)
+        artifacts: dict[str, str] = {}
+        if self._capture.save_prompts:
+            artifacts[ARTIFACT_ROLE_PROMPT] = ARTIFACT_SLOT_MESSAGES
+        if self._capture.save_responses:
+            artifacts[ARTIFACT_ROLE_RESPONSE] = ARTIFACT_SLOT_OUTPUT
         tracker.record_model_event(
             event_id,
             event_context,
             status="completed",
             duration_ms=duration_ms,
-            artifacts={},
+            artifacts=artifacts,
             model_name=response.model_name,
             usage=response.usage,
+            checkpoint_name=checkpoint_name,
         )
         self._reserve_tool_call_order(
             tracker=tracker,
@@ -305,38 +328,59 @@ class KitaruModel(WrapperModel):
         ):
             body_executed = False
 
+            serialized_messages = _serialize_messages(messages)
+            input_artifacts: dict[str, str] = {}
+            output_artifacts: dict[str, str] = {}
+            checkpoint_inputs: dict[str, Any] = {}
+            if self._capture.save_prompts:
+                input_artifacts[ARTIFACT_ROLE_PROMPT] = ARTIFACT_SLOT_MESSAGES
+                checkpoint_inputs[ARTIFACT_SLOT_MESSAGES] = checkpoint_input_value(
+                    serialized_messages
+                )
+            if self._capture.save_responses:
+                output_artifacts[ARTIFACT_ROLE_RESPONSE] = ARTIFACT_SLOT_OUTPUT
+
             # `_in_checkpoint` closes over live `messages` / `self`; safe only for
             # inline runtime. `run_async_in_checkpoint` rejects `runtime='isolated'`
             # to stop these references from hitting a pickling boundary.
             async def _in_checkpoint() -> ModelResponse:
                 nonlocal body_executed
                 body_executed = True
-                return await self._tracked_request(
-                    messages, model_settings, model_request_parameters
-                )
+                with adapter_checkpoint_artifact_refs(
+                    input_artifacts=input_artifacts,
+                    output_artifacts=output_artifacts,
+                ):
+                    return await self._tracked_request(
+                        messages, model_settings, model_request_parameters
+                    )
 
             cache_key = None
             if self._checkpoint_config.get("cache") is not False:
                 cache_key = checkpoint_cache_key(
                     {
-                        "messages": _serialize_messages_for_cache(messages),
+                        ARTIFACT_SLOT_MESSAGES: _messages_for_cache(
+                            serialized_messages
+                        ),
                         "explicit_run_conversation_id": _EXPLICIT_RUN_CONVERSATION_ID.get(),
                         "model_settings": model_settings,
                         "model_request_parameters": model_request_parameters,
                     }
                 )
             started_at = time.perf_counter()
+            checkpoint_name = f"{self._agent_name}_model_request"
             response = await run_async_in_checkpoint(
                 config=with_default_type(self._checkpoint_config, "llm_call"),
-                step_name=f"{self._agent_name}_model_request",
+                step_name=checkpoint_name,
                 body=_in_checkpoint,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
             )
             if not body_executed:
                 self._record_cached_model_checkpoint_event(
                     response=response,
                     model_request_parameters=model_request_parameters,
                     duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                    checkpoint_name=checkpoint_name,
                 )
             return response
         return await self._tracked_request(
@@ -360,10 +404,23 @@ class KitaruModel(WrapperModel):
             attach_model_correlation(event_id, event_context)
 
         artifacts: dict[str, str] = {}
+        adapter_refs = get_adapter_checkpoint_artifact_refs()
         if self._capture.save_prompts:
-            prompt_key = tracker.artifact_name(event_id, "prompt")
-            kitaru.save(prompt_key, _serialize_messages(messages), type="prompt")
-            artifacts["prompt"] = prompt_key
+            if (
+                adapter_refs is not None
+                and ARTIFACT_ROLE_PROMPT in adapter_refs.input_artifacts
+            ):
+                artifacts[ARTIFACT_ROLE_PROMPT] = adapter_refs.input_artifacts[
+                    ARTIFACT_ROLE_PROMPT
+                ]
+            else:
+                prompt_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_PROMPT)
+                kitaru.save(
+                    prompt_key,
+                    _serialize_messages(messages),
+                    type=ARTIFACT_ROLE_PROMPT,
+                )
+                artifacts[ARTIFACT_ROLE_PROMPT] = prompt_key
 
         started_at = time.perf_counter()
         try:
@@ -383,11 +440,21 @@ class KitaruModel(WrapperModel):
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
         if self._capture.save_responses:
-            response_key = tracker.artifact_name(event_id, "response")
-            kitaru.save(
-                response_key, _serialize_model_response(response), type="response"
-            )
-            artifacts["response"] = response_key
+            if (
+                adapter_refs is not None
+                and ARTIFACT_ROLE_RESPONSE in adapter_refs.output_artifacts
+            ):
+                artifacts[ARTIFACT_ROLE_RESPONSE] = adapter_refs.output_artifacts[
+                    ARTIFACT_ROLE_RESPONSE
+                ]
+            else:
+                response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
+                kitaru.save(
+                    response_key,
+                    _serialize_model_response(response),
+                    type=ARTIFACT_ROLE_RESPONSE,
+                )
+                artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
 
         tracker.record_model_event(
             event_id,
@@ -429,9 +496,13 @@ class KitaruModel(WrapperModel):
 
         artifacts: dict[str, str] = {}
         if self._capture.save_prompts:
-            prompt_key = tracker.artifact_name(event_id, "prompt")
-            kitaru.save(prompt_key, _serialize_messages(messages), type="prompt")
-            artifacts["prompt"] = prompt_key
+            prompt_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_PROMPT)
+            kitaru.save(
+                prompt_key,
+                _serialize_messages(messages),
+                type=ARTIFACT_ROLE_PROMPT,
+            )
+            artifacts[ARTIFACT_ROLE_PROMPT] = prompt_key
 
         save_transcripts = self._capture.save_stream_transcripts
         save_responses = self._capture.save_responses
@@ -471,11 +542,17 @@ class KitaruModel(WrapperModel):
         if save_responses or save_transcripts:
             serialized_response = _serialize_model_response(response)
         if save_responses:
-            response_key = tracker.artifact_name(event_id, "response")
-            kitaru.save(response_key, serialized_response, type="response")
-            artifacts["response"] = response_key
+            response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
+            kitaru.save(
+                response_key,
+                serialized_response,
+                type=ARTIFACT_ROLE_RESPONSE,
+            )
+            artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
         if save_transcripts:
-            transcript_key = tracker.artifact_name(event_id, "stream_transcript")
+            transcript_key = tracker.artifact_name(
+                event_id, ARTIFACT_ROLE_STREAM_TRANSCRIPT
+            )
             kitaru.save(
                 transcript_key,
                 {
@@ -486,7 +563,7 @@ class KitaruModel(WrapperModel):
                 },
                 type="context",
             )
-            artifacts["stream_transcript"] = transcript_key
+            artifacts[ARTIFACT_ROLE_STREAM_TRANSCRIPT] = transcript_key
 
         tracker.record_model_event(
             event_id,

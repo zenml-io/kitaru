@@ -6,30 +6,32 @@ from pydantic_ai.usage import RequestUsage
 
 from ._policy import CaptureMode
 
-EventStatus = Literal['completed', 'failed']
-ToolsetKind = Literal['function', 'mcp', 'generic']
-DeferredKind = Literal['hitl', 'approval_required', 'call_deferred']
+EventStatus = Literal["completed", "failed"]
+ToolsetKind = Literal["function", "mcp", "generic"]
+DeferredKind = Literal["hitl", "approval_required", "call_deferred"]
 
 
 class EventError(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
     exception_type: str
     message: str
 
 
 class _BaseEvent(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
     event_id: str
     status: EventStatus
     sequence_index: int
     turn_index: int
     parent_event_ids: list[str] = Field(default_factory=list)
+    checkpoint_name: str | None = None
+    checkpoint_id: str | None = None
 
 
 class ModelEvent(_BaseEvent):
-    kind: Literal['llm_call'] = 'llm_call'
+    kind: Literal["llm_call"] = "llm_call"
     fan_in_from: list[str] = Field(default_factory=list)
     duration_ms: float | None = None
     artifacts: dict[str, str] = Field(default_factory=dict)
@@ -40,7 +42,7 @@ class ModelEvent(_BaseEvent):
 
 
 class ToolEvent(_BaseEvent):
-    kind: Literal['tool_call'] = 'tool_call'
+    kind: Literal["tool_call"] = "tool_call"
     tool_name: str
     toolset_kind: ToolsetKind
     hitl: bool = False
@@ -52,7 +54,7 @@ class ToolEvent(_BaseEvent):
 
 
 class DeferredEvent(_BaseEvent):
-    kind: Literal['deferred'] = 'deferred'
+    kind: Literal["deferred"] = "deferred"
     tool_name: str
     deferred_kind: DeferredKind
     wait_name: str
@@ -61,25 +63,27 @@ class DeferredEvent(_BaseEvent):
 
 
 class StreamEvent(_BaseEvent):
-    kind: Literal['event_stream'] = 'event_stream'
+    kind: Literal["event_stream"] = "event_stream"
     index: int
     duration_ms: float
     error: EventError | None = None
 
 
-AgentEvent = Annotated[ModelEvent | ToolEvent | DeferredEvent | StreamEvent, Field(discriminator='kind')]
+AgentEvent = Annotated[
+    ModelEvent | ToolEvent | DeferredEvent | StreamEvent, Field(discriminator="kind")
+]
 AgentEventsTypeAdapter = TypeAdapter(list[AgentEvent])
 
 
 class EventStreamHandlerSummary(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
     call_count: int
     duration_ms: float
 
 
 class RunSummary(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
     agent_name: str
     run_label: str
@@ -102,4 +106,6 @@ def error_from_exception(error: BaseException) -> EventError:
 
 
 def dump_agent_events(events: list[AgentEvent]) -> list[dict[str, Any]]:
-    return cast(list[dict[str, Any]], AgentEventsTypeAdapter.dump_python(events, mode='json'))
+    return cast(
+        list[dict[str, Any]], AgentEventsTypeAdapter.dump_python(events, mode="json")
+    )

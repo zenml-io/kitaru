@@ -1,7 +1,8 @@
 """Focused tests for OpenAI Agents SDK call-level checkpointing."""
 
+import re
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -127,6 +128,113 @@ def _wait_for_hydrated_run(exec_id: str) -> Any:
 
 def _step_names(hydrated_run: Any) -> set[str]:
     return set(hydrated_run.steps)
+
+
+def _input_names_by_step(hydrated_run: Any) -> list[set[str]]:
+    return [set(step.inputs) for step in hydrated_run.steps.values()]
+
+
+def _artifact_names(hydrated_run: Any) -> list[str]:
+    names: list[str] = []
+    for step in hydrated_run.steps.values():
+        for artifacts in step.outputs.values():
+            names.extend(artifact.name for artifact in artifacts)
+    return names
+
+
+def _events(event_map: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [event for events in event_map.values() for event in events]
+
+
+def _expected_model_input_envelope(
+    *,
+    system_instructions: str | None = None,
+    input_value: Any = None,
+    model_settings: Any = None,
+    previous_response_id: str | None = None,
+    conversation_id: str | None = None,
+    prompt: Any = None,
+) -> dict[str, Any]:
+    return {
+        "system_instructions": system_instructions,
+        "input": input_value,
+        "model_settings": model_settings,
+        "previous_response_id": previous_response_id,
+        "conversation_id": conversation_id,
+        "prompt": prompt,
+    }
+
+
+def test_openai_artifact_names_use_role_first_suffix_namespace() -> None:
+    from kitaru.adapters.openai_agents._tracking import EventTracker, artifact_name
+
+    assert (
+        artifact_name("agent_ab12cd34_llm_call_1", "input")
+        == "llm_call_1_input__agent_ab12cd34"
+    )
+    assert (
+        artifact_name("agent_ab12cd34_tool_call_2", "result")
+        == "tool_call_2_result__agent_ab12cd34"
+    )
+
+    tracker = EventTracker(agent_name="Agent Name", run_label="ab12cd34")
+    assert tracker.event_log_artifact_name == "event_log__Agent_Name_ab12cd34"
+    assert tracker.run_summary_artifact_name == "run_summary__Agent_Name_ab12cd34"
+
+
+def test_openai_event_tracker_records_checkpoint_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.openai_agents import _tracking
+
+    checkpoint_ids = iter(["checkpoint-model", "checkpoint-tool"])
+    checkpoint_names = iter(
+        [
+            "agent_openai_model_call",
+            "agent_double_value_tool_call",
+        ]
+    )
+    monkeypatch.setattr(_tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(
+        _tracking,
+        "get_current_checkpoint_id",
+        lambda: next(checkpoint_ids),
+    )
+    monkeypatch.setattr(
+        _tracking,
+        "get_current_checkpoint_name",
+        lambda: next(checkpoint_names),
+    )
+
+    tracker = _tracking.EventTracker(agent_name="Agent Name", run_label="ab12cd34")
+    model_id, model_context = tracker.start_llm_event()
+    tool_id, tool_context = tracker.start_tool_event(tool_call_id="call_1")
+    tracker.record_event(
+        model_id,
+        model_context,
+        kind="llm_call",
+        status="completed",
+        duration_ms=1.0,
+        artifacts={"response": "output"},
+    )
+    tracker.record_event(
+        tool_id,
+        tool_context,
+        kind="tool_call",
+        status="completed",
+        duration_ms=1.0,
+        artifacts={"result": "output"},
+    )
+
+    events = list(tracker.events)
+    assert [event.checkpoint_id for event in events] == [
+        "checkpoint-model",
+        "checkpoint-tool",
+    ]
+    assert [event.checkpoint_name for event in events] == [
+        "agent_openai_model_call",
+        "agent_double_value_tool_call",
+    ]
 
 
 class TestOpenAIEventTrackerToolCallOrdering:
@@ -352,12 +460,14 @@ class TestOpenAIModelToolCallReservations:
             response_id="resp_cached",
         )
         seen_tool_call_ids: list[list[str]] = []
+        seen_checkpoint_inputs: list[dict[str, Any] | None] = []
 
         class FakeTracker:
             def reserve_tool_call_order(self, tool_call_ids: list[str]) -> None:
                 seen_tool_call_ids.append(tool_call_ids)
 
-        async def fake_run_async_in_checkpoint(**_kwargs: Any) -> Any:
+        async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+            seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
             return cached_response
 
         monkeypatch.setattr(openai_model, "is_inside_flow", lambda: True)
@@ -390,6 +500,184 @@ class TestOpenAIModelToolCallReservations:
 
         assert response is cached_response
         assert seen_tool_call_ids == [["call_alpha", "call_beta"]]
+        assert seen_checkpoint_inputs == [
+            {"input": _expected_model_input_envelope(input_value="prompt")}
+        ]
+
+
+@pytest.mark.anyio
+async def test_openai_model_checkpoint_uses_structural_input_and_output_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._model as openai_model
+    from kitaru.adapters.openai_agents._model import KitaruOpenAIModel
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+    recorded_artifacts: list[dict[str, str]] = []
+    saved: list[tuple[str, str]] = []
+
+    async def fake_wrapped_get_response(*_args: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(output=[], usage=None, response_id="resp_structural")
+
+    class FakeTracker:
+        def start_llm_event(self) -> tuple[str, SimpleNamespace]:
+            return "agent_ab12cd34_llm_call_1", SimpleNamespace(sequence_index=1)
+
+        def record_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded_artifacts.append(kwargs["artifacts"])
+
+        def reserve_tool_call_order(self, _tool_call_ids: list[str]) -> None:
+            return None
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    monkeypatch.setattr(openai_model, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_model, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(openai_model, "get_current_tracker", lambda: FakeTracker())
+    monkeypatch.setattr(
+        openai_model, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+    monkeypatch.setattr(
+        openai_model.kitaru,
+        "save",
+        lambda name, _value, *, type: saved.append((name, type)),
+    )
+
+    model = KitaruOpenAIModel(
+        SimpleNamespace(get_response=fake_wrapped_get_response),
+        capture=OpenAICapturePolicy(save_usage=False),
+        agent_name="structural_agent",
+        checkpoint_config={},
+    )
+
+    response = await model.get_response(
+        "system",
+        [{"role": "user", "content": "hello"}],
+        {"temperature": 0},
+        [],
+        None,
+        [],
+        None,
+        previous_response_id="previous",
+        conversation_id="conversation",
+        prompt={"id": "prompt"},
+    )
+
+    assert response.response_id == "resp_structural"
+    assert seen_checkpoint_inputs == [
+        {
+            "input": _expected_model_input_envelope(
+                system_instructions="system",
+                input_value=[{"role": "user", "content": "hello"}],
+                model_settings={"temperature": 0},
+                previous_response_id="previous",
+                conversation_id="conversation",
+                prompt={"id": "prompt"},
+            )
+        }
+    ]
+    assert recorded_artifacts == [{"input": "input", "response": "output"}]
+    assert saved == []
+
+
+@pytest.mark.anyio
+async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+    recorded_artifacts: list[dict[str, str]] = []
+    saved: list[tuple[str, str]] = []
+
+    from agents.tool import FunctionTool
+
+    async def invoke_double_value(_context: Any, input_json: str) -> str:
+        assert input_json == '{"value": 4}'
+        return "doubled=8"
+
+    double_value = FunctionTool(
+        name="double_value",
+        description="Double a value.",
+        params_json_schema={
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+        on_invoke_tool=invoke_double_value,
+    )
+
+    class FakeTracker:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, SimpleNamespace]:
+            assert tool_call_id == "call_structural_tool"
+            return "agent_ab12cd34_tool_call_2", SimpleNamespace(sequence_index=2)
+
+        def record_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded_artifacts.append(kwargs["artifacts"])
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: FakeTracker())
+    monkeypatch.setattr(
+        openai_tools, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+    monkeypatch.setattr(
+        openai_tools.kitaru,
+        "save",
+        lambda name, _value, *, type: saved.append((name, type)),
+    )
+
+    wrapped = openai_tools._wrap_function_tool(
+        double_value,
+        capture=OpenAICapturePolicy(),
+        agent_name="structural_agent",
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name=None,
+    )
+
+    result = await wrapped.on_invoke_tool(
+        cast(Any, SimpleNamespace(tool_call_id="call_structural_tool")),
+        '{"value": 4}',
+    )
+
+    assert result == "doubled=8"
+    assert seen_checkpoint_inputs == [
+        {
+            "tool_args": {
+                "tool_name": "double_value",
+                "tool_call_id": "call_structural_tool",
+                "raw_args": '{"value": 4}',
+                "parsed_args": {"value": 4},
+            }
+        }
+    ]
+    assert recorded_artifacts == [{"input": "tool_args", "result": "output"}]
+    assert saved == []
 
 
 @pytest.mark.anyio
@@ -577,11 +865,46 @@ def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
         return str(runner.run_sync(OpenAIRunRequest.start(prompt)).final_output)
 
     first = tool_flow.run("please use the tool", "first")
-    _wait_for_hydrated_run(first.exec_id)
+    first_hydrated = _wait_for_hydrated_run(first.exec_id)
     assert side_effects == [4]
     assert model.call_count == 2
-    first_hydrated = _wait_for_hydrated_run(first.exec_id)
     assert any("double_value_tool_call" in name for name in _step_names(first_hydrated))
+    inputs_by_step = _input_names_by_step(first_hydrated)
+    assert any("input" in inputs for inputs in inputs_by_step)
+    assert any("tool_args" in inputs for inputs in inputs_by_step)
+    event_map = first_hydrated.run_metadata["openai_agents_events"]
+    events = _events(event_map)
+    assert any(
+        event["kind"] == "llm_call"
+        and event["artifacts"].get("input") == "input"
+        and event["artifacts"].get("response") == "output"
+        for event in events
+    )
+    assert any(
+        event["kind"] == "tool_call"
+        and event["artifacts"].get("input") == "tool_args"
+        and event["artifacts"].get("result") == "output"
+        for event in events
+    )
+    output_events = [
+        event
+        for event in events
+        if event["artifacts"].get("response") == "output"
+        or event["artifacts"].get("result") == "output"
+    ]
+    assert len(output_events) >= 2
+    assert all(event.get("checkpoint_id") for event in output_events)
+    assert all(event.get("checkpoint_name") for event in output_events)
+    assert len({event["checkpoint_id"] for event in output_events}) == len(
+        output_events
+    )
+    artifact_names = _artifact_names(first_hydrated)
+    assert not any(
+        re.fullmatch(r"llm_call_\d+_input__.*", name) for name in artifact_names
+    )
+    assert not any(
+        re.fullmatch(r"tool_call_\d+_input__.*", name) for name in artifact_names
+    )
 
     second = tool_flow.run("please use the tool", "second")
     _wait_for_hydrated_run(second.exec_id)

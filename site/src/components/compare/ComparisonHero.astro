@@ -97,7 +97,7 @@ const hasOptions = competitorOptions.length > 0;
             {competitorOptions.map((opt) => (
               <li role="none">
                 <a
-                  href={`/compare/${opt.slug}`}
+                  href={`/compare/${opt.slug}/`}
                   role="menuitem"
                   class="chero-chip-menu-item"
                   aria-current={opt.slug === currentSlug ? 'page' : undefined}
@@ -170,8 +170,8 @@ const hasOptions = competitorOptions.length > 0;
           </svg>
         </button>
       </div>
-      <a href="/book-a-demo" class="btn-primary">Book a demo</a>
-      <a href="/docs" class="btn-secondary">Read the docs</a>
+      <a href="/book-a-demo/" class="btn-primary">Book a demo</a>
+      <a href="/docs/" class="btn-secondary">Read the docs</a>
     </div>
   </div>
 </header>
