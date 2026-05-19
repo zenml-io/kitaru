@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import inspect
 import json
@@ -332,6 +333,156 @@ def test_outer_checkpoint_defaults_disable_cache_and_retries(
         "type": "graph_call",
         "runtime": "inline",
     }
+
+
+class ForeignLangGraphRunResult:
+    """Same-shaped LangGraph result with intentionally different identity."""
+
+    def __init__(self, *, thread_id: str = "thread-1") -> None:
+        interrupt = {"index": 0, "value": {"question": "continue?"}}
+        self.schema_version = 1
+        self.status = "interrupted"
+        self.output = None
+        self.thread_id = thread_id
+        self.latest_checkpoint_id = "checkpoint-1"
+        self.next_nodes = ["approval"]
+        self.interrupts = [interrupt]
+        self.pending_state = {
+            "thread_id": thread_id,
+            "checkpoint_id": "checkpoint-1",
+            "next_nodes": ["approval"],
+            "interrupts": [interrupt],
+        }
+        self.state_summary = {
+            "latest_checkpoint_id": "checkpoint-1",
+            "next_nodes": ["approval"],
+            "interrupts": [interrupt],
+        }
+        self.warnings: list[str] = []
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "python"
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "output": self.output,
+            "thread_id": self.thread_id,
+            "latest_checkpoint_id": self.latest_checkpoint_id,
+            "next_nodes": self.next_nodes,
+            "interrupts": self.interrupts,
+            "pending_state": self.pending_state,
+            "state_summary": self.state_summary,
+            "warnings": self.warnings,
+        }
+
+
+class InvalidForeignLangGraphRunResult(ForeignLangGraphRunResult):
+    """Foreign LangGraph result whose dumped payload violates the schema."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        payload = super().model_dump(mode=mode)
+        payload["unexpected_field"] = "bad"
+        return payload
+
+
+class CheckpointableGraph:
+    name = "fake"
+    checkpointer = object()
+
+    def invoke(self, input: object, **_kwargs: object) -> object:
+        return input
+
+    async def ainvoke(self, input: object, **_kwargs: object) -> object:
+        return input
+
+
+def test_invoke_canonicalizes_foreign_graph_call_checkpoint_result(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: ForeignLangGraphRunResult(),
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start({"count": 1}, thread_id="thread-1")
+    )
+
+    assert isinstance(result, langgraph_adapter.LangGraphRunResult)
+    assert not isinstance(result, ForeignLangGraphRunResult)
+    assert isinstance(result.pending_state, langgraph_adapter.LangGraphPendingState)
+    assert isinstance(
+        result.pending_state.interrupts[0],
+        langgraph_adapter.LangGraphInterruptSummary,
+    )
+    assert isinstance(result.interrupts[0], langgraph_adapter.LangGraphInterruptSummary)
+
+
+def test_ainvoke_canonicalizes_foreign_graph_call_checkpoint_result(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+
+    async def fake_run_async_in_checkpoint(**_kwargs: object) -> object:
+        return ForeignLangGraphRunResult()
+
+    monkeypatch.setattr(
+        agent_module, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    async def call_ainvoke() -> object:
+        return await runner.ainvoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"count": 1}, thread_id="thread-1"
+            )
+        )
+
+    result = asyncio.run(call_ainvoke())
+
+    assert isinstance(result, langgraph_adapter.LangGraphRunResult)
+    assert not isinstance(result, ForeignLangGraphRunResult)
+    assert isinstance(result.pending_state, langgraph_adapter.LangGraphPendingState)
+    assert isinstance(result.state_summary, langgraph_adapter.LangGraphStateSummary)
+
+
+def test_invalid_graph_call_checkpoint_result_fails_before_success_tracking(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: InvalidForeignLangGraphRunResult(),
+    )
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    track_calls: list[tuple[object, dict[str, object]]] = []
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+    with pytest.raises(ValidationError):
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"count": 1}, thread_id="thread-1"
+            )
+        )
+
+    assert track_calls == []
 
 
 def test_outer_checkpoint_overrides_are_honored(

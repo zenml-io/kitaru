@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
+from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
@@ -194,6 +195,7 @@ class KitaruRunner:
                 context_cache_identity=context_cache_identity,
                 context_cache_key=context_cache_key,
             )
+        result = canonicalize_result_model(result, OpenAIRunResult)
         self._track_completed("run", result)
         return result
 
@@ -231,6 +233,7 @@ class KitaruRunner:
                 context_cache_identity=context_cache_identity,
                 context_cache_key=context_cache_key,
             )
+        result = canonicalize_result_model(result, OpenAIRunResult)
         self._track_completed("run_sync", result)
         return result
 
