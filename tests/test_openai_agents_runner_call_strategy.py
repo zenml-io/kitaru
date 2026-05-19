@@ -14,6 +14,7 @@ from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+from pydantic import BaseModel
 from zenml.client import Client
 
 import kitaru.adapters.openai_agents._runner as openai_runner
@@ -24,6 +25,11 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunRequest,
     OpenAIRunStateEnvelope,
 )
+
+
+class StructuredSupportAnswer(BaseModel):
+    verdict: str
+    confidence: float
 
 
 class StaticTextModel(Model):
@@ -338,6 +344,27 @@ def test_opaque_context_cache_identity_is_distinct_per_object() -> None:
 
     assert first["python_type"] == second["python_type"]
     assert first != second
+
+
+def test_runner_call_strategy_preserves_structured_final_output() -> None:
+    model = StaticTextModel('{"verdict":"safe","confidence":0.91}')
+    agent = Agent(
+        name="runner-structured",
+        model=model,
+        output_type=StructuredSupportAnswer,
+    )
+    runner = KitaruRunner(
+        agent,
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    result = runner.run_sync(OpenAIRunRequest.start("return structured result"))
+
+    assert result.status == "completed"
+    assert isinstance(result.final_output, StructuredSupportAnswer)
+    assert result.final_output.verdict == "safe"
+    assert result.final_output.confidence == 0.91
 
 
 def test_runner_call_strategy_checkpoints_outer_runner_and_caches(

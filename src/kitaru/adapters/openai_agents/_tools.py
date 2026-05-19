@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -9,6 +10,7 @@ from agents.tool import FunctionTool
 
 import kitaru
 
+from ._events import EventStatus
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import OpenAICapturePolicy
 from ._serialization import to_json_safe
@@ -24,6 +26,13 @@ from ._utils import (
     run_async_in_checkpoint,
     safe_step_name,
     with_default_type,
+)
+
+_GUARDRAIL_BEHAVIOR_EXCEPTION = "exception"
+_GUARDRAIL_BEHAVIOR_RAISE_EXCEPTION = "raise_exception"
+_GUARDRAIL_BEHAVIOR_REJECT_CONTENT = "reject_content"
+_GUARDRAIL_REQUESTED_EXCEPTION_MESSAGE = (
+    "Tool input guardrail requested an exception before tool invocation."
 )
 
 
@@ -169,10 +178,207 @@ def _wrap_function_tool(
             tool_call_id=tool_call_id,
         )
 
-    wrapped = replace(tool, on_invoke_tool=_wrapped_callback)
+    wrapped = replace(
+        tool,
+        on_invoke_tool=_wrapped_callback,
+        tool_input_guardrails=_wrap_tool_input_guardrails(
+            tool.tool_input_guardrails,
+            tool=tool,
+            capture=capture,
+        ),
+    )
     object.__setattr__(wrapped, "_kitaru_wrapped", True)
     object.__setattr__(wrapped, "_kitaru_original_tool", tool)
     return wrapped
+
+
+def _wrap_tool_input_guardrails(
+    guardrails: list[Any] | None,
+    *,
+    tool: FunctionTool,
+    capture: OpenAICapturePolicy,
+) -> list[Any] | None:
+    if not guardrails:
+        return guardrails
+    return [
+        _wrap_tool_input_guardrail(
+            guardrail,
+            tool=tool,
+            capture=capture,
+            guardrail_index=index,
+        )
+        for index, guardrail in enumerate(guardrails)
+    ]
+
+
+def _wrap_tool_input_guardrail(
+    guardrail: Any,
+    *,
+    tool: FunctionTool,
+    capture: OpenAICapturePolicy,
+    guardrail_index: int,
+) -> Any:
+    if getattr(guardrail, "_kitaru_wrapped_tool_input_guardrail", False):
+        return guardrail
+
+    async def _wrapped_guardrail_function(data: Any) -> Any:
+        if not _should_record_tool_input_guardrail_event(capture):
+            return await guardrail.run(data)
+
+        started_at = time.perf_counter()
+        try:
+            output = await guardrail.run(data)
+        except Exception as error:
+            _record_blocked_tool_input_guardrail_event(
+                data,
+                tool=tool,
+                capture=capture,
+                guardrail=guardrail,
+                guardrail_index=guardrail_index,
+                behavior_type=_GUARDRAIL_BEHAVIOR_EXCEPTION,
+                status="failed",
+                started_at=started_at,
+                error=error,
+            )
+            raise
+
+        behavior_type = _guardrail_behavior_type(output)
+        if behavior_type == _GUARDRAIL_BEHAVIOR_REJECT_CONTENT:
+            _record_blocked_tool_input_guardrail_event(
+                data,
+                tool=tool,
+                capture=capture,
+                guardrail=guardrail,
+                guardrail_index=guardrail_index,
+                behavior_type=behavior_type,
+                status="completed",
+                started_at=started_at,
+                rejection_message=_guardrail_rejection_message(output),
+            )
+        elif behavior_type == _GUARDRAIL_BEHAVIOR_RAISE_EXCEPTION:
+            _record_blocked_tool_input_guardrail_event(
+                data,
+                tool=tool,
+                capture=capture,
+                guardrail=guardrail,
+                guardrail_index=guardrail_index,
+                behavior_type=behavior_type,
+                status="failed",
+                started_at=started_at,
+                error=RuntimeError(_GUARDRAIL_REQUESTED_EXCEPTION_MESSAGE),
+            )
+        return output
+
+    wrapped = replace(guardrail, guardrail_function=_wrapped_guardrail_function)
+    object.__setattr__(wrapped, "_kitaru_wrapped_tool_input_guardrail", True)
+    object.__setattr__(wrapped, "_kitaru_original_tool_input_guardrail", guardrail)
+    return wrapped
+
+
+def _record_blocked_tool_input_guardrail_event(
+    data: Any,
+    *,
+    tool: FunctionTool,
+    capture: OpenAICapturePolicy,
+    guardrail: Any,
+    guardrail_index: int,
+    behavior_type: str,
+    status: EventStatus,
+    started_at: float,
+    rejection_message: str | None = None,
+    error: BaseException | None = None,
+) -> None:
+    tracker = get_current_tracker()
+    if tracker is None or not _should_record_tool_input_guardrail_event(
+        capture,
+        tracker=tracker,
+    ):
+        return
+
+    context = getattr(data, "context", None)
+    tool_call_id = _tool_call_id(context)
+    event_id, event_context = tracker.start_tool_event(tool_call_id=tool_call_id)
+    metadata = _tool_event_metadata(tool, tool_call_id=tool_call_id, context=context)
+    metadata.update(
+        {
+            "tool_invoked": False,
+            "blocked_by_guardrail": True,
+            "guardrail_index": guardrail_index,
+            "guardrail_name": _guardrail_name(guardrail),
+            "guardrail_behavior": behavior_type,
+        }
+    )
+    if rejection_message is not None:
+        metadata["rejection_message"] = rejection_message
+
+    tracker.record_event(
+        event_id,
+        event_context,
+        kind="tool_call",
+        status=status,
+        duration_ms=elapsed_ms(started_at),
+        artifacts={},
+        metadata=metadata,
+        error=error,
+    )
+
+
+def _should_record_tool_input_guardrail_event(
+    capture: OpenAICapturePolicy,
+    *,
+    tracker: Any | None = None,
+) -> bool:
+    current_tracker = tracker if tracker is not None else get_current_tracker()
+    return (
+        capture.emit_child_events
+        and current_tracker is not None
+        and (is_inside_flow() or is_inside_checkpoint())
+    )
+
+
+def _tool_event_metadata(
+    tool: FunctionTool,
+    *,
+    tool_call_id: str | None,
+    context: Any = None,
+) -> dict[str, object]:
+    return {
+        "tool_name": _metadata_tool_name(context, tool),
+        "tool_call_id": tool_call_id,
+        "is_agent_tool": bool(getattr(tool, "_is_agent_tool", False)),
+        "tool_namespace": getattr(context, "tool_namespace", None)
+        or getattr(tool, "_tool_namespace", None),
+    }
+
+
+def _metadata_tool_name(context: Any, tool: FunctionTool) -> str:
+    value = getattr(context, "tool_name", None)
+    return value if isinstance(value, str) and value else tool.name
+
+
+def _guardrail_name(guardrail: Any) -> str | None:
+    get_name = getattr(guardrail, "get_name", None)
+    if callable(get_name):
+        try:
+            value = get_name()
+        except Exception:
+            value = None
+        if isinstance(value, str) and value:
+            return value
+    value = getattr(guardrail, "name", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _guardrail_behavior_type(output: Any) -> str | None:
+    behavior = getattr(output, "behavior", None)
+    value = _value_from_mapping_or_attr(behavior, "type")
+    return value if isinstance(value, str) and value else None
+
+
+def _guardrail_rejection_message(output: Any) -> str | None:
+    behavior = getattr(output, "behavior", None)
+    value = _value_from_mapping_or_attr(behavior, "message")
+    return value if isinstance(value, str) and value else None
 
 
 async def _tracked_tool_call(
@@ -220,7 +426,11 @@ async def _tracked_tool_call(
             status="failed",
             duration_ms=elapsed_ms(started_at),
             artifacts=artifacts,
-            metadata={"tool_name": tool.name, "tool_call_id": tool_call_id},
+            metadata=_tool_event_metadata(
+                tool,
+                tool_call_id=tool_call_id,
+                context=context,
+            ),
             error=error,
         )
         raise
@@ -240,14 +450,19 @@ async def _tracked_tool_call(
         status="completed",
         duration_ms=elapsed_ms(started_at),
         artifacts=artifacts,
-        metadata={
-            "tool_name": tool.name,
-            "tool_call_id": tool_call_id,
-            "is_agent_tool": bool(getattr(tool, "_is_agent_tool", False)),
-            "tool_namespace": getattr(tool, "_tool_namespace", None),
-        },
+        metadata=_tool_event_metadata(
+            tool,
+            tool_call_id=tool_call_id,
+            context=context,
+        ),
     )
     return result
+
+
+def _value_from_mapping_or_attr(value: Any, key: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _tool_input_envelope(
