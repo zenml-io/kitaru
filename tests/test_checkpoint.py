@@ -16,6 +16,7 @@ from zenml.enums import StepRuntime, StepType
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import (
+    _CHECKPOINT_HANDLE_SCAN_MAX_VALUES,
     _KitaruOutputArtifact,
     _raise_if_checkpoint_output_handle,
     _raise_if_checkpoint_output_handle_in_value,
@@ -690,6 +691,51 @@ def test_checkpoint_output_handle_validation_scans_prompt_containers() -> None:
     assert "DemoRequest.input[0].content[0].text" in message
     assert "Kitaru checkpoint output handle" in message
     assert "render_prompt.output" in message
+    assert ".load()" in message
+
+
+def test_checkpoint_output_handle_validation_formats_unusual_mapping_keys() -> None:
+    class WeirdKey:
+        def __repr__(self) -> str:
+            return "<weird key>"
+
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            {"foo.bar": {1: {WeirdKey(): handle}}},
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.input['foo.bar'][1][<weird key>]" in message
+
+
+def test_checkpoint_output_handle_validation_errors_when_scan_limit_is_exceeded() -> (
+    None
+):
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+    value = [*range(_CHECKPOINT_HANDLE_SCAN_MAX_VALUES), handle]
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "Kitaru could not validate DemoRequest.input" in message
+    assert f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values" in message
     assert ".load()" in message
 
 

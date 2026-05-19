@@ -6,6 +6,7 @@ Successful outputs become artifacts; failures are recorded for retry.
 
 from __future__ import annotations
 
+import keyword
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
@@ -100,6 +101,22 @@ def _raise_if_checkpoint_output_handle(
 _CHECKPOINT_HANDLE_SCAN_MAX_VALUES = 1_000
 
 
+def _format_checkpoint_value_path(parent: str, key: Any) -> str:
+    if isinstance(key, str) and key.isidentifier() and not keyword.iskeyword(key):
+        return f"{parent}.{key}"
+    return f"{parent}[{key!r}]"
+
+
+def _raise_checkpoint_handle_scan_limit_exceeded(field_name: str) -> None:
+    raise ValueError(
+        "Kitaru could not validate "
+        f"{field_name} for checkpoint output handles because the value contains "
+        f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values. "
+        "Pass a smaller value, or load any checkpoint output handles with `.load()` "
+        "before passing the value here."
+    )
+
+
 def _raise_if_checkpoint_output_handle_in_value(
     value: Any,
     *,
@@ -109,12 +126,13 @@ def _raise_if_checkpoint_output_handle_in_value(
     stack: list[tuple[Any, str]] = [(value, field_name)]
     seen_containers: set[int] = set()
     visited_values = 0
+    scan_limit_exceeded = False
 
     while stack:
         item, item_field_name = stack.pop()
         visited_values += 1
         if visited_values > _CHECKPOINT_HANDLE_SCAN_MAX_VALUES:
-            return
+            _raise_checkpoint_handle_scan_limit_exceeded(field_name)
 
         _raise_if_checkpoint_output_handle(
             item,
@@ -132,10 +150,13 @@ def _raise_if_checkpoint_output_handle_in_value(
                 visited_values + len(stack)
             )
             if remaining_values <= 0:
-                return
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
             children = list(islice(item.items(), remaining_values))
             stack.extend(
-                (child, f"{item_field_name}.{key}") for key, child in reversed(children)
+                (child, _format_checkpoint_value_path(item_field_name, key))
+                for key, child in reversed(children)
             )
             continue
 
@@ -149,11 +170,16 @@ def _raise_if_checkpoint_output_handle_in_value(
                 visited_values + len(stack)
             )
             if remaining_values <= 0:
-                return
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
             stack.extend(
                 (child, f"{item_field_name}[{index}]")
                 for index, child in reversed(list(enumerate(item[:remaining_values])))
             )
+
+    if scan_limit_exceeded:
+        _raise_checkpoint_handle_scan_limit_exceeded(field_name)
 
 
 class _KitaruOutputArtifact(OutputArtifact):
