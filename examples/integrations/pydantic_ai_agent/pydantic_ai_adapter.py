@@ -231,8 +231,12 @@ def demo_hitl_wiring() -> str:
     ``@hitl_tool`` is the safest default because the adapter routes it outside
     granular tool checkpoints. Native ``ApprovalRequired`` / ``CallDeferred``
     tools that may wait should be opted out of tool checkpointing. Ordinary sync
-    tools that call ``kp.wait_for_input(...)`` also need that opt-out so Kitaru
-    can keep the wait out of the tool checkpoint and on the workflow thread.
+    tools that call ``kp.wait_for_input(...)`` need that opt-out plus
+    ``allow_sync_tool_body_waits=True``: the opt-out keeps the wait out of the
+    tool checkpoint, and the explicit flag keeps supported sync tool bodies on
+    the workflow thread for the whole run. That means slow sync tools in the
+    same run can block the workflow thread instead of using Pydantic AI's normal
+    worker-thread path, so ``@hitl_tool`` remains the preferred pure-HITL shape.
     """
     agent = Agent(
         TestModel(call_tools=[]),
@@ -260,6 +264,7 @@ def demo_hitl_wiring() -> str:
             "deferred_side_effect": False,
             "ask_human_directly": False,
         },
+        allow_sync_tool_body_waits=True,
     )
 
     @flow

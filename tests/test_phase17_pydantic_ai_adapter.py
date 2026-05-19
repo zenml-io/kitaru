@@ -1,6 +1,7 @@
 """Integration tests for the PydanticAI adapter."""
 
 import asyncio
+import importlib
 import multiprocessing
 import re
 import time
@@ -124,7 +125,7 @@ def _assert_event_artifacts_use_display_names(
 _DIRECT_WAIT_AGENT: KitaruAgent[Any, str] | None = None
 _GUARDED_WAIT_AGENT: KitaruAgent[Any, str] | None = None
 _HITL_WAIT_AGENT: KitaruAgent[Any, str] | None = None
-_CHILD_EVENT_WAIT_INVOKED = "wait_invoked"
+_CHILD_EVENT_ZENML_WAIT_REACHED = "zenml_wait_reached"
 _CHILD_EVENT_COMPLETED = "completed"
 _CHILD_EVENT_ERROR = "error"
 
@@ -151,14 +152,41 @@ def _put_child_event(
     )
 
 
+def _install_child_wait_reached_event(queue: Any) -> Callable[[], None]:
+    """Report after `kitaru.wait()` passes guards and resolves ZenML's wait."""
+    wait_module = cast(Any, importlib.import_module("kitaru.wait"))
+    original_resolve = cast(
+        Callable[[], Callable[..., Any]],
+        wait_module._resolve_zenml_wait,
+    )
+
+    def recording_resolve() -> Callable[..., Any]:
+        zenml_wait = original_resolve()
+
+        def recording_wait(**kwargs: Any) -> Any:
+            _put_child_event(queue, _CHILD_EVENT_ZENML_WAIT_REACHED, kwargs.get("name"))
+            return zenml_wait(**kwargs)
+
+        return recording_wait
+
+    wait_module._resolve_zenml_wait = recording_resolve
+
+    def cleanup() -> None:
+        wait_module._resolve_zenml_wait = original_resolve
+
+    return cleanup
+
+
 def _run_flow_and_report(
     queue: Any,
     flow_definition: Any,
     cleanup: Callable[[], None],
 ) -> None:
     try:
-        flow_definition.run(cache=False)
-        _put_child_event(queue, _CHILD_EVENT_COMPLETED)
+        handle = flow_definition.run(cache=False)
+        _put_child_event(
+            queue, _CHILD_EVENT_COMPLETED, getattr(handle, "exec_id", None)
+        )
     except BaseException as exc:
         _put_child_event(queue, _CHILD_EVENT_ERROR, type(exc).__name__, str(exc))
     finally:
@@ -185,15 +213,7 @@ def pydantic_ai_hitl_wait_flow() -> str:
 
 def _run_direct_wait_flow_until_pause(queue: Any) -> None:
     global _DIRECT_WAIT_AGENT
-    import kitaru as kitaru_module
-
-    original_wait = kitaru_module.wait
-
-    def recording_wait(**kwargs: Any) -> Any:
-        _put_child_event(queue, _CHILD_EVENT_WAIT_INVOKED, kwargs.get("name"))
-        return original_wait(**kwargs)
-
-    kitaru_module.wait = cast(Any, recording_wait)
+    wait_cleanup = _install_child_wait_reached_event(queue)
 
     agent = Agent(
         TestModel(call_tools=["ask_user"]),
@@ -205,6 +225,7 @@ def _run_direct_wait_flow_until_pause(queue: Any) -> None:
     def ask_user() -> str:
         return kp.wait_for_input(
             schema=str,
+            name="direct_tool_wait",
             question="What context should the agent use?",
             timeout=0,
         )
@@ -212,11 +233,12 @@ def _run_direct_wait_flow_until_pause(queue: Any) -> None:
     _DIRECT_WAIT_AGENT = KitaruAgent(
         agent,
         tool_checkpoint_config_by_name={"ask_user": False},
+        allow_sync_tool_body_waits=True,
     )
 
     def cleanup() -> None:
         global _DIRECT_WAIT_AGENT
-        kitaru_module.wait = cast(Any, original_wait)
+        wait_cleanup()
         _DIRECT_WAIT_AGENT = None
 
     _run_flow_and_report(queue, pydantic_ai_direct_wait_flow, cleanup)
@@ -224,15 +246,7 @@ def _run_direct_wait_flow_until_pause(queue: Any) -> None:
 
 def _run_hitl_wait_flow_until_pause(queue: Any) -> None:
     global _HITL_WAIT_AGENT
-    from kitaru.adapters.pydantic_ai import _toolset
-
-    original_invoke_wait = _toolset.KitaruToolset._invoke_wait
-
-    def recording_invoke_wait(self: Any, **kwargs: Any) -> Any:
-        _put_child_event(queue, _CHILD_EVENT_WAIT_INVOKED, kwargs.get("wait_name"))
-        return original_invoke_wait(self, **kwargs)
-
-    _toolset.KitaruToolset._invoke_wait = cast(Any, recording_invoke_wait)
+    wait_cleanup = _install_child_wait_reached_event(queue)
 
     @hitl_tool(question="What should the tool return?", schema=str)
     def ask_human() -> str:
@@ -248,7 +262,7 @@ def _run_hitl_wait_flow_until_pause(queue: Any) -> None:
 
     def cleanup() -> None:
         global _HITL_WAIT_AGENT
-        _toolset.KitaruToolset._invoke_wait = cast(Any, original_invoke_wait)
+        wait_cleanup()
         _HITL_WAIT_AGENT = None
 
     _run_flow_and_report(queue, pydantic_ai_hitl_wait_flow, cleanup)
@@ -259,29 +273,75 @@ def _assert_child_flow_pauses(
     *,
     required_event: str,
     timeout: float = 30.0,
+    post_event_grace: float = 1.0,
 ) -> None:
-    # Use fork when available so the child inherits the xdist worker's already
-    # isolated ZenML/Kitaru environment. With spawn, the child re-imports this
-    # module from scratch; under pytest-xdist that can exit before our target
-    # function reports a structured error event.
-    start_method = (
-        "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
-    )
-    context = cast(Any, multiprocessing.get_context(start_method))
+    # Use fork so the child inherits the xdist worker's already isolated
+    # ZenML/Kitaru environment. Spawn re-imports this module from scratch and
+    # would need explicit per-child fixture paths to avoid cross-test state.
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("Child wait/pause tests require multiprocessing fork isolation.")
+    context = cast(Any, multiprocessing.get_context("fork"))
     queue = context.Queue()
     process = context.Process(target=target, args=(queue,), daemon=True)
     process.start()
 
     saw_required_event = False
+    grace_deadline: float | None = None
     deadline = time.time() + timeout
+
+    def assert_run_is_waiting(exec_id: str | None) -> None:
+        if exec_id is None:
+            pytest.fail(
+                "Child flow reached the real wait callable, then exited without "
+                "reporting an execution id to verify paused status."
+            )
+        status_deadline = time.time() + 5.0
+        last_status = "unknown"
+        while time.time() < status_deadline:
+            run = Client().get_pipeline_run(exec_id, allow_name_prefix_match=False)
+            last_status = str(getattr(run.status, "value", run.status))
+            if last_status == "paused":
+                return
+            time.sleep(0.2)
+        pytest.fail(
+            "Child flow reached the real wait callable and exited, but execution "
+            f"{exec_id} did not enter paused/waiting status; last status was "
+            f"{last_status!r}."
+        )
+
+    def handle_exit_after_wait() -> None:
+        try:
+            event = queue.get(timeout=0.5)
+        except Empty:
+            pytest.fail(
+                "Child flow exited after reaching the real wait callable, but no "
+                "structured error/completed event was reported."
+            )
+        if event.kind == _CHILD_EVENT_ERROR:
+            pytest.fail(
+                "Child flow reached the real wait callable, then failed instead "
+                f"of pausing: {event.detail}: {event.message}"
+            )
+        if event.kind == _CHILD_EVENT_COMPLETED:
+            assert_run_is_waiting(event.detail)
+            return
+        pytest.fail(
+            "Child flow exited after reaching the real wait callable with "
+            f"unexpected event {event.kind!r}."
+        )
+
     try:
         while time.time() < deadline:
             try:
                 event = queue.get(timeout=0.2)
             except Empty:
                 if saw_required_event:
-                    return
-                if not process.is_alive():
+                    assert grace_deadline is not None
+                    if process.is_alive() and time.time() >= grace_deadline:
+                        return
+                    if not process.is_alive():
+                        handle_exit_after_wait()
+                elif not process.is_alive():
                     pytest.fail(
                         "Child flow exited before pausing; required event "
                         f"{required_event!r} was not observed."
@@ -290,13 +350,20 @@ def _assert_child_flow_pauses(
 
             if event.kind == required_event:
                 saw_required_event = True
+                grace_deadline = time.time() + post_event_grace
                 continue
             if event.kind == _CHILD_EVENT_ERROR:
+                if saw_required_event:
+                    pytest.fail(
+                        "Child flow reached the real wait callable, then failed "
+                        f"instead of pausing: {event.detail}: {event.message}"
+                    )
                 pytest.fail(
                     f"Child flow failed before pausing: {event.detail}: {event.message}"
                 )
             if event.kind == _CHILD_EVENT_COMPLETED:
                 if saw_required_event:
+                    assert_run_is_waiting(event.detail)
                     return
                 pytest.fail(f"Child flow completed before reaching {required_event!r}.")
         pytest.fail(f"Child flow did not reach {required_event!r} before timeout.")
@@ -535,15 +602,15 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
     assert any(name.startswith("llm_call_1_response__") for name in artifact_names)
 
 
-def test_phase17_direct_wait_tool_with_checkpoint_opt_out_reaches_wait(
+def test_phase17_direct_wait_tool_with_explicit_thread_opt_in_reaches_wait(
     primed_zenml,
 ) -> None:
-    """A normal sync tool-body wait should stay on the workflow thread."""
+    """A normal sync tool-body wait should opt into workflow-thread execution."""
     del primed_zenml
     _require_wait_support()
     _assert_child_flow_pauses(
         _run_direct_wait_flow_until_pause,
-        required_event=_CHILD_EVENT_WAIT_INVOKED,
+        required_event=_CHILD_EVENT_ZENML_WAIT_REACHED,
     )
 
 
@@ -570,8 +637,11 @@ def test_phase17_direct_wait_tool_without_opt_out_keeps_checkpoint_guard(
     global _GUARDED_WAIT_AGENT
     _GUARDED_WAIT_AGENT = KitaruAgent(agent)
     try:
-        with pytest.raises(KitaruUsageError, match="tool_checkpoint_config_by_name"):
+        with pytest.raises(KitaruUsageError) as exc_info:
             pydantic_ai_guarded_wait_flow.run(cache=False)
+        message = str(exc_info.value)
+        assert "tool_checkpoint_config_by_name" in message
+        assert "allow_sync_tool_body_waits=True" in message
     finally:
         _GUARDED_WAIT_AGENT = None
 
@@ -582,7 +652,7 @@ def test_phase17_hitl_tool_still_reaches_wait(primed_zenml) -> None:
     _require_wait_support()
     _assert_child_flow_pauses(
         _run_hitl_wait_flow_until_pause,
-        required_event=_CHILD_EVENT_WAIT_INVOKED,
+        required_event=_CHILD_EVENT_ZENML_WAIT_REACHED,
     )
 
 

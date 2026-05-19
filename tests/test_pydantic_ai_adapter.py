@@ -1323,7 +1323,7 @@ class TestThreadingCompat:
         with inline_sync_tool_execution(enabled=False) as active:
             assert active is False
 
-    def test_inline_sync_tool_execution_is_noop_when_hook_missing(
+    def test_inline_sync_tool_execution_fails_fast_when_hook_missing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from pydantic_ai import _utils as pydantic_ai_utils
@@ -1334,10 +1334,13 @@ class TestThreadingCompat:
 
         monkeypatch.delattr(pydantic_ai_utils, "disable_threads", raising=False)
 
-        with inline_sync_tool_execution(enabled=True) as active:
-            assert active is False
+        with (
+            pytest.raises(KitaruUsageError, match=r"disable_threads.*missing"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
 
-    def test_inline_sync_tool_execution_is_noop_when_hook_non_callable(
+    def test_inline_sync_tool_execution_fails_fast_when_hook_non_callable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from pydantic_ai import _utils as pydantic_ai_utils
@@ -1348,10 +1351,33 @@ class TestThreadingCompat:
 
         monkeypatch.setattr(pydantic_ai_utils, "disable_threads", object())
 
-        with inline_sync_tool_execution(enabled=True) as active:
-            assert active is False
+        with (
+            pytest.raises(KitaruUsageError, match=r"disable_threads.*not callable"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
 
-    def test_inline_sync_tool_execution_is_noop_when_hook_entry_fails(
+    def test_inline_sync_tool_execution_fails_fast_when_hook_creation_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        def broken_hook() -> object:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", broken_hook)
+
+        with (
+            pytest.raises(KitaruUsageError, match="could not create"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
+
+    def test_inline_sync_tool_execution_fails_fast_when_hook_entry_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from pydantic_ai import _utils as pydantic_ai_utils
@@ -1371,10 +1397,13 @@ class TestThreadingCompat:
             pydantic_ai_utils, "disable_threads", lambda: BrokenManager()
         )
 
-        with inline_sync_tool_execution(enabled=True) as active:
-            assert active is False
+        with (
+            pytest.raises(KitaruUsageError, match="could not be entered"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
 
-    def test_agent_requests_inline_sync_tools_only_for_false_tool_override(
+    def test_agent_requests_inline_sync_tools_only_for_explicit_wait_opt_in(
         self,
     ) -> None:
         from pydantic_ai import Agent
@@ -1386,6 +1415,11 @@ class TestThreadingCompat:
             Agent(TestModel(), name="inline_tools_agent"),
             tool_checkpoint_config_by_name={"ask_user": False},
         )
+        opted_out_with_wait_compat = KitaruAgent(
+            Agent(TestModel(), name="inline_tools_wait_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+            allow_sync_tool_body_waits=True,
+        )
         ordinary_granular = KitaruAgent(Agent(TestModel(), name="ordinary_tools_agent"))
         configured_granular = KitaruAgent(
             Agent(TestModel(), name="configured_tools_agent"),
@@ -1396,10 +1430,37 @@ class TestThreadingCompat:
             granular_checkpoints=False,
         )
 
-        assert opted_out._should_inline_sync_tools() is True
+        assert opted_out._should_inline_sync_tools() is False
+        assert opted_out_with_wait_compat._should_inline_sync_tools() is True
         assert ordinary_granular._should_inline_sync_tools() is False
         assert configured_granular._should_inline_sync_tools() is False
         assert turn_mode._should_inline_sync_tools() is False
+
+    def test_sync_tool_body_wait_opt_in_requires_checkpoint_opt_out(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(KitaruUsageError, match="requires at least one"):
+            KitaruAgent(
+                Agent(TestModel(), name="missing_tool_opt_out"),
+                allow_sync_tool_body_waits=True,
+            )
+
+    def test_sync_tool_body_wait_opt_in_requires_granular_mode(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
+            KitaruAgent(
+                Agent(TestModel(), name="turn_mode_wait_compat"),
+                granular_checkpoints=False,
+                tool_checkpoint_config_by_name={"ask_user": False},
+                allow_sync_tool_body_waits=True,
+            )
 
 
 class TestWaitForInput:
@@ -1458,6 +1519,7 @@ class TestWaitForInput:
         assert "sync Pydantic AI tool body" in message
         assert "worker thread" in message
         assert "tool_checkpoint_config_by_name" in message
+        assert "allow_sync_tool_body_waits=True" in message
         assert "@hitl_tool" in message
 
     def test_wait_for_input_does_not_rewrite_unrelated_runtime_errors(

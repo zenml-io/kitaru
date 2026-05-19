@@ -48,7 +48,7 @@ from ._mcp_server import has_running_mcp_toolset
 from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
-from ._threading_compat import inline_sync_tool_execution
+from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_execution
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
@@ -90,6 +90,13 @@ _AUTO_FLOW_LOCK = threading.Lock()
 
 if f"src.{__name__}" not in sys.modules:
     sys.modules[f"src.{__name__}"] = sys.modules[__name__]
+
+
+def _has_tool_checkpoint_opt_out(
+    overrides: ToolCheckpointOverrides | None,
+) -> bool:
+    """Return whether any named tool explicitly opts out of checkpointing."""
+    return bool(overrides and any(override is False for override in overrides.values()))
 
 
 class _AutoFlowSlot:
@@ -291,6 +298,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
         mcp_checkpoint_config: CheckpointConfig | None = None,
         persist_message_history: bool = False,
+        allow_sync_tool_body_waits: bool = False,
     ) -> None:
         """Wrap an agent so its runs become durable under Kitaru.
 
@@ -310,6 +318,16 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         **Turn mode** (``granular_checkpoints=False``): each run opens one
         ``@kitaru.checkpoint`` named after the agent; model/tool/MCP calls are
         recorded as child events under that checkpoint.
+
+        If an ordinary synchronous Pydantic AI tool body calls
+        ``kp.wait_for_input(...)`` directly, pass both
+        ``tool_checkpoint_config_by_name={"tool_name": False}`` and
+        ``allow_sync_tool_body_waits=True``. The ``False`` override only skips
+        the adapter-created tool checkpoint. The explicit
+        ``allow_sync_tool_body_waits`` flag asks Pydantic AI to keep supported
+        sync tool bodies on the workflow thread for the whole run, and Kitaru
+        fails before tool execution if that private compatibility hook is not
+        available.
 
         When ``persist_message_history=True``, the adapter remembers the final
         ``result.all_messages()`` of each run on the instance and auto-injects
@@ -367,6 +385,24 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             raise KitaruUsageError(
                 "Per-call checkpoint configs require `granular_checkpoints=True`."
             )
+        if allow_sync_tool_body_waits and not granular_checkpoints:
+            raise KitaruUsageError(
+                "`allow_sync_tool_body_waits=True` requires `granular_checkpoints=True` "
+                "and a matching checkpoint opt-out such as "
+                "`tool_checkpoint_config_by_name={\"tool_name\": False}`."
+            )
+        if allow_sync_tool_body_waits and not _has_tool_checkpoint_opt_out(
+            tool_checkpoint_config_by_name
+        ):
+            raise KitaruUsageError(
+                "`allow_sync_tool_body_waits=True` requires at least one per-tool "
+                "checkpoint opt-out such as "
+                "`tool_checkpoint_config_by_name={\"tool_name\": False}`. "
+                "The opt-out keeps `kp.wait_for_input(...)` out of a synthetic "
+                "tool checkpoint; the flag only controls Pydantic AI sync-tool "
+                "threading."
+            )
+        self._allow_sync_tool_body_waits = allow_sync_tool_body_waits
         if granular_checkpoints:
             self._model_checkpoint_config = (
                 validate_checkpoint_config(
@@ -416,6 +452,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 "toolset_count": len(self._toolsets),
                 "granular_checkpoints": granular_checkpoints,
                 "persist_message_history": persist_message_history,
+                "allow_sync_tool_body_waits": allow_sync_tool_body_waits,
             },
         )
 
@@ -805,21 +842,15 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
 
     def _should_inline_sync_tools(self) -> bool:
-        """Return whether this agent run needs Pydantic AI sync tools inline.
+        """Return whether the user explicitly requested inline sync tools.
 
         This is deliberately run-wide rather than per-tool. Pydantic AI decides
         whether to offload sync tools before Kitaru reaches an individual tool
-        body, so the safe compatibility seam is the agent run boundary. Keep the
-        predicate narrow to agents with explicit per-tool checkpoint opt-outs.
+        body, so the safe compatibility seam is the agent run boundary. The
+        checkpoint opt-out remains checkpoint-only; this separate flag controls
+        the private Pydantic AI threading compatibility path.
         """
-        return bool(
-            self._granular_checkpoints
-            and self._tool_checkpoint_config_by_name
-            and any(
-                override is False
-                for override in self._tool_checkpoint_config_by_name.values()
-            )
-        )
+        return self._allow_sync_tool_body_waits
 
     def _ensure_auto_flow_mcp_lifecycle_safe(
         self,
@@ -971,9 +1002,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
-                inline_sync_tool_execution(
-                    enabled=self._should_inline_sync_tools()
-                ),
+                _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
                 ),
@@ -1082,9 +1111,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
-                inline_sync_tool_execution(
-                    enabled=self._should_inline_sync_tools()
-                ),
+                _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
                 ),
