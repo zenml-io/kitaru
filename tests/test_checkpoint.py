@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +15,7 @@ from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
 
 from kitaru.analytics import AnalyticsEvent
-from kitaru.checkpoint import checkpoint
+from kitaru.checkpoint import _synthetic_checkpoint, checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.flow import flow
 from kitaru.runtime import (
@@ -127,12 +128,12 @@ def _build_checkpoint(
         return _decorate
 
     with patch("kitaru.checkpoint.step", side_effect=_fake_step):
-        wrapped = checkpoint(
+        wrapped = _synthetic_checkpoint(
             retries=retries,
             type=checkpoint_type,
             runtime=runtime,
             cache=cache,
-            _flow_result_candidate=flow_result_candidate,
+            flow_result_candidate=flow_result_candidate,
         )(func)
 
     return wrapped, captured
@@ -247,12 +248,21 @@ def test_checkpoint_private_flow_result_candidate_false_writes_metadata() -> Non
     }
 
 
+def test_checkpoint_public_signature_hides_flow_result_candidate() -> None:
+    signature = inspect.signature(checkpoint)
+
+    assert "_flow_result_candidate" not in signature.parameters
+    assert "flow_result_candidate" not in signature.parameters
+
+
 def test_checkpoint_rejects_non_bool_flow_result_candidate() -> None:
     with pytest.raises(
         KitaruUsageError,
-        match="Checkpoint _flow_result_candidate must be a bool",
+        match="Synthetic checkpoint flow_result_candidate must be a bool",
     ):
-        checkpoint(_flow_result_candidate="false")(lambda: None)  # ty: ignore[invalid-argument-type]
+        _synthetic_checkpoint(
+            flow_result_candidate=cast(Any, "false"),
+        )(lambda: None)
 
 
 def test_checkpoint_passes_plain_name_to_zenml_step() -> None:

@@ -48,7 +48,7 @@ def test_synthetic_checkpoint_marks_flow_result_non_candidate(
 
         return decorate
 
-    monkeypatch.setattr(_utils.kitaru, "checkpoint", fake_checkpoint)
+    monkeypatch.setattr(_utils, "_synthetic_checkpoint", fake_checkpoint)
 
     _utils._build_checkpoint_step(
         config={"type": "llm_call", "cache": False, "retries": 2},
@@ -56,7 +56,7 @@ def test_synthetic_checkpoint_marks_flow_result_non_candidate(
         body=lambda: "ok",
     )
 
-    assert captured["_flow_result_candidate"] is False
+    assert captured["flow_result_candidate"] is False
     assert captured["type"] == "llm_call"
     assert captured["cache"] is False
     assert captured["retries"] == 2

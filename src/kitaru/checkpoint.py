@@ -147,7 +147,7 @@ def _normalize_flow_result_candidate(value: bool | None) -> bool | None:
         return None
     if not isinstance(value, bool):
         raise KitaruUsageError(
-            "Checkpoint _flow_result_candidate must be a bool when provided."
+            "Synthetic checkpoint flow_result_candidate must be a bool when provided."
         )
     return value
 
@@ -367,8 +367,35 @@ def checkpoint(
     type: str | None = None,
     runtime: str | None = None,
     cache: bool | None = None,
-    _flow_result_candidate: bool | None = None,
 ) -> Callable[[Callable[..., Any]], _CheckpointDefinition]: ...
+
+
+def _synthetic_checkpoint(
+    func: Callable[..., Any] | None = None,
+    *,
+    retries: int = 0,
+    type: str | None = None,
+    runtime: str | None = None,
+    cache: bool | None = None,
+    flow_result_candidate: bool | None = None,
+) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
+    """Create a checkpoint with optional internal metadata."""
+    checkpoint_type = type
+
+    def _decorate(target: Callable[..., Any]) -> _CheckpointDefinition:
+        return _CheckpointDefinition(
+            target,
+            retries=retries,
+            checkpoint_type=checkpoint_type,
+            runtime=runtime,
+            cache=cache,
+            flow_result_candidate=flow_result_candidate,
+        )
+
+    if func is not None:
+        return _decorate(func)
+
+    return _decorate
 
 
 def checkpoint(
@@ -378,7 +405,6 @@ def checkpoint(
     type: str | None = None,
     runtime: str | None = None,
     cache: bool | None = None,
-    _flow_result_candidate: bool | None = None,
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Mark a function as a durable checkpoint.
 
@@ -413,22 +439,10 @@ def checkpoint(
     Returns:
         The wrapped checkpoint object or a decorator that returns it.
     """
-    checkpoint_type = type
-    # Internal escape hatch for adapter-created synthetic checkpoints. Keep it
-    # out of public adapter config types; normal user checkpoints should omit it
-    # so their metadata shape stays stable.
-
-    def _decorate(target: Callable[..., Any]) -> _CheckpointDefinition:
-        return _CheckpointDefinition(
-            target,
-            retries=retries,
-            checkpoint_type=checkpoint_type,
-            runtime=runtime,
-            cache=cache,
-            flow_result_candidate=_flow_result_candidate,
-        )
-
-    if func is not None:
-        return _decorate(func)
-
-    return _decorate
+    return _synthetic_checkpoint(
+        func,
+        retries=retries,
+        type=type,
+        runtime=runtime,
+        cache=cache,
+    )

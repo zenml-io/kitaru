@@ -20,8 +20,8 @@ from typing import Any, Literal, cast
 from pydantic_core import to_jsonable_python
 from typing_extensions import TypedDict
 
-import kitaru
 from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru.checkpoint import _synthetic_checkpoint
 from kitaru.errors import KitaruUsageError
 
 CheckpointRuntime = Literal["inline", "isolated"]
@@ -268,9 +268,9 @@ def _build_checkpoint_step(
         )
 
     call.__name__ = safe_step_name(step_name)
-    checkpoint_def = kitaru.checkpoint(
+    checkpoint_def = _synthetic_checkpoint(
         **config,
-        _flow_result_candidate=False,
+        flow_result_candidate=False,
     )(call)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:

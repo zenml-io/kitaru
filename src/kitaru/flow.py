@@ -825,24 +825,38 @@ def _extract_outputs_from_terminal_steps(
         return []
     execution_id = str(hydrated_run.id)
     if len(terminal_step_names) > 1:
-        candidate_terminal_step_names = [
-            step_name
-            for step_name in terminal_step_names
-            if _is_flow_result_candidate_step(step_runs[step_name])
-        ]
-        if len(candidate_terminal_step_names) == 1:
-            terminal_step_names = candidate_terminal_step_names
-        else:
-            raise _MultipleTerminalStepsOutputError(
-                _ambiguous_terminal_message(
-                    execution_id,
-                    reason=(
-                        f"multiple terminal checkpoints were found "
-                        f"({len(terminal_step_names)}): "
-                        f"{', '.join(terminal_step_names)}"
-                    ),
-                )
+        eligible_terminal_step_names: list[str] = []
+        non_candidate_terminal_step_names: list[str] = []
+        for step_name in terminal_step_names:
+            if _is_flow_result_candidate_step(step_runs[step_name]):
+                eligible_terminal_step_names.append(step_name)
+            else:
+                non_candidate_terminal_step_names.append(step_name)
+
+        reason = (
+            f"multiple terminal checkpoints were found "
+            f"({len(terminal_step_names)}): "
+            f"{', '.join(terminal_step_names)}"
+        )
+        if eligible_terminal_step_names:
+            reason += (
+                ". Terminal checkpoints still eligible as flow results: "
+                f"{', '.join(eligible_terminal_step_names)}."
             )
+        if non_candidate_terminal_step_names:
+            reason += (
+                " Terminal checkpoints marked as adapter-created/non-result: "
+                f"{', '.join(non_candidate_terminal_step_names)}. These steps "
+                "also ended the graph, so Kitaru cannot safely ignore them; "
+                "add a final checkpoint that consumes all branches and returns "
+                "the value you want."
+            )
+        raise _MultipleTerminalStepsOutputError(
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=reason,
+            )
+        )
 
     terminal_step_name = terminal_step_names[0]
     terminal_step = step_runs[terminal_step_name]
