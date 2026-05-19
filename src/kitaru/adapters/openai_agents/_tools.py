@@ -391,7 +391,9 @@ def _guardrail_event_error(
         return None
     if capture.save_input or behavior_type == _GUARDRAIL_BEHAVIOR_RAISE_EXCEPTION:
         return error
-    return RuntimeError(_GUARDRAIL_ERROR_REDACTED_MESSAGE)
+    redacted_error = RuntimeError(_GUARDRAIL_ERROR_REDACTED_MESSAGE)
+    redacted_error.__dict__["_kitaru_redacted_run_error"] = True
+    return redacted_error
 
 
 def _should_record_tool_input_guardrail_event(

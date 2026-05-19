@@ -1314,6 +1314,17 @@ async def test_tool_input_guardrail_exception_summary_redacts(
     assert "details redacted" in event_error["message"]
     assert "details redacted" in summary_error["message"]
 
+    tracker = openai_tracking.EventTracker(agent_name="guardrail_summary_agent")
+    redacted_error = RuntimeError("details redacted")
+    redacted_error.__dict__["_kitaru_redacted_run_error"] = True
+    tracker.set_run_error(redacted_error)
+    tracker.set_run_error(RuntimeError("guardrail saw SECRET_DO_NOT_LOG"))
+    overwrite_summary = tracker.build_run_summary()
+    overwrite_error = cast(dict[str, Any], overwrite_summary["error"])
+    assert "SECRET_DO_NOT_LOG" not in repr(overwrite_summary)
+    assert overwrite_error is not None
+    assert "details redacted" in overwrite_error["message"]
+
 
 def test_tool_input_guardrail_error_metadata_redacts_when_input_capture_disabled(
     monkeypatch: pytest.MonkeyPatch,

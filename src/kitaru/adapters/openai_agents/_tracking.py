@@ -247,6 +247,12 @@ class EventTracker:
     ) -> None:
         with self._lock:
             self._status = "failed"
+            if (
+                self._error is not None
+                and getattr(self._error, "_kitaru_redacted_run_error", False)
+                and not getattr(error, "_kitaru_redacted_run_error", False)
+            ):
+                return
             if overwrite or self._error is None:
                 self._error = error
 
