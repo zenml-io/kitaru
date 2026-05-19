@@ -127,6 +127,20 @@ def test_kitaru_runner_requires_context_codec_pair(
         )
 
 
+def test_kitaru_runner_exposes_keyword_only_context(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    run_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run)
+    run_sync_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run_sync)
+
+    assert run_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run_signature.parameters["context"].default is None
+    assert (
+        run_sync_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert run_sync_signature.parameters["context"].default is None
+
+
 def test_run_sync_rejects_running_event_loop(
     openai_agents_adapter: types.ModuleType,
 ) -> None:
@@ -250,7 +264,7 @@ def test_run_sync_canonicalizes_foreign_runner_call_checkpoint_result(
     monkeypatch.setattr(
         runner,
         "_prepare_execution_objects",
-        lambda *, wrap_calls: (SimpleNamespace(name="agent"), SimpleNamespace()),
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
     )
 
     result = runner.run_sync(openai_agents_adapter.OpenAIRunRequest.start("hello"))
@@ -278,7 +292,7 @@ def test_run_sync_canonicalizes_foreign_interrupted_checkpoint_result(
     monkeypatch.setattr(
         runner,
         "_prepare_execution_objects",
-        lambda *, wrap_calls: (SimpleNamespace(name="agent"), SimpleNamespace()),
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
     )
 
     result = runner.run_sync(openai_agents_adapter.OpenAIRunRequest.start("hello"))
@@ -316,7 +330,7 @@ def test_run_canonicalizes_foreign_runner_call_checkpoint_result(
     monkeypatch.setattr(
         runner,
         "_prepare_execution_objects",
-        lambda *, wrap_calls: (SimpleNamespace(name="agent"), SimpleNamespace()),
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
     )
 
     async def call_run() -> object:
@@ -347,7 +361,7 @@ def test_invalid_runner_call_checkpoint_result_fails_before_success_tracking(
     monkeypatch.setattr(
         runner,
         "_prepare_execution_objects",
-        lambda *, wrap_calls: (SimpleNamespace(name="agent"), SimpleNamespace()),
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
     )
     track_calls: list[tuple[object, object]] = []
     monkeypatch.setattr(
@@ -389,6 +403,26 @@ def test_openai_run_request_start_and_resume_validation(
             pending_state=envelope,
             decision=decision,
         )
+    with pytest.raises(ValidationError):
+        openai_agents_adapter.OpenAIRunRequest(kind="start", input="hello", context={})
+
+
+def test_fresh_context_is_rejected_for_resume_request(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    request = openai_agents_adapter.OpenAIRunRequest.resume(
+        openai_agents_adapter.OpenAIRunStateEnvelope(
+            agents_sdk_version="0.15.0",
+            state_json={"current_turn": 1},
+        ),
+        openai_agents_adapter.OpenAIApprovalDecision(approve=True),
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="resume-agent"), checkpoint_strategy="runner_call"
+    )
+
+    with pytest.raises(KitaruUsageError, match="Fresh `context=`"):
+        runner.run_sync(request, context=SimpleNamespace(team_id="team-a"))
 
 
 def test_openai_run_request_rejects_arbitrary_input_object(

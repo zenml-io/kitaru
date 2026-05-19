@@ -239,10 +239,22 @@ class EventTracker:
                 )
             )
 
-    def set_run_error(self, error: BaseException) -> None:
+    def set_run_error(
+        self,
+        error: BaseException,
+        *,
+        overwrite: bool = True,
+    ) -> None:
         with self._lock:
             self._status = "failed"
-            self._error = error
+            if (
+                self._error is not None
+                and getattr(self._error, "_kitaru_redacted_run_error", False)
+                and not getattr(error, "_kitaru_redacted_run_error", False)
+            ):
+                return
+            if overwrite or self._error is None:
+                self._error = error
 
     def _build_run_summary_unlocked(
         self,
@@ -310,7 +322,7 @@ def tracker_scope(agent_name: str | None) -> Iterator[EventTracker]:
     try:
         yield tracker
     except Exception as error:
-        tracker.set_run_error(error)
+        tracker.set_run_error(error, overwrite=False)
         raise
     finally:
         try:

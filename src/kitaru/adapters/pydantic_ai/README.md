@@ -137,20 +137,23 @@ Other PydanticAI deferred patterns can also route through `kitaru.wait()` **when
 
 Durable waits need a stable Pydantic AI `tool_call_id`. The adapter uses that id to make the wait name deterministic, so a resumed run looks for the same human input instead of inventing a new wait. If Pydantic AI does not provide a stable, sanitizable `tool_call_id`, Kitaru raises rather than falling back to a random wait name.
 
-In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call.
+In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call. Prefer `@hitl_tool` for tools that are purely human-input gates.
 
-Regular tool bodies are different. A normal tool in granular mode usually runs inside an adapter-created `*_tool` checkpoint, and `kitaru.wait()` is intentionally rejected from checkpoint scope. `wait_for_input()` does not bypass this guard: if a regular tool body raises `ApprovalRequired` / `CallDeferred` or calls `wait_for_input()` from inside that checkpoint, Kitaru fails early with guidance instead of creating a confusing checkpoint-contained wait.
+Regular sync tool bodies are different. A normal tool in granular mode usually runs inside an adapter-created `*_tool` checkpoint, and Pydantic AI normally runs sync tools on a worker thread. Kitaru waits need both conditions to be safe: they must be outside the synthetic checkpoint and on the workflow thread. `wait_for_input()` does not bypass these guards: if a regular tool body raises `ApprovalRequired` / `CallDeferred` or calls `wait_for_input()` from inside that checkpoint, Kitaru fails early with guidance instead of creating a confusing checkpoint-contained wait.
 
-Use one of these safe patterns for regular tool-body waits:
+Use one of these safe patterns for regular tool-body waits. The per-tool `False` opt-out keeps the wait out of the synthetic `*_tool` checkpoint. The separate `allow_sync_tool_body_waits=True` flag explicitly asks Kitaru to activate Pydantic AI thread compatibility for supported sync tools during the agent run. That compatibility layer is run-wide, so Kitaru only enables it when you ask for it directly. The trade-off is concrete: any supported sync tool in that run may execute inline instead of using Pydantic AI's normal worker-thread path, so avoid mixing this opt-in with slow/blocking sync tools if you rely on normal tool parallelism:
 
 ```python
 durable_agent = KitaruAgent(
     agent,
-    tool_checkpoint_config_by_name={"ask_user": False},  # this tool waits at flow scope
+    tool_checkpoint_config_by_name={"ask_user": False},  # checkpoint opt-out only
+    allow_sync_tool_body_waits=True,  # run sync tool bodies on the workflow thread
 )
 ```
 
 Or move the human gate outside the tool entirely — for example, call `kitaru.wait()` before or after the agent turn in your `@kitaru.flow` code.
+
+If the compatibility layer is unavailable for a future Pydantic AI version, Kitaru fails before the agent enters user sync tool bodies and includes installed-version details plus guidance to use `@hitl_tool(...)` or move the wait into explicit flow code.
 
 This also affects where event details land. Flow-scope explicit HITL calls are still logged as adapter event metadata, but checkpoint artifacts such as `event_log`, `run_summary`, and captured tool args/results are only saved when there is an actual checkpoint scope to attach them to.
 
