@@ -8,12 +8,17 @@ import inspect
 import sys
 import types
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
+from tests._checkpoint_handle_helpers import (
+    assert_checkpoint_handle_error,
+    checkpoint_output_handle,
+)
 
 
 def _purge_claude_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,6 +207,46 @@ def test_claude_run_request_start_and_resume_validation(
         claude_adapter.ClaudeRunRequest(kind="resume", prompt="hello")
     with pytest.raises(ValidationError, match="positive"):
         claude_adapter.ClaudeRunRequest.start("hello", max_turns=0)
+
+
+def test_claude_run_request_rejects_checkpoint_handles(
+    claude_adapter: types.ModuleType,
+) -> None:
+    handle = checkpoint_output_handle()
+
+    with pytest.raises(ValidationError) as prompt_exc:
+        claude_adapter.ClaudeRunRequest.start(cast(str, handle))
+    assert_checkpoint_handle_error(
+        prompt_exc,
+        field_name="ClaudeRunRequest.prompt",
+    )
+
+    with pytest.raises(ValidationError) as resume_prompt_exc:
+        claude_adapter.ClaudeRunRequest.resume(
+            cast(str, handle),
+            "session-123",
+        )
+    assert_checkpoint_handle_error(
+        resume_prompt_exc,
+        field_name="ClaudeRunRequest.prompt",
+    )
+
+    with pytest.raises(ValidationError) as session_exc:
+        claude_adapter.ClaudeRunRequest.resume(
+            "continue",
+            cast(str, handle),
+        )
+    assert_checkpoint_handle_error(
+        session_exc,
+        field_name="ClaudeRunRequest.resume_session_id",
+    )
+
+    with pytest.raises(ValidationError) as cwd_exc:
+        claude_adapter.ClaudeRunRequest.start("hello", cwd=cast(str, handle))
+    assert_checkpoint_handle_error(
+        cwd_exc,
+        field_name="ClaudeRunRequest.cwd",
+    )
 
 
 def test_capture_policy_accepts_strict_capture_failure_knobs(

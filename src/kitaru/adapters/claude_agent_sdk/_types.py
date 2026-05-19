@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from kitaru.checkpoint import _raise_if_checkpoint_output_handle
+
 
 class ClaudeRunRequest(BaseModel):
     """Serializable input to ``KitaruClaudeRunner.run(...)`` / ``run_sync(...)``."""
@@ -63,11 +65,41 @@ class ClaudeRunRequest(BaseModel):
             raise ValueError("Claude run prompt must be non-empty.")
         return value
 
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def _reject_prompt_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle(
+            value,
+            field_name="ClaudeRunRequest.prompt",
+            expected="a materialized string prompt",
+        )
+        return value
+
     @field_validator("resume_session_id")
     @classmethod
     def _validate_resume_session_id(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("resume_session_id must be non-empty when provided.")
+        return value
+
+    @field_validator("resume_session_id", mode="before")
+    @classmethod
+    def _reject_resume_session_id_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle(
+            value,
+            field_name="ClaudeRunRequest.resume_session_id",
+            expected="a materialized Claude session id string",
+        )
+        return value
+
+    @field_validator("cwd", mode="before")
+    @classmethod
+    def _reject_cwd_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle(
+            value,
+            field_name="ClaudeRunRequest.cwd",
+            expected="a materialized filesystem path string",
+        )
         return value
 
     @field_validator("max_turns")

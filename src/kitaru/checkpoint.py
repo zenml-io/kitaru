@@ -6,10 +6,12 @@ Successful outputs become artifacts; failures are recorded for retry.
 
 from __future__ import annotations
 
+import keyword
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from functools import update_wrapper, wraps
+from itertools import islice
 from typing import Any, Literal, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
@@ -56,6 +58,132 @@ _KITARU_EXTRA_NAMESPACE = "kitaru"
 _CHECKPOINT_BOUNDARY_KEY = "boundary"
 _CHECKPOINT_BOUNDARY_VALUE = "checkpoint"
 _FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
+
+
+def _is_checkpoint_output_handle(value: Any) -> bool:
+    return isinstance(value, OutputArtifact)
+
+
+def _checkpoint_output_handle_validation_message(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> str:
+    checkpoint_name = getattr(value, "step_name", None)
+    output_name = getattr(value, "output_name", None)
+    handle_context = "a Kitaru checkpoint output handle"
+    if checkpoint_name and output_name:
+        handle_context = (
+            f"a Kitaru checkpoint output handle for `{checkpoint_name}.{output_name}`"
+        )
+
+    return (
+        f"{field_name} received {handle_context}, not {expected}. "
+        "In a flow body, call `.load()` before constructing this request when "
+        "you need the concrete value. To preserve the durable data edge, pass "
+        "the original handle into a downstream `@checkpoint` instead."
+    )
+
+
+def _raise_if_checkpoint_output_handle(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> None:
+    if _is_checkpoint_output_handle(value):
+        raise ValueError(
+            _checkpoint_output_handle_validation_message(
+                value,
+                field_name=field_name,
+                expected=expected,
+            )
+        )
+
+
+_CHECKPOINT_HANDLE_SCAN_MAX_VALUES = 1_000
+
+
+def _format_checkpoint_value_path(parent: str, key: Any) -> str:
+    if isinstance(key, str) and key.isidentifier() and not keyword.iskeyword(key):
+        return f"{parent}.{key}"
+    return f"{parent}[{key!r}]"
+
+
+def _raise_checkpoint_handle_scan_limit_exceeded(field_name: str) -> None:
+    raise ValueError(
+        "Kitaru could not validate "
+        f"{field_name} for checkpoint output handles because the value contains "
+        f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values. "
+        "Pass a smaller value, or load any checkpoint output handles with `.load()` "
+        "before passing the value here."
+    )
+
+
+def _raise_if_checkpoint_output_handle_in_value(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> None:
+    stack: list[tuple[Any, str]] = [(value, field_name)]
+    seen_containers: set[int] = set()
+    visited_values = 0
+    scan_limit_exceeded = False
+
+    while stack:
+        item, item_field_name = stack.pop()
+        visited_values += 1
+        if visited_values > _CHECKPOINT_HANDLE_SCAN_MAX_VALUES:
+            _raise_checkpoint_handle_scan_limit_exceeded(field_name)
+
+        _raise_if_checkpoint_output_handle(
+            item,
+            field_name=item_field_name,
+            expected=expected,
+        )
+
+        if isinstance(item, Mapping):
+            container_id = id(item)
+            if container_id in seen_containers:
+                continue
+            seen_containers.add(container_id)
+
+            remaining_values = _CHECKPOINT_HANDLE_SCAN_MAX_VALUES - (
+                visited_values + len(stack)
+            )
+            if remaining_values <= 0:
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
+            children = list(islice(item.items(), remaining_values))
+            stack.extend(
+                (child, _format_checkpoint_value_path(item_field_name, key))
+                for key, child in reversed(children)
+            )
+            continue
+
+        if isinstance(item, (list, tuple)):
+            container_id = id(item)
+            if container_id in seen_containers:
+                continue
+            seen_containers.add(container_id)
+
+            remaining_values = _CHECKPOINT_HANDLE_SCAN_MAX_VALUES - (
+                visited_values + len(stack)
+            )
+            if remaining_values <= 0:
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
+            stack.extend(
+                (child, f"{item_field_name}[{index}]")
+                for index, child in reversed(list(enumerate(item[:remaining_values])))
+            )
+
+    if scan_limit_exceeded:
+        _raise_checkpoint_handle_scan_limit_exceeded(field_name)
 
 
 class _KitaruOutputArtifact(OutputArtifact):
