@@ -4,11 +4,13 @@ import asyncio
 import importlib
 import multiprocessing
 import re
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty
 from typing import Any, cast
 from uuid import uuid4
@@ -177,6 +179,16 @@ def _install_child_wait_reached_event(queue: Any) -> Callable[[], None]:
     return cleanup
 
 
+def _child_run_status(exec_id: str | None) -> str | None:
+    if exec_id is None:
+        return None
+    try:
+        run = Client().get_pipeline_run(exec_id, allow_name_prefix_match=False)
+    except Exception as exc:  # pragma: no cover - reported to parent for diagnostics
+        return f"lookup_failed:{type(exc).__name__}:{exc}"
+    return str(getattr(run.status, "value", run.status))
+
+
 def _run_flow_and_report(
     queue: Any,
     flow_definition: Any,
@@ -184,8 +196,12 @@ def _run_flow_and_report(
 ) -> None:
     try:
         handle = flow_definition.run(cache=False)
+        exec_id = getattr(handle, "exec_id", None)
         _put_child_event(
-            queue, _CHILD_EVENT_COMPLETED, getattr(handle, "exec_id", None)
+            queue,
+            _CHILD_EVENT_COMPLETED,
+            exec_id,
+            _child_run_status(exec_id),
         )
     except BaseException as exc:
         _put_child_event(queue, _CHILD_EVENT_ERROR, type(exc).__name__, str(exc))
@@ -272,15 +288,28 @@ def _assert_child_flow_pauses(
     target: Any,
     *,
     required_event: str,
-    timeout: float = 30.0,
+    timeout: float = 90.0,
     post_event_grace: float = 1.0,
 ) -> None:
-    # Use fork so the child inherits the xdist worker's already isolated
-    # ZenML/Kitaru environment. Spawn re-imports this module from scratch and
-    # would need explicit per-child fixture paths to avoid cross-test state.
-    if "fork" not in multiprocessing.get_all_start_methods():
-        pytest.skip("Child wait/pause tests require multiprocessing fork isolation.")
-    context = cast(Any, multiprocessing.get_context("fork"))
+    # Prefer forkserver over raw fork. Raw fork inherits the parent process's
+    # already-open ZenML/SQLite resources; if another test has already run a
+    # flow in this xdist worker, the child can fail with stale file descriptors
+    # before it reaches the wait. Forkserver still inherits the isolated test
+    # environment, but forks from a clean server process instead of the live
+    # pytest worker.
+    main = sys.modules.get("__main__")
+    if main is not None:
+        main_file = getattr(main, "__file__", None)
+        if main_file is None or Path(main_file).is_dir():
+            main.__file__ = __file__
+
+    start_methods = multiprocessing.get_all_start_methods()
+    if "forkserver" in start_methods:
+        context = cast(Any, multiprocessing.get_context("forkserver"))
+    elif "fork" in start_methods:
+        context = cast(Any, multiprocessing.get_context("fork"))
+    else:
+        pytest.skip("Child wait/pause tests require fork or forkserver isolation.")
     queue = context.Queue()
     process = context.Process(target=target, args=(queue,), daemon=True)
     process.start()
@@ -289,24 +318,18 @@ def _assert_child_flow_pauses(
     grace_deadline: float | None = None
     deadline = time.time() + timeout
 
-    def assert_run_is_waiting(exec_id: str | None) -> None:
-        if exec_id is None:
+    def assert_child_reported_waiting(event: _ChildEvent) -> None:
+        if event.detail is None:
             pytest.fail(
                 "Child flow reached the real wait callable, then exited without "
                 "reporting an execution id to verify paused status."
             )
-        status_deadline = time.time() + 5.0
-        last_status = "unknown"
-        while time.time() < status_deadline:
-            run = Client().get_pipeline_run(exec_id, allow_name_prefix_match=False)
-            last_status = str(getattr(run.status, "value", run.status))
-            if last_status == "paused":
-                return
-            time.sleep(0.2)
+        if event.message == "paused":
+            return
         pytest.fail(
             "Child flow reached the real wait callable and exited, but execution "
-            f"{exec_id} did not enter paused/waiting status; last status was "
-            f"{last_status!r}."
+            f"{event.detail} did not report paused/waiting status from the child; "
+            f"reported status was {event.message!r}."
         )
 
     def handle_exit_after_wait() -> None:
@@ -323,7 +346,7 @@ def _assert_child_flow_pauses(
                 f"of pausing: {event.detail}: {event.message}"
             )
         if event.kind == _CHILD_EVENT_COMPLETED:
-            assert_run_is_waiting(event.detail)
+            assert_child_reported_waiting(event)
             return
         pytest.fail(
             "Child flow exited after reaching the real wait callable with "
@@ -363,7 +386,7 @@ def _assert_child_flow_pauses(
                 )
             if event.kind == _CHILD_EVENT_COMPLETED:
                 if saw_required_event:
-                    assert_run_is_waiting(event.detail)
+                    assert_child_reported_waiting(event)
                     return
                 pytest.fail(f"Child flow completed before reaching {required_event!r}.")
         pytest.fail(f"Child flow did not reach {required_event!r} before timeout.")

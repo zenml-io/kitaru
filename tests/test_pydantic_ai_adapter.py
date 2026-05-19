@@ -1517,7 +1517,27 @@ class TestWaitForInput:
 
         message = str(exc_info.value)
         assert "sync Pydantic AI tool body" in message
-        assert "worker thread" in message
+        assert "workflow thread" in message
+        assert "tool_checkpoint_config_by_name" in message
+        assert "allow_sync_tool_body_waits=True" in message
+        assert "@hitl_tool" in message
+
+    def test_wait_for_input_rewrites_checkpoint_scope_errors(self, monkeypatch) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+        from kitaru.errors import KitaruContextError
+        from kitaru.wait import _WAIT_INSIDE_CHECKPOINT_ERROR
+
+        def fake_wait(**_kwargs):
+            raise KitaruContextError(_WAIT_INSIDE_CHECKPOINT_ERROR)
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wait_for_input(schema=str, question="Need input?")
+
+        message = str(exc_info.value)
+        assert "adapter-created checkpoint" in message
         assert "tool_checkpoint_config_by_name" in message
         assert "allow_sync_tool_body_waits=True" in message
         assert "@hitl_tool" in message
