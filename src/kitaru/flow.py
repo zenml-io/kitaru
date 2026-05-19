@@ -888,10 +888,9 @@ def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
         return None
 
     role = _artifact_metadata_value(output.artifact, _FLOW_RESULT_ROLE_METADATA_KEY)
-    # New Kitaru runs stamp an explicit role. We still accept missing metadata
-    # because some ZenML artifact views do not hydrate user metadata reliably;
-    # the reserved artifact name plus marker payload is the compatibility path.
-    if role not in (None, _FLOW_RESULT_TUPLE_METADATA_ROLE):
+    if role is None:
+        return None
+    if role != _FLOW_RESULT_TUPLE_METADATA_ROLE:
         raise KitaruRuntimeError(
             "Execution flow result tuple metadata artifact has an unexpected "
             f"role: {role!r}."

@@ -1304,6 +1304,28 @@ def test_flow_result_extraction_preserves_marker_shaped_last_output() -> None:
     )
 
 
+def test_flow_result_extraction_preserves_reserved_name_without_metadata_role() -> None:
+    """Reserved names alone should not turn user artifacts into metadata."""
+    value = {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": 1,
+    }
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                step_name="step",
+                output_name="output",
+                value=value,
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+            ),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == value
+
+
 def test_flow_result_extraction_rejects_unexpected_tuple_metadata_role() -> None:
     """Reserved tuple metadata artifacts must not carry another Kitaru role."""
     run = _DummyRun(
