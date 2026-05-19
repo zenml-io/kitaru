@@ -1251,8 +1251,7 @@ def test_tool_input_guardrail_rejection_metadata_redacts_when_input_capture_disa
     assert "SECRET_DO_NOT_LOG" not in repr(recorded[0])
 
 
-@pytest.mark.anyio
-async def test_tool_input_guardrail_exception_summary_redacts(
+def test_tool_input_guardrail_exception_summary_redacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import kitaru.adapters.openai_agents._tools as openai_tools
@@ -1262,10 +1261,6 @@ async def test_tool_input_guardrail_exception_summary_redacts(
         OPENAI_AGENTS_RUN_SUMMARIES_METADATA_KEY,
     )
     from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
-
-    @tool_input_guardrail(name="explode_on_secret")
-    def explode_on_secret(_data: Any) -> ToolGuardrailFunctionOutput:
-        raise RuntimeError("guardrail saw SECRET_DO_NOT_LOG")
 
     @function_tool
     def send_email(message: str) -> str:
@@ -1281,21 +1276,18 @@ async def test_tool_input_guardrail_exception_summary_redacts(
         lambda **kwargs: logged.update(kwargs),
     )
 
-    wrapped_guardrail = openai_tools._wrap_tool_input_guardrail(
-        explode_on_secret,
-        tool=send_email,
-        capture=OpenAICapturePolicy(save_input=False),
-        guardrail_index=0,
-    )
-
-    with (
-        pytest.raises(RuntimeError, match="SECRET_DO_NOT_LOG"),
-        openai_tracking.tracker_scope("guardrail_summary_agent"),
-    ):
-        await wrapped_guardrail.run(
-            SimpleNamespace(
-                context=SimpleNamespace(tool_call_id="call_guarded_email"),
-            )
+    with openai_tracking.tracker_scope("guardrail_summary_agent") as tracker:
+        monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: tracker)
+        openai_tools._record_blocked_tool_input_guardrail_event(
+            SimpleNamespace(context=SimpleNamespace(tool_call_id="call_guarded_email")),
+            tool=send_email,
+            capture=OpenAICapturePolicy(save_input=False),
+            guardrail=SimpleNamespace(name="explode_on_secret"),
+            guardrail_index=0,
+            behavior_type="exception",
+            status="failed",
+            started_at=0.0,
+            error=RuntimeError("guardrail saw SECRET_DO_NOT_LOG"),
         )
 
     event_map = logged[OPENAI_AGENTS_EVENTS_METADATA_KEY]
