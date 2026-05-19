@@ -146,6 +146,44 @@ def test_sync_bridge_forwards_exact_context_to_sdk_runner(
     assert seen_contexts == [ctx]
 
 
+def test_runner_sync_threads_interruption_payload_capture_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.openai_agents import OpenAICapturePolicy, OpenAIRunResult
+
+    seen_save_payloads: list[bool] = []
+
+    def fake_run_openai_agent_sync(**_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(final_output="ok")
+
+    def fake_build_run_result(_sdk_result: Any, **kwargs: Any) -> OpenAIRunResult:
+        seen_save_payloads.append(kwargs["save_interruption_payloads"])
+        return OpenAIRunResult(status="completed", final_output="ok")
+
+    runner = KitaruRunner(
+        SimpleNamespace(name="capture-agent"),
+        checkpoint_strategy="runner_call",
+        capture=OpenAICapturePolicy(save_interruption_payloads=False),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_sync.__globals__,
+        "run_openai_agent_sync",
+        fake_run_openai_agent_sync,
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_sync.__globals__,
+        "build_run_result",
+        fake_build_run_result,
+    )
+
+    result = runner.run_sync(OpenAIRunRequest.start("hello"))
+
+    assert result.status == "completed"
+    assert result.final_output == "ok"
+    assert seen_save_payloads == [False]
+
+
 def test_runner_call_run_sync_forwards_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -442,6 +480,147 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
 
     assert result.status == "completed"
     assert result.final_output == "ok"
+
+
+def test_interruption_summary_omits_payloads_when_capture_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_runner, "agents_sdk_version", lambda: "0.15.0")
+
+    class FakeState:
+        def to_json(self, **_kwargs: object) -> dict[str, object]:
+            return {"current_turn": 1}
+
+    interruption = {
+        "tool_name": "send_email",
+        "call_id": "call_sensitive_email",
+        "message": "approval required",
+        "arguments": {"message": "SECRET_DO_NOT_LOG"},
+    }
+    sdk_result = SimpleNamespace(
+        interruptions=[interruption],
+        to_state=lambda: FakeState(),
+        last_response_id="resp_interrupted",
+    )
+
+    result = openai_runner.build_run_result(
+        sdk_result,
+        strict_sdk_version=True,
+        save_interruption_payloads=False,
+    )
+
+    assert result.status == "interrupted"
+    summary = result.interruptions[0]
+    assert summary.tool_name == "send_email"
+    assert summary.call_id == "call_sensitive_email"
+    assert summary.message == "approval required"
+    assert summary.arguments is None
+    assert summary.arguments_preview is None
+    assert "SECRET_DO_NOT_LOG" not in result.model_dump_json()
+
+
+def test_interruption_summary_does_not_mine_nested_identity_when_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_runner, "agents_sdk_version", lambda: "0.15.0")
+
+    class FakeState:
+        def to_json(self, **_kwargs: object) -> dict[str, object]:
+            return {"current_turn": 1}
+
+    sdk_result = SimpleNamespace(
+        interruptions=[
+            {
+                "arguments": {
+                    "name": "SECRET_DO_NOT_LOG_NAME",
+                    "call_id": "SECRET_DO_NOT_LOG_CALL_ID",
+                },
+            }
+        ],
+        to_state=lambda: FakeState(),
+        last_response_id="resp_interrupted",
+    )
+
+    result = openai_runner.build_run_result(
+        sdk_result,
+        strict_sdk_version=True,
+        save_interruption_payloads=False,
+    )
+
+    summary = result.interruptions[0]
+    assert summary.tool_name is None
+    assert summary.call_id is None
+    assert summary.arguments is None
+    assert summary.arguments_preview is None
+    serialized = result.model_dump_json()
+    assert "SECRET_DO_NOT_LOG_NAME" not in serialized
+    assert "SECRET_DO_NOT_LOG_CALL_ID" not in serialized
+
+
+def test_interruption_summary_does_not_promote_argument_message_when_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_runner, "agents_sdk_version", lambda: "0.15.0")
+
+    class FakeState:
+        def to_json(self, **_kwargs: object) -> dict[str, object]:
+            return {"current_turn": 1}
+
+    sdk_result = SimpleNamespace(
+        interruptions=[
+            {
+                "tool_name": "send_email",
+                "call_id": "call_sensitive_email",
+                "arguments": {"message": "SECRET_DO_NOT_LOG"},
+            }
+        ],
+        to_state=lambda: FakeState(),
+        last_response_id="resp_interrupted",
+    )
+
+    result = openai_runner.build_run_result(
+        sdk_result,
+        strict_sdk_version=True,
+        save_interruption_payloads=False,
+    )
+
+    summary = result.interruptions[0]
+    assert summary.message is None
+    assert summary.arguments is None
+    assert summary.arguments_preview is None
+    assert "SECRET_DO_NOT_LOG" not in result.model_dump_json()
+
+
+def test_interruption_summary_keeps_payloads_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openai_runner, "agents_sdk_version", lambda: "0.15.0")
+
+    class FakeState:
+        def to_json(self, **_kwargs: object) -> dict[str, object]:
+            return {"current_turn": 1}
+
+    interruption = {
+        "tool_name": "send_email",
+        "call_id": "call_sensitive_email",
+        "message": "approval required",
+        "arguments": {"message": "SECRET_VISIBLE"},
+    }
+    sdk_result = SimpleNamespace(
+        interruptions=[interruption],
+        to_state=lambda: FakeState(),
+        last_response_id="resp_interrupted",
+    )
+
+    result = openai_runner.build_run_result(
+        sdk_result,
+        strict_sdk_version=True,
+    )
+
+    summary = result.interruptions[0]
+    assert summary.arguments is not None
+    assert summary.arguments_preview is not None
+    assert "SECRET_VISIBLE" in result.model_dump_json()
 
 
 def test_run_state_envelope_serialization_and_approval_boundary(

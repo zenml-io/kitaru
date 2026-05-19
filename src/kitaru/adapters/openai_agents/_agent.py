@@ -376,6 +376,9 @@ class KitaruRunner:
                     strict_sdk_version=self._strict_sdk_version,
                     context_serializer=self._context_serializer,
                     strict_context=self._strict_context,
+                    save_interruption_payloads=(
+                        self._capture.save_interruption_payloads
+                    ),
                 ),
                 tracker=tracker,
             )
@@ -403,6 +406,9 @@ class KitaruRunner:
                     strict_sdk_version=self._strict_sdk_version,
                     context_serializer=self._context_serializer,
                     strict_context=self._strict_context,
+                    save_interruption_payloads=(
+                        self._capture.save_interruption_payloads
+                    ),
                 ),
                 tracker=tracker,
             )
@@ -489,6 +495,9 @@ class KitaruRunner:
         )
         return stable_cache_identity(projected, opaque_objects_unique=True)
 
+    def _context_cache_key_for_context(self, context: Any | None) -> str | None:
+        return self._context_cache_key(self._context_cache_identity(context))
+
     @staticmethod
     def _context_cache_key(context_cache_identity: Any) -> str | None:
         if context_cache_identity is None:
@@ -566,6 +575,7 @@ class KitaruRunner:
                 tool_checkpoint_config_by_name=self._tool_checkpoint_config_by_name,
                 context_cache_identity=context_cache_identity,
                 context_cache_key=context_cache_key,
+                context_cache_key_factory=self._context_cache_key_for_context,
             )
             wrapped_handoffs = [
                 _prepare_agent(handoff, seen) if _is_openai_agent(handoff) else handoff

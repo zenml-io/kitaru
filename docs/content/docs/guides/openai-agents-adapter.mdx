@@ -126,7 +126,12 @@ runtime state for your tools, guardrails, handoffs, and hooks.
 Fresh context is only for new `kind="start"` requests. Interrupted/resumed runs
 use the saved OpenAI `RunState`; `context_serializer=` and
 `context_deserializer=` on `KitaruRunner` remain the way to serialize and rebuild
-context that is already inside an interrupted SDK state.
+context that is already inside an interrupted SDK state. With
+`checkpoint_strategy="calls"`, tool checkpoint cache keys use that restored SDK
+context identity when it is available, so an approved resumed tool call for team
+A does not accidentally reuse a cached tool result from team B. Kitaru uses only
+the derived cache key for that separation; it does not save the raw context or
+your `context_cache_identity=` projection in visible tool input artifacts.
 
 One more boundary to remember: if your guardrail manually calls raw
 `agents.Runner.run(...)` for a nested evaluator, that nested call is not managed
@@ -181,6 +186,13 @@ see blocked tool attempts. In that strategy, Kitaru records a rejected tool
 attempt as an existing `tool_call` event with guardrail metadata before the tool
 function runs. It does not create a new event type, and it does not save a tool
 checkpoint for arguments that the guardrail rejected.
+
+Privacy follows the capture policy here too. If `save_input=False`, Kitaru omits
+raw tool input artifacts and also redacts guardrail rejection messages and
+unexpected guardrail exception details from persisted event metadata, because
+those strings may repeat the user/tool input the guardrail just inspected. The
+event still shows that a guardrail blocked the call, which guardrail did it, and
+whether the behavior was `reject_content`, `raise_exception`, or an exception.
 
 `checkpoint_strategy="runner_call"` still only sees the outer `Runner.run(...)`
 boundary. That is useful for a single durable result, but it cannot show each
@@ -263,6 +275,14 @@ runner = KitaruRunner(
 ```
 
 `OpenAICapturePolicy` defaults are designed for useful traces: child events, input, final output, run state, interruption payloads, usage, and OTel correlation are on; raw response items are off by default because they can be noisy.
+
+Two privacy switches are worth calling out:
+
+- `save_input=False` keeps raw model/tool inputs out of artifacts and redacts
+  tool-input guardrail messages or exception text that may contain those inputs.
+- `save_interruption_payloads=False` keeps approval interruption summaries
+  usable for resume decisions — index, kind, tool name, call ID, and message when
+  the SDK exposes them — but omits raw `arguments` and `arguments_preview`.
 
 Checkpoint config accepts `retries`, `type`, and `runtime`. `runtime="isolated"` is rejected for adapter-managed checkpoints today because those synthetic checkpoint closures capture live OpenAI SDK objects; use inline runtime or omit `runtime`.
 
