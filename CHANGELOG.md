@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.4` so Kitaru tracks the latest upstream ZenML release.
 
 ### Fixed
+- Fixed adapter-created granular checkpoints being treated as flow-return candidates, so `flow.run(...).wait()` / `.get()` can return the user's final checkpoint result when adapters also produced model/tool checkpoints.
 - Fixed PydanticAI direct sync tool-body `kp.wait_for_input(...)` calls under ZenML `0.94.4` with explicit `allow_sync_tool_body_waits=True` opt-in, keeping `tool_checkpoint_config_by_name={"tool": False}` as checkpoint-only configuration.
 - Fixed Kitaru flow return compatibility with ZenML `0.94.4` dynamic-pipeline output validation by persisting plain flow returns as internal artifacts while preserving user-facing Python return values and avoiding marker-shaped user dictionaries being mistaken for hidden tuple metadata.
 

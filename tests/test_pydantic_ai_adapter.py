@@ -29,6 +29,40 @@ from kitaru.adapters.pydantic_ai._utils import (
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
+def test_synthetic_checkpoint_marks_flow_result_non_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _utils
+
+    captured: dict[str, Any] = {}
+
+    class FakeCheckpoint:
+        _step = object()
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        def decorate(func: Any) -> FakeCheckpoint:
+            captured["decorated_name"] = func.__name__
+            return FakeCheckpoint()
+
+        return decorate
+
+    monkeypatch.setattr(_utils.kitaru, "checkpoint", fake_checkpoint)
+
+    _utils._build_checkpoint_step(
+        config={"type": "llm_call", "cache": False, "retries": 2},
+        step_name="model_call",
+        body=lambda: "ok",
+    )
+
+    assert captured["_flow_result_candidate"] is False
+    assert captured["type"] == "llm_call"
+    assert captured["cache"] is False
+    assert captured["retries"] == 2
+    assert captured["decorated_name"] == "model_call"
+
+
 def _with_tool_call_id(ctx: Any, tool_call_id: str = "call_123") -> Any:
     ctx.tool_call_id = tool_call_id
     return ctx

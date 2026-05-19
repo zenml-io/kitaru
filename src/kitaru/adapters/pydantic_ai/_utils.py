@@ -257,7 +257,10 @@ def _build_checkpoint_step(
         )
 
     turn.__name__ = step_name
-    checkpoint_def = kitaru.checkpoint(**config)(turn)
+    checkpoint_def = kitaru.checkpoint(
+        **config,
+        _flow_result_candidate=False,
+    )(turn)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
         alias = build_checkpoint_source_alias(turn.__name__)

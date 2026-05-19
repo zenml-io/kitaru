@@ -163,7 +163,10 @@ def _build_checkpoint_step(
         return body()
 
     _call.__name__ = safe_step_name(step_name)
-    checkpoint_def = kitaru.checkpoint(**config)(_call)
+    checkpoint_def = kitaru.checkpoint(
+        **config,
+        _flow_result_candidate=False,
+    )(_call)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
         alias = build_checkpoint_source_alias(_call.__name__)

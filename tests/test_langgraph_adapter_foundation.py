@@ -49,6 +49,41 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert not hasattr(langgraph_adapter.KitaruGraphRunner, "astream")
 
 
+def test_synthetic_checkpoint_marks_flow_result_non_candidate(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    utils = importlib.import_module("kitaru.adapters.langgraph._utils")
+    captured: dict[str, Any] = {}
+
+    class FakeCheckpoint:
+        _step = object()
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        def decorate(func: Any) -> FakeCheckpoint:
+            captured["decorated_name"] = func.__name__
+            return FakeCheckpoint()
+
+        return decorate
+
+    monkeypatch.setattr(utils.kitaru, "checkpoint", fake_checkpoint)
+
+    utils._build_checkpoint_step(
+        config={"type": "llm_call", "cache": False, "retries": 2},
+        step_name="graph call",
+        body=lambda: "ok",
+    )
+
+    assert langgraph_adapter.KitaruGraphRunner
+    assert captured["_flow_result_candidate"] is False
+    assert captured["type"] == "llm_call"
+    assert captured["cache"] is False
+    assert captured["retries"] == 2
+    assert captured["decorated_name"] == "graph_call"
+
+
 def test_langgraph_analytics_events_exist() -> None:
     values = [
         event.value for event in AnalyticsEvent if event.name.startswith("LANGGRAPH_")

@@ -98,6 +98,7 @@ def _build_checkpoint(
     checkpoint_type: str | None = None,
     runtime: StepRuntime | str | None = None,
     cache: bool | None = None,
+    flow_result_candidate: bool | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -131,6 +132,7 @@ def _build_checkpoint(
             type=checkpoint_type,
             runtime=runtime,
             cache=cache,
+            _flow_result_candidate=flow_result_candidate,
         )(func)
 
     return wrapped, captured
@@ -226,6 +228,31 @@ def test_none_type_produces_no_step_type() -> None:
     _, captured = _build_checkpoint(lambda: "ok", checkpoint_type=None)
     assert captured["step_type"] is None
     assert "type" not in captured["extra"]["kitaru"]
+    assert "flow_result_candidate" not in captured["extra"]["kitaru"]
+
+
+def test_checkpoint_private_flow_result_candidate_false_writes_metadata() -> None:
+    _, captured = _build_checkpoint(
+        lambda: "ok",
+        checkpoint_type="tool_call",
+        flow_result_candidate=False,
+    )
+
+    assert captured["extra"] == {
+        "kitaru": {
+            "boundary": "checkpoint",
+            "type": "tool_call",
+            "flow_result_candidate": False,
+        }
+    }
+
+
+def test_checkpoint_rejects_non_bool_flow_result_candidate() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="Checkpoint _flow_result_candidate must be a bool",
+    ):
+        checkpoint(_flow_result_candidate="false")(lambda: None)  # ty: ignore[invalid-argument-type]
 
 
 def test_checkpoint_passes_plain_name_to_zenml_step() -> None:

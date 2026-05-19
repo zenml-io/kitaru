@@ -62,6 +62,7 @@ from kitaru.flow import (
     _extract_run_pipeline_id,
     _guard_implicit_active_stack_fallback,
     _inject_model_registry_env,
+    _is_flow_result_candidate_step,
     _is_multiple_terminal_steps_output_error,
     _suspend_flow_return_coercion,
     _temporary_active_stack,
@@ -134,6 +135,8 @@ class _DummyOutput:
     value: object
     artifact_name: str | None = None
     run_metadata: Mapping[str, object] | None = None
+    config_extra: Mapping[str, object] | None = None
+    spec_extra: Mapping[str, object] | None = None
 
 
 class _DummyArtifact:
@@ -183,6 +186,8 @@ class _DummyRun:
         outputs = outputs or []
         output_specs: list[SimpleNamespace] = []
         step_outputs: dict[str, dict[str, _DummyArtifact]] = {}
+        step_config_extras: dict[str, Mapping[str, object] | None] = {}
+        step_spec_extras: dict[str, Mapping[str, object] | None] = {}
         for output in outputs:
             if isinstance(output, _DummyOutput):
                 step_name = output.step_name
@@ -190,6 +195,8 @@ class _DummyRun:
                 value = output.value
                 artifact_name = output.artifact_name or output_name
                 run_metadata = dict(output.run_metadata or {})
+                step_config_extras[step_name] = output.config_extra
+                step_spec_extras[step_name] = output.spec_extra
             else:
                 step_name, output_name, value = output
                 artifact_name = output_name
@@ -211,7 +218,14 @@ class _DummyRun:
         )
         self.resources = resources
         self.steps = {
-            step_name: SimpleNamespace(regular_outputs=regular_outputs)
+            step_name: SimpleNamespace(
+                regular_outputs=regular_outputs,
+                config=SimpleNamespace(extra=step_config_extras.get(step_name)),
+                spec=SimpleNamespace(
+                    extra=step_spec_extras.get(step_name),
+                    upstream_steps=[],
+                ),
+            )
             for step_name, regular_outputs in step_outputs.items()
         }
 
@@ -2387,6 +2401,173 @@ def test_flow_handle_get_falls_back_to_terminal_step_outputs() -> None:
         result = handle.get()
 
     assert result == "done"
+
+
+@pytest.mark.parametrize(
+    ("step_run", "expected"),
+    [
+        (SimpleNamespace(), True),
+        (
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    extra={"kitaru": {"flow_result_candidate": False}}
+                )
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                spec=SimpleNamespace(extra={"kitaru": {"flow_result_candidate": False}})
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                config=SimpleNamespace(extra={"kitaru": "malformed"}),
+                spec=SimpleNamespace(
+                    extra={"kitaru": {"flow_result_candidate": False}}
+                ),
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                config=SimpleNamespace(extra={"kitaru": {"type": "llm_call"}}),
+                spec=SimpleNamespace(
+                    extra={"kitaru": {"flow_result_candidate": False}}
+                ),
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    extra={"kitaru": {"flow_result_candidate": "false"}}
+                )
+            ),
+            True,
+        ),
+        (
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    extra={"other": {"flow_result_candidate": False}}
+                )
+            ),
+            True,
+        ),
+    ],
+)
+def test_flow_result_candidate_step_reads_kitaru_extra(
+    step_run: object,
+    expected: bool,
+) -> None:
+    assert _is_flow_result_candidate_step(step_run) is expected
+
+
+def test_flow_handle_get_terminal_fallback_uses_single_remaining_candidate() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                step_name="adapter_call",
+                output_name="output",
+                value="synthetic",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+            ("finalize", "output", "done"),
+        ],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = handle.get()
+
+    assert result == "done"
+
+
+def test_flow_handle_get_single_terminal_non_candidate_still_returns() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                step_name="adapter_call",
+                output_name="output",
+                value="synthetic",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+        ],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = handle.get()
+
+    assert result == "synthetic"
+
+
+def test_flow_handle_get_raises_when_terminal_filter_leaves_zero_candidates() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                step_name="adapter_a",
+                output_name="output",
+                value="a",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+            _DummyOutput(
+                step_name="adapter_b",
+                output_name="output",
+                value="b",
+                spec_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+        ],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        pytest.raises(KitaruAmbiguousFlowResultError) as exc_info,
+    ):
+        handle.get()
+
+    assert _is_multiple_terminal_steps_output_error(exc_info.value)
+
+
+def test_flow_handle_get_output_specs_ignore_candidate_metadata() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                step_name="adapter_call",
+                output_name="output",
+                value="synthetic",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+            ("finalize", "output", "done"),
+        ],
+    )
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = handle.get()
+
+    assert result == ("synthetic", "done")
 
 
 def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:

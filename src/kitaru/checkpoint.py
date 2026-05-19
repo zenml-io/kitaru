@@ -52,6 +52,10 @@ _CHECKPOINT_OUTPUT_HANDLE_MESSAGE = (
     "This is a Kitaru checkpoint output handle for `{checkpoint}.{output}`, "
     "not the materialized value. Call `.load()` to materialize the value."
 )
+_KITARU_EXTRA_NAMESPACE = "kitaru"
+_CHECKPOINT_BOUNDARY_KEY = "boundary"
+_CHECKPOINT_BOUNDARY_VALUE = "checkpoint"
+_FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
 
 
 class _KitaruOutputArtifact(OutputArtifact):
@@ -110,12 +114,18 @@ def _to_retry_config(retries: int) -> StepRetryConfig | None:
     return StepRetryConfig(max_retries=retries)
 
 
-def _build_checkpoint_extra(checkpoint_type: str | None) -> dict[str, Any]:
+def _build_checkpoint_extra(
+    checkpoint_type: str | None,
+    *,
+    flow_result_candidate: bool | None = None,
+) -> dict[str, Any]:
     """Build namespaced step metadata for dashboard rendering."""
-    payload: dict[str, Any] = {"boundary": "checkpoint"}
+    payload: dict[str, Any] = {_CHECKPOINT_BOUNDARY_KEY: _CHECKPOINT_BOUNDARY_VALUE}
     if checkpoint_type is not None:
         payload["type"] = checkpoint_type
-    return {"kitaru": payload}
+    if flow_result_candidate is not None:
+        payload[_FLOW_RESULT_CANDIDATE_KEY] = flow_result_candidate
+    return {_KITARU_EXTRA_NAMESPACE: payload}
 
 
 _KNOWN_STEP_TYPES: dict[str, StepType] = {
@@ -129,6 +139,17 @@ def _to_step_type(checkpoint_type: str | None) -> StepType | None:
     if checkpoint_type is None:
         return None
     return _KNOWN_STEP_TYPES.get(checkpoint_type)
+
+
+def _normalize_flow_result_candidate(value: bool | None) -> bool | None:
+    """Validate the private terminal-result eligibility flag."""
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise KitaruUsageError(
+            "Checkpoint _flow_result_candidate must be a bool when provided."
+        )
+    return value
 
 
 _KNOWN_STEP_RUNTIMES: dict[str, StepRuntime] = {
@@ -212,6 +233,7 @@ class _CheckpointDefinition:
         checkpoint_type: str | None,
         runtime: StepRuntime | str | None,
         cache: bool | None,
+        flow_result_candidate: bool | None,
     ) -> None:
         """Initialize a Kitaru checkpoint wrapper."""
         self._func = func
@@ -220,6 +242,7 @@ class _CheckpointDefinition:
         self._runtime = _normalize_runtime(runtime)
         self._cache = cache
         self._cache_explicitly_set = cache is not None
+        flow_result_candidate = _normalize_flow_result_candidate(flow_result_candidate)
 
         wrapped_entrypoint = _wrap_entrypoint(
             func,
@@ -236,7 +259,10 @@ class _CheckpointDefinition:
             name=registration_name,
             retry=_to_retry_config(self._default_retries),
             enable_cache=self._cache,
-            extra=_build_checkpoint_extra(checkpoint_type),
+            extra=_build_checkpoint_extra(
+                checkpoint_type,
+                flow_result_candidate=flow_result_candidate,
+            ),
             step_type=_to_step_type(checkpoint_type),
             runtime=self._runtime,
         )(wrapped_entrypoint)
@@ -341,6 +367,7 @@ def checkpoint(
     type: str | None = None,
     runtime: str | None = None,
     cache: bool | None = None,
+    _flow_result_candidate: bool | None = None,
 ) -> Callable[[Callable[..., Any]], _CheckpointDefinition]: ...
 
 
@@ -351,6 +378,7 @@ def checkpoint(
     type: str | None = None,
     runtime: str | None = None,
     cache: bool | None = None,
+    _flow_result_candidate: bool | None = None,
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Mark a function as a durable checkpoint.
 
@@ -382,11 +410,13 @@ def checkpoint(
             for this checkpoint, ``False`` disables it, and ``None`` defers to
             higher-level flow/default cache behavior. Useful for forcing one
             expensive step to re-run while the rest of the flow stays cached.
-
     Returns:
         The wrapped checkpoint object or a decorator that returns it.
     """
     checkpoint_type = type
+    # Internal escape hatch for adapter-created synthetic checkpoints. Keep it
+    # out of public adapter config types; normal user checkpoints should omit it
+    # so their metadata shape stays stable.
 
     def _decorate(target: Callable[..., Any]) -> _CheckpointDefinition:
         return _CheckpointDefinition(
@@ -395,6 +425,7 @@ def checkpoint(
             checkpoint_type=checkpoint_type,
             runtime=runtime,
             cache=cache,
+            flow_result_candidate=_flow_result_candidate,
         )
 
     if func is not None:
