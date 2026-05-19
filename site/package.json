@@ -11,12 +11,12 @@
     "@astrojs/cloudflare": "^12.6.12",
     "@astrojs/mdx": "^4.3.13",
     "@astrojs/sitemap": "^3.7.0",
-    "@tailwindcss/vite": "^4.2.4",
+    "@tailwindcss/vite": "^4.3.0",
     "astro": "^5.2.0",
-    "tailwindcss": "^4.2.4"
+    "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
-    "wrangler": "^4.87.0"
+    "wrangler": "^4.90.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
