@@ -160,6 +160,9 @@ _RUNTIME_HINTS: Final[tuple[str, ...]] = (
     "hydrate",
     "reconstruct",
     "materializer",
+    "kitaruruntimeerror",
+    "could not persist the flow return value",
+    "artifact save failed",
 )
 _BACKEND_HINTS: Final[tuple[str, ...]] = (
     "backend communication",
