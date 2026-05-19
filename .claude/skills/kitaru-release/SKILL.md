@@ -280,6 +280,8 @@ On completion, verify release artifact exists:
 gh release view v<VERSION> --json name,tagName,isDraft,url,publishedAt
 ```
 
+For non-dry-run releases, the workflow also validates `CLOUD_PLUGINS_REPO_PAT` early, pins the current `zenml-io/zenml-cloud-plugins` `main` SHA, checks that `refs/tags/kitaru-<VERSION>` is either missing or already points at that SHA, then creates the tag after the Kitaru Helm chart has been pushed. That tag is the downstream trigger for the Kitaru Pro server image build; dry-runs skip it and should say so in the workflow summary.
+
 If `isDraft: false` and `publishedAt` is populated, the release succeeded. If the workflow failed, inspect job logs with `gh run view <RUN_ID> --log-failed` and stop — do not attempt the notes-editing step.
 
 ## Step 10: Draft release notes
@@ -344,6 +346,7 @@ Print a completion table with every artifact URL:
 | GitHub Release | `https://github.com/zenml-io/kitaru/releases/tag/v<VERSION>` |
 | PyPI | `https://pypi.org/project/kitaru/<VERSION>/` |
 | Docker Hub | `zenmldocker/kitaru:<VERSION>` + `:latest` |
+| Cloud plugins trigger | `https://github.com/zenml-io/zenml-cloud-plugins/tree/kitaru-<VERSION>` |
 | CHANGELOG on main | `https://github.com/zenml-io/kitaru/blob/main/CHANGELOG.md` |
 
 Mark any post-release follow-ups (social posts, docs sync) as user-driven. The skill is done at this point.
@@ -359,7 +362,8 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.
 - **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets + manual approval); dry-runs use the `dry-run` GitHub environment and skip the `pypi` approval gate. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.
 - **PyPI approval gate.** The `pypi` environment has required reviewers (`kitaru-admins` team, `prevent_self_review: false`). Every non-dry-run release pauses partway through awaiting approval. The triggering user can approve their own deployment if they're in `kitaru-admins`. If they're not, the release will sit waiting indefinitely until an admin approves — do not forget this step. `gh run watch` will show the run in `waiting` state while the gate is open; this is normal, not a hang.
-- **Non-dry-run releases require `RELEASE_GIT_TOKEN` for protected branch pushes.** `release.yml` now fails early if `secrets.RELEASE_GIT_TOKEN` is missing on a real release, before any PyPI/Docker/Helm side effects. The secret is only used for the protected branch pushes to `develop`, `main`, and `release/*`; checkout, GitHub API reads, and tag push still use the default `GITHUB_TOKEN`. If a later push step still gets a 403/permission error, check that the token's identity is actually allowed to bypass the `develop`/`main` rulesets and create `release/*` branches. Dry-runs do not require this secret.
+- **Non-dry-run releases require `RELEASE_GIT_TOKEN` for protected branch pushes.** `release.yml` now fails early if `secrets.RELEASE_GIT_TOKEN` is missing on a real release, before any PyPI/Docker/Helm side effects. The secret is only used for the protected branch pushes to `develop`, `main`, and `release/*`; checkout, GitHub API reads, and the Kitaru repo tag push still use the default `GITHUB_TOKEN`. If a later push step still gets a 403/permission error, check that the token's identity is actually allowed to bypass the `develop`/`main` rulesets and create `release/*` branches. Dry-runs do not require this secret.
+- **Non-dry-run releases require `CLOUD_PLUGINS_REPO_PAT` for the downstream Kitaru Pro trigger.** `release.yml` validates this secret before expensive publish work, pins the current `zenml-io/zenml-cloud-plugins` `main` SHA, and fails early if `refs/tags/kitaru-$VERSION` already exists somewhere else. After Docker and Helm have been published, the workflow creates that tag at the pinned SHA. The secret needs read access to `zenml-cloud-plugins/main` and permission to create Git tags in `zenml-io/zenml-cloud-plugins`. Existing matching tags are treated as recovery-safe and skipped; existing divergent tags fail the release and require manual investigation. Dry-runs do not require this secret and do not create the downstream tag.
 - **Recovery dispatch skips file mutations.** When `v$VERSION` already exists on origin, the workflow detects this pre-checkout, checks out the tag itself, and skips the "Bump version" / "Update CHANGELOG" / "Update lockfile" / "Commit release changes" steps. This is intentional: `uv lock` is not stable across time (it regenerates `exclude-newer` timestamps and may re-resolve transitive deps if newer versions have been released between the original tag push and the recovery dispatch), so running it would create a commit on top of the tagged SHA and fail the consistency check. Do not re-enable those steps for recovery — the tag is the authoritative identity anchor.
 - **The `prompt-exports/` directory** is commonly untracked in the working tree — ignore it when staging CHANGELOG commits.
 
