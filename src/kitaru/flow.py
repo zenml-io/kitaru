@@ -19,7 +19,7 @@ from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import ConfigDict, create_model
 from zenml.artifacts.utils import save_artifact
@@ -29,10 +29,11 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.config.retry_config import StepRetryConfig
 from zenml.constants import DEFAULT_STACK_AND_COMPONENT_NAME
-from zenml.enums import ArtifactType
+from zenml.enums import ArtifactType, MetadataResourceTypes
 from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
+from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
@@ -244,6 +245,10 @@ def _register_pipeline_source_alias(
 
 _FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
 _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
+_FLOW_RESULT_ARTIFACT_NAMES = frozenset(
+    {_FLOW_RESULT_ARTIFACT_NAME, _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME}
+)
+_FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY = "kitaru_flow_result_artifact_ids"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
 _FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
 _FLOW_RESULT_TUPLE_METADATA_ROLE = "tuple_metadata"
@@ -280,13 +285,22 @@ def _save_flow_result_artifact(
     name: str,
     user_metadata: Mapping[str, Any] | None = None,
 ) -> ArtifactVersionResponse:
-    """Persist one plain flow result value as a ZenML artifact."""
+    """Persist one plain flow result value as a ZenML artifact.
+
+    ``save_artifact`` is called from the pipeline body, after the user's flow
+    function has returned, so there is no active step context. ZenML therefore
+    cannot link the resulting artifact to a step, which means the artifact
+    will not show up in ``run.steps[*].outputs`` or in ``pipeline_spec.outputs``
+    later. We compensate by recording the produced artifact id on the active
+    pipeline run's metadata so ``_extract_outputs_from_kitaru_flow_result_artifacts``
+    can recover it without depending on DAG topology.
+    """
     metadata: dict[str, Any] = {"kitaru_artifact_type": "output"}
     if user_metadata is not None:
         metadata.update(user_metadata)
 
     try:
-        return save_artifact(
+        artifact = save_artifact(
             data=value,
             name=name,
             artifact_type=ArtifactType.DATA,
@@ -300,6 +314,55 @@ def _save_flow_result_artifact(
             "this flow body, non-idempotent side effects in the flow may run "
             f"again: {exc}"
         ) from exc
+
+    _record_flow_result_artifact_on_run(artifact, name=name)
+    return artifact
+
+
+def _record_flow_result_artifact_on_run(
+    artifact: ArtifactVersionResponse,
+    *,
+    name: str,
+) -> None:
+    """Attach an orphan flow-result artifact to the active pipeline run.
+
+    ``save_artifact`` outside a step context produces an artifact that is not
+    linked to any step or run. We stash a mapping of ``name -> artifact_id``
+    on the run's metadata so the harness can recover the flow's return value
+    when ZenML's own ``pipeline_spec.outputs`` is empty (common for dynamic
+    pipelines whose flow body returns derived/plain Python values).
+
+    Failures here are non-fatal: the artifact was already persisted, and the
+    terminal-step fallback can still try to surface a result.
+    """
+    from kitaru.runtime import _get_current_execution_id
+
+    execution_id = _get_current_execution_id()
+    if execution_id is None:
+        return
+
+    try:
+        execution_uuid = UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return
+
+    try:
+        Client().create_run_metadata(
+            metadata={
+                _FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY: {name: str(artifact.id)},
+            },
+            resources=[
+                RunMetadataResource(
+                    id=execution_uuid,
+                    type=MetadataResourceTypes.PIPELINE_RUN,
+                )
+            ],
+        )
+    except Exception as exc:
+        logger.debug(
+            "Failed to record kitaru_flow_result artifact id on pipeline run: %s",
+            exc,
+        )
 
 
 def _flow_result_tuple_metadata(length: int) -> dict[str, Any]:
@@ -904,6 +967,67 @@ def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
     return cast(int, output.value["length"])
 
 
+def _extract_outputs_from_kitaru_flow_result_artifacts(
+    run: PipelineRunResponse,
+) -> list[_FlowResultOutput]:
+    """Recover flow-result artifacts that Kitaru persisted out-of-band.
+
+    When a flow body returns a plain Python value, ``_coerce_flow_return_for_zenml``
+    saves it via ``save_artifact`` from the pipeline-body finalizer. There is no
+    active step context there, so ZenML cannot link the artifact to a step and
+    ``pipeline_spec.outputs`` stays empty. ``_save_flow_result_artifact``
+    compensates by writing the produced artifact ids into the run's metadata
+    under :data:`_FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY`; this helper reads
+    them back.
+
+    Returns an empty list when the run has no such metadata, in which case the
+    caller falls back to terminal-step extraction.
+    """
+    hydrated_run = run.get_hydrated_version()
+    artifact_ids_by_name = _flow_result_artifact_ids_from_run(hydrated_run)
+    if not artifact_ids_by_name:
+        return []
+
+    client = Client()
+    outputs: list[_FlowResultOutput] = []
+    for artifact_name, artifact_id_str in artifact_ids_by_name.items():
+        try:
+            artifact_uuid = UUID(str(artifact_id_str))
+        except (TypeError, ValueError):
+            continue
+        try:
+            artifact = client.get_artifact_version(artifact_uuid, hydrate=True)
+        except Exception as exc:
+            logger.debug(
+                "Failed to load recorded flow-result artifact %s: %s",
+                artifact_id_str,
+                exc,
+            )
+            continue
+        outputs.append(
+            _FlowResultOutput(
+                step_name=_FLOW_RESULT_ARTIFACT_NAME,
+                output_name=str(artifact_name),
+                artifact=artifact,
+                value=artifact.load(),
+            )
+        )
+
+    return outputs
+
+
+def _flow_result_artifact_ids_from_run(run: PipelineRunResponse) -> dict[str, str]:
+    """Read the recorded flow-result artifact id mapping off the run's metadata."""
+    for attr_name in ("run_metadata", "metadata"):
+        candidate = getattr(run, attr_name, None)
+        if not isinstance(candidate, Mapping):
+            continue
+        recorded = candidate.get(_FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY)
+        if isinstance(recorded, Mapping):
+            return {str(k): str(v) for k, v in recorded.items()}
+    return {}
+
+
 def _extract_flow_result(run: PipelineRunResponse) -> Any:
     """Extract user-facing flow return value from a finished pipeline run.
 
@@ -917,6 +1041,13 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
         The flow result (`None`, a single value, or a tuple of values).
     """
     outputs = _extract_outputs_from_output_specs(run)
+    if not outputs:
+        # Prefer the Kitaru-saved flow return value when present. Without this
+        # step `_extract_outputs_from_terminal_steps` would refuse to pick when
+        # adapter-internal checkpoints (PydanticAI granular, LangGraph `calls`,
+        # OpenAI Agents `calls`) appear as sibling terminals to the actual
+        # user return value.
+        outputs = _extract_outputs_from_kitaru_flow_result_artifacts(run)
     if not outputs:
         outputs = _extract_outputs_from_terminal_steps(run)
 

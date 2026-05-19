@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added an all-adapters showcase (`examples/integrations/all_adapters_showcase/`) that runs the same customer-support scenario through PydanticAI, OpenAI Agents, LangGraph, and Claude Agent SDK and prints one consolidated comparison table — demonstrating per-adapter checkpoint granularity (typically 5/5/2/1) with one durable-flow boundary on a remote stack.
+
 ### Changed
 - Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.4` so Kitaru tracks the latest upstream ZenML release.
 
 ### Fixed
 - Fixed Kitaru flow return compatibility with ZenML `0.94.4` dynamic-pipeline output validation by persisting plain flow returns as internal artifacts while preserving user-facing Python return values and avoiding marker-shaped user dictionaries being mistaken for hidden tuple metadata.
+- Fixed `.wait()` raising `_MultipleTerminalStepsOutputError` when a flow body returns a derived value alongside granular adapter checkpoints (PydanticAI granular, OpenAI Agents `checkpoint_strategy="calls"`, LangGraph `checkpoint_strategy="calls"`). The flow-return coercer now records the saved artifact id on the active pipeline run's metadata, and `_extract_flow_result` consults that breadcrumb before falling back to terminal-step extraction. Fixes #350.
 
 ## [0.12.0] - 2026-05-17
 

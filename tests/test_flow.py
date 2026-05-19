@@ -168,6 +168,8 @@ class _DummyRun:
         traceback: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        run_metadata: Mapping[str, object] | None = None,
+        include_output_specs: bool = True,
     ) -> None:
         self.id = run_id or uuid4()
         self.pipeline_id = pipeline_id
@@ -179,6 +181,7 @@ class _DummyRun:
         self.exception_info = (
             SimpleNamespace(traceback=traceback) if traceback else None
         )
+        self.run_metadata = dict(run_metadata or {})
 
         outputs = outputs or []
         output_specs: list[SimpleNamespace] = []
@@ -205,7 +208,9 @@ class _DummyRun:
             )
 
         self.snapshot = SimpleNamespace(
-            pipeline_spec=SimpleNamespace(outputs=output_specs),
+            pipeline_spec=SimpleNamespace(
+                outputs=output_specs if include_output_specs else []
+            ),
             pipeline_id=snapshot_pipeline_id,
             pipeline=snapshot_pipeline,
         )
@@ -1405,6 +1410,58 @@ def test_flow_result_extraction_rejects_multiple_tuple_metadata_artifacts() -> N
 
     with pytest.raises(KitaruRuntimeError, match="multiple Kitaru tuple metadata"):
         _extract_flow_result(_as_pipeline_run(run))
+
+
+def test_flow_result_extraction_recovers_orphan_kitaru_flow_result_via_run_metadata() -> (
+    None
+):
+    """Recover the user's return value when adapter checkpoints fan out as siblings.
+
+    When the flow body returns a plain Python value, ``_coerce_flow_return_for_zenml``
+    saves it via ``save_artifact`` from the pipeline-body finalizer. There is no
+    active step context at that point, so the resulting artifact is not linked to
+    any step or pipeline output spec. ``_save_flow_result_artifact`` compensates
+    by recording the artifact id on the run's metadata; this test verifies the
+    extractor reads it back instead of erroring on the sibling adapter terminals.
+    """
+    from kitaru.flow import _FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY
+
+    flow_result_artifact_id = uuid4()
+    recorded_value = "Order ORD-1007 is delayed; replacement available."
+
+    class _StubArtifact:
+        def load(self) -> str:
+            return recorded_value
+
+    class _StubClient:
+        def get_artifact_version(
+            self, artifact_id: object, *, hydrate: bool = False
+        ) -> _StubArtifact:
+            del hydrate  # accept but ignore
+            assert str(artifact_id) == str(flow_result_artifact_id)
+            return _StubArtifact()
+
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        # Three sibling terminal checkpoints, none feeding into another — the
+        # shape that PydanticAI / OpenAI Agents / LangGraph granular adapters
+        # produce. Without the run-metadata fallback this would raise
+        # ``_MultipleTerminalStepsOutputError``.
+        outputs=[
+            ("model_call_1", "output", "intermediate-1"),
+            ("tool_call_2", "output", "intermediate-2"),
+            ("model_call_3", "output", "intermediate-3"),
+        ],
+        include_output_specs=False,
+        run_metadata={
+            _FLOW_RESULT_ARTIFACT_IDS_RUN_METADATA_KEY: {
+                _FLOW_RESULT_ARTIFACT_NAME: str(flow_result_artifact_id),
+            },
+        },
+    )
+
+    with patch("kitaru.flow.Client", return_value=_StubClient()):
+        assert _extract_flow_result(_as_pipeline_run(run)) == recorded_value
 
 
 def test_flow_return_coercion_rejects_mixed_tuple_subclasses() -> None:
