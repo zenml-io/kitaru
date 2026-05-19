@@ -48,6 +48,7 @@ from ._mcp_server import has_running_mcp_toolset
 from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
+from ._threading_compat import inline_sync_tool_execution
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
@@ -803,6 +804,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             "Use `await agent.run(...)` instead."
         )
 
+    def _should_inline_sync_tools(self) -> bool:
+        """Return whether this agent run needs Pydantic AI sync tools inline.
+
+        This is deliberately run-wide rather than per-tool. Pydantic AI decides
+        whether to offload sync tools before Kitaru reaches an individual tool
+        body, so the safe compatibility seam is the agent run boundary. Keep the
+        predicate narrow to agents with explicit per-tool checkpoint opt-outs.
+        """
+        return bool(
+            self._granular_checkpoints
+            and self._tool_checkpoint_config_by_name
+            and any(
+                override is False
+                for override in self._tool_checkpoint_config_by_name.values()
+            )
+        )
+
     def _ensure_auto_flow_mcp_lifecycle_safe(
         self,
         *,
@@ -953,6 +971,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                inline_sync_tool_execution(
+                    enabled=self._should_inline_sync_tools()
+                ),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
                 ),
@@ -1061,6 +1082,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                inline_sync_tool_execution(
+                    enabled=self._should_inline_sync_tools()
+                ),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
                 ),

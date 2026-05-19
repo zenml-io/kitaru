@@ -1277,6 +1277,131 @@ class TestModelMessageCacheSerialization:
         assert len(cached_responses) == 2
 
 
+class TestThreadingCompat:
+    """Compatibility wrapper for Pydantic AI sync-tool threading."""
+
+    def test_inline_sync_tool_execution_enters_available_hook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        events: list[str] = []
+
+        class Manager:
+            def __enter__(self) -> None:
+                events.append("enter")
+
+            def __exit__(self, *_exc_info: object) -> None:
+                events.append("exit")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", lambda: Manager())
+
+        with inline_sync_tool_execution(enabled=True) as active:
+            assert active is True
+            events.append("body")
+
+        assert events == ["enter", "body", "exit"]
+
+    def test_inline_sync_tool_execution_is_noop_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        def fail_if_called() -> object:
+            raise AssertionError("hook should not be called")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", fail_if_called)
+
+        with inline_sync_tool_execution(enabled=False) as active:
+            assert active is False
+
+    def test_inline_sync_tool_execution_is_noop_when_hook_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        monkeypatch.delattr(pydantic_ai_utils, "disable_threads", raising=False)
+
+        with inline_sync_tool_execution(enabled=True) as active:
+            assert active is False
+
+    def test_inline_sync_tool_execution_is_noop_when_hook_non_callable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", object())
+
+        with inline_sync_tool_execution(enabled=True) as active:
+            assert active is False
+
+    def test_inline_sync_tool_execution_is_noop_when_hook_entry_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        class BrokenManager:
+            def __enter__(self) -> None:
+                raise RuntimeError("boom")
+
+            def __exit__(self, *_exc_info: object) -> None:
+                raise AssertionError("exit should not run after failed enter")
+
+        monkeypatch.setattr(
+            pydantic_ai_utils, "disable_threads", lambda: BrokenManager()
+        )
+
+        with inline_sync_tool_execution(enabled=True) as active:
+            assert active is False
+
+    def test_agent_requests_inline_sync_tools_only_for_false_tool_override(
+        self,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        opted_out = KitaruAgent(
+            Agent(TestModel(), name="inline_tools_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+        )
+        ordinary_granular = KitaruAgent(Agent(TestModel(), name="ordinary_tools_agent"))
+        configured_granular = KitaruAgent(
+            Agent(TestModel(), name="configured_tools_agent"),
+            tool_checkpoint_config_by_name={"lookup": {"cache": False}},
+        )
+        turn_mode = KitaruAgent(
+            Agent(TestModel(), name="turn_mode_agent"),
+            granular_checkpoints=False,
+        )
+
+        assert opted_out._should_inline_sync_tools() is True
+        assert ordinary_granular._should_inline_sync_tools() is False
+        assert configured_granular._should_inline_sync_tools() is False
+        assert turn_mode._should_inline_sync_tools() is False
+
+
 class TestWaitForInput:
     """Adapter-namespaced helper for calling wait from a tool body."""
 
@@ -1313,6 +1438,41 @@ class TestWaitForInput:
             "source": "tool_body",
             "extra": 1,
         }
+
+    def test_wait_for_input_rewrites_pipeline_thread_errors(self, monkeypatch) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+
+        def fake_wait(**_kwargs):
+            raise RuntimeError(
+                "`zenml.wait(...)` must be called from the pipeline thread, "
+                "not from a worker thread spawned inside the pipeline function."
+            )
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wait_for_input(schema=str, question="Need input?")
+
+        message = str(exc_info.value)
+        assert "sync Pydantic AI tool body" in message
+        assert "worker thread" in message
+        assert "tool_checkpoint_config_by_name" in message
+        assert "@hitl_tool" in message
+
+    def test_wait_for_input_does_not_rewrite_unrelated_runtime_errors(
+        self, monkeypatch
+    ) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+
+        def fake_wait(**_kwargs):
+            raise RuntimeError("different runtime failure")
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(RuntimeError, match="different runtime failure"):
+            wait_for_input(schema=str, question="Need input?")
 
     def test_wait_for_input_adapter_metadata_wins_over_caller_metadata(
         self, monkeypatch

@@ -18,6 +18,7 @@ from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
 from pydantic_ai.models.test import TestModel
 
 from kitaru import checkpoint, flow
+from kitaru.adapters import pydantic_ai as kp
 from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent, hitl_tool
 
 # Fresh suffix per run so cached artifacts from prior runs don't collide.
@@ -229,7 +230,9 @@ def demo_hitl_wiring() -> str:
 
     ``@hitl_tool`` is the safest default because the adapter routes it outside
     granular tool checkpoints. Native ``ApprovalRequired`` / ``CallDeferred``
-    tools that may wait should be opted out of tool checkpointing.
+    tools that may wait should be opted out of tool checkpointing. Ordinary sync
+    tools that call ``kp.wait_for_input(...)`` also need that opt-out so Kitaru
+    can keep the wait out of the tool checkpoint and on the workflow thread.
     """
     agent = Agent(
         TestModel(call_tools=[]),
@@ -246,11 +249,16 @@ def demo_hitl_wiring() -> str:
     def deferred_side_effect() -> str:
         raise CallDeferred("Queued for async completion.")
 
+    @agent.tool_plain
+    def ask_human_directly(question: str = "What should happen next?") -> str:
+        return kp.wait_for_input(schema=str, question=question)
+
     wired = KitaruAgent(
         agent,
         tool_checkpoint_config_by_name={
             "approval_required": False,
             "deferred_side_effect": False,
+            "ask_human_directly": False,
         },
     )
 
