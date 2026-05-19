@@ -98,6 +98,9 @@ def _coerce_result(value: Any) -> ClaudeRunResult:
         return value
     if isinstance(value, dict):
         return ClaudeRunResult.model_validate(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return ClaudeRunResult.model_validate(model_dump(mode="python"))
     raise TypeError(f"Expected ClaudeRunResult from flow, got {type(value).__name__}.")
 
 

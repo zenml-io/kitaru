@@ -74,10 +74,13 @@ def _raise_checkpoint_wait_not_supported(tool_name: str, kind: DeferredKind) -> 
         f"PydanticAI tool {tool_name!r} requested {kind!r} human input while "
         "running inside a checkpoint. Kitaru waits must be created at flow "
         "scope, not from checkpoint scope. Use `@hitl_tool` for pure wait "
-        "tools, disable checkpointing for this tool with "
-        '`tool_checkpoint_config_by_name={"tool_name": False}` while running '
-        "the agent in granular mode, or move the wait before/after the agent "
-        "call in flow code."
+        "tools. For ordinary tool bodies, disable checkpointing for this tool "
+        'with `tool_checkpoint_config_by_name={"tool_name": False}` while '
+        "running the agent in granular mode. If the ordinary sync tool body "
+        "calls `kp.wait_for_input(...)` directly, also pass "
+        "`allow_sync_tool_body_waits=True` so supported sync tool bodies run "
+        "on the workflow thread for the whole agent run. Or move the wait "
+        "before/after the agent call in flow code."
     )
 
 
