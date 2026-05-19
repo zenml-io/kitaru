@@ -164,6 +164,35 @@ call in your own `@checkpoint` is **not** a workaround here — the adapter
 guards against it and will raise, because per-call checkpoints cannot be
 nested inside another Kitaru checkpoint.
 
+## Structured outputs, guardrails, and nested agents
+
+OpenAI Agents SDK structured outputs work through the adapter. If your agent is
+created with `Agent(output_type=...)`, Kitaru preserves the SDK result object and
+its typed `final_output` in both supported strategies:
+
+- `checkpoint_strategy="runner_call"` records the outer runner call and returns
+  the structured result from `.wait()` cleanly.
+- `checkpoint_strategy="calls"` records supported model and tool calls
+  individually, while the SDK still produces the typed final output for your
+  Python code.
+
+For tool-input guardrails, use `checkpoint_strategy="calls"` when you need to
+see blocked tool attempts. In that strategy, Kitaru records a rejected tool
+attempt as an existing `tool_call` event with guardrail metadata before the tool
+function runs. It does not create a new event type, and it does not save a tool
+checkpoint for arguments that the guardrail rejected.
+
+`checkpoint_strategy="runner_call"` still only sees the outer `Runner.run(...)`
+boundary. That is useful for a single durable result, but it cannot show each
+individual tool guardrail decision. Choose `"calls"` when per-tool guardrail
+observability matters.
+
+One more boundary to remember: raw nested `agents.Runner.run(...)` calls remain
+outside Kitaru unless you wrap that evaluator agent with its own `KitaruRunner`.
+Raw nested agents are fine for quick ephemeral checks. If their inputs, outputs,
+or guardrail decisions need Kitaru observability, run them through
+`KitaruRunner` too.
+
 ## Important guardrail
 
 `checkpoint_strategy="calls"` must run from flow scope (not from inside another

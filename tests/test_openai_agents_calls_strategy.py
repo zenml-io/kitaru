@@ -1,6 +1,7 @@
 """Focused tests for OpenAI Agents SDK call-level checkpointing."""
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,14 +12,17 @@ import pytest
 pytest.importorskip("agents")
 
 from agents import Agent, RunConfig, RunContextWrapper, function_tool
+from agents.exceptions import ToolInputGuardrailTripwireTriggered
 from agents.items import ModelResponse
 from agents.models.interface import Model
+from agents.tool_guardrails import ToolGuardrailFunctionOutput, tool_input_guardrail
 from agents.usage import Usage
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
     ResponseOutputText,
 )
+from pydantic import BaseModel
 from zenml.client import Client
 
 from kitaru import flow
@@ -68,6 +72,11 @@ class RepeatedToolCallingModel(Model):
         raise NotImplementedError
 
 
+class StructuredSupportAnswer(BaseModel):
+    verdict: str
+    confidence: float
+
+
 @dataclass(frozen=True)
 class WorkerContext:
     team_id: str
@@ -107,6 +116,38 @@ class ToolCallingModel(Model):
         raise NotImplementedError
 
 
+class GuardrailToolCallingModel(Model):
+    def __init__(
+        self,
+        tool_calls: list[ResponseFunctionToolCall],
+        *,
+        final_text: str = "guardrail tool flow complete",
+    ) -> None:
+        self.tool_calls = tool_calls
+        self.final_text = final_text
+        self.call_count = 0
+        self.seen_function_call_outputs: list[str] = []
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        sdk_input = _args[1] if len(_args) > 1 else None
+        function_call_outputs = _function_call_outputs(sdk_input)
+        if function_call_outputs:
+            self.seen_function_call_outputs.extend(function_call_outputs)
+            return _text_response(
+                self.final_text,
+                response_id=f"resp_guardrail_final_{self.call_count}",
+            )
+        return ModelResponse(
+            output=cast(Any, self.tool_calls),
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_guardrail_tool_call",
+        )
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
 class ContextToolCallingModel(Model):
     def __init__(self) -> None:
         self.call_count = 0
@@ -138,14 +179,31 @@ class ContextToolCallingModel(Model):
 
 
 def _contains_function_call_output(value: Any) -> bool:
+    return next(_iter_function_call_outputs(value), None) is not None
+
+
+def _function_call_outputs(value: Any) -> list[str]:
+    return list(_iter_function_call_outputs(value))
+
+
+def _iter_function_call_outputs(value: Any) -> Iterator[str]:
     if isinstance(value, list | tuple):
-        return any(_contains_function_call_output(item) for item in value)
+        for item in value:
+            yield from _iter_function_call_outputs(item)
+        return
     if isinstance(value, dict):
         if value.get("type") == "function_call_output":
-            return True
-        return any(_contains_function_call_output(item) for item in value.values())
-    item_type = getattr(value, "type", None)
-    return item_type == "function_call_output"
+            output = value.get("output")
+            if isinstance(output, str):
+                yield output
+            return
+        for item in value.values():
+            yield from _iter_function_call_outputs(item)
+        return
+    if getattr(value, "type", None) == "function_call_output":
+        output = getattr(value, "output", None)
+        if isinstance(output, str):
+            yield output
 
 
 def _text_response(text: str, *, response_id: str) -> ModelResponse:
@@ -945,6 +1003,34 @@ def test_calls_strategy_model_call_runs_inside_checkpoint(primed_zenml) -> None:
     assert model.call_count == 1
 
 
+def test_calls_strategy_preserves_structured_final_output_and_model_event(
+    primed_zenml,
+) -> None:
+    model = StaticTextModel('{"verdict":"safe","confidence":0.91}')
+    agent_name = f"openai_structured_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, output_type=StructuredSupportAnswer),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def structured_output_flow(prompt: str, nonce: str) -> dict[str, Any]:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        assert isinstance(result.final_output, StructuredSupportAnswer)
+        assert result.final_output.verdict == "safe"
+        assert result.final_output.confidence == 0.91
+        return result.final_output.model_dump()
+
+    handle = structured_output_flow.run("return structured safety result", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert any("openai_model_call" in name for name in _step_names(hydrated))
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    assert any(event["kind"] == "llm_call" for event in events)
+
+
 def test_calls_strategy_model_checkpoint_cache_skips_inner_model(
     primed_zenml,
 ) -> None:
@@ -967,6 +1053,225 @@ def test_calls_strategy_model_checkpoint_cache_skips_inner_model(
     second = cached_model_flow.run("stable prompt", "second")
     _wait_for_hydrated_run(second.exec_id)
     assert model.call_count == 1
+
+
+def test_calls_strategy_tool_input_guardrail_reject_records_blocked_tool_event(
+    primed_zenml,
+) -> None:
+    side_effects: list[str] = []
+    seen_call_ids: list[str] = []
+
+    @tool_input_guardrail(name="block_sensitive_input")
+    def block_sensitive_input(data: Any) -> ToolGuardrailFunctionOutput:
+        seen_call_ids.append(data.context.tool_call_id)
+        return ToolGuardrailFunctionOutput.reject_content("blocked by policy")
+
+    @function_tool(tool_input_guardrails=[block_sensitive_input])
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        side_effects.append(message)
+        return "sent"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"message":"secret"}',
+                call_id="call_blocked_email",
+                id="fc_blocked_email",
+                name="send_email",
+                status="completed",
+                type="function_call",
+            )
+        ],
+    )
+    agent_name = f"openai_guardrail_reject_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[send_email]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_reject_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    handle = guardrail_reject_flow.run("send the email", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == []
+    assert seen_call_ids == ["call_blocked_email"]
+    assert model.seen_function_call_outputs == ["blocked by policy"]
+    assert not any("send_email_tool_call" in name for name in _step_names(hydrated))
+
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert len(tool_events) == 1
+    blocked_event = tool_events[0]
+    assert blocked_event["status"] == "completed"
+    assert blocked_event["artifacts"] == {}
+    blocked_metadata = blocked_event["metadata"]
+    assert blocked_metadata["tool_name"] == "send_email"
+    assert blocked_metadata["tool_call_id"] == "call_blocked_email"
+    assert blocked_metadata["tool_invoked"] is False
+    assert blocked_metadata["blocked_by_guardrail"] is True
+    assert blocked_metadata["guardrail_index"] == 0
+    assert blocked_metadata["guardrail_name"] == "block_sensitive_input"
+    assert blocked_metadata["guardrail_behavior"] == "reject_content"
+    assert blocked_metadata["rejection_message"] == "blocked by policy"
+
+
+def test_calls_strategy_tool_input_guardrail_raise_records_failed_tool_event(
+    primed_zenml,
+) -> None:
+    side_effects: list[str] = []
+
+    @tool_input_guardrail(name="trip_sensitive_input")
+    def trip_sensitive_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.raise_exception(
+            output_info={"blocked": True}
+        )
+
+    @function_tool(tool_input_guardrails=[trip_sensitive_input])
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        side_effects.append(message)
+        return "sent"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"message":"secret"}',
+                call_id="call_tripped_email",
+                id="fc_tripped_email",
+                name="send_email",
+                status="completed",
+                type="function_call",
+            )
+        ],
+    )
+    agent_name = f"openai_guardrail_raise_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[send_email]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_raise_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        try:
+            runner.run_sync(OpenAIRunRequest.start(prompt))
+        except ToolInputGuardrailTripwireTriggered as error:
+            return type(error).__name__
+        raise AssertionError("expected ToolInputGuardrailTripwireTriggered")
+
+    handle = guardrail_raise_flow.run("send the email", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == []
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert len(tool_events) == 1
+    failed_event = tool_events[0]
+    assert failed_event["status"] == "failed"
+    assert failed_event["metadata"]["tool_name"] == "send_email"
+    assert failed_event["metadata"]["tool_call_id"] == "call_tripped_email"
+    assert failed_event["metadata"]["tool_invoked"] is False
+    assert failed_event["metadata"]["blocked_by_guardrail"] is True
+    assert failed_event["metadata"]["guardrail_name"] == "trip_sensitive_input"
+    assert failed_event["metadata"]["guardrail_behavior"] == "raise_exception"
+    assert failed_event["error"]["exception_type"] == "RuntimeError"
+    assert (
+        "requested an exception before tool invocation"
+        in failed_event["error"]["message"]
+    )
+
+
+def test_calls_strategy_allowed_and_blocked_guardrails_keep_tool_event_order(
+    primed_zenml,
+) -> None:
+    side_effects: list[int] = []
+
+    @tool_input_guardrail(name="allow_tool_input")
+    def allow_tool_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.allow(output_info={"checked": True})
+
+    @tool_input_guardrail(name="block_tool_input")
+    def block_tool_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.reject_content("blocked second tool")
+
+    @function_tool(tool_input_guardrails=[block_tool_input])
+    def blocked_value(value: int) -> str:
+        """A tool that should not run when the guardrail blocks it."""
+        side_effects.append(value)
+        return f"blocked={value}"
+
+    @function_tool(tool_input_guardrails=[allow_tool_input])
+    def allowed_value(value: int) -> str:
+        """A tool that should run when the guardrail allows it."""
+        side_effects.append(value)
+        return f"allowed={value}"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"value":1}',
+                call_id="call_blocked_value",
+                id="fc_blocked_value",
+                name="blocked_value",
+                status="completed",
+                type="function_call",
+            ),
+            ResponseFunctionToolCall(
+                arguments='{"value":2}',
+                call_id="call_allowed_value",
+                id="fc_allowed_value",
+                name="allowed_value",
+                status="completed",
+                type="function_call",
+            ),
+        ],
+    )
+    agent_name = f"openai_guardrail_mixed_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[blocked_value, allowed_value]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_mixed_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    handle = guardrail_mixed_flow.run("use both tools", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == [2]
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert [event["metadata"]["tool_call_id"] for event in tool_events] == [
+        "call_blocked_value",
+        "call_allowed_value",
+    ]
+    blocked_events = [
+        event
+        for event in tool_events
+        if event["metadata"].get("blocked_by_guardrail") is True
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0]["metadata"]["tool_invoked"] is False
+    allowed_events = [
+        event
+        for event in tool_events
+        if event["metadata"].get("tool_call_id") == "call_allowed_value"
+    ]
+    assert len(allowed_events) == 1
+    assert allowed_events[0]["metadata"].get("blocked_by_guardrail") is None
+    assert allowed_events[0]["artifacts"].get("input") == "tool_args"
+    assert allowed_events[0]["artifacts"].get("result") == "output"
 
 
 def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
