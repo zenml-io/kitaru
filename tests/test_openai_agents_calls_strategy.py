@@ -1,6 +1,8 @@
 """Focused tests for OpenAI Agents SDK call-level checkpointing."""
 
 import re
+from collections.abc import Iterator
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -9,15 +11,18 @@ import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, function_tool
+from agents import Agent, RunConfig, RunContextWrapper, function_tool
+from agents.exceptions import ToolInputGuardrailTripwireTriggered
 from agents.items import ModelResponse
 from agents.models.interface import Model
+from agents.tool_guardrails import ToolGuardrailFunctionOutput, tool_input_guardrail
 from agents.usage import Usage
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
     ResponseOutputText,
 )
+from pydantic import BaseModel
 from zenml.client import Client
 
 from kitaru import flow
@@ -67,6 +72,21 @@ class RepeatedToolCallingModel(Model):
         raise NotImplementedError
 
 
+class StructuredSupportAnswer(BaseModel):
+    verdict: str
+    confidence: float
+
+
+@dataclass(frozen=True)
+class WorkerContext:
+    team_id: str
+    user_id: str
+    thread_id: str
+    worker_name: str = "support-worker"
+    message_id: str | None = None
+    doc_id: str | None = None
+
+
 class ToolCallingModel(Model):
     def __init__(self) -> None:
         self.call_count = 0
@@ -94,6 +114,96 @@ class ToolCallingModel(Model):
 
     def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
         raise NotImplementedError
+
+
+class GuardrailToolCallingModel(Model):
+    def __init__(
+        self,
+        tool_calls: list[ResponseFunctionToolCall],
+        *,
+        final_text: str = "guardrail tool flow complete",
+    ) -> None:
+        self.tool_calls = tool_calls
+        self.final_text = final_text
+        self.call_count = 0
+        self.seen_function_call_outputs: list[str] = []
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        sdk_input = _args[1] if len(_args) > 1 else None
+        function_call_outputs = _function_call_outputs(sdk_input)
+        if function_call_outputs:
+            self.seen_function_call_outputs.extend(function_call_outputs)
+            return _text_response(
+                self.final_text,
+                response_id=f"resp_guardrail_final_{self.call_count}",
+            )
+        return ModelResponse(
+            output=cast(Any, self.tool_calls),
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_guardrail_tool_call",
+        )
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
+class ContextToolCallingModel(Model):
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        sdk_input = _args[1] if len(_args) > 1 else None
+        if _contains_function_call_output(sdk_input):
+            return _text_response(
+                "context tool complete", response_id="resp_context_final"
+            )
+        return ModelResponse(
+            output=[
+                ResponseFunctionToolCall(
+                    arguments="{}",
+                    call_id="call_context_tool",
+                    id="fc_context",
+                    name="team_label",
+                    status="completed",
+                    type="function_call",
+                )
+            ],
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_context_tool_call",
+        )
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
+def _contains_function_call_output(value: Any) -> bool:
+    return next(_iter_function_call_outputs(value), None) is not None
+
+
+def _function_call_outputs(value: Any) -> list[str]:
+    return list(_iter_function_call_outputs(value))
+
+
+def _iter_function_call_outputs(value: Any) -> Iterator[str]:
+    if isinstance(value, list | tuple):
+        for item in value:
+            yield from _iter_function_call_outputs(item)
+        return
+    if isinstance(value, dict):
+        if value.get("type") == "function_call_output":
+            output = value.get("output")
+            if isinstance(output, str):
+                yield output
+            return
+        for item in value.values():
+            yield from _iter_function_call_outputs(item)
+        return
+    if getattr(value, "type", None) == "function_call_output":
+        output = getattr(value, "output", None)
+        if isinstance(output, str):
+            yield output
 
 
 def _text_response(text: str, *, response_id: str) -> ModelResponse:
@@ -598,6 +708,7 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
 
     inside_checkpoint = False
     seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+    seen_cache_payloads: list[Any] = []
     recorded_artifacts: list[dict[str, str]] = []
     saved: list[tuple[str, str]] = []
 
@@ -640,6 +751,13 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
         finally:
             inside_checkpoint = False
 
+    original_checkpoint_cache_key = openai_tools.checkpoint_cache_key
+
+    def fake_checkpoint_cache_key(payload: Any) -> str:
+        seen_cache_payloads.append(payload)
+        return original_checkpoint_cache_key(payload)
+
+    monkeypatch.setattr(openai_tools, "checkpoint_cache_key", fake_checkpoint_cache_key)
     monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
     monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
     monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: FakeTracker())
@@ -677,7 +795,224 @@ async def test_openai_tool_checkpoint_uses_structural_tool_args_and_output_refs(
         }
     ]
     assert recorded_artifacts == [{"input": "tool_args", "result": "output"}]
+    assert "context_cache_key" not in seen_cache_payloads[0]
     assert saved == []
+
+
+def test_calls_strategy_prepare_objects_wires_context_cache_key_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+
+    seen_kwargs: dict[str, Any] = {}
+    original_tools = [SimpleNamespace(name="lookup_customer")]
+
+    def fake_kitaruify_openai_tools(tools: list[Any], **kwargs: Any) -> list[Any]:
+        seen_kwargs.update(kwargs)
+        return tools
+
+    monkeypatch.setattr(
+        openai_tools,
+        "kitaruify_openai_tools",
+        fake_kitaruify_openai_tools,
+    )
+
+    runner = KitaruRunner(
+        Agent(
+            name="factory-wire-agent",
+            model="gpt-5-nano",
+            tools=cast(Any, original_tools),
+        ),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+        context_cache_identity=lambda ctx: {"team_id": ctx.team_id},
+    )
+    context = WorkerContext(
+        team_id="team-a",
+        user_id="user-1",
+        thread_id="thread-1",
+    )
+    context_identity = runner._context_cache_identity(context)
+    context_key = runner._context_cache_key(context_identity)
+
+    prepared_agent, _run_config = runner._prepare_execution_objects(
+        wrap_calls=True,
+        context_cache_identity=context_identity,
+        context_cache_key=context_key,
+    )
+
+    assert prepared_agent.tools == original_tools
+    assert seen_kwargs["context_cache_identity"] == context_identity
+    assert seen_kwargs["context_cache_key"] == context_key
+    factory = seen_kwargs["context_cache_key_factory"]
+    assert callable(factory)
+    assert factory(context) == context_key
+    assert (
+        factory(
+            WorkerContext(
+                team_id="team-b",
+                user_id="user-1",
+                thread_id="thread-1",
+            )
+        )
+        != context_key
+    )
+
+
+@pytest.mark.anyio
+async def test_openai_tool_checkpoint_uses_callback_context_key_for_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+    seen_cache_payloads: list[dict[str, Any]] = []
+    seen_team_ids: list[str] = []
+
+    from agents.tool import FunctionTool
+
+    async def invoke_tool(context: Any, _input_json: str) -> str:
+        seen_team_ids.append(context.context.team_id)
+        return f"team={context.context.team_id}"
+
+    tool = FunctionTool(
+        name="lookup_customer",
+        description="Look up a customer.",
+        params_json_schema={
+            "type": "object",
+            "properties": {"customer_id": {"type": "string"}},
+            "required": ["customer_id"],
+            "additionalProperties": False,
+        },
+        on_invoke_tool=invoke_tool,
+    )
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    original_checkpoint_cache_key = openai_tools.checkpoint_cache_key
+
+    def fake_checkpoint_cache_key(payload: Any) -> str:
+        if isinstance(payload, dict) and payload.get("tool_name") == "lookup_customer":
+            seen_cache_payloads.append(payload)
+        return original_checkpoint_cache_key(payload)
+
+    monkeypatch.setattr(openai_tools, "checkpoint_cache_key", fake_checkpoint_cache_key)
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(
+        openai_tools,
+        "run_async_in_checkpoint",
+        fake_run_async_in_checkpoint,
+    )
+
+    wrapped = openai_tools._wrap_function_tool(
+        tool,
+        capture=OpenAICapturePolicy(save_final_output=False),
+        agent_name="resume_context_agent",
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name=None,
+        context_cache_key_factory=lambda ctx: f"context-key:{ctx.team_id}",
+    )
+
+    for team_id in ("team-a", "team-b"):
+        result = await wrapped.on_invoke_tool(
+            cast(
+                Any,
+                SimpleNamespace(
+                    tool_call_id="call_lookup",
+                    context=WorkerContext(
+                        team_id=team_id,
+                        user_id="user-1",
+                        thread_id="thread-1",
+                    ),
+                ),
+            ),
+            '{"customer_id": "123"}',
+        )
+        assert result == f"team={team_id}"
+
+    assert seen_team_ids == ["team-a", "team-b"]
+    assert [payload["context_cache_key"] for payload in seen_cache_payloads] == [
+        "context-key:team-a",
+        "context-key:team-b",
+    ]
+    assert seen_cache_payloads[0] != seen_cache_payloads[1]
+    assert all("team-a" not in repr(inputs) for inputs in seen_checkpoint_inputs)
+    assert all("team-b" not in repr(inputs) for inputs in seen_checkpoint_inputs)
+
+
+@pytest.mark.anyio
+async def test_openai_tool_checkpoint_keeps_context_key_out_of_visible_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_checkpoint_inputs: list[dict[str, Any] | None] = []
+
+    from agents.tool import FunctionTool
+
+    async def invoke_tool(_context: Any, _input_json: str) -> str:
+        return "ok"
+
+    tool = FunctionTool(
+        name="lookup_customer",
+        description="Look up a customer.",
+        params_json_schema={
+            "type": "object",
+            "properties": {"customer_id": {"type": "string"}},
+            "required": ["customer_id"],
+            "additionalProperties": False,
+        },
+        on_invoke_tool=invoke_tool,
+    )
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        seen_checkpoint_inputs.append(kwargs.get("checkpoint_inputs"))
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(
+        openai_tools, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+
+    wrapped = openai_tools._wrap_function_tool(
+        tool,
+        capture=OpenAICapturePolicy(save_final_output=False),
+        agent_name="context_agent",
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name=None,
+        context_cache_identity={"team_id": "team-a", "user_id": "user-1"},
+    )
+
+    result = await wrapped.on_invoke_tool(
+        cast(Any, SimpleNamespace(tool_call_id="call_lookup")),
+        '{"customer_id": "123"}',
+    )
+
+    assert result == "ok"
+    checkpoint_inputs = seen_checkpoint_inputs[0]
+    assert checkpoint_inputs is not None
+    tool_args = checkpoint_inputs["tool_args"]
+    assert "context_cache_key" not in tool_args
+    assert "context_cache_identity" not in tool_args
+    assert "team-a" not in repr(tool_args)
+    assert "user-1" not in repr(tool_args)
 
 
 @pytest.mark.anyio
@@ -818,6 +1153,34 @@ def test_calls_strategy_model_call_runs_inside_checkpoint(primed_zenml) -> None:
     assert model.call_count == 1
 
 
+def test_calls_strategy_preserves_structured_final_output_and_model_event(
+    primed_zenml,
+) -> None:
+    model = StaticTextModel('{"verdict":"safe","confidence":0.91}')
+    agent_name = f"openai_structured_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, output_type=StructuredSupportAnswer),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def structured_output_flow(prompt: str, nonce: str) -> dict[str, Any]:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        assert isinstance(result.final_output, StructuredSupportAnswer)
+        assert result.final_output.verdict == "safe"
+        assert result.final_output.confidence == 0.91
+        return result.final_output.model_dump()
+
+    handle = structured_output_flow.run("return structured safety result", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert any("openai_model_call" in name for name in _step_names(hydrated))
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    assert any(event["kind"] == "llm_call" for event in events)
+
+
 def test_calls_strategy_model_checkpoint_cache_skips_inner_model(
     primed_zenml,
 ) -> None:
@@ -840,6 +1203,384 @@ def test_calls_strategy_model_checkpoint_cache_skips_inner_model(
     second = cached_model_flow.run("stable prompt", "second")
     _wait_for_hydrated_run(second.exec_id)
     assert model.call_count == 1
+
+
+def test_tool_input_guardrail_rejection_metadata_redacts_when_input_capture_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    @function_tool
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        return message
+
+    recorded: list[dict[str, Any]] = []
+
+    class FakeTracker:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, SimpleNamespace]:
+            assert tool_call_id == "call_guarded_email"
+            return "event-1", SimpleNamespace(sequence_index=1)
+
+        def record_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded.append(kwargs)
+
+    monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: FakeTracker())
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+
+    openai_tools._record_blocked_tool_input_guardrail_event(
+        SimpleNamespace(context=SimpleNamespace(tool_call_id="call_guarded_email")),
+        tool=send_email,
+        capture=OpenAICapturePolicy(save_input=False),
+        guardrail=SimpleNamespace(name="block_sensitive_input"),
+        guardrail_index=0,
+        behavior_type="reject_content",
+        status="completed",
+        started_at=0.0,
+        rejection_message="blocked SECRET_DO_NOT_LOG",
+    )
+
+    metadata = recorded[0]["metadata"]
+    assert "rejection_message" not in metadata
+    assert metadata["rejection_message_redacted"] is True
+    assert "SECRET_DO_NOT_LOG" not in repr(recorded[0])
+
+
+def test_tool_input_guardrail_exception_summary_redacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    import kitaru.adapters.openai_agents._tracking as openai_tracking
+    from kitaru.adapters.openai_agents._constants import (
+        OPENAI_AGENTS_EVENTS_METADATA_KEY,
+        OPENAI_AGENTS_RUN_SUMMARIES_METADATA_KEY,
+    )
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    @function_tool
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        return message
+
+    logged: dict[str, Any] = {}
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(
+        openai_tracking.kitaru,
+        "log",
+        lambda **kwargs: logged.update(kwargs),
+    )
+
+    with openai_tracking.tracker_scope("guardrail_summary_agent") as tracker:
+        monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: tracker)
+        openai_tools._record_blocked_tool_input_guardrail_event(
+            SimpleNamespace(context=SimpleNamespace(tool_call_id="call_guarded_email")),
+            tool=send_email,
+            capture=OpenAICapturePolicy(save_input=False),
+            guardrail=SimpleNamespace(name="explode_on_secret"),
+            guardrail_index=0,
+            behavior_type="exception",
+            status="failed",
+            started_at=0.0,
+            error=RuntimeError("guardrail saw SECRET_DO_NOT_LOG"),
+        )
+
+    event_map = logged[OPENAI_AGENTS_EVENTS_METADATA_KEY]
+    summary_map = logged[OPENAI_AGENTS_RUN_SUMMARIES_METADATA_KEY]
+    serialized_events = repr(event_map)
+    serialized_summary = repr(summary_map)
+    assert "SECRET_DO_NOT_LOG" not in serialized_events
+    assert "SECRET_DO_NOT_LOG" not in serialized_summary
+
+    events = next(iter(event_map.values()))
+    summaries = next(iter(summary_map.values()))
+    event_error = events[0]["error"]
+    summary_error = summaries["error"]
+    assert event_error["exception_type"] == "RuntimeError"
+    assert summary_error["exception_type"] == "RuntimeError"
+    assert "details redacted" in event_error["message"]
+    assert "details redacted" in summary_error["message"]
+
+    tracker = openai_tracking.EventTracker(agent_name="guardrail_summary_agent")
+    redacted_error = RuntimeError("details redacted")
+    redacted_error.__dict__["_kitaru_redacted_run_error"] = True
+    tracker.set_run_error(redacted_error)
+    tracker.set_run_error(RuntimeError("guardrail saw SECRET_DO_NOT_LOG"))
+    overwrite_summary = tracker.build_run_summary()
+    overwrite_error = cast(dict[str, Any], overwrite_summary["error"])
+    assert "SECRET_DO_NOT_LOG" not in repr(overwrite_summary)
+    assert overwrite_error is not None
+    assert "details redacted" in overwrite_error["message"]
+
+
+def test_tool_input_guardrail_error_metadata_redacts_when_input_capture_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    @function_tool
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        return message
+
+    recorded: list[dict[str, Any]] = []
+
+    class FakeTracker:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, SimpleNamespace]:
+            assert tool_call_id == "call_guarded_email"
+            return "event-1", SimpleNamespace(sequence_index=1)
+
+        def record_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded.append(kwargs)
+
+    monkeypatch.setattr(openai_tools, "get_current_tracker", lambda: FakeTracker())
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+
+    openai_tools._record_blocked_tool_input_guardrail_event(
+        SimpleNamespace(context=SimpleNamespace(tool_call_id="call_guarded_email")),
+        tool=send_email,
+        capture=OpenAICapturePolicy(save_input=False),
+        guardrail=SimpleNamespace(name="block_sensitive_input"),
+        guardrail_index=0,
+        behavior_type="exception",
+        status="failed",
+        started_at=0.0,
+        error=RuntimeError("guardrail saw SECRET_DO_NOT_LOG"),
+    )
+
+    error = recorded[0]["error"]
+    assert isinstance(error, RuntimeError)
+    assert "details redacted" in str(error)
+    assert "SECRET_DO_NOT_LOG" not in repr(recorded[0])
+
+
+def test_calls_strategy_tool_input_guardrail_reject_records_blocked_tool_event(
+    primed_zenml,
+) -> None:
+    side_effects: list[str] = []
+    seen_call_ids: list[str] = []
+
+    @tool_input_guardrail(name="block_sensitive_input")
+    def block_sensitive_input(data: Any) -> ToolGuardrailFunctionOutput:
+        seen_call_ids.append(data.context.tool_call_id)
+        return ToolGuardrailFunctionOutput.reject_content("blocked by policy")
+
+    @function_tool(tool_input_guardrails=[block_sensitive_input])
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        side_effects.append(message)
+        return "sent"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"message":"secret"}',
+                call_id="call_blocked_email",
+                id="fc_blocked_email",
+                name="send_email",
+                status="completed",
+                type="function_call",
+            )
+        ],
+    )
+    agent_name = f"openai_guardrail_reject_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[send_email]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_reject_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    handle = guardrail_reject_flow.run("send the email", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == []
+    assert seen_call_ids == ["call_blocked_email"]
+    assert model.seen_function_call_outputs == ["blocked by policy"]
+    assert not any("send_email_tool_call" in name for name in _step_names(hydrated))
+
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert len(tool_events) == 1
+    blocked_event = tool_events[0]
+    assert blocked_event["status"] == "completed"
+    assert blocked_event["artifacts"] == {}
+    blocked_metadata = blocked_event["metadata"]
+    assert blocked_metadata["tool_name"] == "send_email"
+    assert blocked_metadata["tool_call_id"] == "call_blocked_email"
+    assert blocked_metadata["tool_invoked"] is False
+    assert blocked_metadata["blocked_by_guardrail"] is True
+    assert blocked_metadata["guardrail_index"] == 0
+    assert blocked_metadata["guardrail_name"] == "block_sensitive_input"
+    assert blocked_metadata["guardrail_behavior"] == "reject_content"
+    assert blocked_metadata["rejection_message"] == "blocked by policy"
+
+
+def test_calls_strategy_tool_input_guardrail_raise_records_failed_tool_event(
+    primed_zenml,
+) -> None:
+    side_effects: list[str] = []
+
+    @tool_input_guardrail(name="trip_sensitive_input")
+    def trip_sensitive_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.raise_exception(
+            output_info={"blocked": True}
+        )
+
+    @function_tool(tool_input_guardrails=[trip_sensitive_input])
+    def send_email(message: str) -> str:
+        """Send an email message."""
+        side_effects.append(message)
+        return "sent"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"message":"secret"}',
+                call_id="call_tripped_email",
+                id="fc_tripped_email",
+                name="send_email",
+                status="completed",
+                type="function_call",
+            )
+        ],
+    )
+    agent_name = f"openai_guardrail_raise_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[send_email]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_raise_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        try:
+            runner.run_sync(OpenAIRunRequest.start(prompt))
+        except ToolInputGuardrailTripwireTriggered as error:
+            return type(error).__name__
+        raise AssertionError("expected ToolInputGuardrailTripwireTriggered")
+
+    handle = guardrail_raise_flow.run("send the email", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == []
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert len(tool_events) == 1
+    failed_event = tool_events[0]
+    assert failed_event["status"] == "failed"
+    assert failed_event["metadata"]["tool_name"] == "send_email"
+    assert failed_event["metadata"]["tool_call_id"] == "call_tripped_email"
+    assert failed_event["metadata"]["tool_invoked"] is False
+    assert failed_event["metadata"]["blocked_by_guardrail"] is True
+    assert failed_event["metadata"]["guardrail_name"] == "trip_sensitive_input"
+    assert failed_event["metadata"]["guardrail_behavior"] == "raise_exception"
+    assert failed_event["error"]["exception_type"] == "RuntimeError"
+    assert (
+        "requested an exception before tool invocation"
+        in failed_event["error"]["message"]
+    )
+
+
+def test_calls_strategy_allowed_and_blocked_guardrails_keep_tool_event_order(
+    primed_zenml,
+) -> None:
+    side_effects: list[int] = []
+
+    @tool_input_guardrail(name="allow_tool_input")
+    def allow_tool_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.allow(output_info={"checked": True})
+
+    @tool_input_guardrail(name="block_tool_input")
+    def block_tool_input(_data: Any) -> ToolGuardrailFunctionOutput:
+        return ToolGuardrailFunctionOutput.reject_content("blocked second tool")
+
+    @function_tool(tool_input_guardrails=[block_tool_input])
+    def blocked_value(value: int) -> str:
+        """A tool that should not run when the guardrail blocks it."""
+        side_effects.append(value)
+        return f"blocked={value}"
+
+    @function_tool(tool_input_guardrails=[allow_tool_input])
+    def allowed_value(value: int) -> str:
+        """A tool that should run when the guardrail allows it."""
+        side_effects.append(value)
+        return f"allowed={value}"
+
+    model = GuardrailToolCallingModel(
+        [
+            ResponseFunctionToolCall(
+                arguments='{"value":1}',
+                call_id="call_blocked_value",
+                id="fc_blocked_value",
+                name="blocked_value",
+                status="completed",
+                type="function_call",
+            ),
+            ResponseFunctionToolCall(
+                arguments='{"value":2}',
+                call_id="call_allowed_value",
+                id="fc_allowed_value",
+                name="allowed_value",
+                status="completed",
+                type="function_call",
+            ),
+        ],
+    )
+    agent_name = f"openai_guardrail_mixed_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[blocked_value, allowed_value]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def guardrail_mixed_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(OpenAIRunRequest.start(prompt))
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    handle = guardrail_mixed_flow.run("use both tools", "first")
+    hydrated = _wait_for_hydrated_run(handle.exec_id)
+
+    assert side_effects == [2]
+    events = _events(hydrated.run_metadata["openai_agents_events"])
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert [event["metadata"]["tool_call_id"] for event in tool_events] == [
+        "call_blocked_value",
+        "call_allowed_value",
+    ]
+    blocked_events = [
+        event
+        for event in tool_events
+        if event["metadata"].get("blocked_by_guardrail") is True
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0]["metadata"]["tool_invoked"] is False
+    allowed_events = [
+        event
+        for event in tool_events
+        if event["metadata"].get("tool_call_id") == "call_allowed_value"
+    ]
+    assert len(allowed_events) == 1
+    assert allowed_events[0]["metadata"].get("blocked_by_guardrail") is None
+    assert allowed_events[0]["artifacts"].get("input") == "tool_args"
+    assert allowed_events[0]["artifacts"].get("result") == "output"
 
 
 def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
@@ -910,6 +1651,139 @@ def test_calls_strategy_function_tool_runs_inside_checkpoint_and_caches(
     _wait_for_hydrated_run(second.exec_id)
     assert side_effects == [4]
     assert model.call_count == 2
+
+
+def test_calls_strategy_function_tool_receives_fresh_context(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_tool_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def context_tool_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id="team-a",
+                user_id="user-1",
+                thread_id="thread-1",
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = context_tool_flow.run("please use the context tool", "first")
+    _wait_for_hydrated_run(first.exec_id)
+
+    assert seen_team_ids == ["team-a"]
+
+
+def test_calls_strategy_tool_cache_varies_by_context_identity(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_cache_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def context_cache_flow(prompt: str, team_id: str, nonce: str) -> str:
+        _ = nonce
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id=team_id,
+                user_id="user-1",
+                thread_id="thread-1",
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = context_cache_flow.run("please use the context tool", "team-a", "first")
+    _wait_for_hydrated_run(first.exec_id)
+    second = context_cache_flow.run("please use the context tool", "team-b", "second")
+    _wait_for_hydrated_run(second.exec_id)
+
+    assert seen_team_ids == ["team-a", "team-b"]
+
+
+def test_calls_strategy_context_projection_can_reuse_tool_cache(
+    primed_zenml,
+) -> None:
+    seen_team_ids: list[str] = []
+
+    @function_tool
+    def team_label(ctx: RunContextWrapper[WorkerContext]) -> str:
+        """Return the current team label."""
+        seen_team_ids.append(ctx.context.team_id)
+        return f"team={ctx.context.team_id}"
+
+    model = ContextToolCallingModel()
+    agent_name = f"openai_context_projection_agent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(name=agent_name, model=model, tools=[team_label]),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+        context_cache_identity=lambda ctx: {
+            "team_id": ctx.team_id,
+            "user_id": ctx.user_id,
+            "thread_id": ctx.thread_id,
+            "worker_name": ctx.worker_name,
+        },
+    )
+
+    @flow
+    def projected_context_flow(prompt: str, message_id: str, doc_id: str) -> str:
+        result = runner.run_sync(
+            OpenAIRunRequest.start(prompt),
+            context=WorkerContext(
+                team_id="team-a",
+                user_id="user-1",
+                thread_id="thread-1",
+                message_id=message_id,
+                doc_id=doc_id,
+            ),
+        )
+        assert result.status == "completed"
+        return str(result.final_output)
+
+    first = projected_context_flow.run(
+        "please use the context tool",
+        "msg-1",
+        "doc-1",
+    )
+    _wait_for_hydrated_run(first.exec_id)
+    second = projected_context_flow.run(
+        "please use the context tool",
+        "msg-2",
+        "doc-2",
+    )
+    _wait_for_hydrated_run(second.exec_id)
+
+    assert seen_team_ids == ["team-a"]
 
 
 def test_same_args_tool_calls_without_visible_call_id_do_not_collide(
