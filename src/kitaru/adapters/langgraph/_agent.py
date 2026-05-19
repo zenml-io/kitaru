@@ -7,6 +7,7 @@ from functools import lru_cache
 from importlib import metadata
 from typing import Any, cast
 
+from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
@@ -154,6 +155,7 @@ class KitaruGraphRunner:
             )
         else:
             result = _body()
+        result = canonicalize_result_model(result, LangGraphRunResult)
         self._track_result("invoke", result, request=request)
         return result
 
@@ -175,6 +177,7 @@ class KitaruGraphRunner:
             )
         else:
             result = await _body()
+        result = canonicalize_result_model(result, LangGraphRunResult)
         self._track_result("ainvoke", result, request=request)
         return result
 

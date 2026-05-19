@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
@@ -168,6 +169,7 @@ class KitaruClaudeRunner:
         self._require_invocation_scope("KitaruClaudeRunner.run()")
         try:
             result = await self._run_invocation_async(request)
+            result = canonicalize_result_model(result, ClaudeRunResult)
         except Exception:
             self._track_completed("run", status="failed", result=None)
             raise
@@ -188,6 +190,7 @@ class KitaruClaudeRunner:
         self._require_invocation_scope("KitaruClaudeRunner.run_sync()")
         try:
             result = self._run_invocation_sync(request)
+            result = canonicalize_result_model(result, ClaudeRunResult)
         except Exception:
             self._track_completed("run_sync", status="failed", result=None)
             raise
