@@ -8,12 +8,17 @@ import inspect
 import sys
 import types
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruUsageError
+from tests._checkpoint_handle_helpers import (
+    assert_checkpoint_handle_error,
+    checkpoint_output_handle,
+)
 
 
 @pytest.fixture
@@ -430,6 +435,33 @@ def test_openai_run_request_rejects_arbitrary_input_object(
 ) -> None:
     with pytest.raises(ValidationError):
         openai_agents_adapter.OpenAIRunRequest(kind="start", input={"role": "user"})
+
+
+def test_openai_run_request_rejects_checkpoint_handles(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    handle = checkpoint_output_handle()
+
+    with pytest.raises(ValidationError) as direct_exc:
+        openai_agents_adapter.OpenAIRunRequest.start(cast(str, handle))
+    assert_checkpoint_handle_error(
+        direct_exc,
+        field_name="OpenAIRunRequest.input",
+    )
+
+    with pytest.raises(ValidationError) as nested_exc:
+        openai_agents_adapter.OpenAIRunRequest.start(
+            [{"role": "user", "content": handle}]
+        )
+    assert_checkpoint_handle_error(
+        nested_exc,
+        field_name="OpenAIRunRequest.input[0].content",
+    )
+
+    valid = openai_agents_adapter.OpenAIRunRequest.start(
+        [{"role": "user", "content": "hello"}]
+    )
+    assert valid.input == [{"role": "user", "content": "hello"}]
 
 
 def test_interrupted_result_requires_state_and_interruption(

@@ -8,13 +8,20 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
 
 from kitaru.analytics import AnalyticsEvent
-from kitaru.checkpoint import checkpoint
+from kitaru.checkpoint import (
+    _CHECKPOINT_HANDLE_SCAN_MAX_VALUES,
+    _KitaruOutputArtifact,
+    _raise_if_checkpoint_output_handle,
+    _raise_if_checkpoint_output_handle_in_value,
+    checkpoint,
+)
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.flow import flow
 from kitaru.runtime import (
@@ -640,3 +647,104 @@ def test_flow_body_output_handle_string_conversion_is_helpful(
         assert ".load()" in rendered
         assert "ArtifactVersionResponse" not in rendered
         assert "ZenML" not in rendered
+
+
+def test_checkpoint_output_handle_validation_message_is_helpful() -> None:
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle(
+            handle,
+            field_name="DemoRequest.prompt",
+            expected="a materialized prompt string",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.prompt" in message
+    assert "Kitaru checkpoint output handle" in message
+    assert "render_prompt.output" in message
+    assert ".load()" in message
+    assert "downstream `@checkpoint`" in message
+    assert "ArtifactVersionResponse" not in message
+    assert "ZenML" not in message
+
+
+def test_checkpoint_output_handle_validation_scans_prompt_containers() -> None:
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            [{"role": "user", "content": [{"text": handle}]}],
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.input[0].content[0].text" in message
+    assert "Kitaru checkpoint output handle" in message
+    assert "render_prompt.output" in message
+    assert ".load()" in message
+
+
+def test_checkpoint_output_handle_validation_formats_unusual_mapping_keys() -> None:
+    class WeirdKey:
+        def __repr__(self) -> str:
+            return "<weird key>"
+
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            {"foo.bar": {1: {WeirdKey(): handle}}},
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.input['foo.bar'][1][<weird key>]" in message
+
+
+def test_checkpoint_output_handle_validation_errors_when_scan_limit_is_exceeded() -> (
+    None
+):
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+    value = [*range(_CHECKPOINT_HANDLE_SCAN_MAX_VALUES), handle]
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "Kitaru could not validate DemoRequest.input" in message
+    assert f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values" in message
+    assert ".load()" in message
+
+
+def test_checkpoint_output_handle_validation_skips_cycles() -> None:
+    cyclic_value: dict[str, Any] = {"messages": []}
+    cyclic_value["self"] = cyclic_value
+
+    _raise_if_checkpoint_output_handle_in_value(
+        cyclic_value,
+        field_name="DemoRequest.input",
+        expected="materialized prompt content",
+    )
