@@ -170,16 +170,14 @@ def test_runner_call_run_sync_forwards_context(
 def test_runner_call_cache_key_omits_context_when_context_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import kitaru.adapters.openai_agents._agent as openai_agent_module
-
     seen_payloads: list[dict[str, Any]] = []
 
     def fake_checkpoint_cache_key(payload: dict[str, Any]) -> str:
         seen_payloads.append(payload)
         return "cache-key"
 
-    monkeypatch.setattr(
-        openai_agent_module,
+    monkeypatch.setitem(
+        KitaruRunner._runner_call_cache_key.__globals__,
         "checkpoint_cache_key",
         fake_checkpoint_cache_key,
     )
