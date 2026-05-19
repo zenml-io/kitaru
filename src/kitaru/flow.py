@@ -13,6 +13,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
@@ -20,13 +22,17 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ConfigDict, create_model
+from zenml.artifacts.utils import save_artifact
 from zenml.client import Client
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.config.retry_config import StepRetryConfig
 from zenml.constants import DEFAULT_STACK_AND_COMPONENT_NAME
+from zenml.enums import ArtifactType
+from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
+from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
@@ -236,6 +242,129 @@ def _register_pipeline_source_alias(
     setattr(module, alias, pipeline_obj)
 
 
+_FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
+_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
+_FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
+_FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
+_FLOW_RESULT_TUPLE_METADATA_ROLE = "tuple_metadata"
+_FLOW_RESULT_COERCION_ENABLED: ContextVar[bool] = ContextVar(
+    "kitaru_flow_result_coercion_enabled",
+    default=True,
+)
+
+
+@contextmanager
+def _suspend_flow_return_coercion() -> Iterator[None]:
+    """Temporarily skip return-value artifact persistence.
+
+    Deployment snapshot preparation may execute the dynamic pipeline function with
+    representative inputs. That phase is only compiling a saved snapshot, not
+    producing a real user-invoked execution, so it must not create durable flow
+    result artifacts.
+    """
+    token = _FLOW_RESULT_COERCION_ENABLED.set(False)
+    try:
+        yield
+    finally:
+        _FLOW_RESULT_COERCION_ENABLED.reset(token)
+
+
+def _is_zenml_pipeline_output_artifact(value: Any) -> bool:
+    """Return whether ``value`` is already valid as a ZenML pipeline output."""
+    return isinstance(value, ArtifactVersionResponse | OutputArtifact)
+
+
+def _save_flow_result_artifact(
+    value: Any,
+    *,
+    name: str,
+    user_metadata: Mapping[str, Any] | None = None,
+) -> ArtifactVersionResponse:
+    """Persist one plain flow result value as a ZenML artifact."""
+    metadata: dict[str, Any] = {"kitaru_artifact_type": "output"}
+    if user_metadata is not None:
+        metadata.update(user_metadata)
+
+    try:
+        return save_artifact(
+            data=value,
+            name=name,
+            artifact_type=ArtifactType.DATA,
+            user_metadata=metadata,
+        )
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Kitaru could not persist the flow return value as a ZenML "
+            "artifact. The user flow returned successfully, but the backend "
+            "artifact save failed after user code returned. If ZenML retries "
+            "this flow body, non-idempotent side effects in the flow may run "
+            f"again: {exc}"
+        ) from exc
+
+
+def _flow_result_tuple_metadata(length: int) -> dict[str, Any]:
+    """Return hidden metadata that marks expanded pipeline outputs as a tuple."""
+    return {
+        "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+        "version": 1,
+        "length": length,
+    }
+
+
+def _is_flow_result_tuple_metadata(value: Any) -> bool:
+    """Return whether a loaded output value is Kitaru tuple metadata."""
+    return (
+        isinstance(value, Mapping)
+        and value.get("kitaru_artifact_type") == _FLOW_RESULT_TUPLE_METADATA_MARKER
+        and value.get("version") == 1
+        and isinstance(value.get("length"), int)
+    )
+
+
+def _coerce_flow_return_for_zenml(value: Any) -> Any:
+    """Convert a user flow return value into a ZenML 0.94.4-compatible output.
+
+    ZenML 0.94.4 validates dynamic pipeline return values and only accepts
+    artifact references (or tuples of artifact references). Kitaru flows expose
+    normal Python return values, so plain values need to be persisted manually
+    before they are handed back to ZenML's pipeline finalizer.
+    """
+    if value is None:
+        return None
+    if _is_zenml_pipeline_output_artifact(value):
+        return value
+    if isinstance(value, tuple) and any(
+        _is_zenml_pipeline_output_artifact(item) for item in value
+    ):
+        if type(value) is not tuple:
+            raise KitaruUsageError(
+                "Kitaru cannot preserve tuple subclass return values that "
+                "contain checkpoint output handles. Return a plain tuple, or "
+                "wrap the structured value in a final @checkpoint so ZenML "
+                "materializes it as one artifact."
+            )
+
+        coerced_items = tuple(
+            item
+            if _is_zenml_pipeline_output_artifact(item)
+            else _save_flow_result_artifact(
+                item,
+                name=f"{_FLOW_RESULT_ARTIFACT_NAME}_{index}",
+            )
+            for index, item in enumerate(value)
+        )
+        metadata = _save_flow_result_artifact(
+            _flow_result_tuple_metadata(len(value)),
+            name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+            user_metadata={
+                _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE,
+            },
+        )
+        return (*coerced_items, metadata)
+
+    return _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
+
+
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a flow entrypoint with Kitaru flow runtime scope."""
 
@@ -244,7 +373,10 @@ def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
         with _flow_scope(name=flow_name):
-            return func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            if not _FLOW_RESULT_COERCION_ENABLED.get():
+                return result
+            return _coerce_flow_return_for_zenml(result)
 
     return _wrapped
 
@@ -550,8 +682,20 @@ def _emit_kitaru_execution_url(
     logger.info("Execution URL: %s", url)
 
 
-def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
-    """Extract return values using explicit pipeline output specs."""
+@dataclass(frozen=True)
+class _FlowResultOutput:
+    """Loaded flow-output value plus the artifact identity it came from."""
+
+    step_name: str
+    output_name: str
+    artifact: Any
+    value: Any
+
+
+def _extract_outputs_from_output_specs(
+    run: PipelineRunResponse,
+) -> list[_FlowResultOutput]:
+    """Extract return outputs using explicit pipeline output specs."""
     hydrated_run = run.get_hydrated_version()
 
     snapshot = hydrated_run.snapshot
@@ -561,7 +705,7 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
         return []
 
     step_runs = hydrated_run.steps
-    values: list[Any] = []
+    outputs: list[_FlowResultOutput] = []
     for output_spec in output_specs:
         step_run = step_runs.get(output_spec.step_name)
         if step_run is None:
@@ -577,9 +721,16 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
                 f"'{output_spec.output_name}' on step '{output_spec.step_name}'."
             )
 
-        values.append(artifact.load())
+        outputs.append(
+            _FlowResultOutput(
+                step_name=output_spec.step_name,
+                output_name=output_spec.output_name,
+                artifact=artifact,
+                value=artifact.load(),
+            )
+        )
 
-    return values
+    return outputs
 
 
 class _MultipleTerminalStepsOutputError(KitaruAmbiguousFlowResultError):
@@ -625,8 +776,10 @@ def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
     return "\n".join(lines)
 
 
-def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
-    """Extract return values from terminal step outputs as a fallback.
+def _extract_outputs_from_terminal_steps(
+    run: PipelineRunResponse,
+) -> list[_FlowResultOutput]:
+    """Extract return outputs from terminal step outputs as a fallback.
 
     This fallback is intentionally conservative to avoid returning values in an
     incorrect order when ZenML pipeline-level output specs are unavailable.
@@ -683,7 +836,72 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
 
     output_name = next(iter(terminal_step.regular_outputs))
     artifact = terminal_step.regular_outputs[output_name]
-    return [artifact.load()]
+    return [
+        _FlowResultOutput(
+            step_name=terminal_step_name,
+            output_name=output_name,
+            artifact=artifact,
+            value=artifact.load(),
+        )
+    ]
+
+
+def _safe_artifact_name(artifact: Any) -> str | None:
+    """Best-effort artifact name lookup that tolerates lazy/test doubles."""
+    try:
+        name = getattr(artifact, "name", None)
+    except Exception:
+        return None
+    if name is None:
+        return None
+    return str(name)
+
+
+def _metadata_value(value: Any) -> Any:
+    """Unwrap ZenML metadata wrappers when present."""
+    if hasattr(value, "value"):
+        try:
+            return value.value
+        except Exception:
+            return value
+    return value
+
+
+def _artifact_metadata_value(artifact: Any, key: str) -> Any:
+    """Return one metadata value from a ZenML artifact if available."""
+    for attr_name in ("run_metadata", "user_metadata", "metadata"):
+        try:
+            metadata = getattr(artifact, attr_name, None)
+        except Exception:
+            continue
+        if isinstance(metadata, Mapping) and key in metadata:
+            return _metadata_value(metadata[key])
+    return None
+
+
+def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
+    """Return tuple length only for Kitaru's reserved metadata artifact."""
+    if (
+        _safe_artifact_name(output.artifact)
+        != _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME
+    ):
+        return None
+
+    role = _artifact_metadata_value(output.artifact, _FLOW_RESULT_ROLE_METADATA_KEY)
+    if role is None:
+        return None
+    if role != _FLOW_RESULT_TUPLE_METADATA_ROLE:
+        raise KitaruRuntimeError(
+            "Execution flow result tuple metadata artifact has an unexpected "
+            f"role: {role!r}."
+        )
+
+    if not _is_flow_result_tuple_metadata(output.value):
+        raise KitaruRuntimeError(
+            "Execution flow result tuple metadata artifact did not contain "
+            "valid Kitaru tuple metadata."
+        )
+    return cast(int, output.value["length"])
 
 
 def _extract_flow_result(run: PipelineRunResponse) -> Any:
@@ -698,12 +916,35 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     Returns:
         The flow result (`None`, a single value, or a tuple of values).
     """
-    values = _extract_values_from_output_specs(run)
-    if not values:
-        values = _extract_values_from_terminal_steps(run)
+    outputs = _extract_outputs_from_output_specs(run)
+    if not outputs:
+        outputs = _extract_outputs_from_terminal_steps(run)
 
-    if not values:
+    if not outputs:
         return None
+
+    metadata_outputs: list[tuple[_FlowResultOutput, int]] = []
+    for output in outputs:
+        length = _tuple_metadata_length_from_output(output)
+        if length is not None:
+            metadata_outputs.append((output, length))
+
+    if len(metadata_outputs) > 1:
+        raise KitaruRuntimeError(
+            "Execution flow result contained multiple Kitaru tuple metadata artifacts."
+        )
+
+    if metadata_outputs:
+        metadata_output, expected_length = metadata_outputs[0]
+        tuple_outputs = [output for output in outputs if output is not metadata_output]
+        if len(tuple_outputs) != expected_length:
+            raise KitaruRuntimeError(
+                "Execution flow result tuple metadata did not match the "
+                "loaded output count."
+            )
+        return tuple(output.value for output in tuple_outputs)
+
+    values = [output.value for output in outputs]
     if len(values) == 1:
         return values[0]
     return tuple(values)
@@ -1035,7 +1276,9 @@ class _FlowDefinition:
             stack: Optional stack override.
             image: Optional image override.
             cache: Optional cache override.
-            retries: Optional retry override.
+            retries: Optional retry override. Retries rerun the whole flow body;
+                if an internal result-artifact save fails after user code
+                returns, ZenML may replay any side effects in the flow.
             **kwargs: Flow input kwargs.
 
         Returns:
@@ -1114,7 +1357,8 @@ class _FlowDefinition:
             )
             _preflight_active_stack_implementation_hydration()
             try:
-                configured_pipeline.prepare(*args, **kwargs)
+                with _suspend_flow_return_coercion():
+                    configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
                 raise KitaruDeploymentInputValuesError(
                     "Unable to create this deployment because Kitaru needs concrete "
@@ -1213,7 +1457,10 @@ class _FlowDefinition:
             stack: Optional stack override for the replay run.
             image: Optional image override for the replay run.
             cache: Optional cache override for the replay run.
-            retries: Optional retry override for the replay run.
+            retries: Optional retry override for the replay run. Retries rerun
+                the whole flow body; if an internal result-artifact save fails
+                after user code returns, ZenML may replay any side effects in
+                the flow.
             **flow_inputs: Optional flow input overrides.
 
         Returns:
@@ -1462,7 +1709,9 @@ def flow(
         cache: Optional cache override (when omitted, lower-precedence config
             sources apply and eventually default to ``True``).
         retries: Optional retry override (when omitted, lower-precedence config
-            sources apply and eventually default to ``0``).
+            sources apply and eventually default to ``0``). Retries rerun the
+            whole flow body, including any side effects that happened before a
+            post-return internal result-artifact save failure.
 
     Returns:
         The wrapped flow object or a decorator that returns it.
