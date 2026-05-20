@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from kitaru.checkpoint import (
     _KitaruOutputArtifact,
     _raise_if_checkpoint_output_handle,
     _raise_if_checkpoint_output_handle_in_value,
+    _synthetic_checkpoint,
     checkpoint,
 )
 from kitaru.errors import KitaruContextError, KitaruUsageError
@@ -105,6 +107,7 @@ def _build_checkpoint(
     checkpoint_type: str | None = None,
     runtime: StepRuntime | str | None = None,
     cache: bool | None = None,
+    flow_result_candidate: bool | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -133,11 +136,12 @@ def _build_checkpoint(
         return _decorate
 
     with patch("kitaru.checkpoint.step", side_effect=_fake_step):
-        wrapped = checkpoint(
+        wrapped = _synthetic_checkpoint(
             retries=retries,
             type=checkpoint_type,
             runtime=runtime,
             cache=cache,
+            flow_result_candidate=flow_result_candidate,
         )(func)
 
     return wrapped, captured
@@ -233,6 +237,40 @@ def test_none_type_produces_no_step_type() -> None:
     _, captured = _build_checkpoint(lambda: "ok", checkpoint_type=None)
     assert captured["step_type"] is None
     assert "type" not in captured["extra"]["kitaru"]
+    assert "flow_result_candidate" not in captured["extra"]["kitaru"]
+
+
+def test_checkpoint_private_flow_result_candidate_false_writes_metadata() -> None:
+    _, captured = _build_checkpoint(
+        lambda: "ok",
+        checkpoint_type="tool_call",
+        flow_result_candidate=False,
+    )
+
+    assert captured["extra"] == {
+        "kitaru": {
+            "boundary": "checkpoint",
+            "type": "tool_call",
+            "flow_result_candidate": False,
+        }
+    }
+
+
+def test_checkpoint_public_signature_hides_flow_result_candidate() -> None:
+    signature = inspect.signature(checkpoint)
+
+    assert "_flow_result_candidate" not in signature.parameters
+    assert "flow_result_candidate" not in signature.parameters
+
+
+def test_checkpoint_rejects_non_bool_flow_result_candidate() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="Synthetic checkpoint flow_result_candidate must be a bool",
+    ):
+        _synthetic_checkpoint(
+            flow_result_candidate=cast(Any, "false"),
+        )(lambda: None)
 
 
 def test_checkpoint_passes_plain_name_to_zenml_step() -> None:

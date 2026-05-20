@@ -30,6 +30,39 @@ from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
 from kitaru.errors import KitaruUsageError
 
 
+def test_synthetic_checkpoint_marks_flow_result_non_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.openai_agents import _utils
+
+    captured: dict[str, Any] = {}
+
+    class FakeCheckpoint:
+        _step = object()
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        def decorate(func: Any) -> FakeCheckpoint:
+            captured["decorated_name"] = func.__name__
+            return FakeCheckpoint()
+
+        return decorate
+
+    monkeypatch.setattr(_utils, "_synthetic_checkpoint", fake_checkpoint)
+
+    _utils._build_checkpoint_step(
+        config={"type": "tool_call", "retries": 2},
+        step_name="tool call",
+        body=lambda: "ok",
+    )
+
+    assert captured["flow_result_candidate"] is False
+    assert captured["type"] == "tool_call"
+    assert captured["retries"] == 2
+    assert captured["decorated_name"] == "tool_call"
+
+
 class StaticTextModel(Model):
     def __init__(self, text: str) -> None:
         self.text = text
