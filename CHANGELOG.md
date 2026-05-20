@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-20
+
 ### Added
 - Added OpenAI Agents adapter context passthrough: `KitaruRunner.run(...)` and `run_sync(...)` now accept a `context=` argument that is forwarded to the OpenAI Agents SDK and included in runner/tool checkpoint cache keys, with an explicit `context_cache_identity=` projection hook for stable production contexts. Context-derived cache identity also covers tool calls resumed from interrupted `RunState` so approved tools after a HITL resume cannot reuse stale same-args/different-context cache entries. (#345)
 - Added OpenAI Agents tool-input guardrail observability in `checkpoint_strategy="calls"`: model-requested tool calls a guardrail blocks before the tool body runs are now recorded as `tool_call` events with guardrail metadata, without creating a tool checkpoint or persisting rejected arguments. `OpenAICapturePolicy.save_input=False` redacts guardrail rejection text and unexpected exception details, and `save_interruption_payloads=False` omits raw interruption argument previews. (#345)
