@@ -60,7 +60,7 @@ zizmor:
 
 # Audit Python dependencies for known vulnerabilities (honors .github/pip-audit-ignored.txt)
 audit:
-    awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
+    awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
