@@ -54,7 +54,7 @@ jobs:
       - run: uv sync --frozen
       - name: Run pip-audit (with documented ignore list)
         run: |
-          awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' \
+          awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
   links:
     runs-on: ubuntu-latest
