@@ -247,6 +247,8 @@ _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
 _FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
 _FLOW_RESULT_TUPLE_METADATA_ROLE = "tuple_metadata"
+_KITARU_EXTRA_NAMESPACE = "kitaru"
+_FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
 _FLOW_RESULT_COERCION_ENABLED: ContextVar[bool] = ContextVar(
     "kitaru_flow_result_coercion_enabled",
     default=True,
@@ -776,6 +778,26 @@ def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
     return "\n".join(lines)
 
 
+def _iter_step_kitaru_extras(step_run: Any) -> Iterator[Mapping[str, Any]]:
+    """Yield Kitaru step metadata from a hydrated step run, if present."""
+    for owner_name in ("config", "spec"):
+        owner = getattr(step_run, owner_name, None)
+        raw_extra = getattr(owner, "extra", None)
+        if not isinstance(raw_extra, Mapping):
+            continue
+        raw_kitaru = raw_extra.get(_KITARU_EXTRA_NAMESPACE)
+        if isinstance(raw_kitaru, Mapping):
+            yield raw_kitaru
+
+
+def _is_flow_result_candidate_step(step_run: Any) -> bool:
+    """Return whether a terminal step can be used as the fallback flow result."""
+    for raw_kitaru in _iter_step_kitaru_extras(step_run):
+        if _FLOW_RESULT_CANDIDATE_KEY in raw_kitaru:
+            return raw_kitaru[_FLOW_RESULT_CANDIDATE_KEY] is not False
+    return True
+
+
 def _extract_outputs_from_terminal_steps(
     run: PipelineRunResponse,
 ) -> list[_FlowResultOutput]:
@@ -803,14 +825,36 @@ def _extract_outputs_from_terminal_steps(
         return []
     execution_id = str(hydrated_run.id)
     if len(terminal_step_names) > 1:
+        eligible_terminal_step_names: list[str] = []
+        non_candidate_terminal_step_names: list[str] = []
+        for step_name in terminal_step_names:
+            if _is_flow_result_candidate_step(step_runs[step_name]):
+                eligible_terminal_step_names.append(step_name)
+            else:
+                non_candidate_terminal_step_names.append(step_name)
+
+        reason = (
+            f"multiple terminal checkpoints were found "
+            f"({len(terminal_step_names)}): "
+            f"{', '.join(terminal_step_names)}"
+        )
+        if eligible_terminal_step_names:
+            reason += (
+                ". Terminal checkpoints still eligible as flow results: "
+                f"{', '.join(eligible_terminal_step_names)}."
+            )
+        if non_candidate_terminal_step_names:
+            reason += (
+                " Terminal checkpoints marked as adapter-created/non-result: "
+                f"{', '.join(non_candidate_terminal_step_names)}. These steps "
+                "also ended the graph, so Kitaru cannot safely ignore them; "
+                "add a final checkpoint that consumes all branches and returns "
+                "the value you want."
+            )
         raise _MultipleTerminalStepsOutputError(
             _ambiguous_terminal_message(
                 execution_id,
-                reason=(
-                    f"multiple terminal checkpoints were found "
-                    f"({len(terminal_step_names)}): "
-                    f"{', '.join(terminal_step_names)}"
-                ),
+                reason=reason,
             )
         )
 
