@@ -60,11 +60,11 @@ local = [
     "zenml[server]>=0.94.4",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.89.0,<1.93.0",
+    "pydantic-ai-slim>=1.89.0,<1.96.0",
     "typing_extensions>=4.12",
 ]
 openai-agents = [
-    "openai-agents>=0.15.0,<0.16.0",
+    "openai-agents>=0.15.0,<0.18.0",
 ]
 langgraph = [
     "langchain>=1.0,<2",
@@ -125,8 +125,8 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.89.0,<1.93.0",
-    "openai-agents>=0.15.0,<0.16.0",
+    "pydantic-ai-slim>=1.89.0,<1.96.0",
+    "openai-agents>=0.15.0,<0.18.0",
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langgraph>=1.1,<2",
