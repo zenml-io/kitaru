@@ -75,9 +75,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN, which is not exposed to fork PRs.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
-      == github.repository
+    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       ZENML_SERVER_TAG: 0.94.4
@@ -142,9 +141,8 @@ jobs:
         if: always()
         run: docker rm -f kitaru-ci-server || true
   wheel-packaging:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN, which is not exposed to fork PRs.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
-      == github.repository
+    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2

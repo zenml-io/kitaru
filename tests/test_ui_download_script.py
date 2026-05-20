@@ -48,7 +48,7 @@ import json
 import os
 import shutil
 import sys
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
 args = sys.argv[1:]
 log_path = os.environ.get("FAKE_CURL_LOG")
@@ -78,8 +78,18 @@ if not url:
     print("fake curl: no URL", file=sys.stderr)
     raise SystemExit(2)
 
-if url.endswith("/releases?per_page=100"):
-    sys.stdout.write(os.environ["FAKE_RELEASES_JSON"])
+if "/releases" in url and "/releases/tags/" not in url:
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    page = params.get("page", ["1"])[0]
+    releases_json = os.environ.get(
+        f"FAKE_RELEASES_JSON_PAGE_{page}",
+        os.environ.get("FAKE_RELEASES_JSON", "[]" if page != "1" else None),
+    )
+    if releases_json is None:
+        print("fake curl: missing FAKE_RELEASES_JSON", file=sys.stderr)
+        raise SystemExit(4)
+    sys.stdout.write(releases_json)
     raise SystemExit(0)
 
 if "/releases/tags/" in url:
@@ -201,6 +211,39 @@ def test_download_ui_defaults_to_highest_stable_kitaru_ui_release(
     assert "Authorization: Bearer secret-token" in curl_log
 
 
+def test_download_ui_finds_stable_release_on_later_page(tmp_path: Path) -> None:
+    """Default selection searches past a full page of non-Kitaru releases."""
+    page_1 = [
+        {
+            "tag_name": f"other-product-v{index}.0.0",
+            "draft": False,
+            "prerelease": False,
+        }
+        for index in range(100)
+    ]
+    page_2 = [{"tag_name": "kitaru-ui-v0.12.0", "draft": False, "prerelease": False}]
+
+    result = _run_download_script(
+        tmp_path,
+        extra_env={
+            "FAKE_RELEASES_JSON_PAGE_1": json.dumps(page_1),
+            "FAKE_RELEASES_JSON_PAGE_2": json.dumps(page_2),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads(
+        (
+            tmp_path / "repo" / "src" / "kitaru" / "_ui" / "bundle_manifest.json"
+        ).read_text()
+    )
+    assert manifest["tag"] == "kitaru-ui-v0.12.0"
+
+    curl_log = (tmp_path / "curl.log").read_text()
+    assert "releases?per_page=100&page=1" in curl_log
+    assert "releases?per_page=100&page=2" in curl_log
+
+
 def test_download_ui_rejects_bare_v_tag_before_downloading(tmp_path: Path) -> None:
     """Old bare v* tags should fail clearly under the monorepo policy."""
     result = _run_download_script(tmp_path, extra_env={"TAG": "v0.10.0"})
@@ -218,6 +261,20 @@ def test_download_ui_rejects_prerelease_without_opt_in(tmp_path: Path) -> None:
             "TAG": "kitaru-ui-v0.11.0-rc.1",
             "FAKE_PRERELEASE_TAGS": "kitaru-ui-v0.11.0-rc.1",
         },
+    )
+
+    assert result.returncode != 0
+    assert "KITARU_UI_ALLOW_PRERELEASE=true" in result.stderr
+    assert not (tmp_path / "repo" / "src" / "kitaru" / "_ui" / "dist").exists()
+
+
+def test_download_ui_rejects_prerelease_tag_shape_without_metadata(
+    tmp_path: Path,
+) -> None:
+    """Semver prerelease-looking tags are rejected even if release metadata is wrong."""
+    result = _run_download_script(
+        tmp_path,
+        extra_env={"TAG": "kitaru-ui-v0.11.0-rc.1"},
     )
 
     assert result.returncode != 0

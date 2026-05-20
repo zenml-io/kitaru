@@ -37,7 +37,8 @@ just ui-bundle
 What happens:
 
 - Kitaru resolves the highest stable/full `kitaru-ui-v*` GitHub release from
-  `zenml-io/zenml-frontend-monorepo`.
+  `zenml-io/zenml-frontend-monorepo`, searching across paginated GitHub release
+  results instead of trusting only the first page.
 - The archive checksum is verified.
 - Files are extracted to `.kitaru-ui-bundles/current/dist/`.
 - A `bundle_manifest.json` is written next to the dist directory.
@@ -63,7 +64,9 @@ Old bare tags like `v0.2.0` are intentionally rejected.
 
 If that tag is a prerelease, this command fails. That failure is the release
 safety rail: the normal stable lane should not accidentally consume prerelease
-UI.
+UI. Tags like `kitaru-ui-v0.3.0-rc.1` are treated as prereleases from their
+semver shape even if GitHub release metadata incorrectly says they are full
+releases.
 
 ## Prerelease UI bundle
 
@@ -77,6 +80,8 @@ just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease
 This is deliberately more explicit than `ui-bundle` because it sets
 `KITARU_UI_ALLOW_PRERELEASE=true` under the hood. That opt-in belongs in local
 or smoke testing only, never in the official Kitaru release workflow.
+Tokened UI bundle jobs in CI must run only on trusted events such as `push`, not
+on `pull_request` code.
 
 ## Start local Kitaru with the prepared UI
 

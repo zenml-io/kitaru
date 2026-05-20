@@ -100,6 +100,8 @@ Treat no-op pairs (add X / revert X in same unreleased window) as excluded — t
 
 Official Kitaru releases bundle a Kitaru UI release from `zenml-io/zenml-frontend-monorepo` into the Python package. The Docker image then copies that already-packaged UI from the installed `kitaru` package. Docker does **not** download UI assets or choose a UI tag itself.
 
+Before changing UI bundle selection, frontend smoke testing, Docker dashboard packaging, or release UI workflow behavior, read `FRONTEND-TESTING.md`. It is the canonical runbook for stable/prerelease `kitaru-ui-v*` testing and token/trusted-event boundaries.
+
 The release workflow's `kitaru-ui-tag` input accepts only `kitaru-ui-v<semver>` tags. If the input is empty, `scripts/download-ui.sh` selects the highest stable/full `kitaru-ui-v*` release. Drafts and prereleases are excluded. Prerelease UI tags are only for local testing and `.github/workflows/ui-prerelease-smoke.yml`.
 
 Fetch the last Kitaru release timestamp and the monorepo releases:
@@ -363,7 +365,7 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **Main is force-pushed.** Always diff against the last tag, never against `origin/main`. `git fetch --tags` is mandatory before every invocation.
 - **CHANGELOG PR references drift.** Draft PR numbers get renumbered at merge. Cross-check every `(#N)` against `git log`.
 - **Site vs library changelog.** `site/` changes deploy on their own cadence via `site.yml`. They do not belong in the Python library CHANGELOG even when they land on the same `develop` branch.
-- **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo`. Only pass `-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>` if the user explicitly wants to pin to a specific stable UI. Official releases reject prerelease UI tags.
+- **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo`. Only pass `-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>` if the user explicitly wants to pin to a specific stable UI. Official releases reject prerelease UI tags. Read `FRONTEND-TESTING.md` before touching this path.
 - **Prerelease UI smoke.** To validate a prerelease UI, use Actions → `UI prerelease smoke` with a required `ui-tag` such as `kitaru-ui-v0.3.0-rc.1`. That workflow sets `KITARU_UI_ALLOW_PRERELEASE=true`, builds/verifies locally, and publishes nothing.
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.
 - **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets + manual approval); dry-runs use the `dry-run` GitHub environment and skip the `pypi` approval gate. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.

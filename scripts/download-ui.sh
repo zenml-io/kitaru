@@ -99,6 +99,52 @@ validate_tag_shape() {
     fi
 }
 
+fetch_release_pages() {
+    local releases_file="$1"
+    local page=1
+    local page_count=0
+    local -a page_files=()
+
+    while true; do
+        local page_file="$TMP_DIR/releases-page-$page.json"
+        github_api "$GITHUB_API_URL/repos/$UI_RELEASE_REPO/releases?per_page=100&page=$page" > "$page_file"
+        page_files+=("$page_file")
+        page_count=$("$PYTHON_BIN" - "$page_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    releases = json.load(handle)
+if not isinstance(releases, list):
+    print("Error: GitHub releases response was not a JSON array.", file=sys.stderr)
+    raise SystemExit(1)
+print(len(releases))
+PY
+)
+        if [ "$page_count" -lt 100 ]; then
+            break
+        fi
+        page=$((page + 1))
+    done
+
+    "$PYTHON_BIN" - "$releases_file" "${page_files[@]}" <<'PY'
+import json
+import sys
+
+output_file = sys.argv[1]
+all_releases: list[object] = []
+for page_file in sys.argv[2:]:
+    with open(page_file, encoding="utf-8") as handle:
+        releases = json.load(handle)
+    if not isinstance(releases, list):
+        print("Error: GitHub releases response was not a JSON array.", file=sys.stderr)
+        raise SystemExit(1)
+    all_releases.extend(releases)
+with open(output_file, "w", encoding="utf-8") as handle:
+    json.dump(all_releases, handle)
+PY
+}
+
 select_latest_stable_tag() {
     local releases_file="$1"
     "$PYTHON_BIN" - "$releases_file" <<'PY'
@@ -141,7 +187,7 @@ resolve_tag() {
 
     echo "No TAG or KITARU_UI_TAG set; resolving highest stable Kitaru UI release..."
     local releases_file="$TMP_DIR/releases.json"
-    github_api "$GITHUB_API_URL/repos/$UI_RELEASE_REPO/releases?per_page=100" > "$releases_file"
+    fetch_release_pages "$releases_file"
     TAG=$(select_latest_stable_tag "$releases_file")
     echo "Resolved stable tag: $TAG"
 }
@@ -150,6 +196,7 @@ load_release_metadata() {
     local release_file="$1" metadata_file="$2"
     "$PYTHON_BIN" - "$release_file" "$TAG" "$ALLOW_PRERELEASE" "$ARCHIVE_NAME" <<'PY' > "$metadata_file"
 import json
+import re
 import shlex
 import sys
 
@@ -160,7 +207,9 @@ if release.get("draft"):
     print(f"Error: release {tag} is a draft and cannot be bundled.", file=sys.stderr)
     raise SystemExit(1)
 
-is_prerelease = bool(release.get("prerelease"))
+metadata_prerelease = bool(release.get("prerelease"))
+tag_prerelease = bool(re.match(r"^kitaru-ui-v\d+\.\d+\.\d+-", tag))
+is_prerelease = metadata_prerelease or tag_prerelease
 if is_prerelease and allow_prerelease != "true":
     print(
         f"Error: release {tag} is a prerelease. Set "

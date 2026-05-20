@@ -36,7 +36,8 @@ scripts/              # Doc generation + site merge scripts
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
   smoke-test.sh              # Pre-release end-to-end sanity check (CLI, flows, MCP, LLM)
-FRONTEND-TESTING.md   # Internal runbook for stable/prerelease Kitaru UI bundle testing
+FRONTEND-TESTING.md   # Read first for Kitaru UI bundle/frontend testing,
+                       # stable/prerelease release validation, and token boundaries
 docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
   Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
   Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
@@ -185,6 +186,7 @@ just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
 
 # Kitaru UI bundle testing
+# Read FRONTEND-TESTING.md before changing UI bundle, frontend smoke, Docker dashboard, or release UI workflows.
 just ui-bundle                                # Download latest stable/full kitaru-ui-v* bundle
 just UI_TAG=kitaru-ui-v0.2.0 ui-bundle        # Download a specific stable UI bundle
 just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease  # Explicit prerelease opt-in

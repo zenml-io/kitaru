@@ -46,8 +46,10 @@ def test_ci_bundles_ui_before_source_docker_smoke() -> None:
     assert "KITARU_UI_RELEASE_TOKEN" in workflow
     assert "--build-arg KITARU_UI_TAG" not in workflow
     assert "KITARU_UI_TAG: latest" not in workflow
-    assert "github.event.pull_request.head.repo.full_name" in workflow
-    assert "== github.repository" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "github.event.pull_request.head.repo.full_name" not in workflow
+    assert "== github.repository" not in workflow
+    assert "never expose it to PR code" in workflow
     assert "bash scripts/verify-server-ui.sh kitaru-ci-server" in workflow
     assert "uv run --no-project scripts/verify-ui-wheel.py" in workflow
 
