@@ -7,14 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added OpenAI Agents adapter context passthrough: `KitaruRunner.run(...)` and `run_sync(...)` now accept a `context=` argument that is forwarded to the OpenAI Agents SDK and included in runner/tool checkpoint cache keys, with an explicit `context_cache_identity=` projection hook for stable production contexts. Context-derived cache identity also covers tool calls resumed from interrupted `RunState` so approved tools after a HITL resume cannot reuse stale same-args/different-context cache entries. (#345)
+- Added OpenAI Agents tool-input guardrail observability in `checkpoint_strategy="calls"`: model-requested tool calls a guardrail blocks before the tool body runs are now recorded as `tool_call` events with guardrail metadata, without creating a tool checkpoint or persisting rejected arguments. `OpenAICapturePolicy.save_input=False` redacts guardrail rejection text and unexpected exception details, and `save_interruption_payloads=False` omits raw interruption argument previews. (#345)
+- Built wheels now include the `kitaru/py.typed` PEP 561 marker so downstream type checkers pick up Kitaru's public type information. (#343)
+
 ### Changed
-- Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.4` so Kitaru tracks the latest upstream ZenML release.
+- Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.4` so Kitaru tracks the latest upstream ZenML release. (#344)
+- `kitaru logout` now resets persisted store state and clears credentials before attempting best-effort local-daemon shutdown, so a failure to stop the daemon no longer leaves the CLI pointed at a broken remote connection. (#343)
+- `kitaru secrets list` now uses a stable backend page size before applying CLI pagination, producing deterministic ordering across runs. (#343)
 
 ### Fixed
-- Fixed adapter-created granular checkpoints being treated as flow-return candidates, so `flow.run(...).wait()` / `.get()` can return the user's final checkpoint result when adapters also produced model/tool checkpoints.
-- Fixed Kitaru-owned request constructors to reject checkpoint output handles with guidance to call `.load()` instead of surfacing generic Pydantic string validation errors. (#349)
-- Fixed PydanticAI direct sync tool-body `kp.wait_for_input(...)` calls under ZenML `0.94.4` with explicit `allow_sync_tool_body_waits=True` opt-in, keeping `tool_checkpoint_config_by_name={"tool": False}` as checkpoint-only configuration.
-- Fixed Kitaru flow return compatibility with ZenML `0.94.4` dynamic-pipeline output validation by persisting plain flow returns as internal artifacts while preserving user-facing Python return values and avoiding marker-shaped user dictionaries being mistaken for hidden tuple metadata.
+- Fixed adapter-created granular checkpoints being treated as flow-return candidates, so `flow.run(...).wait()` / `.get()` can return the user's final checkpoint result when adapters also produced model/tool checkpoints. (#355)
+- Fixed Kitaru-owned request constructors to reject checkpoint output handles with guidance to call `.load()` instead of surfacing generic Pydantic string validation errors. (#353)
+- Fixed PydanticAI direct sync tool-body `kp.wait_for_input(...)` calls under ZenML `0.94.4` with explicit `allow_sync_tool_body_waits=True` opt-in, keeping `tool_checkpoint_config_by_name={"tool": False}` as checkpoint-only configuration. (#351)
+- Fixed Kitaru flow return compatibility with ZenML `0.94.4` dynamic-pipeline output validation by persisting plain flow returns as internal artifacts while preserving user-facing Python return values and avoiding marker-shaped user dictionaries being mistaken for hidden tuple metadata. (#344)
+- Fixed adapter result identity after checkpoint load for OpenAI Agents, Claude Agent SDK, and LangGraph runners: results restored from a synthetic checkpoint are now rebuilt as the canonical local result class, so `isinstance(result, OpenAIRunResult)` (and the Claude/LangGraph equivalents) no longer fails when the loaded payload originally came from an alternate import path. (#354)
+- Replaced local-server cleanup's PID-only `SIGKILL` fallback with a "warn and continue" path so a recycled PID cannot cause Kitaru to kill an unrelated process during `kitaru clean global/all`. Inspection failures now surface as `unknown (inspection failed: ...)` instead of being silently treated as "no local server". (#343)
+- Restored the caller process environment exactly after `kitaru login` startup attempts, even when local-daemon deployment or connection fails partway through. (#343)
+- Removed stale references to the deprecated native memory surface from the docs site, agent-native guides, and comparison pages. (#342)
 
 ## [0.12.0] - 2026-05-17
 
