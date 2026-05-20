@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCAL_SERVER_HOST = "127.0.0.1"
 _DEFAULT_LOCAL_SERVER_PORT = 8383
+_KITARU_UI_DIST_PATH_ENV = "KITARU_UI_DIST_PATH"
 _LOCAL_INSTALL_GUIDANCE = "\n".join(
     [
         "Local server requires additional dependencies.",
@@ -52,6 +54,60 @@ def _resolve_bundled_ui_dir() -> Path | None:
     if ui_dir.is_dir() and (ui_dir / "index.html").is_file():
         return ui_dir
     return None
+
+
+def _resolve_env_ui_dist_path() -> Path | None:
+    """Return the validated KITARU_UI_DIST_PATH override, if configured."""
+    raw_path = os.environ.get(_KITARU_UI_DIST_PATH_ENV)
+    if not raw_path:
+        return None
+
+    ui_dir = Path(raw_path).expanduser().resolve()
+    if not ui_dir.is_dir():
+        raise KitaruUsageError(
+            "\n".join(
+                [
+                    f"{_KITARU_UI_DIST_PATH_ENV} points to a missing directory:",
+                    f"  {ui_dir}",
+                    "Set it to a built Kitaru UI dist directory that "
+                    "contains index.html.",
+                ]
+            )
+        )
+    if not (ui_dir / "index.html").is_file():
+        raise KitaruUsageError(
+            "\n".join(
+                [
+                    f"{_KITARU_UI_DIST_PATH_ENV} must point to a UI dist "
+                    "directory containing index.html.",
+                    f"Checked: {ui_dir}",
+                ]
+            )
+        )
+    return ui_dir
+
+
+def _resolve_kitaru_ui_dir() -> Path | None:
+    """Return the UI dist directory Kitaru should ask ZenML to serve."""
+    return _resolve_env_ui_dist_path() or _resolve_bundled_ui_dir()
+
+
+def _local_server_ui_override_running_error(
+    *, existing_url: str, ui_dir: Path
+) -> KitaruUsageError:
+    """Build the error for an already-running server and UI override."""
+    return KitaruUsageError(
+        "\n".join(
+            [
+                f"A local Kitaru server is already running at {existing_url}.",
+                f"{_KITARU_UI_DIST_PATH_ENV} only applies when the local "
+                "server starts, so this running server cannot pick up:",
+                f"  {ui_dir}",
+                "Restart the local server with the override, for example:",
+                f"  kitaru logout && {_KITARU_UI_DIST_PATH_ENV}={ui_dir} kitaru login",
+            ]
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +241,12 @@ def _deploy_and_connect(
         port=port,
     )
     env_overlay = {ZENML_DEFAULT_ANALYTICS_SOURCE_ENV: "kitaru-api"}
-    if ui_dir := _resolve_bundled_ui_dir():
+    if ui_dir := _resolve_kitaru_ui_dir():
         env_overlay["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
         logger.info("Kitaru UI directory: %s", ui_dir)
     else:
         logger.debug(
-            "No bundled Kitaru UI found (expected at %s); "
+            "No Kitaru UI override or bundled UI found (expected bundled UI at %s); "
             "server will use default ZenML dashboard",
             Path(__file__).parent / "_ui" / "dist",
         )
@@ -239,6 +295,7 @@ def start_or_connect_local_server(
 
     deployer = local_server_deployer_cls()
     local_server = get_local_server()
+    ui_override_dir = _resolve_env_ui_dist_path()
 
     if local_server is not None:
         existing_url = _existing_local_server_url(local_server)
@@ -246,6 +303,12 @@ def start_or_connect_local_server(
         is_running = _is_server_running(local_server) and bool(existing_url)
 
         if is_running and (port is None or port == existing_port):
+            if ui_override_dir is not None:
+                assert existing_url is not None
+                raise _local_server_ui_override_running_error(
+                    existing_url=existing_url,
+                    ui_dir=ui_override_dir,
+                )
             if _resolve_bundled_ui_dir() is not None:
                 logger.debug(
                     "Connecting to existing server; dashboard may differ "

@@ -75,19 +75,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
+    # UI release assets may require KITARU_UI_RELEASE_TOKEN, which is not exposed to fork PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
+      == github.repository
     runs-on: ubuntu-latest
     env:
       ZENML_SERVER_TAG: 0.94.4
-      KITARU_UI_TAG: latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+      - name: Download stable Kitaru UI
+        run: bash scripts/download-ui.sh
+        env:
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
       - name: Build server image
         run: >-
           docker build -f docker/Dockerfile --target server
           --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
-          --build-arg KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
           -t kitaru-ci-server .
       - name: Start server container
         run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
@@ -104,10 +109,8 @@ jobs:
           echo "Server did not become healthy in time." >&2
           docker logs kitaru-ci-server || true
           exit 1
-      - name: Verify bundled dashboard assets exist in the installed package
-        run: |
-          set -euo pipefail
-          docker exec kitaru-ci-server sh -c 'python -c "import zenml, os; d=os.path.join(zenml.__path__[0],\"zen_server/dashboard/index.html\"); assert os.path.isfile(d), f\"missing: {d}\"; print(\"OK:\", d)"'
+      - name: Verify bundled and copied dashboard assets
+        run: bash scripts/verify-server-ui.sh kitaru-ci-server
       - name: Smoke test root route serves dashboard HTML
         run: |
           set -euo pipefail
@@ -139,6 +142,9 @@ jobs:
         if: always()
         run: docker rm -f kitaru-ci-server || true
   wheel-packaging:
+    # UI release assets may require KITARU_UI_RELEASE_TOKEN, which is not exposed to fork PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
+      == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -147,28 +153,16 @@ jobs:
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
         with:
           python-version: '3.12'
-      - name: Download Kitaru UI
+      - name: Download stable Kitaru UI
         run: bash scripts/download-ui.sh
+        env:
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
       - name: Build wheel
         run: uv build --wheel
       - name: Verify Kitaru UI in wheel
         run: |
           WHEEL=$(ls dist/*.whl)
-          python -c "
-          import zipfile, sys
-          names = zipfile.ZipFile('$WHEEL').namelist()
-          missing = []
-          if not any('_ui/dist/index.html' in n for n in names):
-              missing.append('kitaru/_ui/dist/index.html')
-          if not any('_ui/bundle_manifest.json' in n for n in names):
-              missing.append('kitaru/_ui/bundle_manifest.json')
-          if missing:
-              for m in missing:
-                  print(f'::error::{m} missing from wheel')
-              sys.exit(1)
-          ui_files = sum(1 for n in names if '_ui/dist/' in n)
-          print(f'Kitaru UI verified: {ui_files} asset files in $WHEEL')
-          "
+          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
   test:
     runs-on: ubuntu-latest
     strategy:
