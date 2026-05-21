@@ -5,19 +5,25 @@ description: PydanticAI gives the agent loop. Kitaru gives durable execution. To
 
 **Stage file:** `stage_1_basic_agent.py`
 
-PydanticAI gives you the agent loop. Kitaru gives you durable execution. Together: durable agents without learning a graph DSL or rewriting your control flow as a state machine.
+## The problem
 
-## What's in it
+A useful agent task is rarely one model call. The agent reasons, calls a tool, reads the result, reasons again, and only finishes several turns later. Each of those turns costs real money and real time. Partway through, the process can die: a deploy restarts the worker, or the machine runs out of memory.
 
-- `Profile` — a Pydantic model declaring `name`, `system_prompt`, `model`, `allowed_tools`.
-- `PermissionHandler` — gates every tool call against the profile.
-- `build_tools(permission_handler)` — produces a pydantic-ai toolset filtered by `allowed_tools`.
-- `build_agent(profile)` — returns a vanilla pydantic-ai `Agent`.
-- The flow body wraps the agent with `KitaruAgent(...)` for durable execution.
+## What goes wrong without it
 
-## The hero demo
+The model already did the expensive part of turn 1, and then the process fell over before turn 2. A plain agent loop has no memory of that completed work. When you retry, it starts from the top and pays for turn 1 again. On a long task that is the same model bill twice, plus the latency of redoing work that already succeeded.
 
-The flow has **two checkpoints**, both real LLM turns. A `FORCE_FAILURE` env var raises a simulated downstream blip between them.
+## What this stage adds
+
+PydanticAI gives you the agent loop. Kitaru wraps that loop in a durable flow, so a turn that already finished is saved and reused after a retry instead of being paid for a second time. You get this without learning a graph DSL or rewriting your control flow as a state machine.
+
+The flow has two checkpoints, both real LLM turns. When the process dies between them, the first turn is already saved; the retry replays it from cache and only runs the part that never finished.
+
+<DurableAgentReplayDiagram />
+
+## Run it
+
+The demo uses a `FORCE_FAILURE` env var to simulate a downstream blip between the two turns.
 
 <Steps>
 
@@ -43,9 +49,14 @@ python stage_1_basic_agent.py
 
 </Steps>
 
-<DurableAgentReplayDiagram />
+### Env-var toggles
 
-What you see in the kitaru log lines:
+- `FORCE_FAILURE=1` — simulate the post-turn-1 blip described above.
+- `DISABLE_CACHE=1` — force every checkpoint to re-execute even if a prior cached output exists. Useful when iterating on the flow itself.
+
+## What to look for in the logs
+
+Watch the two checkpoints across the two runs:
 
 | | First run (with `FORCE_FAILURE`) | Second run (no flag) |
 |---|---|---|
@@ -53,20 +64,27 @@ What you see in the kitaru log lines:
 | `default_2` | (never runs — flow raised first) | started → finished (one LLM call) |
 | Outcome | failure | printed output, only second turn re-paid for |
 
-Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. **That's the durability story.**
+The first run pays for turn 1, then fails. The second run serves turn 1 from cache for free and only runs turn 2. Without Kitaru, the first failure would have wasted turn 1's work and you would pay for both turns on the retry. With Kitaru, only the part that did not complete the first time gets re-paid for. That is the durability story.
 
-## How it composes
+## How it works
 
-Each stage in this tour explicitly passes `granular_checkpoints=False` to `KitaruAgent` so the stage log blocks read cleanly: one aggregating `default` / `default_2` checkpoint per `agent.run_sync()`, easy to point at while learning. The FORCE_FAILURE demo above lands at the turn boundary in this mode.
+The stage is a small set of pieces, each one a plain Python object:
 
-In a real fork, you usually remove this teaching-only kwarg. `KitaruAgent` defaults to `granular_checkpoints=True`, which means every model request and every tool call gets its own checkpoint and its own cache key — a flow that crashed after the third model request resumes by replaying only the calls after the third. Same durability story; finer cache granularity, finer dashboard rows.
+- `Profile` — a Pydantic model declaring `name`, `system_prompt`, `model`, `allowed_tools`.
+- `PermissionHandler` — gates every tool call against the profile.
+- `build_tools(permission_handler)` — produces a pydantic-ai toolset filtered by `allowed_tools`.
+- `build_agent(profile)` — returns a vanilla pydantic-ai `Agent`.
+- The flow body wraps the agent with `KitaruAgent(...)` for durable execution.
 
 The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later stages add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
 
-## Env-var toggles
+## What's simplified for the tutorial
 
-- `FORCE_FAILURE=1` — simulate the post-turn-1 blip described above.
-- `DISABLE_CACHE=1` — force every checkpoint to re-execute even if a prior cached output exists. Useful when iterating on the flow itself.
+Each stage in this tour explicitly passes `granular_checkpoints=False` to `KitaruAgent` so the stage log blocks read cleanly: one aggregating `default` / `default_2` checkpoint per `agent.run_sync()`, easy to point at while learning. The `FORCE_FAILURE` demo lands at the turn boundary in this mode. This kwarg exists for teaching, not because you would normally set it.
+
+## Production upgrade path
+
+In a real fork you usually remove the teaching-only `granular_checkpoints=False`. `KitaruAgent` defaults to `granular_checkpoints=True`, which means every model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request then resumes by replaying only the calls after the third. Same durability story; finer cache granularity, finer dashboard rows.
 
 ## Source
 

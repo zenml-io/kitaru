@@ -5,13 +5,29 @@ description: ask_question — a freeform HITL tool that suspends the flow until 
 
 **Stage file:** `stage_6_hitl.py`
 
-Some questions only the operator can answer — sign-off on irreversible actions, subjective preferences, ambiguous next-steps. Stage 6 introduces `ask_question`, a freeform HITL tool that pauses the flow until a human responds.
+## The problem
 
-The agent calls it like any other tool; the kitaru pydantic-ai adapter routes the call through [`kitaru.wait()`](/guides/wait-and-resume). From the agent's perspective: `ask_question("...")` returns a string after a brief pause. From kitaru's perspective: the flow paused, durably, until input arrived.
+Some questions only the operator can answer: sign-off on an irreversible action, a subjective preference, an ambiguous next step. The agent reaches that point and genuinely should stop and ask a human, not guess.
+
+## What goes wrong without it
+
+The naive version is calling `input()` in the middle of the run. That ties the whole flow to one live process. If the machine restarts while it waits, the run is gone, and there is no way for the human to answer from a dashboard, a CLI, or a REST call on a server. A human might take minutes or hours to respond, and the process sits there the whole time, losing everything if it dies.
+
+## What this stage adds
+
+Stage 6 introduces `ask_question`, a freeform HITL tool that pauses the flow until a human responds. The agent calls it like any other tool; the kitaru pydantic-ai adapter routes the call through [`kitaru.wait()`](/guides/wait-and-resume). From the agent's perspective, `ask_question("...")` returns a string after a brief pause. From kitaru's perspective, the flow paused durably until input arrived, so a restart in the middle does not lose the run.
 
 <HitlPauseResumeDiagram />
 
-## Run it — two ways
+## One-time setup
+
+Stage 6's skill uses the typed services and mocks from Stages 4 and 5. If you skipped those stages, run the setup script once; it builds the images and creates the `wiki-token` and `webhook-token` secrets:
+
+```bash
+bash setup.sh
+```
+
+## Run it
 
 <Tabs items={["Interactive", "Non-interactive"]}>
   <Tab value="Interactive">
@@ -42,20 +58,24 @@ The agent calls it like any other tool; the kitaru pydantic-ai adapter routes th
 </Tabs>
 
 <Callout type="info">
-  On the local stack the kitaru runtime polls for input until a 600s timeout, so the non-interactive path *does* wait for the CLI command above on this stack. If you skip the answer, the flow eventually times out rather than auto-resolving. Behavior on remote stacks is the same shape — the difference is just where the wait record lives.
+  On the local stack the kitaru runtime polls for input until a 600s timeout, so the non-interactive path *does* wait for the CLI command above on this stack. If you skip the answer, the flow eventually times out rather than auto-resolving. Behavior on remote stacks is the same shape; the difference is just where the wait record lives.
 </Callout>
 
-## What the agent does
+### Env-var toggles
 
-The agent's skill (`skills/with-hitl/default-agent/SKILL.md`) does this:
+- `DISABLE_CACHE=1` — same as earlier stages.
 
-1. Look up `lookup_wiki(topic="durability")` — host-side typed service from [Stage 5](/agent-factory/05-typed-services).
+## What to look for in the logs
+
+The agent's skill (`skills/with-hitl/default-agent/SKILL.md`) runs this procedure:
+
+1. Look up `lookup_wiki(topic="durability")`, a host-side typed service from [Stage 5](/agent-factory/05-typed-services).
 2. Draft a 1–2 sentence summary from the first snippet.
-3. Call `ask_question("What suffix should I add before publishing?")` — **the flow pauses here.**
+3. Call `ask_question("What suffix should I add before publishing?")`. **The flow pauses here.**
 4. Append the operator's answer to the summary.
 5. Publish via `publish_summary`. Returns `{message_id, posted_at}`.
 
-So the agent goes: typed-service lookup → human pause → publish, all in one durable flow.
+So the agent goes: typed-service lookup → human pause → publish, all in one durable flow. The pause is the line to watch for:
 
 ```text
 Kitaru: Checkpoint `default` started.
@@ -70,27 +90,6 @@ Kitaru: Checkpoint `default` finished in 1m12s.
 Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoint output. Verified by ops on call.
 ```
 
-## What's in it
-
-- `agent_factory/tools.py` — adds the `ask_question` tool factory. Body calls `wait_for_input(question=question, name=...)` from the kitaru pydantic-ai adapter. The wait returns whatever the operator supplies; the tool coerces to `str` for the agent's tool-result contract.
-- `agent_factory/profile.py` — `ToolName` already includes `ask_question` (forward-looking). Stage 6 just turns it on in `allowed_tools={...}`.
-- [`skills/with-hitl/default-agent/SKILL.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/skills/with-hitl/default-agent/SKILL.md) — stage 6's procedure.
-
-## Architectural notes
-
-- **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
-- **Wait paths are flow-scope only — opt the wait-bearing tool out of granular checkpoints.** `KitaruAgent` defaults to `granular_checkpoints=True`, which wraps every tool call in its own checkpoint. But `kitaru.wait()` (and the adapter's `wait_for_input` shim) refuses to run inside a checkpoint body — it has to live at flow scope. Stage 6 wires this by passing `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`, which tells the adapter to skip the granular checkpoint wrapper for that one tool. Other tools (`exec`, `skill`, `exec_service`) stay granular.
-- **Wait-name design is replay-safe.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. For an end-to-end replay tour against a flow with cached waits, see [`/guides/replay-and-overrides`](/guides/replay-and-overrides).
-- **Why `wait_for_input(...)` from the body, not `@hitl_tool(...)` on the function?** The shipped `@hitl_tool(schema=...)` form persists the `schema` value (a Python `type`) into the wait's metadata, which doesn't round-trip cleanly on the local stack today. Calling `wait_for_input(...)` from inside the tool body has the same external behavior without that snag.
-- **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape.
-- **Operator input flows downstream verbatim.** Whatever the operator answers becomes the tool's return value, then is appended to the summary, then is POSTed to the webhook. No escaping, no re-prompting. Forks should escape it themselves before handing it to anything that interprets the bytes (HTML renderer, shell, SQL).
-
-## Env-var toggles
-
-- `DISABLE_CACHE=1` — same as earlier stages.
-
-## Inspecting and replaying the run
-
 Once a stage has completed, the operator surface that makes durability *observable* lives behind the CLI and dashboard. From the same shell that ran the stage:
 
 ```bash
@@ -100,11 +99,35 @@ kitaru executions logs <execution_id>                   # streaming runtime logs
 kitaru executions replay <execution_id> --from default  # re-run from the agent turn (cached HITL answer reused)
 ```
 
-`replay --from default` re-executes the agent turn with everything upstream served from cache; if the operator already answered the wait in the original run, the cached answer is reused (the wait `name` is stable across replays — see the architectural note above). For replay with output overrides — swap a checkpoint's input artifact while preserving downstream caches — see [Replay and Overrides](/guides/replay-and-overrides).
+`replay --from default` re-executes the agent turn with everything upstream served from cache; if the operator already answered the wait in the original run, the cached answer is reused (the wait `name` is stable across replays; the "Wait-name design is replay-safe" note under How it works explains why). For replay with output overrides that swap a checkpoint's input artifact while preserving downstream caches, see [Replay and Overrides](/guides/replay-and-overrides).
+
+## How it works
+
+The pieces involved:
+
+- `agent_factory/tools.py` — adds the `ask_question` tool factory. Body calls `wait_for_input(question=question, name=...)` from the kitaru pydantic-ai adapter. The wait returns whatever the operator supplies; the tool coerces to `str` for the agent's tool-result contract.
+- `agent_factory/profile.py` — `ToolName` already includes `ask_question` (forward-looking). Stage 6 just turns it on in `allowed_tools={...}`.
+- [`skills/with-hitl/default-agent/SKILL.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/skills/with-hitl/default-agent/SKILL.md) — stage 6's procedure.
+
+A few mechanics worth knowing:
+
+- **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
+- **Wait paths are flow-scope only, so the wait-bearing tool opts out of granular checkpoints.** `KitaruAgent` defaults to `granular_checkpoints=True`, which wraps every tool call in its own checkpoint. But `kitaru.wait()` (and the adapter's `wait_for_input` shim) refuses to run inside a checkpoint body; it has to live at flow scope. Stage 6 wires this by passing `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`, which tells the adapter to skip the granular checkpoint wrapper for that one tool. Other tools (`exec`, `skill`, `exec_service`) stay granular.
+- **Wait-name design is replay-safe.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index.
+- **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape.
+
+## What's simplified for the tutorial
+
+- **The tool calls `wait_for_input(...)` from the body instead of decorating with `@hitl_tool(...)`.** The shipped `@hitl_tool(schema=...)` form persists the `schema` value (a Python `type`) into the wait's metadata, which doesn't round-trip cleanly on the local stack today. Calling `wait_for_input(...)` from inside the tool body has the same external behavior without that snag.
+- **Operator input flows downstream verbatim.** Whatever the operator answers becomes the tool's return value, then is appended to the summary, then is POSTed to the webhook. There is no escaping and no re-prompting in the example.
+
+## Production upgrade path
+
+On a server the operator answers through the dashboard, CLI, or REST API rather than the local terminal prompt; the non-interactive run above is already that shape. Before handing operator input to anything that interprets the bytes (an HTML renderer, a shell, SQL), escape it yourself; the example passes it through unescaped.
 
 ## Source
 
 - [`stage_6_hitl.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_6_hitl.py)
 - [Wait, Input, and Resume](/guides/wait-and-resume) — the underlying primitive.
 
-That's the end of the tour. Replay isn't covered as a separate stage here — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](/guides/replay-and-overrides) when you want it.
+That's the end of the tour. Replay isn't covered as a separate stage here; it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](/guides/replay-and-overrides) when you want it.
