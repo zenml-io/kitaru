@@ -5,6 +5,7 @@ ZENML_SERVER_TAG := "0.94.4"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
+UI_BUNDLE_ROOT := ".kitaru-ui-bundles"
 
 # List available recipes
 default:
@@ -84,6 +85,56 @@ test *ARGS:
 build:
     uv build
 
+# Download/extract a local Kitaru UI bundle for manual login/smoke testing.
+# Defaults to the latest stable kitaru-ui-v* release.
+# Pass UI_TAG=kitaru-ui-v0.2.0 to pin a stable release.
+ui-bundle:
+    @set -e; \
+    if [ "{{ UI_TAG }}" = "latest" ]; then \
+        dest="{{ UI_BUNDLE_ROOT }}/current"; \
+        printf 'Downloading latest stable Kitaru UI bundle into %s/dist\n' "$dest"; \
+        KITARU_UI_INSTALL_DIR="$dest" bash scripts/download-ui.sh; \
+    else \
+        dest="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}"; \
+        printf 'Downloading Kitaru UI bundle {{ UI_TAG }} into %s/dist\n' "$dest"; \
+        KITARU_UI_INSTALL_DIR="$dest" TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
+    fi; \
+    printf '\nUse with: KITARU_UI_DIST_PATH=%s/dist uv run kitaru login\n' "$dest"
+
+# Download/extract an explicit prerelease Kitaru UI bundle for local testing.
+ui-bundle-prerelease:
+    @set -e; \
+    if [ "{{ UI_TAG }}" = "latest" ]; then \
+        printf 'Error: pass an explicit prerelease tag, e.g. UI_TAG=kitaru-ui-v0.3.0-rc.1\n' >&2; \
+        exit 1; \
+    fi; \
+    dest="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}"; \
+    printf 'Downloading prerelease Kitaru UI bundle {{ UI_TAG }} into %s/dist\n' "$dest"; \
+    KITARU_UI_ALLOW_PRERELEASE=true KITARU_UI_INSTALL_DIR="$dest" TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
+    printf '\nUse with: KITARU_UI_DIST_PATH=%s/dist uv run kitaru login\n' "$dest"
+
+# Start local Kitaru with a prepared UI bundle.
+ui-login:
+    @set -e; \
+    if [ "{{ UI_TAG }}" = "latest" ]; then \
+        dist="{{ UI_BUNDLE_ROOT }}/current/dist"; \
+    else \
+        dist="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}/dist"; \
+    fi; \
+    test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
+    KITARU_UI_DIST_PATH="$dist" uv run kitaru login
+
+# Run smoke tests against a prepared UI bundle and keep the server for inspection.
+ui-smoke:
+    @set -e; \
+    if [ "{{ UI_TAG }}" = "latest" ]; then \
+        dist="{{ UI_BUNDLE_ROOT }}/current/dist"; \
+    else \
+        dist="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}/dist"; \
+    fi; \
+    test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
+    KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
+
 # Build dev base image for remote stack testing (K8s, etc.)
 # The image bakes in kitaru from local source + ZenML from PyPI.
 # Pass REPO to override the target registry/image.
@@ -93,15 +144,20 @@ dev-image REPO="strickvl/kitaru-dev":
     docker push {{ REPO }}:latest
     @printf 'Dev image pushed to {{ REPO }}:latest\n'
 
-# Build production server image (ZenML server base + Kitaru + Kitaru UI).
+# Build production server image (ZenML server base + Kitaru + packaged Kitaru UI).
 # Override variables on the command line:
-#   just server-image                          # defaults
-#   just UI_TAG=v0.1.0 server-image            # specific UI release
-#   just DOCKER_TAG=v0.2.0 server-image        # specific image tag
+#   just server-image                                  # bundle latest stable UI
+#   just UI_TAG=kitaru-ui-v0.2.0 server-image          # bundle specific stable UI
+#   just DOCKER_TAG=v0.2.0 server-image                # specific image tag
 server-image:
+    @set -e; \
+    if [ "{{ UI_TAG }}" = "latest" ]; then \
+        bash scripts/download-ui.sh; \
+    else \
+        TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
+    fi
     docker build -f docker/Dockerfile --target server \
         --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
-        --build-arg KITARU_UI_TAG={{ UI_TAG }} \
         -t kitaru-server .
     docker tag kitaru-server {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
     @printf 'Server image built: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'

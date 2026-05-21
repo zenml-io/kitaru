@@ -4,8 +4,9 @@ description: >-
   Guide the Kitaru release process end-to-end — diff develop against the
   last tag, classify commits (src / docs content / site / infra),
   filter site-only PRs out of the Python library CHANGELOG, check
-  zenml-io/kitaru-ui for a new UI release that will be bundled into the
-  server image, suggest a version bump, update CHANGELOG.md, run the
+  zenml-io/zenml-frontend-monorepo for the latest stable kitaru-ui-v*
+  release that will be bundled into the Python package and then copied
+  into the Docker image, suggest a version bump, update CHANGELOG.md, run the
   smoke test, trigger the release workflow via gh, and rewrite the
   auto-generated GitHub Release notes into structured
   Highlights / Changed / Fixed sections. Interactive — pauses for user
@@ -34,7 +35,7 @@ Copy and track progress in your todo / task list:
 ```
 - [ ] Step 1: Fetch + gather state
 - [ ] Step 2: Classify commits by scope
-- [ ] Step 3: Check kitaru-ui for a new release since last Kitaru release
+- [ ] Step 3: Check monorepo Kitaru UI stable releases since last Kitaru release
 - [ ] Step 4: ★ Pause — show summary, suggest version, await user confirmation
 - [ ] Step 5: Update CHANGELOG [Unreleased] block
 - [ ] Step 6: ★ Pause — show CHANGELOG diff, await confirmation, then commit + push
@@ -95,22 +96,28 @@ git show --stat <sha> | head -30
 
 Treat no-op pairs (add X / revert X in same unreleased window) as excluded — they net to nothing.
 
-## Step 3: Check kitaru-ui for new release
+## Step 3: Check monorepo Kitaru UI stable releases
 
-Kitaru's production Docker image bundles the `kitaru-ui` dashboard. The release workflow's `kitaru-ui-tag` input defaults to the latest kitaru-ui release, so if a new UI ships between Kitaru releases, the next Kitaru release bundles it automatically.
+Official Kitaru releases bundle a Kitaru UI release from `zenml-io/zenml-frontend-monorepo` into the Python package. The Docker image then copies that already-packaged UI from the installed `kitaru` package. Docker does **not** download UI assets or choose a UI tag itself.
 
-Fetch the last Kitaru release timestamp and the kitaru-ui releases:
+Before changing UI bundle selection, frontend smoke testing, Docker dashboard packaging, or release UI workflow behavior, read `FRONTEND-TESTING.md`. It is the canonical runbook for stable/prerelease `kitaru-ui-v*` testing and token/trusted-event boundaries.
+
+The release workflow's `kitaru-ui-tag` input accepts only `kitaru-ui-v<semver>` tags. If the input is empty, `scripts/download-ui.sh` selects the highest stable/full `kitaru-ui-v*` release. Drafts and prereleases are excluded. Prerelease UI tags are only for local testing and `.github/workflows/ui-prerelease-smoke.yml`.
+
+Fetch the last Kitaru release timestamp and the monorepo releases:
 
 ```bash
 LAST_KITARU_TS=$(gh release view "$LAST_TAG" -R zenml-io/kitaru --json publishedAt --jq .publishedAt)
-gh release list -R zenml-io/kitaru-ui --limit 10 \
-  --json tagName,publishedAt,isLatest,isDraft,isPrerelease
+gh release list -R zenml-io/zenml-frontend-monorepo --limit 50 \
+  --json tagName,publishedAt,isDraft,isPrerelease \
+  --jq '[.[] | select(.tagName | startswith("kitaru-ui-v"))]'
 ```
 
-From the JSON, find the latest non-draft, non-prerelease UI release and compare its `publishedAt` to `$LAST_KITARU_TS`:
+From the JSON, find the highest/version-latest non-draft, non-prerelease `kitaru-ui-v*` release and compare its `publishedAt` to `$LAST_KITARU_TS`:
 
 - If UI `publishedAt > $LAST_KITARU_TS` → a new UI will ship. **Remember the UI tag name** for release notes step 10.
 - If UI `publishedAt <= $LAST_KITARU_TS` → same UI as last release. Don't mention it.
+- If there is no full/non-prerelease `kitaru-ui-v*` release → stop and tell the user the official Kitaru release is blocked until frontend maintainers promote one.
 
 Do **not** fetch or summarize what's in the UI release — just note the tag if it's newer.
 
@@ -119,7 +126,7 @@ Do **not** fetch or summarize what's in the UI release — just note the tag if 
 Present a summary table to the user covering:
 
 1. Commits since last release with scope classification
-2. Whether a new kitaru-ui ships (tag only, no contents)
+2. Whether a new Kitaru UI bundle ships (tag only, no contents)
 3. File-level diff stats
 4. Version bump suggestion with reasoning
 
@@ -207,7 +214,7 @@ The script uses `set -uo pipefail` **without `-e`** deliberately — it continue
 
 Prefer running in the background with `run_in_background: true` and tail the log afterwards — the full output is verbose and not useful in conversation context.
 
-**If running from a git worktree:** the smoke test's local server will serve ZenML's stock dashboard rather than the Kitaru UI, because `src/kitaru/_ui/dist/` is gitignored and not populated in fresh worktrees. The smoke test outcome is unaffected (CLI/SDK/MCP/LLM checks are dashboard-independent). Surface this to the user so they don't mistake the ZenML fallback for a Kitaru regression. If they want the Kitaru UI locally in the worktree, `bash scripts/download-ui.sh` pulls it.
+**If running from a git worktree:** a fresh worktree may not have `src/kitaru/_ui/dist/` populated yet. If the user wants the Kitaru UI during smoke testing, run `just ui-bundle` followed by `just ui-smoke`, or run `bash scripts/download-ui.sh` before `./scripts/smoke-test.sh`. The direct override path is `KITARU_UI_DIST_PATH=/path/to/dist ./scripts/smoke-test.sh --keep-server`.
 
 ## Step 8: ★ Pause — verify smoke test
 
@@ -224,8 +231,8 @@ Only when `Failed: 0` and the user confirms, proceed.
 ```bash
 gh workflow run release.yml --ref develop \
   -f version=<AGREED_VERSION> \
-  [-f kitaru-ui-tag=<UI_TAG>]   # only if pinning a specific UI version
-  [-f dry-run=true]             # only if user requested
+  [-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>]  # only if pinning a specific stable/full UI version
+  [-f dry-run=true]                      # only if user requested
 ```
 
 Confirm the trigger succeeded:
@@ -358,7 +365,8 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **Main is force-pushed.** Always diff against the last tag, never against `origin/main`. `git fetch --tags` is mandatory before every invocation.
 - **CHANGELOG PR references drift.** Draft PR numbers get renumbered at merge. Cross-check every `(#N)` against `git log`.
 - **Site vs library changelog.** `site/` changes deploy on their own cadence via `site.yml`. They do not belong in the Python library CHANGELOG even when they land on the same `develop` branch.
-- **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the latest kitaru-ui release. Only pass `-f kitaru-ui-tag=v<X>` if the user explicitly wants to pin to an older UI.
+- **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo`. Only pass `-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>` if the user explicitly wants to pin to a specific stable UI. Official releases reject prerelease UI tags. Read `FRONTEND-TESTING.md` before touching this path.
+- **Prerelease UI smoke.** To validate a prerelease UI, use Actions → `UI prerelease smoke` with a required `ui-tag` such as `kitaru-ui-v0.3.0-rc.1`. That workflow sets `KITARU_UI_ALLOW_PRERELEASE=true`, builds/verifies locally, and publishes nothing.
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.
 - **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets + manual approval); dry-runs use the `dry-run` GitHub environment and skip the `pypi` approval gate. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.
 - **PyPI approval gate.** The `pypi` environment has required reviewers (`kitaru-admins` team, `prevent_self_review: false`). Every non-dry-run release pauses partway through awaiting approval. The triggering user can approve their own deployment if they're in `kitaru-admins`. If they're not, the release will sit waiting indefinitely until an admin approves — do not forget this step. `gh run watch` will show the run in `waiting` state while the gate is open; this is normal, not a hang.
@@ -374,7 +382,7 @@ Release workflow inputs (`release.yml`):
 | Input | Required | Default | Notes |
 |---|---|---|---|
 | `version` | yes | — | Semver without `v` prefix, e.g. `0.4.1` |
-| `kitaru-ui-tag` | no | latest | `v` prefix required, e.g. `v0.2.0` |
+| `kitaru-ui-tag` | no | latest stable/full `kitaru-ui-v*` | Optional stable UI pin, e.g. `kitaru-ui-v0.2.0`; prereleases are rejected |
 | `dry-run` | no | `false` | Skips PyPI/Docker/tag pushes |
 
 Useful state-inspection commands:
@@ -390,7 +398,8 @@ sed -n '/## \[Unreleased\]/,/## \[/p' CHANGELOG.md | head -50
 gh run list --workflow=release.yml --limit 5 \
   --json databaseId,status,conclusion,displayTitle,createdAt
 
-# Latest kitaru-ui release tag
-gh release list -R zenml-io/kitaru-ui --limit 1 \
-  --json tagName,publishedAt --jq '.[0]'
+# Latest Kitaru UI releases in the frontend monorepo
+gh release list -R zenml-io/zenml-frontend-monorepo --limit 50 \
+  --json tagName,publishedAt,isDraft,isPrerelease \
+  --jq '[.[] | select(.tagName | startswith("kitaru-ui-v"))]'
 ```

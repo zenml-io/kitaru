@@ -19,7 +19,9 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   app/                # Next.js app routes, layout, metadata
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
-scripts/              # Doc generation, site merge, and smoke test scripts
+scripts/              # Doc generation, site merge, smoke test, and UI bundle scripts
+FRONTEND-TESTING.md   # Internal runbook for Kitaru UI bundle/frontend testing
+                         and stable/prerelease release validation
 docker/               # Dockerfiles (production server, server-dev, and dev flow images)
 design/               # Design docs, meeting notes (gitignored, never commit)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -158,6 +160,8 @@ When adding a new CLI command, MCP tool, or SDK feature:
 ### Python CI (`ci.yml`)
 
 Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, dependency audit, link check, Docker server smoke test, wheel-packaging check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
+
+When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard packaging, or release UI selection, read `FRONTEND-TESTING.md` first. It is the runbook for stable vs prerelease `kitaru-ui-v*` bundle testing and the trusted-event/token boundaries.
 
 ### Site CI (`site.yml`)
 

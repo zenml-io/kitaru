@@ -39,6 +39,7 @@ _EARLY_TEST_ENV_VARS = (
     "KITARU_CONFIG_PATH",
     "KITARU_DEBUG",
     "KITARU_ANALYTICS_OPT_IN",
+    "KITARU_UI_DIST_PATH",
     "ZENML_CONFIG_PATH",
     "ZENML_ACTIVE_PROJECT_ID",
     "ZENML_DEBUG",
@@ -134,6 +135,7 @@ def isolated_zenml_global_config(
         KITARU_CONFIG_PATH_ENV,
         KITARU_DEBUG_ENV,
         KITARU_ANALYTICS_OPT_IN_ENV,
+        "KITARU_UI_DIST_PATH",
     ):
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
