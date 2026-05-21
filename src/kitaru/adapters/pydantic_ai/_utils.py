@@ -14,8 +14,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, TypedDict, cast
 
-import kitaru
 from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru.checkpoint import _synthetic_checkpoint
 from kitaru.errors import KitaruUsageError
 from pydantic_core import to_jsonable_python
 
@@ -257,7 +257,10 @@ def _build_checkpoint_step(
         )
 
     turn.__name__ = step_name
-    checkpoint_def = kitaru.checkpoint(**config)(turn)
+    checkpoint_def = _synthetic_checkpoint(
+        **config,
+        flow_result_candidate=False,
+    )(turn)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
         alias = build_checkpoint_source_alias(turn.__name__)

@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import inspect
 import sys
 import types
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruUsageError
+from tests._checkpoint_handle_helpers import (
+    assert_checkpoint_handle_error,
+    checkpoint_output_handle,
+)
 
 
 @pytest.fixture
@@ -126,6 +132,20 @@ def test_kitaru_runner_requires_context_codec_pair(
         )
 
 
+def test_kitaru_runner_exposes_keyword_only_context(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    run_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run)
+    run_sync_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run_sync)
+
+    assert run_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run_signature.parameters["context"].default is None
+    assert (
+        run_sync_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert run_sync_signature.parameters["context"].default is None
+
+
 def test_run_sync_rejects_running_event_loop(
     openai_agents_adapter: types.ModuleType,
 ) -> None:
@@ -177,6 +197,190 @@ def test_runner_call_strategy_runs_without_calls_wrappers(
     assert calls == [agent]
 
 
+class ForeignOpenAIRunResult:
+    """Same-shaped OpenAI result with intentionally different class identity."""
+
+    def __init__(self, final_output: object | None = None) -> None:
+        self.schema_version = 1
+        self.status = "completed"
+        self.final_output = final_output
+        self.usage: dict[str, object] | None = None
+        self.interruptions: list[object] = []
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "python"
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "final_output": self.final_output,
+            "usage": self.usage,
+            "interruptions": self.interruptions,
+        }
+
+
+class InvalidForeignOpenAIRunResult(ForeignOpenAIRunResult):
+    """Foreign result whose dumped payload violates the canonical schema."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        payload = super().model_dump(mode=mode)
+        payload["unexpected_field"] = "bad"
+        return payload
+
+
+class ForeignInterruptedOpenAIRunResult:
+    """Foreign interrupted OpenAI result with nested same-shaped payloads."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "python"
+        return {
+            "schema_version": 1,
+            "status": "interrupted",
+            "pending_state": {
+                "schema_version": 1,
+                "agents_sdk_version": "0.15.0",
+                "state_json": {"current_turn": 1},
+            },
+            "interruptions": [
+                {
+                    "index": 0,
+                    "kind": "tool_approval",
+                    "tool_name": "publish",
+                    "call_id": "call_123",
+                }
+            ],
+        }
+
+
+def test_run_sync_canonicalizes_foreign_runner_call_checkpoint_result(
+    openai_agents_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.openai_agents._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: ForeignOpenAIRunResult(final_output="from checkpoint"),
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="agent"), checkpoint_strategy="runner_call"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_execution_objects",
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
+    )
+
+    result = runner.run_sync(openai_agents_adapter.OpenAIRunRequest.start("hello"))
+
+    assert isinstance(result, openai_agents_adapter.OpenAIRunResult)
+    assert not isinstance(result, ForeignOpenAIRunResult)
+    assert result.final_output == "from checkpoint"
+
+
+def test_run_sync_canonicalizes_foreign_interrupted_checkpoint_result(
+    openai_agents_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.openai_agents._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: ForeignInterruptedOpenAIRunResult(),
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="agent"), checkpoint_strategy="runner_call"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_execution_objects",
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
+    )
+
+    result = runner.run_sync(openai_agents_adapter.OpenAIRunRequest.start("hello"))
+
+    assert isinstance(result, openai_agents_adapter.OpenAIRunResult)
+    assert result.status == "interrupted"
+    assert isinstance(
+        result.pending_state, openai_agents_adapter.OpenAIRunStateEnvelope
+    )
+    assert isinstance(
+        result.interruptions[0],
+        openai_agents_adapter.OpenAIInterruptionSummary,
+    )
+    assert result.pending_state.agents_sdk_version == "0.15.0"
+    assert result.interruptions[0].tool_name == "publish"
+
+
+def test_run_canonicalizes_foreign_runner_call_checkpoint_result(
+    openai_agents_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.openai_agents._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+
+    async def fake_run_async_in_checkpoint(**_kwargs: object) -> object:
+        return ForeignOpenAIRunResult(final_output="async checkpoint")
+
+    monkeypatch.setattr(
+        agent_module, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="agent"), checkpoint_strategy="runner_call"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_execution_objects",
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
+    )
+
+    async def call_run() -> object:
+        return await runner.run(openai_agents_adapter.OpenAIRunRequest.start("hello"))
+
+    result = asyncio.run(call_run())
+
+    assert isinstance(result, openai_agents_adapter.OpenAIRunResult)
+    assert not isinstance(result, ForeignOpenAIRunResult)
+    assert result.final_output == "async checkpoint"
+
+
+def test_invalid_runner_call_checkpoint_result_fails_before_success_tracking(
+    openai_agents_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.openai_agents._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: InvalidForeignOpenAIRunResult(final_output="bad"),
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="agent"), checkpoint_strategy="runner_call"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_execution_objects",
+        lambda **_kwargs: (SimpleNamespace(name="agent"), SimpleNamespace()),
+    )
+    track_calls: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    with pytest.raises(ValidationError):
+        runner.run_sync(openai_agents_adapter.OpenAIRunRequest.start("hello"))
+
+    assert track_calls == []
+
+
 def test_openai_run_request_start_and_resume_validation(
     openai_agents_adapter: types.ModuleType,
 ) -> None:
@@ -204,6 +408,26 @@ def test_openai_run_request_start_and_resume_validation(
             pending_state=envelope,
             decision=decision,
         )
+    with pytest.raises(ValidationError):
+        openai_agents_adapter.OpenAIRunRequest(kind="start", input="hello", context={})
+
+
+def test_fresh_context_is_rejected_for_resume_request(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    request = openai_agents_adapter.OpenAIRunRequest.resume(
+        openai_agents_adapter.OpenAIRunStateEnvelope(
+            agents_sdk_version="0.15.0",
+            state_json={"current_turn": 1},
+        ),
+        openai_agents_adapter.OpenAIApprovalDecision(approve=True),
+    )
+    runner = openai_agents_adapter.KitaruRunner(
+        SimpleNamespace(name="resume-agent"), checkpoint_strategy="runner_call"
+    )
+
+    with pytest.raises(KitaruUsageError, match="Fresh `context=`"):
+        runner.run_sync(request, context=SimpleNamespace(team_id="team-a"))
 
 
 def test_openai_run_request_rejects_arbitrary_input_object(
@@ -211,6 +435,33 @@ def test_openai_run_request_rejects_arbitrary_input_object(
 ) -> None:
     with pytest.raises(ValidationError):
         openai_agents_adapter.OpenAIRunRequest(kind="start", input={"role": "user"})
+
+
+def test_openai_run_request_rejects_checkpoint_handles(
+    openai_agents_adapter: types.ModuleType,
+) -> None:
+    handle = checkpoint_output_handle()
+
+    with pytest.raises(ValidationError) as direct_exc:
+        openai_agents_adapter.OpenAIRunRequest.start(cast(str, handle))
+    assert_checkpoint_handle_error(
+        direct_exc,
+        field_name="OpenAIRunRequest.input",
+    )
+
+    with pytest.raises(ValidationError) as nested_exc:
+        openai_agents_adapter.OpenAIRunRequest.start(
+            [{"role": "user", "content": handle}]
+        )
+    assert_checkpoint_handle_error(
+        nested_exc,
+        field_name="OpenAIRunRequest.input[0].content",
+    )
+
+    valid = openai_agents_adapter.OpenAIRunRequest.start(
+        [{"role": "user", "content": "hello"}]
+    )
+    assert valid.input == [{"role": "user", "content": "hello"}]
 
 
 def test_interrupted_result_requires_state_and_interruption(

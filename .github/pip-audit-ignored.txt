@@ -3,12 +3,14 @@
 # Remove an entry once the upstream cause is resolved and a fresh
 # `uv lock --upgrade` no longer reports it.
 #
-# Format: one CVE ID per line. Lines starting with `#` and blank lines are
+# Format: one vulnerability ID per line, using a pip-audit-supported prefix
+# such as CVE-, GHSA-, or PYSEC-. Lines starting with `#` and blank lines are
 # ignored. Inline `#` comments after the ID are allowed and encouraged.
 
 # --- Blocked by zenml's `pyjwt==2.7.*` pin in the [server] extra. -----------
 # Tracked upstream: https://github.com/zenml-io/zenml/issues/4782
 CVE-2026-32597  # pyjwt 2.7 -> 2.12 (auth library; zenml hard-pins 2.7.*)
+PYSEC-2025-183  # pyjwt 2.7 disputed weak-key advisory; blocked by the same zenml pin
 CVE-2025-66416  # mcp 1.19 -> 1.23 (transitively blocked: mcp >=1.20 needs pyjwt >=2.10.1)
 
 # --- Transitive deps in zenml's FastAPI/Starlette server stack. ------------

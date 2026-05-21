@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
 
 from kitaru.analytics import AnalyticsEvent
-from kitaru.checkpoint import checkpoint
+from kitaru.checkpoint import (
+    _CHECKPOINT_HANDLE_SCAN_MAX_VALUES,
+    _KitaruOutputArtifact,
+    _raise_if_checkpoint_output_handle,
+    _raise_if_checkpoint_output_handle_in_value,
+    _synthetic_checkpoint,
+    checkpoint,
+)
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.flow import flow
 from kitaru.runtime import (
@@ -98,6 +107,7 @@ def _build_checkpoint(
     checkpoint_type: str | None = None,
     runtime: StepRuntime | str | None = None,
     cache: bool | None = None,
+    flow_result_candidate: bool | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -126,11 +136,12 @@ def _build_checkpoint(
         return _decorate
 
     with patch("kitaru.checkpoint.step", side_effect=_fake_step):
-        wrapped = checkpoint(
+        wrapped = _synthetic_checkpoint(
             retries=retries,
             type=checkpoint_type,
             runtime=runtime,
             cache=cache,
+            flow_result_candidate=flow_result_candidate,
         )(func)
 
     return wrapped, captured
@@ -226,6 +237,40 @@ def test_none_type_produces_no_step_type() -> None:
     _, captured = _build_checkpoint(lambda: "ok", checkpoint_type=None)
     assert captured["step_type"] is None
     assert "type" not in captured["extra"]["kitaru"]
+    assert "flow_result_candidate" not in captured["extra"]["kitaru"]
+
+
+def test_checkpoint_private_flow_result_candidate_false_writes_metadata() -> None:
+    _, captured = _build_checkpoint(
+        lambda: "ok",
+        checkpoint_type="tool_call",
+        flow_result_candidate=False,
+    )
+
+    assert captured["extra"] == {
+        "kitaru": {
+            "boundary": "checkpoint",
+            "type": "tool_call",
+            "flow_result_candidate": False,
+        }
+    }
+
+
+def test_checkpoint_public_signature_hides_flow_result_candidate() -> None:
+    signature = inspect.signature(checkpoint)
+
+    assert "_flow_result_candidate" not in signature.parameters
+    assert "flow_result_candidate" not in signature.parameters
+
+
+def test_checkpoint_rejects_non_bool_flow_result_candidate() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="Synthetic checkpoint flow_result_candidate must be a bool",
+    ):
+        _synthetic_checkpoint(
+            flow_result_candidate=cast(Any, "false"),
+        )(lambda: None)
 
 
 def test_checkpoint_passes_plain_name_to_zenml_step() -> None:
@@ -640,3 +685,104 @@ def test_flow_body_output_handle_string_conversion_is_helpful(
         assert ".load()" in rendered
         assert "ArtifactVersionResponse" not in rendered
         assert "ZenML" not in rendered
+
+
+def test_checkpoint_output_handle_validation_message_is_helpful() -> None:
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle(
+            handle,
+            field_name="DemoRequest.prompt",
+            expected="a materialized prompt string",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.prompt" in message
+    assert "Kitaru checkpoint output handle" in message
+    assert "render_prompt.output" in message
+    assert ".load()" in message
+    assert "downstream `@checkpoint`" in message
+    assert "ArtifactVersionResponse" not in message
+    assert "ZenML" not in message
+
+
+def test_checkpoint_output_handle_validation_scans_prompt_containers() -> None:
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            [{"role": "user", "content": [{"text": handle}]}],
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.input[0].content[0].text" in message
+    assert "Kitaru checkpoint output handle" in message
+    assert "render_prompt.output" in message
+    assert ".load()" in message
+
+
+def test_checkpoint_output_handle_validation_formats_unusual_mapping_keys() -> None:
+    class WeirdKey:
+        def __repr__(self) -> str:
+            return "<weird key>"
+
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            {"foo.bar": {1: {WeirdKey(): handle}}},
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "DemoRequest.input['foo.bar'][1][<weird key>]" in message
+
+
+def test_checkpoint_output_handle_validation_errors_when_scan_limit_is_exceeded() -> (
+    None
+):
+    handle = _KitaruOutputArtifact.model_construct(
+        id=uuid4(),
+        step_name="render_prompt",
+        output_name="output",
+    )
+    value = [*range(_CHECKPOINT_HANDLE_SCAN_MAX_VALUES), handle]
+
+    with pytest.raises(ValueError) as exc_info:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="DemoRequest.input",
+            expected="materialized prompt content",
+        )
+
+    message = str(exc_info.value)
+    assert "Kitaru could not validate DemoRequest.input" in message
+    assert f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values" in message
+    assert ".load()" in message
+
+
+def test_checkpoint_output_handle_validation_skips_cycles() -> None:
+    cyclic_value: dict[str, Any] = {"messages": []}
+    cyclic_value["self"] = cyclic_value
+
+    _raise_if_checkpoint_output_handle_in_value(
+        cyclic_value,
+        field_name="DemoRequest.input",
+        expected="materialized prompt content",
+    )

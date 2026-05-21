@@ -1,8 +1,7 @@
 # Pinned ZenML server image version — bump here when upgrading.
-# Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
-# docker/Dockerfile.server-dev (those two are enforced by contract tests;
-# this Justfile value and the CI/release workflow values are not).
-ZENML_SERVER_TAG := "0.94.3"
+# Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
+# workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
+ZENML_SERVER_TAG := "0.94.4"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
@@ -61,7 +60,7 @@ zizmor:
 
 # Audit Python dependencies for known vulnerabilities (honors .github/pip-audit-ignored.txt)
 audit:
-    awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
+    awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:

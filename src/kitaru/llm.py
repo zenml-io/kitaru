@@ -13,12 +13,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from kitaru._env import _temporary_env
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
-from kitaru.checkpoint import checkpoint
+from kitaru.checkpoint import (
+    _raise_if_checkpoint_output_handle,
+    _raise_if_checkpoint_output_handle_in_value,
+    checkpoint,
+)
 from kitaru.config import ResolvedModelSelection, resolve_model_selection
 from kitaru.errors import (
     KitaruBackendError,
@@ -67,6 +71,26 @@ class _LLMRequest(BaseModel):
     call_name: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def _reject_prompt_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="_LLMRequest.prompt",
+            expected="materialized prompt content",
+        )
+        return value
+
+    @field_validator("system", mode="before")
+    @classmethod
+    def _reject_system_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle(
+            value,
+            field_name="_LLMRequest.system",
+            expected="a materialized system prompt string",
+        )
+        return value
 
 
 @dataclass(frozen=True)

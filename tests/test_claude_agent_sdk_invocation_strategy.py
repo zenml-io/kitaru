@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import types
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
@@ -76,6 +78,41 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     messages[:] = [AssistantMessage("thinking"), ResultMessage()]
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", sdk)
     return sdk
+
+
+def test_synthetic_checkpoint_marks_flow_result_non_candidate(
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    utils = importlib.import_module("kitaru.adapters.claude_agent_sdk._utils")
+    captured: dict[str, Any] = {}
+
+    class FakeCheckpoint:
+        _step = object()
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        def decorate(func: Any) -> FakeCheckpoint:
+            captured["decorated_name"] = func.__name__
+            return FakeCheckpoint()
+
+        return decorate
+
+    monkeypatch.setattr(utils, "_synthetic_checkpoint", fake_checkpoint)
+
+    utils._build_checkpoint_step(
+        config={"type": "llm_call", "cache": False, "retries": 2},
+        step_name="claude invocation",
+        body=lambda: "ok",
+    )
+
+    assert fake_sdk
+    assert captured["flow_result_candidate"] is False
+    assert captured["type"] == "llm_call"
+    assert captured["cache"] is False
+    assert captured["retries"] == 2
+    assert captured["decorated_name"] == "claude_invocation"
 
 
 @pytest.fixture
@@ -644,6 +681,113 @@ def test_emit_events_false_suppresses_event_artifacts_and_log(
     assert not any(name.startswith("event_log__") for name in saved)
     assert not any(name.startswith("run_summary__") for name in saved)
     assert logs == []
+
+
+class ForeignClaudeRunResult:
+    """Same-shaped Claude result with intentionally different class identity."""
+
+    def __init__(self, final_text: str | None = None) -> None:
+        self.schema_version = 1
+        self.status = "completed"
+        self.session_id = "session-foreign"
+        self.final_text = final_text
+        self.usage: dict[str, object] | None = None
+        self.warnings: list[str] = []
+        self.metadata: dict[str, object] = {}
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "python"
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "session_id": self.session_id,
+            "final_text": self.final_text,
+            "usage": self.usage,
+            "warnings": self.warnings,
+            "metadata": self.metadata,
+        }
+
+
+class InvalidForeignClaudeRunResult(ForeignClaudeRunResult):
+    """Foreign Claude result whose dumped payload violates the schema."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        payload = super().model_dump(mode=mode)
+        payload["unexpected_field"] = "bad"
+        return payload
+
+
+def test_run_sync_canonicalizes_foreign_invocation_checkpoint_result(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: ForeignClaudeRunResult(final_text="from checkpoint"),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert isinstance(result, claude_adapter.ClaudeRunResult)
+    assert not isinstance(result, ForeignClaudeRunResult)
+    assert result.final_text == "from checkpoint"
+
+
+def test_run_canonicalizes_foreign_invocation_checkpoint_result(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+
+    async def fake_run_async_in_checkpoint(**_kwargs: object) -> object:
+        return ForeignClaudeRunResult(final_text="async checkpoint")
+
+    monkeypatch.setattr(
+        agent_module, "run_async_in_checkpoint", fake_run_async_in_checkpoint
+    )
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+
+    async def call_run() -> object:
+        return await runner.run(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    result = asyncio.run(call_run())
+
+    assert isinstance(result, claude_adapter.ClaudeRunResult)
+    assert not isinstance(result, ForeignClaudeRunResult)
+    assert result.final_text == "async checkpoint"
+
+
+def test_invalid_invocation_checkpoint_result_fails_before_success_tracking(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent_module,
+        "run_sync_in_checkpoint",
+        lambda **_kwargs: InvalidForeignClaudeRunResult(final_text="bad"),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    track_calls: list[tuple[object, dict[str, object]]] = []
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    with pytest.raises(ValidationError):
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert not any(metadata["status"] == "completed" for _, metadata in track_calls)
 
 
 def test_synthetic_checkpoint_is_used_from_flow_scope(

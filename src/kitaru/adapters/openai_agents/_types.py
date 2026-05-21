@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from kitaru.checkpoint import _raise_if_checkpoint_output_handle_in_value
+
 
 class OpenAIRunStateEnvelope(BaseModel):
     """Checkpoint-safe wrapper around serialized OpenAI ``RunState``."""
@@ -110,6 +112,16 @@ class OpenAIRunRequest(BaseModel):
         if isinstance(value, list) and all(isinstance(item, dict) for item in value):
             return value
         raise ValueError("OpenAI run input must be a string or list of dictionaries.")
+
+    @field_validator("input", mode="before")
+    @classmethod
+    def _reject_input_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="OpenAIRunRequest.input",
+            expected="materialized OpenAI input content",
+        )
+        return value
 
     @model_validator(mode="after")
     def _validate_kind_contract(self) -> "OpenAIRunRequest":

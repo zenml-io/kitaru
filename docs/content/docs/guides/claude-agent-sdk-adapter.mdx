@@ -219,6 +219,20 @@ request = ClaudeRunRequest.resume(
 )
 ```
 
+If the prompt comes from a previous checkpoint or from a flow-body
+`kitaru.llm()` call, remember that the value in the flow body is a Kitaru
+checkpoint output handle, not the concrete string yet. Load it before building a
+Claude request when Claude needs the actual text:
+
+```python
+prompt_text = render_prompt(topic).load()
+request = ClaudeRunRequest.start(prompt_text)
+```
+
+If you want to preserve Kitaru's durable data edge instead, pass the original
+handle into a downstream `@checkpoint` and build the `ClaudeRunRequest` inside
+that checkpoint.
+
 This uses Claude's native session mechanism. Kitaru records the session ID and
 passes it back through `ClaudeAgentOptions(resume=...)` when you resume.
 

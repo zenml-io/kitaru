@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection, register_model_alias
@@ -20,6 +21,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import flow
 from kitaru.llm import (
+    _LLMRequest,
     _LLMUsage,
     _parse_provider_target,
     _ProviderCallResult,
@@ -27,6 +29,10 @@ from kitaru.llm import (
     llm,
 )
 from kitaru.runtime import _checkpoint_scope, _flow_scope
+from tests._checkpoint_handle_helpers import (
+    assert_checkpoint_handle_error,
+    checkpoint_output_handle,
+)
 
 
 def _flow_checkpoint_scope() -> tuple[str, str]:
@@ -95,6 +101,83 @@ def test_llm_raises_outside_flow() -> None:
     """`kitaru.llm()` should reject calls outside an active flow."""
     with pytest.raises(KitaruContextError, match=r"inside a @flow"):
         llm("hello")
+
+
+def test_llm_request_rejects_checkpoint_handles() -> None:
+    handle = checkpoint_output_handle()
+
+    with pytest.raises(ValidationError) as prompt_exc:
+        _LLMRequest(
+            prompt=cast(str, handle),
+            model="fast",
+            call_name="demo",
+        )
+    assert_checkpoint_handle_error(
+        prompt_exc,
+        field_name="_LLMRequest.prompt",
+    )
+
+    with pytest.raises(ValidationError) as system_exc:
+        _LLMRequest(
+            prompt="hello",
+            model="fast",
+            system=cast(str, handle),
+            call_name="demo",
+        )
+    assert_checkpoint_handle_error(
+        system_exc,
+        field_name="_LLMRequest.system",
+    )
+
+    with pytest.raises(ValidationError) as nested_exc:
+        _LLMRequest(
+            prompt=[{"role": "user", "content": [{"text": handle}]}],
+            model="fast",
+            call_name="demo",
+        )
+    assert_checkpoint_handle_error(
+        nested_exc,
+        field_name="_LLMRequest.prompt[0].content[0].text",
+    )
+
+    valid = _LLMRequest(
+        prompt=[{"role": "user", "content": "hello"}],
+        model="fast",
+        system="You are helpful.",
+        call_name="demo",
+    )
+    assert valid.prompt == [{"role": "user", "content": "hello"}]
+    assert valid.system == "You are helpful."
+
+
+def test_public_llm_rejects_checkpoint_handles_before_dispatch() -> None:
+    handle = checkpoint_output_handle()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=str(uuid4())),
+        patch("kitaru.llm._llm_checkpoint_call") as mock_synthetic,
+        pytest.raises(ValidationError) as prompt_exc,
+    ):
+        llm(cast(str, handle), model="fast", name="demo")
+
+    assert_checkpoint_handle_error(
+        prompt_exc,
+        field_name="_LLMRequest.prompt",
+    )
+    mock_synthetic.assert_not_called()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=str(uuid4())),
+        patch("kitaru.llm._llm_checkpoint_call") as mock_synthetic,
+        pytest.raises(ValidationError) as system_exc,
+    ):
+        llm("hello", model="fast", system=cast(str, handle), name="demo")
+
+    assert_checkpoint_handle_error(
+        system_exc,
+        field_name="_LLMRequest.system",
+    )
+    mock_synthetic.assert_not_called()
 
 
 def test_llm_uses_inline_execution_inside_checkpoint() -> None:
