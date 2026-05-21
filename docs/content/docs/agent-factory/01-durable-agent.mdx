@@ -1,5 +1,5 @@
 ---
-title: Chapter 1 — A durable PydanticAI agent
+title: Stage 1 — A durable PydanticAI agent
 description: PydanticAI gives the agent loop. Kitaru gives durable execution. Together — durable agents in ~30 lines.
 ---
 
@@ -43,6 +43,8 @@ python stage_1_basic_agent.py
 
 </Steps>
 
+<DurableAgentReplayDiagram />
+
 What you see in the kitaru log lines:
 
 | | First run (with `FORCE_FAILURE`) | Second run (no flag) |
@@ -55,11 +57,11 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 
 ## How it composes
 
-Each stage in this tour explicitly passes `granular_checkpoints=False` to `KitaruAgent` so the chapter log blocks read cleanly: one aggregating `default` / `default_2` checkpoint per `agent.run_sync()`, easy to point at while learning. The FORCE_FAILURE demo above lands at the turn boundary in this mode.
+Each stage in this tour explicitly passes `granular_checkpoints=False` to `KitaruAgent` so the stage log blocks read cleanly: one aggregating `default` / `default_2` checkpoint per `agent.run_sync()`, easy to point at while learning. The FORCE_FAILURE demo above lands at the turn boundary in this mode.
 
-In production, drop the kwarg. `KitaruAgent` defaults to `granular_checkpoints=True`, which means every model request and every tool call gets its own checkpoint and its own cache key — a flow that crashed after the third model request resumes by replaying only the calls after the third. Same durability story; finer cache granularity, finer dashboard rows.
+In a real fork, you usually remove this teaching-only kwarg. `KitaruAgent` defaults to `granular_checkpoints=True`, which means every model request and every tool call gets its own checkpoint and its own cache key — a flow that crashed after the third model request resumes by replaying only the calls after the third. Same durability story; finer cache granularity, finer dashboard rows.
 
-The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later chapters add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
+The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later stages add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
 
 ## Env-var toggles
 
@@ -71,4 +73,4 @@ The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `
 - [`stage_1_basic_agent.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_1_basic_agent.py)
 - [`agent_factory/profile.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/profile.py), [`agent_factory/agent.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/agent.py), [`agent_factory/tools.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/tools.py)
 
-Next up: [Chapter 2 — Your agents need a sandbox](/agent-factory/02-sandbox).
+Next up: [Stage 2 — Your agents need a sandbox](/agent-factory/02-sandbox).

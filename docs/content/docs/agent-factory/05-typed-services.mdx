@@ -1,11 +1,13 @@
 ---
-title: Chapter 5 — Your agents need typed services
+title: Stage 5 — Your agents need typed services
 description: exec_service — a typed-union dispatcher for structured calls. Plus the two credential paths.
 ---
 
 **Stage file:** `stage_5_typed_services.py`
 
 Not every agent call deserves a shell. When the agent needs *structured* input AND a *structured* response — posting a webhook, looking up records, hitting an internal control plane — give it a typed service instead of asking it to drive `curl` and parse JSON. Stage 5 introduces `exec_service`: one tool that dispatches to a discriminated union of typed services. Tool description is built dynamically from the profile's `allowed_services`, so the LLM only sees what this agent can actually call.
+
+<ServiceCallPathsDiagram />
 
 This is also where the **two credential paths** distinction lands:
 
@@ -18,7 +20,7 @@ The proxy is **not** involved for `exec_service`. Each path is right for differe
 
 ## One-time setup
 
-Same `setup.sh` as earlier chapters — also adds the `webhook-token` secret. Idempotent; re-run if you skipped stage 4.
+Same `setup.sh` as earlier stages — also adds the `webhook-token` secret. Idempotent; re-run if you skipped stage 4.
 
 ```bash
 bash setup.sh
@@ -76,11 +78,11 @@ Notice what's *not* in the log: there are no `[sandbox]` lines for the `lookup_w
 
 ## Env-var toggles
 
-- `DISABLE_CACHE=1` — same as earlier chapters.
+- `DISABLE_CACHE=1` — same as earlier stages.
 
 ## Source
 
 - [`stage_5_typed_services.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_5_typed_services.py)
 - [`agent_factory/services/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/services)
 
-Next up: [Chapter 6 — Your agents need to ask humans things](/agent-factory/06-hitl).
+Next up: [Stage 6 — Your agents need to ask humans things](/agent-factory/06-hitl).

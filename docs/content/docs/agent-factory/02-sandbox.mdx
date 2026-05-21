@@ -1,11 +1,13 @@
 ---
-title: Chapter 2 — Your agents need a sandbox
-description: Wrap each agent run in a DockerSandbox so shell commands can't touch the host
+title: Stage 2 — Your agents need a sandbox
+description: Wrap each agent run in a DockerSandbox so shell commands do not run directly on the host
 ---
 
 **Stage file:** `stage_2_sandboxed_exec.py`
 
-The `exec` tool runs in your host process in [Chapter 1](/agent-factory/01-durable-agent). Production agents need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
+The `exec` tool runs in your host process in [Stage 1](/agent-factory/01-durable-agent). Agents that can run shell commands need a sandbox so accidental filesystem damage is contained to the container and mounted workspace rather than the host. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
+
+<SandboxBoundaryDiagram />
 
 ## One-time setup
 
@@ -54,7 +56,7 @@ Every `run(command)` call goes through **one long-lived `bash --noprofile --norc
 
 The bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or persist specific values via [`kitaru.save()`](/guides/artifacts) and reload them with `kitaru.load()` at the top of the next run.
 
-> **One subtlety on the durability story from Chapter 1.** Kitaru caches the agent's *reasoning* (the LLM responses, the tool-call decisions, the turn output as a whole) — it does **not** replay the bash side effects of a cached turn. If turn 1 ran `cd /tmp && touch summary.txt` and got cached, a re-run that serves turn 1 from cache won't actually re-execute the `cd` or re-create the file. The next turn that's still live will run against a *fresh* shell. Plan accordingly: side-effecting commands should generally not straddle the same turn boundary as the LLM calls that decided to issue them.
+> **One subtlety on the durability story from Stage 1.** Kitaru caches the agent's *reasoning* (the LLM responses, the tool-call decisions, the turn output as a whole) — it does **not** replay the bash side effects of a cached turn. If turn 1 ran `cd /tmp && touch summary.txt` and got cached, a re-run that serves turn 1 from cache won't actually re-execute the `cd` or re-create the file. The next turn that's still live will run against a *fresh* shell. Plan accordingly: side-effecting commands should generally not straddle the same turn boundary as the LLM calls that decided to issue them.
 
 ## What's in it
 
@@ -73,15 +75,15 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 ## Env-var toggles
 
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands).
-- `FORCE_FAILURE=1` — same durability story as Chapter 1: turn 1's checkpoint is cached across the failure, so a re-run without the flag serves it instantly.
+- `FORCE_FAILURE=1` — same durability story as Stage 1: turn 1's checkpoint is cached across the failure, so a re-run without the flag serves it instantly.
 
 ## Not yet here
 
-Credentials still come from the host process; [Chapter 4](/agent-factory/04-credential-proxy) isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
+Credentials still come from the host process; [Stage 4](/agent-factory/04-credential-proxy) isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
 ## Source
 
 - [`stage_2_sandboxed_exec.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_2_sandboxed_exec.py)
 - [`agent_factory/sandbox/runtime.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/sandbox/runtime.py)
 
-Next up: [Chapter 3 — Your agents need a procedure](/agent-factory/03-skills).
+Next up: [Stage 3 — Your agents need a procedure](/agent-factory/03-skills).

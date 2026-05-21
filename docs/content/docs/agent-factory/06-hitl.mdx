@@ -1,5 +1,5 @@
 ---
-title: Chapter 6 — Your agents need to ask humans things
+title: Stage 6 — Your agents need to ask humans things
 description: ask_question — a freeform HITL tool that suspends the flow until an operator answers
 ---
 
@@ -8,6 +8,8 @@ description: ask_question — a freeform HITL tool that suspends the flow until 
 Some questions only the operator can answer — sign-off on irreversible actions, subjective preferences, ambiguous next-steps. Stage 6 introduces `ask_question`, a freeform HITL tool that pauses the flow until a human responds.
 
 The agent calls it like any other tool; the kitaru pydantic-ai adapter routes the call through [`kitaru.wait()`](/guides/wait-and-resume). From the agent's perspective: `ask_question("...")` returns a string after a brief pause. From kitaru's perspective: the flow paused, durably, until input arrived.
+
+<HitlPauseResumeDiagram />
 
 ## Run it — two ways
 
@@ -25,7 +27,7 @@ The agent calls it like any other tool; the kitaru pydantic-ai adapter routes th
   </Tab>
   <Tab value="Non-interactive">
 
-    The production-shaped path.
+    The server-style path.
 
     ```bash
     DISABLE_CACHE=1 python stage_6_hitl.py </dev/null &
@@ -34,7 +36,7 @@ The agent calls it like any other tool; the kitaru pydantic-ai adapter routes th
     kitaru executions input <execution_id> --value '"Verified by ops on call"'
     ```
 
-    That's exactly how it works in production: the flow runs on a server, the operator answers via the dashboard / CLI / REST API. The flow resumes from the same point and continues.
+    That's the same shape on a server: the flow runs remotely, the operator answers via the dashboard / CLI / REST API. The flow resumes from the same point and continues.
 
   </Tab>
 </Tabs>
@@ -47,7 +49,7 @@ The agent calls it like any other tool; the kitaru pydantic-ai adapter routes th
 
 The agent's skill (`skills/with-hitl/default-agent/SKILL.md`) does this:
 
-1. Look up `lookup_wiki(topic="durability")` — host-side typed service from [Chapter 5](/agent-factory/05-typed-services).
+1. Look up `lookup_wiki(topic="durability")` — host-side typed service from [Stage 5](/agent-factory/05-typed-services).
 2. Draft a 1–2 sentence summary from the first snippet.
 3. Call `ask_question("What suffix should I add before publishing?")` — **the flow pauses here.**
 4. Append the operator's answer to the summary.
@@ -85,7 +87,7 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 
 ## Env-var toggles
 
-- `DISABLE_CACHE=1` — same as earlier chapters.
+- `DISABLE_CACHE=1` — same as earlier stages.
 
 ## Inspecting and replaying the run
 
@@ -105,4 +107,4 @@ kitaru executions replay <execution_id> --from default  # re-run from the agent 
 - [`stage_6_hitl.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_6_hitl.py)
 - [Wait, Input, and Resume](/guides/wait-and-resume) — the underlying primitive.
 
-That's the end of the tour. Replay isn't covered as a separate chapter here — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](/guides/replay-and-overrides) when you want it.
+That's the end of the tour. Replay isn't covered as a separate stage here — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](/guides/replay-and-overrides) when you want it.

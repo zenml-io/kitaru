@@ -6,14 +6,20 @@ import { Step, Steps } from 'fumadocs-ui/components/steps';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import type { MDXComponents } from 'mdx/types';
 import {
+  AgentFactoryOverviewDiagram,
   BuyerMatrixDiagram,
   CheckpointReplayDiagram,
   ComponentsDiagram,
+  CredentialProxyDiagram,
+  DurableAgentReplayDiagram,
   ExecutionArchitectureDiagram,
   FailedCheckpointDiagram,
   FlowShapeDiagram,
   GatewayStackDiagram,
   HarnessRuntimePlatformDiagram,
+  HitlPauseResumeDiagram,
+  SandboxBoundaryDiagram,
+  ServiceCallPathsDiagram,
   ThreePlanesDiagram,
   WaitResumeDiagram,
 } from '@/components/diagrams';
@@ -39,6 +45,12 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     FailedCheckpointDiagram,
     HarnessRuntimePlatformDiagram,
     BuyerMatrixDiagram,
+    AgentFactoryOverviewDiagram,
+    DurableAgentReplayDiagram,
+    SandboxBoundaryDiagram,
+    CredentialProxyDiagram,
+    ServiceCallPathsDiagram,
+    HitlPauseResumeDiagram,
     ...components,
   };
 }

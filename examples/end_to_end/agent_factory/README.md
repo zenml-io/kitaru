@@ -1,8 +1,8 @@
 # Build an internal agent factory
 
-> **Reading on the docs site is recommended:** the same tour as a chapter-by-chapter walk lives at [kitaru.ai/docs/agent-factory](https://kitaru.ai/docs/agent-factory/). This README is the on-GitHub mirror — same content, slightly different formatting, useful when you've cloned the repo and want a single file to scroll while you run the stages.
+> **Reading on the docs site is recommended:** the same tour as a stage-by-stage walk lives at [kitaru.ai/docs/agent-factory](https://kitaru.ai/docs/agent-factory/). This README is the on-GitHub mirror — same content, slightly different formatting, useful when you've cloned the repo and want a single file to scroll while you run the stages.
 
-A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation and HITL gates wired up correctly. Locally runnable with `bash setup.sh && python stage_N_*.py` and zero external accounts.
+A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation and HITL gates shown explicitly. Locally runnable with `bash setup.sh && python stage_N_*.py`, Docker, and one model-provider API key; the wiki and webhook services are mocked locally.
 
 ## Who this is for
 
@@ -64,7 +64,7 @@ What you see in the kitaru log lines:
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
 
-**Mode.** Each stage in this tour explicitly passes `granular_checkpoints=False` for log-clarity in the chapter walk-throughs — one aggregating `default` / `default_2` checkpoint per `agent.run_sync()` keeps the trace readable when you're learning the primitives. Production forks should drop the kwarg: `KitaruAgent` defaults to `granular_checkpoints=True`, so every model request and every tool call gets its own checkpoint and its own cache key, and a flow that crashed after the third model request resumes by replaying only the calls after the third. Same FORCE_FAILURE durability story; finer cache granularity and richer dashboard rows.
+**Mode.** Each stage in this tour explicitly passes `granular_checkpoints=False` for log-clarity in the stage walk-throughs — one aggregating `default` / `default_2` checkpoint per `agent.run_sync()` keeps the trace readable when you're learning the primitives. Forks running beyond the local walkthrough should drop the kwarg: `KitaruAgent` defaults to `granular_checkpoints=True`, so every model request and every tool call gets its own checkpoint and its own cache key, and a flow that crashed after the third model request resumes by replaying only the calls after the third. Same FORCE_FAILURE durability story; finer cache granularity and richer dashboard rows.
 
 **Env-var toggles:**
 
@@ -78,7 +78,7 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 ### Stage 2 — Your agents need a sandbox
 
 **Stage file:** `stage_2_sandboxed_exec.py`
-**The pitch:** the `exec` tool runs in your host process in stage 1. Production agents need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
+**The pitch:** the `exec` tool runs in your host process in stage 1. Agents that can run shell commands need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
 
 **One-time setup (build the sandbox image):**
 
@@ -115,7 +115,7 @@ Kitaru: Checkpoint `default_2` finished in 13.1s.
 [sandbox] Stopping container e87af8e85ec2
 ```
 
-`summary.txt` ends up at `/tmp/summary.txt` because the bash session is the *same* bash session across turn 1 and turn 2 — the chapter's whole point. The agent also reports Debian / root (the container's image and user), not your macOS/Linux host.
+`summary.txt` ends up at `/tmp/summary.txt` because the bash session is the *same* bash session across turn 1 and turn 2 — the stage's whole point. The agent also reports Debian / root (the container's image and user), not your macOS/Linux host.
 
 **Watch it boot from another terminal:**
 
@@ -140,7 +140,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 **Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or persist specific values via [`kitaru.save()`](https://kitaru.ai/docs/guides/artifacts) and reload them with `kitaru.load()` at the top of the next run.
 
-**Not yet here:** credentials still come from the host process; chapter 4 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
+**Not yet here:** credentials still come from the host process; stage 4 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
 ---
 
@@ -185,9 +185,9 @@ The system prompt only says "find your skill and follow it." The actual procedur
 
 **Where the skill tool runs:** *host-side*, not inside the sandbox. The agent calls the tool from inside its turn checkpoint; the tool reads files from the host's filesystem directly. This means operators can edit `skills/...` without touching containers, and the path validation is a single boundary on the host.
 
-**Where skills live in production:** stage 3 ships **one** `SkillSource` variant — `LocalSkillSource(path=...)` — for local development. Real deployments will want one of:
+**Where skills can live outside local development:** stage 3 ships **one** `SkillSource` variant — `LocalSkillSource(path=...)` — for local development. Forks commonly want one of:
 
-- **`GitRepoSkillSource(repo_url=..., ref=...)`** — clone a versioned skill repo at flow start. The prod path: skills are code-reviewed via PRs, shared across teammates and running agents.
+- **`GitRepoSkillSource(repo_url=..., ref=...)`** — clone a versioned skill repo at flow start. The shared-team path: skills are code-reviewed via PRs, shared across teammates and running agents.
 - **`InlineMarkdownSkillSource(name=..., markdown=...)`** — bake the markdown directly into the Profile. Useful for one-off agents, tests, or skills generated by another flow.
 - **Object storage / kitaru artifacts / container-image bake** — for stricter deployment shapes.
 
@@ -360,7 +360,7 @@ DISABLE_CACHE=1 python stage_6_hitl.py
 
 When the agent calls `ask_question`, kitaru's local runtime prompts on the same terminal. Type your answer, hit enter, the flow resumes.
 
-**Non-interactive (production-shaped):**
+**Non-interactive (server-style):**
 
 ```bash
 DISABLE_CACHE=1 python stage_6_hitl.py </dev/null &
@@ -369,7 +369,7 @@ kitaru executions list                                          # find the waiti
 kitaru executions input <execution_id> --value '"Verified by ops on call"'
 ```
 
-That's exactly how it works in production: the flow runs on a server, the operator answers via the dashboard / CLI / REST API. The flow resumes from the same point and continues.
+That's the same shape on a server: the flow runs remotely, the operator answers via the dashboard / CLI / REST API. The flow resumes from the same point and continues.
 
 > **Local-stack caveat:** the local kitaru runtime polls for input until a 600s timeout, so the non-interactive path *does* wait for the CLI command above on this stack. If you skip the answer, the flow eventually times out rather than auto-resolving. Behavior on remote stacks is the same shape — the difference is just where the wait record lives.
 
@@ -414,7 +414,7 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 
 ---
 
-That's the full tour. Replay isn't covered as a separate chapter — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) when you want it.
+That's the full tour. Replay isn't covered as a separate stage — it's a general Kitaru primitive that applies uniformly to any flow, not a platform-engineering capability specific to agent factories. See [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) when you want it.
 
 ---
 
@@ -429,8 +429,8 @@ Highlights of the architecture choices behind this tour:
 
 ## Forking for your team
 
-When this example is mature, the fork-this-for-your-team guide lands here. For now: clone, swap `DEFAULT_PROFILE`'s system prompt and `allowed_tools` for whatever your agents need, point `LocalSkillSource` at your team's playbook directory, and update the mock services to talk to your real wiki/webhook endpoints.
+To fork this for your team: clone, swap `DEFAULT_PROFILE`'s system prompt and `allowed_tools` for whatever your agents need, point `LocalSkillSource` at your team's playbook directory, and update the mock services to talk to your real wiki/webhook endpoints.
 
-## Tips for production use
+## Tips for running a fork beyond the local demo
 
-- **Model aliases.** This example hardcodes a provider string (`"openai:gpt-5-nano"`) in the Profile so chapter 1 has the smallest possible setup. In production, prefer `kitaru model register <alias> --provider openai --model <id> --api-key ...` and reference the alias in your Profile so credentials are managed centrally.
+- **Model aliases.** This example hardcodes a provider string (`"openai:gpt-5-nano"`) in the Profile so stage 1 has the smallest possible setup. In production, prefer `kitaru model register <alias> --provider openai --model <id> --api-key ...` and reference the alias in your Profile so credentials are managed centrally.

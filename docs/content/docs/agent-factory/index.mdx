@@ -1,54 +1,81 @@
 ---
 title: Agent Factory
-description: A chapter-by-chapter starter kit for building your team's internal agent factory on Kitaru + PydanticAI
+description: A runnable reference architecture for building an internal agent factory with Kitaru and PydanticAI
 ---
 
-A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation and HITL gates wired up correctly. Locally runnable with `bash setup.sh && python stage_N_*.py` and zero external accounts.
+When one team builds one agent, the hard parts can hide in a notebook or a script. When several teams start building agents, the same platform questions come back every time:
 
-## Who this is for
+- If an agent crashes halfway through a task, can it resume without paying for the same model call again?
+- Where do logs live when someone needs to debug what happened yesterday?
+- How does the agent run shell commands without touching the developer's laptop or the production host?
+- How do tools call internal services without handing raw credentials to the model or the worker process?
+- How do you stop an agent before it takes a risky action, wait for a human answer, and then continue from the same point?
+- How do different teams get different tools, prompts, services, and safety rules without copying a pile of glue code?
 
-Platform engineers building their org's internal agent platform on top of [Kitaru](/) and [PydanticAI](https://ai.pydantic.dev). The example is intentionally generic — every stage's demo prompt is a throwaway exercising the new tool that stage introduces. The *framework* is the through-line, not a vertical domain. Forking this for your team means swapping the prompt + fixtures + skill markdown; the framework stays the same.
+This example is about those repeated platform problems. It shows one small internal agent platform where the shared machinery is reusable, and each individual agent is mostly configuration.
 
-If you'd rather add durable execution to a single function, start with the [Quickstart](/getting-started/quickstart) — that's the smallest possible Kitaru flow. Come back here when you want to see how the same primitives compose into a real agent platform.
+## What "internal agent factory" means here
 
-## How the tour is organized
+In this example, an **internal agent factory** is not a place where agents magically appear. It is a small platform layer that takes an agent profile and produces a runnable agent with the same safety and operations rails every time.
 
-The example builds up one capability at a time. Each chapter adds **one tool** or **one architectural primitive**; the library at `agent_factory/` grows monotonically; the per-stage `Profile` gates which capabilities each stage's agent actually exercises. Older stage files stay valid as the library expands.
+Concretely, a team describes an agent with a `Profile`: its name, model, system prompt, allowed tools, allowed services, skill files, sandbox rules, and approval points. The factory code reads that profile and builds the agent around it. Kitaru supplies durable execution, so completed work can be reused after a retry. PydanticAI supplies the agent runtime. The example library supplies the platform seams around tools, sandboxes, credentials, typed service calls, and human approval.
+
+The goal is that Team A can build a support-triage agent and Team B can build a release-notes agent without both teams re-solving durability, logs, secrets, approvals, and safe command execution from scratch.
+
+## What this example is, and what it is not
+
+This is a **runnable local reference architecture**. You can clone the repo, run the stages, and see each platform pattern in a concrete script. The stages are deliberately small: each one adds one new capability while keeping the older stages valid.
+
+This also shows **forkable platform seams**. The credential proxy, typed service boundary, profile gates, sandbox, and human-in-the-loop pause are all shown as separate pieces because those are the pieces you would usually want to harden, replace, or connect to your own infrastructure.
+
+This is **not** a turnkey enterprise platform. It does not ship your identity provider, policy engine, observability stack, deployment system, or production secret store. It is also **not** a hostile-code security boundary. The sandbox pattern is useful for local isolation and for showing where command execution belongs, but running untrusted code safely requires much more infrastructure and review than this example includes.
+
+If you only want to make one function durable, start with the [Quickstart](/getting-started/quickstart). Come back here when you want to see how the same Kitaru primitives fit into a larger internal platform shape.
+
+## Architecture at a glance
+
+<AgentFactoryOverviewDiagram />
+
+The six patterns below build up this picture one capability at a time, in the order a platform team usually adds them.
+
+## The six platform patterns
 
 <Cards>
   <Card
-    title="Chapter 1 — A durable PydanticAI agent"
-    description="Profile + KitaruAgent. The minimum durable agent — turn 1 caches, turn 2 retries cheap."
+    title="Durable agent execution"
+    description="Build the smallest PydanticAI agent that runs inside a Kitaru flow, so completed turns can be reused after a retry instead of paid for twice."
     href="/agent-factory/01-durable-agent"
   />
   <Card
-    title="Chapter 2 — Your agents need a sandbox"
-    description="DockerSandbox — every shell command runs inside an isolated container with its own filesystem and network namespace."
+    title="Sandboxed command execution"
+    description="Put shell commands in a Docker sandbox with its own filesystem and network namespace, rather than running agent-generated commands on the host."
     href="/agent-factory/02-sandbox"
   />
   <Card
-    title="Chapter 3 — Your agents need a procedure"
-    description="The `skill` tool. Move the agent's procedure out of the system prompt and into operator-edited markdown files."
+    title="Operator-editable procedures"
+    description="Move repeatable agent instructions into skill markdown files, so teams can change procedures without burying every rule in the system prompt."
     href="/agent-factory/03-skills"
   />
   <Card
-    title="Chapter 4 — Your agents need credentials they can't see"
-    description="A separate proxy container holds the secrets and injects auth headers; the worker stays credential-free."
+    title="Credential isolation"
+    description="Keep secrets out of the worker. A separate proxy process holds credentials and adds auth headers for approved internal calls."
     href="/agent-factory/04-credential-proxy"
   />
   <Card
-    title="Chapter 5 — Your agents need typed services"
-    description="`exec_service`: a typed-union dispatcher for structured calls. The two credential paths land here."
+    title="Typed service boundaries"
+    description="Route structured service requests through a typed dispatcher, so the platform can decide exactly which internal actions an agent may call."
     href="/agent-factory/05-typed-services"
   />
   <Card
-    title="Chapter 6 — Your agents need to ask humans things"
-    description="`ask_question` + `kitaru.wait()`: durable HITL. The flow pauses, the operator answers, the flow resumes."
+    title="Durable human approval"
+    description="Pause a run with `kitaru.wait()`, ask a human for a decision, and resume the same flow after the answer arrives."
     href="/agent-factory/06-hitl"
   />
 </Cards>
 
 ## Get the code
+
+The local tour needs Docker and one model-provider API key. The wiki and webhook services are mocked locally.
 
 ```bash
 git clone https://github.com/zenml-io/kitaru.git
@@ -58,14 +85,17 @@ export OPENAI_API_KEY=sk-...
 python stage_1_basic_agent.py
 ```
 
-The full source — runnable stage files, the `agent_factory/` library, mocks, skills, Dockerfiles — lives in [`examples/end_to_end/agent_factory/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) on GitHub. The chapters that follow walk through each stage; clone the repo to run them.
+The full source lives in [`examples/end_to_end/agent_factory/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) on GitHub. It includes the runnable stage files, the reusable `agent_factory/` library, mocks, skills, and Dockerfiles.
 
-## What you'll have at the end
+## What you will have at the end
 
-- One `Profile` per agent (Pydantic model: name, system prompt, model string, allowed tools, allowed services, skill source, sandbox-proxy rules).
-- A reusable `agent_factory/` library that takes a Profile and produces a durable PydanticAI agent.
-- A two-process credential isolation pattern (proxy + worker) wired correctly.
-- Typed service handlers for the host-side path; sandboxed `exec` for the shell path.
-- Durable human-in-the-loop via `kitaru.wait()` — your flow can pause for hours, the host can reboot, the operator answers, the flow resumes from the same point.
+By the end of the tour, you will have seen how to assemble:
 
-The repo's example README also covers forking guidance ("swap the mock for your real wiki / webhook / skill markdown") and tips for production use (model aliases, memory compaction).
+- one `Profile` per agent, with clear gates for tools, services, skills, and approval points;
+- a reusable `agent_factory/` library that turns a profile into a durable PydanticAI agent;
+- a sandboxed command path for shell work;
+- a credential proxy path for service calls that need secrets;
+- typed service handlers for approved internal actions; and
+- durable human-in-the-loop pauses for decisions that should not be left to the model.
+
+The demo prompts are intentionally generic. The point is not the toy task each stage performs. The point is the shape of the platform: shared rails once, many profile-driven agents on top.
