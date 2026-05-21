@@ -1,21 +1,23 @@
 ---
 title: Stage 6 — Your agents need to ask humans things
-description: ask_question — a freeform HITL tool that suspends the flow until an operator answers
+description: ask_question, a freeform HITL tool that pauses the flow until an operator answers from any surface
 ---
 
 **Stage file:** `stage_6_hitl.py`
 
 ## The problem
 
-Some questions only the operator can answer: sign-off on an irreversible action, a subjective preference, an ambiguous next step. The agent reaches that point and genuinely should stop and ask a human, not guess.
+Your agent has just drafted a summary and is one step away from posting it to a live channel. Once it posts, it is posted: the webhook fires, the message is out, and there is no un-sending it. Plenty of steps are like that: a sign-off before something irreversible, a judgment call the model should not make alone, an ambiguous fork where guessing wrong is costly to undo. At those points the agent should stop and ask a person, not pick an answer and hope.
 
 ## What goes wrong without it
 
-The naive version is calling `input()` in the middle of the run. That ties the whole flow to one live process. If the machine restarts while it waits, the run is gone, and there is no way for the human to answer from a dashboard, a CLI, or a REST call on a server. A human might take minutes or hours to respond, and the process sits there the whole time, losing everything if it dies.
+The obvious version is `input()`: stop and read a line from the keyboard. It works on your laptop right up until anything goes wrong. Look at what `input()` actually does, though. It blocks one specific Python process and waits. The half-finished run, all the work the agent did to reach this point, lives in that process's memory and nowhere else. Now the human takes four hours to answer because they are stuck in meetings. For those four hours a process sits pinned open doing nothing. If the machine reboots, a deploy rolls out, or the pod gets evicted in that window, the run is gone: no record, no way to resume, nothing left for the human to answer. And the answer can only come from that one keyboard, never from a dashboard, a CLI on a server, or a REST call from a web form.
 
 ## What this stage adds
 
-Stage 6 introduces `ask_question`, a freeform HITL tool that pauses the flow until a human responds. The agent calls it like any other tool; the kitaru pydantic-ai adapter routes the call through [`kitaru.wait()`](/guides/wait-and-resume). From the agent's perspective, `ask_question("...")` returns a string after a brief pause. From kitaru's perspective, the flow paused durably until input arrived, so a restart in the middle does not lose the run.
+Stage 6 adds `ask_question`, a tool the agent calls exactly like any other. The agent's view is deliberately boring: it calls `ask_question("What suffix should I add before publishing?")` and, a moment later, gets a string back. As far as the agent knows, nothing unusual happened.
+
+Underneath, something very different happened. The kitaru pydantic-ai adapter routes that call through [`kitaru.wait()`](/guides/wait-and-resume), which writes a wait record to durable storage and lets the flow stop. Not block: stop. The process can exit, the compute can be freed, and hours can pass. When an answer finally arrives, from a terminal, a dashboard, a CLI, or a REST call, Kitaru loads the run back and the agent's `ask_question(...)` returns that answer as though it had been a slow function all along.
 
 <HitlPauseResumeDiagram />
 
@@ -90,7 +92,7 @@ Kitaru: Checkpoint `default` finished in 1m12s.
 Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoint output. Verified by ops on call.
 ```
 
-Once a stage has completed, the operator surface that makes durability *observable* lives behind the CLI and dashboard. From the same shell that ran the stage:
+Once the stage finishes, you can inspect the run from the CLI or the dashboard. From the same shell that ran the stage:
 
 ```bash
 kitaru executions list                                  # find the execution_id
@@ -99,7 +101,7 @@ kitaru executions logs <execution_id>                   # streaming runtime logs
 kitaru executions replay <execution_id> --from default  # re-run from the agent turn (cached HITL answer reused)
 ```
 
-`replay --from default` re-executes the agent turn with everything upstream served from cache; if the operator already answered the wait in the original run, the cached answer is reused (the wait `name` is stable across replays; the "Wait-name design is replay-safe" note under How it works explains why). For replay with output overrides that swap a checkpoint's input artifact while preserving downstream caches, see [Replay and Overrides](/guides/replay-and-overrides).
+`replay --from default` re-runs the agent turn with everything before it served from cache. You will not be prompted to answer `ask_question` a second time: the operator's original answer is cached and replayed, because every wait has a stable name that survives the replay. (The "Wait-name design is replay-safe" note under How it works explains the naming.) To swap a checkpoint's input artifact on replay while keeping downstream caches, see [Replay and Overrides](/guides/replay-and-overrides).
 
 ## How it works
 
@@ -112,7 +114,7 @@ The pieces involved:
 A few mechanics worth knowing:
 
 - **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
-- **Wait paths are flow-scope only, so the wait-bearing tool opts out of granular checkpoints.** `KitaruAgent` defaults to `granular_checkpoints=True`, which wraps every tool call in its own checkpoint. But `kitaru.wait()` (and the adapter's `wait_for_input` shim) refuses to run inside a checkpoint body; it has to live at flow scope. Stage 6 wires this by passing `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`, which tells the adapter to skip the granular checkpoint wrapper for that one tool. Other tools (`exec`, `skill`, `exec_service`) stay granular.
+- **Waits live at flow scope, and turn mode keeps them there.** `kitaru.wait()` (and the adapter's `wait_for_input` shim) refuses to run inside a checkpoint body; it has to live at flow scope. Stage 6 runs the same teaching setting as the rest of the tour, `granular_checkpoints=False`, so the whole `agent.run_sync()` turn is a single checkpoint and no individual tool call is wrapped in one of its own. That is what lets `ask_question` call `wait_for_input` straight from flow scope, with nothing extra to wire up. (Granular checkpoints change this; the production upgrade path covers what to do.)
 - **Wait-name design is replay-safe.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index.
 - **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape.
 
@@ -124,6 +126,8 @@ A few mechanics worth knowing:
 ## Production upgrade path
 
 On a server the operator answers through the dashboard, CLI, or REST API rather than the local terminal prompt; the non-interactive run above is already that shape. Before handing operator input to anything that interprets the bytes (an HTML renderer, a shell, SQL), escape it yourself; the example passes it through unescaped.
+
+If you drop the teaching-only `granular_checkpoints=False` and run granular (the upgrade [Stage 1](/agent-factory/01-durable-agent) describes), exempt any wait-bearing tool so it still runs at flow scope: pass `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`. That skips the granular checkpoint wrapper for `ask_question` while `exec`, `skill`, and `exec_service` stay granular.
 
 ## Source
 

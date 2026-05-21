@@ -1,21 +1,21 @@
 ---
 title: Stage 5 — Your agents need typed services
-description: exec_service — a typed-union dispatcher for structured calls. Plus the two credential paths.
+description: Add exec_service for structured host-side calls (look up a record, create a ticket, publish a summary) when a shell command is the wrong shape
 ---
 
 **Stage file:** `stage_5_typed_services.py`
 
 ## The problem
 
-Not every agent call deserves a shell. Some calls need *structured* input and a *structured* response: posting a webhook, looking up a record, hitting an internal control plane. The result matters more than the raw bytes, and the answer needs to come back in a shape the rest of the flow can rely on.
+The agent's `exec` tool is a shell, and a shell is the right tool when the agent is genuinely reasoning about command output: reading a file, grepping a log, checking which version of something is installed. It is the wrong tool the moment the agent wants to do one specific, structured thing: publish a summary, look up a customer record, create a ticket, call an internal control plane. Those actions have a defined input and a defined result, and the result is the point, not the raw bytes that came back.
 
 ## What goes wrong without it
 
-If the only tool is `exec`, the agent has to assemble `curl` and parse JSON by hand for these calls. That is fragile: the model can mangle the request or misread the response, and a structured action turns into shell-shaped glue. When the platform wants typed inputs, typed outputs, and a clear permission boundary, the shell is the wrong shape for the job.
+With only `exec`, the agent has to hand-assemble the `curl`, get the headers right, and parse the JSON that comes back. That is fragile in both directions: the model can mangle the request (post to the wrong webhook, drop a required field) or misread the response (treat a `500` body as success). A structured action becomes shell-shaped glue the model has to get right character by character, when what the platform wants is typed inputs, typed outputs, and a clear permission boundary.
 
 ## What this stage adds
 
-Stage 5 introduces `exec_service`: one tool that dispatches to a discriminated union of typed services. The tool description is built dynamically from the profile's `allowed_services`, so the LLM only sees what this agent can actually call. `exec` stays for shell-shaped work the agent reasons about as command output; `exec_service` handles structured host-side work where the typed result matters more than the bytes.
+Stage 5 adds a second tool, `exec_service`, for exactly those structured calls. Each service has a typed input and a typed output; the agent picks one by name and fills in its arguments. That splits the work cleanly: `exec` is for shell-shaped work the agent reasons about as command output, and `exec_service` is for structured host-side work where the typed result matters more than the bytes. The agent only sees the services this profile allows, because the tool's description is built from the profile's `allowed_services`.
 
 <ServiceCallPathsDiagram />
 

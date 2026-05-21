@@ -15,7 +15,7 @@ If those commands run on the host, the blast radius is your laptop or your produ
 
 ## What this stage adds
 
-Stage 2 wraps each agent run in a `DockerSandbox` context manager. Every shell command now runs inside a container with its own filesystem and network namespace, so accidental damage is contained to the container and a mounted workspace instead of reaching the host.
+Stage 2 wraps each agent run in a `DockerSandbox` context manager. Every shell command now runs inside a container with its own filesystem, process, and network namespaces, so accidental damage is contained to the container and a mounted workspace instead of reaching the host.
 
 <SandboxBoundaryDiagram />
 
@@ -85,15 +85,25 @@ The pieces involved:
 
 ## What's simplified for the tutorial
 
+**Docker is the tutorial's sandbox, not a hostile-code boundary.** It gives a real filesystem, process, and network boundary, which is the right size for the risk in this example: a confused agent that runs a bad `rm` hits the container and a mounted workspace, not your home directory. It is not a wall against code that is actively trying to break out. The container shares one Linux kernel with the host, so a kernel exploit or a sloppy mount can still reach across. For genuinely untrusted code you would want stronger isolation, which the upgrade path below covers.
+
 **Shell state is deliberately not preserved across runs.** The bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or persist specific values via [`kitaru.save()`](/guides/artifacts) and reload them with `kitaru.load()` at the top of the next run.
 
 > **One subtlety on the durability story from Stage 1.** Kitaru caches the agent's *reasoning* (the LLM responses, the tool-call decisions, the turn output as a whole). It does **not** replay the bash side effects of a cached turn. If turn 1 ran `cd /tmp && touch summary.txt` and got cached, a re-run that serves turn 1 from cache won't actually re-execute the `cd` or re-create the file. The next turn that's still live will run against a *fresh* shell. Plan accordingly: side-effecting commands should generally not straddle the same turn boundary as the LLM calls that decided to issue them.
 
-Docker also has limits as a security boundary. The container and the host share one Linux kernel, so Docker contains many accidental filesystem mistakes but is not a hostile-code boundary on its own. The [landing page](/agent-factory) covers that distinction; the upgrade path below is where you would tighten it.
-
 ## Production upgrade path
 
-The `exec` tool only depends on a small `run(command) -> ExecResult` shape, so `DockerSandbox` is one implementation you can swap. A fork that needs stronger isolation can put a different backend behind the same interface without changing the agent's tool wiring. Credentials are the next gap: in this stage they still come from the host process, and [Stage 4](/agent-factory/04-credential-proxy) isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
+Stage 2 uses Docker, but the `exec` tool does not know that. It calls `sandbox.run(command)` and expects back an `ExecResult` (an exit code plus captured stdout). Anything that matches that one method is a valid sandbox, so swapping the backend never touches the agent's tool wiring. `DockerSandbox` is just the implementation that is easy to run on a laptop.
+
+When you need a real boundary against untrusted code, that seam is where you change it. A few backends to reach for, roughly in order of how much isolation they buy:
+
+- **gVisor** runs each container against a user-space kernel, so syscalls hit gVisor instead of the host kernel directly. Stronger than plain Docker, still container-shaped.
+- **Kata Containers** wraps each container in a lightweight VM, so a kernel escape lands in the VM rather than on the host.
+- **Firecracker microVMs** give each run its own minimal VM with a small attack surface (the same technology behind AWS Lambda).
+- **Hosted sandboxes** like E2B, Modal, or Daytona run the commands on isolated infrastructure, so nothing executes on your own machine.
+- **WebAssembly** isolates by default, but arbitrary `bash` is not its strong suit, so it fits best when you can constrain what the agent runs.
+
+Credentials are the next gap. In this stage they still come from the host process; [Stage 4](/agent-factory/04-credential-proxy) moves them behind a separate proxy container that injects `Authorization` headers based on host patterns.
 
 ## Source
 

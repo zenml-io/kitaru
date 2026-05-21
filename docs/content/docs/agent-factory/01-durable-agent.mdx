@@ -1,23 +1,25 @@
 ---
 title: Stage 1 — A durable PydanticAI agent
-description: PydanticAI gives the agent loop. Kitaru gives durable execution. Together — durable agents in ~30 lines.
+description: PydanticAI runs the agent loop. Kitaru remembers the work that finished before a crash. Together, durable agents in about 30 lines.
 ---
 
 **Stage file:** `stage_1_basic_agent.py`
 
 ## The problem
 
-A useful agent task is rarely one model call. The agent reasons, calls a tool, reads the result, reasons again, and only finishes several turns later. Each of those turns costs real money and real time. Partway through, the process can die: a deploy restarts the worker, or the machine runs out of memory.
+A useful agent task is rarely a single model call. The agent reasons, calls a tool, reads the result, reasons again, and only finishes several turns later. Every turn is a real API call: it costs real money and takes real seconds. And partway through, the process can die for reasons that have nothing to do with your agent: a deploy restarts the worker, the orchestrator reschedules the pod, the machine runs low on memory.
 
 ## What goes wrong without it
 
-The model already did the expensive part of turn 1, and then the process fell over before turn 2. A plain agent loop has no memory of that completed work. When you retry, it starts from the top and pays for turn 1 again. On a long task that is the same model bill twice, plus the latency of redoing work that already succeeded.
+Walk through a single retry. Turn 1 runs: the model thinks, calls a tool, comes back with a result. That call cost you, say, forty cents and twenty seconds. Then, before turn 2 starts, the worker restarts. A plain agent loop held all of that progress in memory, and memory is gone. So the retry begins again at turn 1: the same model call, the same forty cents, the same twenty seconds, all to rebuild a result you had a moment ago. On a ten-turn task that crashes near the end, you pay for almost the whole run twice.
 
 ## What this stage adds
 
-PydanticAI gives you the agent loop. Kitaru wraps that loop in a durable flow, so a turn that already finished is saved and reused after a retry instead of being paid for a second time. You get this without learning a graph DSL or rewriting your control flow as a state machine.
+There are really two jobs here. PydanticAI runs the agent loop: it decides what the model does next, calls the tools, feeds the results back in. That is its job, and it does it well. What it does not do, and what no in-memory agent loop does on its own, is survive the process dying. The loop's progress lives in memory, so when the process goes, the progress goes with it.
 
-The flow has two checkpoints, both real LLM turns. When the process dies between them, the first turn is already saved; the retry replays it from cache and only runs the part that never finished.
+Kitaru is the other job. It wraps the loop in a durable flow and writes each finished turn to durable storage the moment it completes. Picture the loop as what the agent is thinking right now, and Kitaru as what it has already written down and cannot lose. After a crash, the retry reads back the turns that already finished instead of paying for them again. Running the loop and surviving a crash are two separate jobs; here PydanticAI stays a plain agent loop and Kitaru supplies the durability around it. You get that without learning a graph DSL or rewriting your control flow as a state machine.
+
+This stage's flow has two checkpoints, both real LLM turns. When the process dies between them, the first turn is already written down; the retry loads it from cache and runs only the turn that never finished.
 
 <DurableAgentReplayDiagram />
 
@@ -56,15 +58,15 @@ python stage_1_basic_agent.py
 
 ## What to look for in the logs
 
-Watch the two checkpoints across the two runs:
+Run it twice and watch the two checkpoints. The gap between the columns is the whole point:
 
 | | First run (with `FORCE_FAILURE`) | Second run (no flag) |
 |---|---|---|
 | `default` | started → finished (multiple LLM calls) | **cached** (instant, $0) |
-| `default_2` | (never runs — flow raised first) | started → finished (one LLM call) |
+| `default_2` | (never runs; flow raised first) | started → finished (one LLM call) |
 | Outcome | failure | printed output, only second turn re-paid for |
 
-The first run pays for turn 1, then fails. The second run serves turn 1 from cache for free and only runs turn 2. Without Kitaru, the first failure would have wasted turn 1's work and you would pay for both turns on the retry. With Kitaru, only the part that did not complete the first time gets re-paid for. That is the durability story.
+The first run pays for turn 1, then fails. The second run serves turn 1 from cache for nothing and runs only turn 2. The retry rebuilds none of the work that already succeeded.
 
 ## How it works
 

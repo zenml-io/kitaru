@@ -7,15 +7,28 @@ description: Move the agent's procedure out of the system prompt and into operat
 
 ## The problem
 
-In stages 1–2 the agent's behavior is hardcoded in the system prompt. Real agents have playbooks: the specific steps to take, what to check, how to summarize, when to stop. Those steps change often, and the people who want to change them are not always the people who own the Python.
+An agent's real instructions are a procedure: which steps to run, what to check, how to summarize, when to stop. Those steps change often, and the person who wants to change them is rarely the person who owns the agent's Python. A support lead wants to tighten the triage checklist. An ops engineer wants the agent to run one extra verification before it reports "done." In stages 1–2 that procedure is hardcoded in the system prompt, inside the agent code.
 
 ## What goes wrong without it
 
-If the procedure lives in a prompt string inside the agent code, every wording change is a code change. An operator who wants to adjust the triage steps has to open the Python, edit a string, and wait for a deploy. The procedure is also hard to read and review when it is buried in source.
+When the procedure is a string literal in the agent code, every wording change is a code change. The support lead who wants to adjust two triage steps has to open the Python, edit a string, get it reviewed, and wait for a deploy. Until then the agents in production keep running the old steps. The procedure is also hard to read and review while it sits buried in source next to tool wiring and imports.
 
 ## What this stage adds
 
-Stage 3 introduces the `skill` tool. The agent reads its instructions from `skills/<agent>/SKILL.md` instead of from Python. The system prompt only says "find your skill and follow it." The actual procedure (which commands to run, what to summarize, how to return) lives in `skills/basic/default-agent/SKILL.md`. Edit the markdown, re-run, and the agent's behavior changes without touching Python.
+Stage 3 introduces the `skill` tool. The system prompt shrinks to one instruction: find your skill and follow it. The actual procedure lives in a markdown file, `skills/basic/default-agent/SKILL.md`, that an operator edits in their IDE. The agent calls `skill(action="list")` to discover its skill files, `skill(action="read", path=...)` to fetch one, then follows what it read using the `exec` tool. Edit the markdown, re-run, and the agent's behavior changes without touching Python.
+
+### What Kitaru adds beyond reading a file
+
+PydanticAI can already call a tool that opens a markdown file and hands the text to the model. That part is not the point of this stage. The point is where that read sits, who is allowed to do it, and how easily you can change where the procedure comes from.
+
+- The read-and-act cycle runs inside a durable flow. The agent reads its skill and acts on it inside `agent_factory_flow`, a `@kitaru.flow`, and each `agent.run_sync()` turn is checkpointed (this is the durability from [Stage 1](/agent-factory/01-durable-agent)). In this tutorial mode the whole turn is the cache unit: once a turn finishes, a replay serves it from cache instead of re-running its model and tool calls; a turn that crashed partway through re-executes in full, re-reading the skill and repeating its steps. Reuse at the finer grain of individual model or tool calls is what granular checkpoints add (see Stage 1's production upgrade path). A plain script gets none of this: a crash throws away even the turns that already finished.
+- Skill access is something the profile declares. An agent gets the `skill` tool only when its `Profile` both lists `"skill"` in `allowed_tools` and sets a `skill_source`. The `default` profile does both. Leave out the source and `build_tools` refuses to wire the tool at all. So whether an agent can read procedures, and where from, sits in its configuration next to its model and system prompt.
+- The procedure's location travels with the agent. `skill_source` is a field on `Profile`, alongside `model`, `system_prompt`, and `allowed_tools`. Two agents in one factory can point at two different skill sources, and that difference is part of what makes them different agents.
+- The source sits behind a seam you can swap. `SkillSource` is an alias with a single method, `resolve() -> Path`. The `skill` tool only ever sees a directory of markdown; it never learns whether that directory came from the local filesystem, a cloned git repo, or text baked into the profile. The example ships one source today, and the seam is what lets a fork add others without touching the tool.
+
+The durable flow is the part Kitaru provides. The profile-gating, the skill source as configuration, and the swappable seam are the structure this example adds on top of Kitaru. You want that structure once more than one agent and more than one person are editing procedures.
+
+Kitaru does not manage the skills themselves. There is no built-in versioning, review interface, diffing, change history, or UI that surfaces edits. Those are real production concerns, and the production upgrade path below points at where they would plug in, but the example ships none of them.
 
 ## One-time setup
 
@@ -34,7 +47,7 @@ DISABLE_CACHE=1 python stage_3_skills.py
 ```
 
 <Callout type="info">
-  When iterating on a `SKILL.md`, run with `DISABLE_CACHE=1`, otherwise the prior run's turn output is cached and your edits won't visibly change anything until the cache is invalidated.
+  When iterating on a `SKILL.md`, run with `DISABLE_CACHE=1`. Otherwise the prior run's turn output is cached and your edits won't visibly change anything until the cache is invalidated.
 </Callout>
 
 ### Env-var toggles
@@ -57,31 +70,33 @@ Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions   ← LLM 
 …
 ```
 
-`skill` is a host-side Python function, not an HTTP call. The `Kitaru: HTTP Request: POST ...` lines you see are the LLM turns that *decide* to call it.
+`skill` is a host-side Python function, not an HTTP call. The `Kitaru: HTTP Request: POST ...` lines are the LLM turns that *decide* to call it.
 
 ## How it works
 
-The pieces involved:
+Three files carry the stage:
 
-- `agent_factory/tools.py` — `skill` tool factory with `list` / `read` / `search` actions, `.is_relative_to(skills_root)` escape prevention, `MAX_READ_BYTES=100_000`, default glob `**/SKILL.md`.
-- `agent_factory/profile.py` — `LocalSkillSource(path=...)` Pydantic model + `SkillSource` alias.
-- `skills/basic/default-agent/SKILL.md` — the agent's playbook for stage 3 (basic procedure with no external services). Operator edits this in their IDE.
+- `agent_factory/tools.py`: the `skill` tool factory, with `list` / `read` / `search` actions, `MAX_READ_BYTES=100_000`, a default `**/SKILL.md` glob, and an `.is_relative_to(skills_root)` check that rejects any path trying to escape the skills directory.
+- `agent_factory/profile.py`: the `LocalSkillSource(path=...)` model and the `SkillSource` alias.
+- `skills/basic/default-agent/SKILL.md`: the procedure itself, the file an operator edits. It says which commands to run, what to summarize, and how to return.
 
-The skill tool runs **host-side**, not inside the sandbox. The agent calls the tool from inside its turn checkpoint; the tool reads files from the host's filesystem directly. So operators can edit `skills/...` without touching containers, and the path validation is a single boundary on the host.
+Access is gated in two places. `build_agent` resolves `profile.skill_source` to a directory and hands it to `build_tools`. `build_tools` only constructs the `skill` tool when `"skill"` is in `allowed_tools`, and it raises if the tool is allowed without a source. So an agent reaches its procedure only when its profile both opts into the tool and says where the files live.
+
+The skill tool runs host-side, not inside the sandbox. The agent calls it from within a turn, and that turn runs inside the `@kitaru.flow`, so the read is part of the checkpointed, replayable execution. The tool reads files straight from the host filesystem, so operators edit `skills/...` in their editor without rebuilding or entering a container. The path validation is the single boundary on the host.
 
 ## What's simplified for the tutorial
 
-Stage 3 ships one `SkillSource` variant (`LocalSkillSource(path=...)`) for local development. It does not include skill versioning, a review UI, or diff/provenance tracking. The point of this stage is to show where operator-editable procedures plug in, not to ship a full skill-management product.
+Stage 3 ships one `SkillSource` variant, `LocalSkillSource(path=...)`, for local development. It does not version skills, diff them, record who changed what, gate edits behind review, or surface changes in any UI. Kitaru does not provide those for skills today. The job of this stage is to show where operator-editable procedures plug in, not to ship a skill-management product. The next section is where a fork would add the rest.
 
 ## Production upgrade path
 
 Forks commonly want one of:
 
-- **`GitRepoSkillSource(repo_url=..., ref=...)`** — clone a versioned skill repo at flow start. The shared-team path: skills are code-reviewed via PRs, shared across teammates and running agents.
-- **`InlineMarkdownSkillSource(name=..., markdown=...)`** — bake the markdown directly into the Profile. Useful for one-off agents, tests, or skills generated by another flow.
-- **Object storage / kitaru artifacts / container-image bake** — for stricter deployment shapes.
+- `GitRepoSkillSource(repo_url=..., ref=...)`: clone a versioned skill repo at flow start. This is the shared-team path, where skills are code-reviewed through PRs and shared across teammates and running agents.
+- `InlineMarkdownSkillSource(name=..., markdown=...)`: bake the markdown straight into the Profile. Useful for one-off agents, tests, or skills generated by another flow.
+- Object storage, Kitaru artifacts, or a container-image bake for stricter deployment shapes.
 
-The `SkillSource` seam is visible in `agent_factory/profile.py` so forking devs see the alternatives where the architecture lives, not just in docs. Adding a new source = subclass with a `resolve(self) -> Path` method; the skill tool itself doesn't change. This is also the natural place a production fork would add review, provenance, or version pinning.
+The `SkillSource` seam lives in `agent_factory/profile.py`, with the production alternatives spelled out in a comment right where you would add your own. Adding a source means writing a subclass with a `resolve(self) -> Path` method; the `skill` tool does not change. This is also the natural home for what the tutorial leaves out. Review, change history, provenance, and version pinning all belong on the source rather than in the agent.
 
 ## Source
 
