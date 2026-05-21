@@ -234,24 +234,34 @@ image with Kitaru and the Kitaru UI layered on top.
 ### 1. Build the server image locally
 
 ```bash
-just server-image REPO=kitaru-local TAG=dev UI_TAG=v0.1.0
-# or, if you do not have `just` installed:
-docker build -f docker/Dockerfile --target server \
-    --build-arg KITARU_UI_TAG=v0.1.0 \
-    -t kitaru-local:dev .
+just DOCKER_REPO=kitaru-local DOCKER_TAG=dev server-image
 ```
-
-> Replace `v0.1.0` with the desired Kitaru UI release tag. Without an
-> explicit tag, the build defaults to `latest` (the most recent GitHub release).
 
 This creates a local image tag called `kitaru-local:dev`.
 
-For local UI development (without a published Kitaru UI release), use
-the dev server image instead:
+The `server-image` recipe first bundles a stable Kitaru UI release into the
+Kitaru package tree, then Docker copies that packaged UI into the server image.
+Docker no longer downloads UI release assets itself.
+
+If you do not have `just` installed, run the two steps explicitly:
+
+```bash
+bash scripts/download-ui.sh
+docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
+```
+
+To test a specific stable UI release in the release-like image path:
+
+```bash
+just UI_TAG=kitaru-ui-v0.2.0 DOCKER_REPO=kitaru-local DOCKER_TAG=dev server-image
+```
+
+For local UI development with an unarchived frontend build, use the dev server
+image instead:
 
 ```bash
 # Build kitaru-ui first, then copy dist/ into the build context:
-cp -r /path/to/kitaru-ui/dist/ docker/kitaru-ui-dist/
+cp -r /path/to/zenml-frontend-monorepo/apps/kitaru-ui/dist/ docker/kitaru-ui-dist/
 just server-dev-image
 ```
 
@@ -285,8 +295,8 @@ This uses browser-based device authorization. A few practical notes:
   manually.
 - If the browser page shows `{"detail":"An unexpected error occurred."}`
   or the CLI keeps polling with `authorization_pending`, the image likely
-  does not contain the bundled dashboard assets. Rebuild the image from
-  the current branch or switch to a newer published tag.
+  does not contain the bundled dashboard assets. Rebuild from source after
+  running `bash scripts/download-ui.sh`, or switch to a newer published tag.
 - If login stalls, `docker logs kitaru-server` is the first place to look.
 
 After login, `uv run kitaru status` should show the server connection.
@@ -302,6 +312,49 @@ locally.
 ```bash
 docker stop kitaru-server && docker rm kitaru-server
 ```
+
+## Maintainer UI testing
+
+Most users should not need this section. It is for Kitaru/backend maintainers
+and frontend maintainers validating a Kitaru UI bundle before a release.
+
+The key safety rule: official Kitaru builds only bundle stable/full UI releases
+from `zenml-io/zenml-frontend-monorepo`. Prerelease UI testing is explicit and
+local; it does not publish a Kitaru package or image.
+
+```bash
+# Download the latest stable/full UI bundle for local testing
+just ui-bundle
+
+# Download a specific stable UI bundle
+just UI_TAG=kitaru-ui-v0.2.0 ui-bundle
+
+# Download a prerelease UI bundle, explicitly opting into prereleases
+just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease
+
+# Start local Kitaru with the prepared bundle
+just ui-login
+
+# Run the smoke test with the prepared bundle and keep the server running
+just ui-smoke
+```
+
+You can also bypass `just` and point Kitaru at any built UI `dist/` directory:
+
+```bash
+KITARU_UI_DIST_PATH=/absolute/path/to/dist uv run kitaru login
+KITARU_UI_DIST_PATH=/absolute/path/to/dist ./scripts/smoke-test.sh --keep-server
+```
+
+If a local server is already running, restart it before changing
+`KITARU_UI_DIST_PATH`:
+
+```bash
+uv run kitaru logout
+KITARU_UI_DIST_PATH=/absolute/path/to/dist uv run kitaru login
+```
+
+For the full internal runbook, see `FRONTEND-TESTING.md`.
 
 ## Useful CLI commands
 

@@ -30,7 +30,8 @@ helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
 ```
 
 This starts a single Kitaru server pod with a local SQLite database persisted
-via a PersistentVolumeClaim.
+via a PersistentVolumeClaim. The chart uses the official Kitaru server image, so
+it inherits the Kitaru UI bundled into that image at release time.
 
 Once the pod is ready, port-forward and connect:
 
@@ -73,10 +74,11 @@ Snapshot-backed deployment execution (`kitaru invoke`,
 `KitaruClient().deployments.invoke(...)`, and
 `kitaru flow deployments curl`) requires server workload-manager support.
 
-The default Kitaru chart/image path already includes this support. If you
-override the image (for example using plain `zenmldocker/zenml-server`) or
-replace environment settings, preserve a compatible workload-manager
-configuration explicitly under `kitaru.server.environment`.
+The default Kitaru chart/image path already includes this support and the
+release-bundled Kitaru UI. If you override the image (for example using plain
+`zenmldocker/zenml-server`) or replace environment settings, preserve a
+compatible workload-manager configuration explicitly under
+`kitaru.server.environment`.
 
 ```yaml
 kitaru:

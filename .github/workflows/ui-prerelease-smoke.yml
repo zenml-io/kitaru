@@ -1,0 +1,136 @@
+---
+name: UI prerelease smoke
+on:
+  workflow_dispatch:
+    inputs:
+      ui-tag:
+        description: Kitaru UI prerelease tag to test (e.g. kitaru-ui-v0.1.8)
+        required: true
+        type: string
+      kitaru-ref:
+        description: Kitaru git ref to test
+        required: false
+        type: string
+        default: develop
+      docker-smoke:
+        description: Also build and smoke-test the production Docker image locally
+        required: false
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: ui-prerelease-smoke-${{ github.ref }}-${{ inputs.ui-tag }}
+  cancel-in-progress: false
+env:
+  ZENML_SERVER_TAG: 0.94.4
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          path: trusted
+          persist-credentials: false
+      - name: Checkout Kitaru ref under test
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ inputs.kitaru-ref }}
+          path: kitaru
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+      - name: Download selected Kitaru UI prerelease
+        working-directory: kitaru
+        run: bash ../trusted/scripts/download-ui.sh
+        env:
+          TAG: ${{ inputs.ui-tag }}
+          KITARU_UI_ALLOW_PRERELEASE: 'true'
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+      - name: Build wheel
+        working-directory: kitaru
+        run: uv build --wheel
+      - name: Verify Kitaru UI in wheel
+        working-directory: kitaru
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          uv run --no-project ../trusted/scripts/verify-ui-wheel.py "$WHEEL"
+      - name: Record smoke identity
+        working-directory: kitaru
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          manifest = json.loads(Path("src/kitaru/_ui/bundle_manifest.json").read_text())
+          ref = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## UI prerelease smoke inputs\n")
+              summary.write(f"Kitaru ref: `{ref}`\n\n")
+              summary.write(f"UI repo: `{manifest['repo']}`\n\n")
+              summary.write(f"UI tag: `{manifest['tag']}`\n\n")
+              summary.write(f"UI checksum: `{manifest['checksum']}`\n\n")
+              summary.write("No PyPI package, Docker image, Git tag, GitHub release, or Helm chart was published.\n")
+          PY
+      - name: Build server image
+        if: ${{ inputs.docker-smoke }}
+        working-directory: kitaru
+        run: >-
+          docker build -f docker/Dockerfile --target server
+          --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
+          -t kitaru-ui-prerelease-smoke .
+      - name: Start server container
+        if: ${{ inputs.docker-smoke }}
+        run: docker run -d --rm --name kitaru-ui-prerelease-smoke -p 18080:8080 kitaru-ui-prerelease-smoke
+      - name: Wait for health endpoint
+        if: ${{ inputs.docker-smoke }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/health >/tmp/kitaru-health.txt; then
+              cat /tmp/kitaru-health.txt
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time." >&2
+          docker logs kitaru-ui-prerelease-smoke || true
+          exit 1
+      - name: Verify package UI and copied dashboard assets
+        if: ${{ inputs.docker-smoke }}
+        run: bash trusted/scripts/verify-server-ui.sh kitaru-ui-prerelease-smoke
+      - name: Smoke test root route serves dashboard HTML
+        if: ${{ inputs.docker-smoke }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /tmp/root-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/')
+          test "$status" = "200"
+          grep -qi '<!doctype html\|<html' /tmp/root-response.txt || {
+            echo "Root route did not return HTML." >&2
+            cat /tmp/root-response.txt >&2
+            exit 1
+          }
+      - name: Smoke test device verification route
+        if: ${{ inputs.docker-smoke }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /tmp/device-verify-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/devices/verify?device_id=test&user_code=test')
+          test "$status" = "200"
+          if grep -q 'An unexpected error occurred' /tmp/device-verify-response.txt; then
+            echo "Device verification route returned the generic unexpected-error payload." >&2
+            cat /tmp/device-verify-response.txt >&2
+            exit 1
+          fi
+          if docker logs kitaru-ui-prerelease-smoke 2>&1 | grep -q 'TemplateNotFound'; then
+            echo "TemplateNotFound appeared in container logs after hitting /devices/verify." >&2
+            exit 1
+          fi
+      - name: Dump container logs on failure
+        if: ${{ failure() && inputs.docker-smoke }}
+        run: docker logs kitaru-ui-prerelease-smoke || true
+      - name: Stop server container
+        if: ${{ always() && inputs.docker-smoke }}
+        run: docker rm -f kitaru-ui-prerelease-smoke || true

@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       kitaru-ui-tag:
-        description: Kitaru UI release tag (e.g. v0.1.0). Defaults to latest kitaru-ui
-          release.
+        description: Kitaru UI release tag (e.g. kitaru-ui-v0.1.0). Defaults to the
+          highest stable kitaru-ui-v* release.
         required: false
         type: string
         default: ''
@@ -48,27 +48,6 @@ jobs:
             exit 1
           fi
           printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
-      - name: Set Kitaru UI tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_TAG: ${{ github.event.inputs.kitaru-ui-tag }}
-        run: |
-          set -euo pipefail
-          validate_tag() {
-            local tag="$1"
-            if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
-              echo "::error::Invalid Kitaru UI tag: $tag"
-              exit 1
-            fi
-          }
-          if [ -n "$INPUT_TAG" ]; then
-            KITARU_UI_TAG_VALUE="$INPUT_TAG"
-          else
-            KITARU_UI_TAG_VALUE=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
-            echo "Using latest Kitaru UI release: $KITARU_UI_TAG_VALUE"
-          fi
-          validate_tag "$KITARU_UI_TAG_VALUE"
-          printf 'KITARU_UI_TAG=%s\n' "$KITARU_UI_TAG_VALUE" >> "$GITHUB_ENV"
       # --- Determine checkout ref (dispatch only) ---
       # Normally checks out `develop`. If v$VERSION already exists on origin,
       # this is a partial-recovery dispatch and we must check out that tag so
@@ -289,10 +268,32 @@ jobs:
         run: uv run pytest --ignore=tests/mcp
 
       # --- Bundle Kitaru UI ---
-      - name: Download Kitaru UI
+      - name: Download stable Kitaru UI
         run: bash scripts/download-ui.sh
         env:
-          TAG: ${{ env.KITARU_UI_TAG }}
+          TAG: ${{ github.event.inputs.kitaru-ui-tag || '' }}
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+      - name: Record Kitaru UI bundle identity
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads(Path("src/kitaru/_ui/bundle_manifest.json").read_text())
+          values = {
+              "KITARU_UI_REPO": manifest["repo"],
+              "KITARU_UI_TAG": manifest["tag"],
+              "KITARU_UI_CHECKSUM": manifest["checksum"],
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in values.items():
+                  env_file.write(f"{key}={value}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Kitaru UI bundle\n")
+              summary.write(f"Repo: `{values['KITARU_UI_REPO']}`\n\n")
+              summary.write(f"Tag: `{values['KITARU_UI_TAG']}`\n\n")
+              summary.write(f"Checksum: `{values['KITARU_UI_CHECKSUM']}`\n\n")
+          PY
 
       # --- Build ---
       - name: Build package
@@ -300,20 +301,7 @@ jobs:
       - name: Verify Kitaru UI in wheel
         run: |
           WHEEL=$(ls dist/*.whl)
-          python -c "
-          import zipfile, sys
-          names = zipfile.ZipFile('$WHEEL').namelist()
-          missing = []
-          if not any('_ui/dist/index.html' in n for n in names):
-              missing.append('kitaru/_ui/dist/index.html')
-          if not any('_ui/bundle_manifest.json' in n for n in names):
-              missing.append('kitaru/_ui/bundle_manifest.json')
-          if missing:
-              for m in missing:
-                  print(f'::error::{m} missing from wheel')
-              sys.exit(1)
-          print('Kitaru UI assets verified in $WHEEL')
-          "
+          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
       - name: List build artifacts
         run: ls -lh dist/
 
@@ -358,6 +346,49 @@ jobs:
           done
           echo "::error::kitaru==$VERSION did not appear on PyPI within 5 minutes"
           exit 1
+      - name: Verify PyPI artifacts match local build
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+          import urllib.request
+          from pathlib import Path
+          version = os.environ["VERSION"]
+          metadata_url = f"https://pypi.org/pypi/kitaru/{version}/json"
+          with urllib.request.urlopen(metadata_url, timeout=30) as response:
+              metadata = json.load(response)
+          remote_files = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in metadata.get("urls", [])
+              if "filename" in item and "digests" in item and "sha256" in item["digests"]
+          }
+          failures = []
+          for artifact in sorted(Path("dist").iterdir()):
+              if not artifact.is_file():
+                  continue
+              expected = remote_files.get(artifact.name)
+              if expected is None:
+                  failures.append(f"{artifact.name} is missing from PyPI metadata")
+                  continue
+              actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+              if actual != expected:
+                  failures.append(
+                      f"{artifact.name} hash mismatch: local={actual} pypi={expected}"
+                  )
+          if failures:
+              for failure in failures:
+                  print(f"::error::{failure}")
+              print(
+                  "::error::Local dist artifacts differ from PyPI. This prevents "
+                  "a recovery run from publishing GitHub/Docker/Helm artifacts "
+                  "built with a different UI bundle than the already-published package."
+              )
+              sys.exit(1)
+          print("PyPI artifacts match local dist/ build outputs.")
+          PY
 
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
@@ -506,7 +537,6 @@ jobs:
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
           build-args: |
             ZENML_SERVER_TAG=0.94.4
-            KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
             ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
@@ -628,7 +658,8 @@ jobs:
             echo ""
             echo "### Docker image"
             echo "Built (not pushed): zenmldocker/kitaru:$VERSION"
-            echo "Kitaru UI tag: $KITARU_UI_TAG"
+            echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
+            echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
             echo "### Helm chart"
             echo "Built (not pushed): kitaru-${VERSION}.tgz"

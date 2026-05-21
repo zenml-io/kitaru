@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.12.0"
+version = "0.13.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -194,6 +194,16 @@ unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
 include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime
+# via the `_example_on_syspath` autouse fixture (in the test file); static
+# analysis can't see those packages because `examples/**` is excluded from
+# ty's first-party search root.
+include = ["tests/test_agent_factory_example.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
