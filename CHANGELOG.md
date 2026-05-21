@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-05-21
+
 ### Added
 - **Agent Harness Platform** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_harness_platform/` and a dedicated docs section at [`/docs/agent-harness-platform/`](https://kitaru.ai/docs/agent-harness-platform/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_harness_platform/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_harness_platform_example.py`. (#288)
 
