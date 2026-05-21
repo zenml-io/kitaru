@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Added
 - **Agent Factory** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_factory/` and a dedicated docs section at [`/docs/agent-factory/`](https://kitaru.ai/docs/agent-factory/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_factory/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_factory_example.py`. (#288)
 
 ### Changed
 - `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Factory tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
 - `docs/content/docs/guides/news-scout.mdx` removed; the `news_scout` example itself stays runnable in the repo and is now listed under "Other end-to-end examples" on the docs site. The guides section is reserved for Kitaru-feature how-tos. (#288)
-=======
+
+### Fixed
+- Fixed PydanticAI adapter compatibility with `pydantic-ai-slim>=1.95`, where upstream renamed built-in tools to native tools. The adapter no longer fails at import time on `AgentBuiltinTool` or crashes by forwarding `builtin_tools=None` into PydanticAI's deprecation shim. (#370)
+
 ## [0.13.0] - 2026-05-20
 
 ### Added
@@ -36,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Replaced local-server cleanup's PID-only `SIGKILL` fallback with a "warn and continue" path so a recycled PID cannot cause Kitaru to kill an unrelated process during `kitaru clean global/all`. Inspection failures now surface as `unknown (inspection failed: ...)` instead of being silently treated as "no local server". (#343)
 - Restored the caller process environment exactly after `kitaru login` startup attempts, even when local-daemon deployment or connection fails partway through. (#343)
 - Removed stale references to the deprecated native memory surface from the docs site, agent-native guides, and comparison pages. (#342)
->>>>>>> origin/develop
 
 ## [0.12.0] - 2026-05-17
 
