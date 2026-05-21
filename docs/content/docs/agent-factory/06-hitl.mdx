@@ -146,6 +146,6 @@ If you drop the teaching-only `granular_checkpoints=False` and run granular (the
 
 That is the full Agent Factory. You started with a plain PydanticAI agent and a durable record of finished work, then added a sandbox, editable skills, a credential proxy, typed services, and now a durable pause for human judgment. Each layer narrowed what the agent can do on its own, and none of them made you rewrite the agent as a state machine.
 
-Replay is not a stage of its own here. It is a general Kitaru primitive that works the same on any flow, not something specific to agent factories, so it lives in [Replay and Overrides](/guides/replay-and-overrides) rather than in its own chapter.
+Replay is not a stage of its own here. It is a general Kitaru primitive that works the same on any flow, not something specific to agent factories, so it lives in [Replay and Overrides](/guides/replay-and-overrides) rather than on its own Agent Factory page.
 
 If you are weighing this pattern for real use, [Production notes and upgrade paths](/agent-factory/production-notes) gathers every teaching stand-in from the tour in one place and lists what to harden before you depend on it.

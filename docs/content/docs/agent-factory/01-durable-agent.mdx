@@ -20,10 +20,10 @@ Most useful agent tasks are not a single model call. The agent reasons, runs a t
 Now picture a two-turn task:
 
 - Turn 1 runs. The model thinks, calls a shell command, comes back with a result. Say that turn took twenty seconds and forty cents.
-- Before turn 2 starts, the process dies. Not because of a bug in your agent: a deploy restarts the worker, Kubernetes reschedules the pod, the box runs out of memory. Pick your poison.
+- Before turn 2 starts, the process dies. Not because of a bug in your agent: a deploy restarts the worker, Kubernetes reschedules the pod, the box runs out of RAM. Pick your poison.
 - The job is retried from the top.
 
-A plain agent loop kept turn 1's result in memory, and that memory died with the process. So the retry runs turn 1 again: the same model call, the same forty cents, the same twenty seconds, all to rebuild a result you already had a minute ago. On a ten-turn task that dies near the end, you pay for almost the entire run twice.
+A plain agent loop kept turn 1's result inside the running process, and that process state disappeared when the process died. So the retry runs turn 1 again: the same model call, the same forty cents, the same twenty seconds, all to rebuild a result you already had a minute ago. On a ten-turn task that dies near the end, you pay for almost the entire run twice.
 
 That second bill is what Stage 1 removes. Here is the shape of what changes once Kitaru is in the loop:
 
@@ -81,7 +81,7 @@ Two different jobs were going on, and it helps to pull them apart, because they 
 
 PydanticAI ran the agent loop. It decided what the model should do next, called the `exec` tool, fed the tool's result back to the model, and produced each turn's output. That is what PydanticAI is good at, and Stage 1 leaves it alone. The agent in the code is a plain PydanticAI `Agent`.
 
-What PydanticAI does not do, and what no in-memory agent loop does on its own, is survive the process dying. Its progress lives in memory, so when the process goes, the progress goes with it.
+What PydanticAI does not do, and what no plain in-process agent loop does on its own, is survive the process dying. Its progress lives only inside that running Python process, so when the process goes, the progress goes with it.
 
 That second job is Kitaru's. A single line wraps the agent:
 
