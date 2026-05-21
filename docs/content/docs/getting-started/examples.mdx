@@ -1,11 +1,11 @@
 ---
 title: Examples
-description: Runnable Kitaru examples — start with the Agent Factory tour, or jump to a feature-focused example
+description: Runnable Kitaru examples — start with the Agent Harness Platform tour, or jump to a feature-focused example
 ---
 
 The Kitaru repo includes a set of runnable examples grouped by purpose:
 
-- **Agent Factory** — a chapter-by-chapter tour through building a durable agent platform on Kitaru + PydanticAI. Read this first if you're new.
+- **Agent Harness Platform** — a stage-by-stage tour through building a durable agent harness platform on Kitaru + PydanticAI. Read this first if you're new.
 - **Other end-to-end examples** — production-shaped, self-contained scenarios that exercise multiple primitives at once. No required reading order.
 - **Feature-focused examples** — small examples that demo one Kitaru primitive in isolation.
 
@@ -27,7 +27,7 @@ uv run examples/features/basic_flow/first_working_flow.py
   source from a saved execution.
 </Callout>
 
-Most examples can be run from the repository root with `uv run path/to/script.py`. Some end-to-end examples (including the Agent Factory tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
+Most examples can be run from the repository root with `uv run path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 ## Connection context
 
@@ -41,20 +41,21 @@ uv run kitaru login https://my-server.example.com
 uv run kitaru status
 ```
 
-## Start here — Agent Factory
+## Start here — Agent Harness Platform
 
-A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. **`bash setup.sh && python stage_N_*.py`, no external accounts.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
+A platform engineer's starter kit for building their org's internal agent harness platform on top of Kitaru + PydanticAI. **Bring Docker and one model-provider API key; then `bash setup.sh && uv run python stage_N_*.py`.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
 
 Use it as the first thing you read end-to-end, and as the thing you fork for your team.
 
-→ [Agent Factory tour](/agent-factory) — read the chapter-by-chapter docs, then [grab the code on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory).
+→ [Agent Harness Platform tour](/agent-harness-platform) — read the stage-by-stage docs, then [grab the code on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_harness_platform).
 
 ```bash
 git clone https://github.com/zenml-io/kitaru.git
-cd kitaru/examples/end_to_end/agent_factory
+cd kitaru/examples/end_to_end/agent_harness_platform
 uv sync
+uv run kitaru init
 export OPENAI_API_KEY=sk-...
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 ## Other end-to-end examples
@@ -114,7 +115,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 
 ## If you'd rather build up primitive-by-primitive first
 
-Agent Factory is the recommended starting point for most readers — it's structured as a tour and each stage's commit message points at the docs page that explains the primitive being introduced. If you'd rather see each primitive in isolation before reading them woven together, follow this path:
+Agent Harness Platform is the recommended starting point for most readers — it's structured as a tour and each stage's commit message points at the docs page that explains the primitive being introduced. If you'd rather see each primitive in isolation before reading them woven together, follow this path:
 
 1. [Quickstart](/getting-started/quickstart) — `@flow` + `@checkpoint` in 6 lines.
 2. `features/basic_flow/first_working_flow.py` — the same idea as a runnable file.
@@ -129,4 +130,4 @@ Agent Factory is the recommended starting point for most readers — it's struct
 11. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](/guides/langgraph-adapter).
 12. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](/guides/openai-agents-adapter#end-to-end-research-bot-example).
 13. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server).
-14. **[Agent Factory](/agent-factory)** — the same primitives, woven into one runnable agent platform.
+14. **[Agent Harness Platform](/agent-harness-platform)** — the same primitives, woven into one runnable agent harness platform.

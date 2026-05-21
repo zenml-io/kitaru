@@ -253,7 +253,7 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
-| [PydanticAI adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | Wrap a PydanticAI agent with `KitaruAgent` |
+| [Agent Harness Platform](https://kitaru.ai/docs/agent-harness-platform) | Build a durable agent harness platform stage by stage |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
