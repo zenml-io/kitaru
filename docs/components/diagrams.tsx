@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 // Shared primitives ---------------------------------------------------------
 
@@ -374,12 +374,12 @@ function Legend({
   );
 }
 
-const row: React.CSSProperties = {
+const row: CSSProperties = {
   display: 'flex',
   gap: 12,
   flexWrap: 'wrap',
 };
-const col: React.CSSProperties = {
+const col: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 10,
@@ -1273,14 +1273,14 @@ export function BuyerMatrixDiagram() {
 }
 
 // ============================================================
-// Agent Factory diagrams
+// Agent Harness Platform diagrams
 // ============================================================
 
 // ------------------------------------------------------------
-// Diagram 11: Agent Factory overview (landing page hero)
+// Diagram 11: Agent Harness Platform overview (landing page hero)
 // ------------------------------------------------------------
 
-export function AgentFactoryOverviewDiagram() {
+export function AgentHarnessPlatformOverviewDiagram() {
   return (
     <DiagramFrame>
       <div style={{ ...col, gap: 14, minWidth: 640 }}>
@@ -1303,7 +1303,7 @@ export function AgentFactoryOverviewDiagram() {
         </div>
 
         <Node
-          title="Agent Factory library"
+          title="Agent Harness Platform library"
           subtitle="reusable rails — built once, shared by every team"
           bullets={[
             'builds a PydanticAI agent from the profile',
