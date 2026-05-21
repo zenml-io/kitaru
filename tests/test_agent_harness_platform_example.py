@@ -1,4 +1,4 @@
-"""Hermetic smoke tests for the agent_factory example.
+"""Hermetic smoke tests for the agent_harness_platform example.
 
 Narrow safety net: catches import-surface drift on the kitaru side
 (public symbol renames in `kitaru.adapters.pydantic_ai`, `Profile`
@@ -11,6 +11,7 @@ agent loop, HITL wait/resume. Deliberately ~80 lines, ~6 seconds in
 CI — the cheap proxy for the layer-B suite at 1% of the runtime cost.
 """
 
+import importlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -20,7 +21,10 @@ import pytest
 from pydantic import ValidationError
 
 _EXAMPLE_DIR = (
-    Path(__file__).resolve().parent.parent / "examples" / "end_to_end" / "agent_factory"
+    Path(__file__).resolve().parent.parent
+    / "examples"
+    / "end_to_end"
+    / "agent_harness_platform"
 )
 
 _STAGE_FILES = (
@@ -45,7 +49,7 @@ _EXPECTED_TOOLS_PER_STAGE: dict[str, set[str]] = {
 
 @pytest.fixture(autouse=True)
 def _example_on_syspath(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Put the example root on ``sys.path`` for ``agent_factory`` / ``mocks``.
+    """Put the example root on ``sys.path`` for ``agent_harness_platform`` / ``mocks``.
 
     The example ships its own importable packages at the example root;
     pytest doesn't know about them by default. Use ``syspath_prepend`` so
@@ -53,9 +57,13 @@ def _example_on_syspath(monkeypatch: pytest.MonkeyPatch) -> None:
     partially-loaded modules between tests for a clean import each time.
     """
     monkeypatch.syspath_prepend(str(_EXAMPLE_DIR))
-    evict_prefixes = ("agent_factory.", "mocks.", "_agent_factory_smoke.")
+    evict_prefixes = (
+        "agent_harness_platform.",
+        "mocks.",
+        "_agent_harness_platform_smoke.",
+    )
     for module_name in list(sys.modules):
-        if module_name in {"agent_factory", "mocks"} or module_name.startswith(
+        if module_name in {"agent_harness_platform", "mocks"} or module_name.startswith(
             evict_prefixes
         ):
             monkeypatch.delitem(sys.modules, module_name, raising=False)
@@ -63,7 +71,7 @@ def _example_on_syspath(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _load_stage(stage_filename: str) -> ModuleType:
     """Load a stage file by path under a namespaced ``sys.modules`` key."""
-    module_key = f"_agent_factory_smoke.{stage_filename[:-3]}"
+    module_key = f"_agent_harness_platform_smoke.{stage_filename[:-3]}"
     spec = importlib.util.spec_from_file_location(
         module_key, _EXAMPLE_DIR / stage_filename
     )
@@ -79,11 +87,13 @@ def test_stage_imports_and_builds_tools(stage_filename: str) -> None:
     """Each stage imports, exposes a real flow, and builds the expected toolset.
 
     Catches public-symbol renames (anything imported at module scope from
-    kitaru / agent_factory), Profile field drift, and any silent failure
+    kitaru / agent_harness_platform), Profile field drift, and any silent failure
     of `@kitaru.flow` to produce a flow object with `.run` / `.replay`.
     """
-    from agent_factory.profile import Profile
-    from agent_factory.tools import build_tools
+    profile_module = importlib.import_module("agent_harness_platform.profile")
+    tools_module = importlib.import_module("agent_harness_platform.tools")
+    Profile = profile_module.Profile
+    build_tools = tools_module.build_tools
 
     module = _load_stage(stage_filename)
 
@@ -91,7 +101,7 @@ def test_stage_imports_and_builds_tools(stage_filename: str) -> None:
     assert isinstance(profile, Profile)
     assert profile.allowed_tools == _EXPECTED_TOOLS_PER_STAGE[stage_filename]
 
-    flow = module.agent_factory_flow
+    flow = module.agent_harness_platform_flow
     assert callable(getattr(flow, "run", None))
     assert callable(getattr(flow, "replay", None))
 
@@ -114,7 +124,8 @@ def test_publish_summary_args_validates_webhook_id() -> None:
     exists specifically because the pattern was added in response to a
     security review finding (LLM-supplied path traversal into the URL).
     """
-    from agent_factory.services import PublishSummaryArgs
+    services_module = importlib.import_module("agent_harness_platform.services")
+    PublishSummaryArgs = services_module.PublishSummaryArgs
 
     PublishSummaryArgs(webhook_id="ok-123", content="hi")  # accepts well-formed
     for bad in ("../snippets/durability", "x" * 65, "has spaces"):
@@ -129,11 +140,10 @@ def test_profile_round_trips_through_pydantic_json() -> None:
     state), so a Profile that can't round-trip through pydantic's
     serializer would silently drop fields on replay.
     """
-    from agent_factory.profile import (
-        LocalSkillSource,
-        Profile,
-        SandboxProxyRule,
-    )
+    profile_module = importlib.import_module("agent_harness_platform.profile")
+    LocalSkillSource = profile_module.LocalSkillSource
+    Profile = profile_module.Profile
+    SandboxProxyRule = profile_module.SandboxProxyRule
 
     original = Profile(
         name="researcher",
@@ -164,8 +174,11 @@ def test_build_credential_map_resolves_secret_templates(
     secret key must surface clearly rather than silently injecting an
     empty / wrong header into outbound requests.
     """
-    from agent_factory.profile import Profile, SandboxProxyRule
-    from agent_factory.secrets import build_credential_map
+    profile_module = importlib.import_module("agent_harness_platform.profile")
+    secrets_module = importlib.import_module("agent_harness_platform.secrets")
+    Profile = profile_module.Profile
+    SandboxProxyRule = profile_module.SandboxProxyRule
+    build_credential_map = secrets_module.build_credential_map
 
     import kitaru
     from kitaru.secrets import Secret
@@ -237,7 +250,8 @@ def test_build_tools_omits_disallowed_tools(
     The cheapest defense against accidental tool exposure: if the
     profile didn't ask for it, the tool isn't in the agent's toolset.
     """
-    from agent_factory.tools import build_tools
+    tools_module = importlib.import_module("agent_harness_platform.tools")
+    build_tools = tools_module.build_tools
 
     tools = build_tools(allowed_tools, sandbox=None)
     assert {t.name for t in tools} == expected_tool_names
@@ -253,9 +267,14 @@ def test_exec_service_dispatch_handler_must_return_basemodel(
     mid-LLM-turn; with it, the LLM sees a typed dispatch error and can
     reason about the failure.
     """
-    from agent_factory.services import ALL_SERVICES
-    from agent_factory.services.registry import ServiceCall
-    from agent_factory.tools import build_tools
+    services_module = importlib.import_module("agent_harness_platform.services")
+    registry_module = importlib.import_module(
+        "agent_harness_platform.services.registry"
+    )
+    tools_module = importlib.import_module("agent_harness_platform.tools")
+    ALL_SERVICES = services_module.ALL_SERVICES
+    ServiceCall = registry_module.ServiceCall
+    build_tools = tools_module.build_tools
     from pydantic import BaseModel
 
     class _FakeArgs(BaseModel):

@@ -25,13 +25,14 @@ _PROXY_AUTH_CHALLENGE_HEADERS = {
 
 if _CREDENTIALS:
     print(
-        f"[agent-harness-platform-proxy] credentials loaded for hosts: {sorted(_CREDENTIALS)}",
+        "[agent-harness-platform-proxy] credentials loaded for hosts: "
+        f"{sorted(_CREDENTIALS)}",
         flush=True,
     )
 else:
     print(
-        "[agent-harness-platform-proxy] WARNING: AGENT_HARNESS_PLATFORM_CREDENTIALS not set "
-        "— no headers will be injected",
+        "[agent-harness-platform-proxy] WARNING: "
+        "AGENT_HARNESS_PLATFORM_CREDENTIALS not set — no headers will be injected",
         flush=True,
     )
 
@@ -39,8 +40,8 @@ if _PROXY_TOKEN:
     print("[agent-harness-platform-proxy] proxy token configured", flush=True)
 else:
     print(
-        "[agent-harness-platform-proxy] WARNING: AGENT_HARNESS_PLATFORM_PROXY_TOKEN not set "
-        "— rejecting all requests",
+        "[agent-harness-platform-proxy] WARNING: "
+        "AGENT_HARNESS_PLATFORM_PROXY_TOKEN not set — rejecting all requests",
         flush=True,
     )
 
