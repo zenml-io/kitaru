@@ -2,23 +2,65 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Mapping
+from functools import cache
 from pathlib import Path
+from typing import Any, cast
+
+from zenml.utils import yaml_utils
+
+_VERSION_PATTERN = r"[0-9]+(?:\.[0-9]+)+"
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+@cache
+def _read_file(relative_path: str) -> str:
+    return (_repo_root() / relative_path).read_text()
+
+
 def _read_dockerfile() -> str:
-    return (_repo_root() / "docker" / "Dockerfile").read_text()
+    return _read_file("docker/Dockerfile")
 
 
 def _read_server_dev_dockerfile() -> str:
-    return (_repo_root() / "docker" / "Dockerfile.server-dev").read_text()
+    return _read_file("docker/Dockerfile.server-dev")
 
 
 def _read_pyproject() -> str:
-    return (_repo_root() / "pyproject.toml").read_text()
+    return _read_file("pyproject.toml")
+
+
+@cache
+def _read_toml(relative_path: str) -> dict[str, Any]:
+    return tomllib.loads(_read_file(relative_path))
+
+
+@cache
+def _read_yaml(relative_path: str) -> dict[str, Any]:
+    data = yaml_utils.read_yaml(str(_repo_root() / relative_path))
+    assert isinstance(data, dict), f"{relative_path} should contain a YAML mapping."
+    return data
+
+
+def _extract_zenml_minimum(requirement: str) -> str:
+    match = re.search(rf"\bzenml(?:\[[^\]]+\])?>=({_VERSION_PATTERN})", requirement)
+    assert match, f"Could not extract ZenML minimum from {requirement!r}."
+    return match.group(1)
+
+
+def _expected_zenml_version() -> str:
+    pyproject = _read_toml("pyproject.toml")
+    dependencies = pyproject["project"]["dependencies"]  # type: ignore[index]
+    zenml_requirements = [
+        requirement
+        for requirement in dependencies
+        if isinstance(requirement, str) and requirement.startswith("zenml[")
+    ]
+    assert len(zenml_requirements) == 1
+    return _extract_zenml_minimum(zenml_requirements[0])
 
 
 # ---------------------------------------------------------------------------
@@ -85,11 +127,34 @@ def test_dockerfile_installs_kitaru() -> None:
     assert "KITARU_VERSION" in dockerfile
 
 
-def test_dockerfile_downloads_kitaru_ui() -> None:
-    """The image should download the Kitaru UI release archive."""
+def test_dockerfile_copies_packaged_kitaru_ui() -> None:
+    """The image should copy UI files from the installed Kitaru package."""
     dockerfile = _read_dockerfile()
-    assert "kitaru-ui.tar.gz" in dockerfile
-    assert "sha256sum" in dockerfile or "sha256" in dockerfile
+    assert "KITARU_UI_DIST" in dockerfile
+    assert "Path(kitaru.__file__).parent" in dockerfile
+    assert '"_ui" / "dist"' in dockerfile
+    assert "Kitaru package UI assets missing" in dockerfile
+    assert 'cp -a "$KITARU_UI_DIST/." "$DASHBOARD_DIR/"' in dockerfile
+
+
+def test_dockerfile_does_not_download_kitaru_ui_release_assets() -> None:
+    """Docker must not have a second hidden UI release download path."""
+    dockerfile = _read_dockerfile()
+    forbidden_markers = [
+        "ARG KITARU_UI_TAG",
+        "KITARU_UI_REPO_URL",
+        "zenml-io/kitaru-ui",
+        "kitaru-ui.tar.gz",
+        "releases/latest/download",
+        "releases/download",
+        "curl ",
+        "sha256sum",
+    ]
+    for marker in forbidden_markers:
+        assert marker not in dockerfile, (
+            f"Dockerfile still contains UI download marker {marker!r}. "
+            "Bundle UI into the Kitaru package before Docker builds instead."
+        )
 
 
 def test_dockerfile_configures_workload_manager_for_deployments() -> None:
@@ -150,6 +215,143 @@ def test_dockerfiles_use_same_zenml_server_tag() -> None:
     )
 
 
+def _extract_just_assignment(name: str) -> str:
+    match = re.search(
+        rf"^{re.escape(name)}\s*:=\s*\"([^\"]+)\"$",
+        _read_file("Justfile"),
+        re.MULTILINE,
+    )
+    assert match, f"Justfile should assign {name}."
+    return match.group(1)
+
+
+def _find_yaml_values(data: object, name: str) -> list[str]:
+    if isinstance(data, Mapping):
+        mapping = cast(Mapping[str, object], data)
+        values: list[str] = []
+        value = mapping.get(name)
+        if isinstance(value, str):
+            values.append(value)
+        for nested_value in mapping.values():
+            values.extend(_find_yaml_values(nested_value, name))
+        return values
+    if isinstance(data, list):
+        values = []
+        for item in data:
+            values.extend(_find_yaml_values(item, name))
+        return values
+    return []
+
+
+def _extract_workflow_env_value(relative_path: str, name: str) -> str:
+    values = _find_yaml_values(_read_yaml(relative_path), name)
+    assert len(values) == 1, f"{relative_path} should set env {name} once."
+    return values[0]
+
+
+def _extract_release_build_arg(name: str) -> str:
+    match = re.search(
+        rf"^\s+{re.escape(name)}=({_VERSION_PATTERN})\s*$",
+        _read_file(".github/workflows/release.yml"),
+        re.MULTILINE,
+    )
+    assert match, f"release.yml should pass build arg {name}."
+    return match.group(1)
+
+
+def _extract_helm_dependency_version(name: str) -> str:
+    chart = _read_yaml("helm/Chart.yaml")
+    dependencies = chart.get("dependencies")
+    assert isinstance(dependencies, list), (
+        "helm/Chart.yaml should declare dependencies."
+    )
+    matches = [
+        dependency
+        for dependency in dependencies
+        if isinstance(dependency, dict) and dependency.get("name") == name
+    ]
+    assert len(matches) == 1, f"helm/Chart.yaml should declare dependency {name}."
+    version = matches[0].get("version")
+    assert isinstance(version, str), f"Helm dependency {name} should have a version."
+    return version.strip('"')
+
+
+def _lock_package(name: str) -> dict[str, Any]:
+    lock = _read_toml("uv.lock")
+    packages = lock["package"]  # type: ignore[index]
+    matches = [
+        package
+        for package in packages
+        if isinstance(package, dict) and package.get("name") == name
+    ]
+    assert len(matches) == 1, f"uv.lock should contain exactly one {name} package."
+    return matches[0]
+
+
+def _zenml_lock_specifiers(entries: object) -> list[str]:
+    assert isinstance(entries, list)
+    specifiers: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        mapping = cast(Mapping[str, object], entry)
+        specifier = mapping.get("specifier")
+        if mapping.get("name") == "zenml" and isinstance(specifier, str):
+            specifiers.append(specifier)
+    return specifiers
+
+
+def test_zenml_python_dependency_surfaces_are_aligned() -> None:
+    """Python dependency specs and the lockfile should move together."""
+    expected = _expected_zenml_version()
+    pyproject = _read_toml("pyproject.toml")
+
+    project_dependencies = pyproject["project"]["dependencies"]  # type: ignore[index]
+    local_extra = pyproject["project"]["optional-dependencies"]["local"]  # type: ignore[index]
+    dev_dependencies = pyproject["dependency-groups"]["dev"]  # type: ignore[index]
+
+    requirements = [
+        next(req for req in project_dependencies if req.startswith("zenml[local]")),
+        next(req for req in local_extra if req.startswith("zenml[server]")),
+        next(req for req in dev_dependencies if req.startswith("zenml[server]")),
+    ]
+    assert [_extract_zenml_minimum(req) for req in requirements] == [
+        expected,
+        expected,
+        expected,
+    ]
+
+    kitaru_package = _lock_package("kitaru")
+    metadata = kitaru_package["metadata"]  # type: ignore[index]
+    lock_specs = [
+        *_zenml_lock_specifiers(metadata["requires-dist"]),  # type: ignore[index]
+        *_zenml_lock_specifiers(
+            metadata["requires-dev"]["dev"]  # type: ignore[index]
+        ),
+    ]
+    assert lock_specs == [f">={expected}", f">={expected}", f">={expected}"]
+    assert _lock_package("zenml")["version"] == expected
+
+
+def test_zenml_server_version_surfaces_are_aligned() -> None:
+    """Server image, workflow, Justfile, and Helm pins should match Python."""
+    expected = _expected_zenml_version()
+    surfaces = {
+        "docker/Dockerfile": _extract_zenml_server_tag(_read_dockerfile()),
+        "docker/Dockerfile.server-dev": _extract_zenml_server_tag(
+            _read_server_dev_dockerfile()
+        ),
+        "ci.yml docker-smoke env": _extract_workflow_env_value(
+            ".github/workflows/ci.yml",
+            "ZENML_SERVER_TAG",
+        ),
+        "release.yml Docker build arg": _extract_release_build_arg("ZENML_SERVER_TAG"),
+        "Justfile": _extract_just_assignment("ZENML_SERVER_TAG"),
+        "helm/Chart.yaml": _extract_helm_dependency_version("zenml"),
+    }
+    assert surfaces == {name: expected for name in surfaces}
+
+
 def test_server_dev_dockerfile_copies_local_ui_dist() -> None:
     """The server-dev image should copy local UI dist, not download from GitHub."""
     dockerfile = _read_server_dev_dockerfile()
@@ -164,7 +366,20 @@ def test_server_dev_dockerfile_copies_local_ui_dist() -> None:
 
 def _read_dev_dockerfile() -> str:
     """Read the flow-execution image Dockerfile (not the dev *server*)."""
-    return (_repo_root() / "docker" / "Dockerfile.dev").read_text()
+    return _read_file("docker/Dockerfile.dev")
+
+
+def _extract_dockerfile_dev_zenml_minimums() -> list[str]:
+    """Extract executable ZenML lower bounds from the flow-execution image."""
+    executable_lines = "\n".join(
+        line
+        for line in _read_dev_dockerfile().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    return re.findall(
+        rf"\bzenml(?:\[[^\]]+\])?>=({_VERSION_PATTERN})",
+        executable_lines,
+    )
 
 
 def test_dockerfile_dev_has_no_git_refs() -> None:
@@ -177,19 +392,38 @@ def test_dockerfile_dev_has_no_git_refs() -> None:
         )
 
 
+def test_dockerfile_dev_zenml_minimum_matches_package_contract() -> None:
+    """Dockerfile.dev may use >=, but its floor must match pyproject."""
+    expected = _expected_zenml_version()
+    minimums = _extract_dockerfile_dev_zenml_minimums()
+    assert minimums, "Dockerfile.dev should contain at least one ZenML minimum."
+    assert minimums == [expected for _ in minimums]
+
+
 # ---------------------------------------------------------------------------
 # Cross-file consistency
 # ---------------------------------------------------------------------------
 
 
-def test_dockerfile_uses_curl_fail_flag() -> None:
-    """curl must use --fail (-f) so HTTP errors are not silently ignored."""
-    dockerfile = _read_dockerfile()
-    for line in dockerfile.splitlines():
-        if "curl " in line and "-o " in line:
-            assert re.search(r"-[a-zA-Z]*f", line) or "--fail" in line, (
-                f"curl download missing --fail flag: {line.strip()}"
-            )
+def test_dockerignore_allows_generated_package_ui() -> None:
+    """Source Docker builds must include generated package UI but not local caches."""
+    dockerignore = _read_file(".dockerignore")
+    assert "dist/" in dockerignore
+    assert "!src/kitaru/_ui/dist/" in dockerignore
+    assert "!src/kitaru/_ui/dist/**" in dockerignore
+    assert "!src/kitaru/_ui/bundle_manifest.json" in dockerignore
+    assert ".kitaru-ui-bundles/" in dockerignore
+
+
+def test_just_server_image_bundles_ui_before_docker_build() -> None:
+    """Local source server builds should prepare package UI before Docker runs."""
+    justfile = _read_file("Justfile")
+    server_image_recipe = justfile.split("\nserver-image:", maxsplit=1)[1].split(
+        "\n# Build and push production server image",
+        maxsplit=1,
+    )[0]
+    assert "bash scripts/download-ui.sh" in server_image_recipe
+    assert "--build-arg KITARU_UI_TAG" not in server_image_recipe
 
 
 def test_server_dockerfiles_switch_to_root_for_build() -> None:

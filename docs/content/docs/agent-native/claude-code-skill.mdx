@@ -1,18 +1,31 @@
 ---
-title: Claude Code Skills
-description: Install Kitaru's Claude Code skills for scoping and authoring durable agent workflows
+title: Agent Skills
+description: Install Kitaru's agent skills for quickstart, scoping, and authoring durable agent workflows
 ---
 
-Kitaru provides two Claude Code skills that teach Claude how to design and build
-durable agent workflows.
+Kitaru provides three agent skills that teach coding agents how to discover,
+design, and build durable workflows with Kitaru.
 
 ## Available skills
+
+### Quickstart skill
+
+The **kitaru-quickstart** skill gives you an interactive tour of Kitaru. It
+scaffolds a small demo flow and walks through the core ideas: crash recovery
+with replay, human-in-the-loop pauses with `wait()`, artifact capture, and
+optional MCP integration.
+
+**Use it when:**
+- You want to try Kitaru and see what it does before designing a real workflow
+- You want a five-minute tour of crash recovery, replay, waits, and artifacts
+- You want an agent to set up a small local demo for your own workflow shape
 
 ### Scoping skill
 
 The **kitaru-scoping** skill helps you decide whether your agent workflow
 benefits from durable execution, then designs the flow architecture —
-checkpoint boundaries, wait points, artifact strategy, and MVP scope.
+checkpoint boundaries, wait points, replay anchors, artifact strategy, operator
+surface, and MVP scope.
 
 It runs a structured interview and produces a `flow_architecture.md`
 specification that feeds directly into the authoring skill.
@@ -24,22 +37,28 @@ specification that feeds directly into the authoring skill.
 
 ### Authoring skill
 
-The **kitaru-authoring** skill teaches Claude how to write valid Kitaru flows,
-checkpoints, waits, and adapter usage patterns.
+The **kitaru-authoring** skill teaches coding agents how to write valid Kitaru flows,
+checkpoints, waits, logging, artifacts, `KitaruClient` usage, replay/resume/retry
+flows, deployments, secrets, CLI/MCP operations, and adapter usage patterns.
 
 **What it covers:**
 - `@flow` and `@checkpoint` roles
 - `kitaru.wait()` flow-level guardrails
 - `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`
 - `.submit()` / `.result()` checkpoint concurrency
-- PydanticAI adapter guidance (`kitaru.adapters.pydantic_ai.KitaruAgent(...)`)
-- Common mistakes (nested flows, non-serializable checkpoint outputs, etc.)
+- PydanticAI adapter guidance with `kitaru.adapters.pydantic_ai.KitaruAgent(...)`
+- OpenAI Agents adapter guidance with `KitaruRunner`
+- LangGraph adapter guidance with `KitaruGraphRunner`
+- Claude Agent SDK adapter guidance with `KitaruClaudeRunner`
+- Common mistakes such as nested flows, non-serializable checkpoint outputs, and unsafe side effects
 
 ## Recommended workflow
 
-1. **Scope first** — use `/kitaru-scoping` (or let Claude trigger it automatically)
-   to validate fit and define your flow architecture
-2. **Author second** — use `/kitaru-authoring` to build the flows defined in
+1. **Quickstart first** — use `/kitaru-quickstart` to see what Kitaru does and
+   build intuition for crash recovery, replay, waits, and artifacts
+2. **Scope second** — use `/kitaru-scoping` to validate fit and define your flow
+   architecture before writing code
+3. **Author third** — use `/kitaru-authoring` to build the flows defined in
    your `flow_architecture.md`
 
 ## Install from the marketplace
@@ -52,34 +71,53 @@ and install with two commands:
 /plugin install kitaru@kitaru
 ```
 
+These are Markdown skill directories, so the same files can also be reused by
+other agent hosts that support local skill folders.
+
 Once installed, Claude Code will automatically use the skills based on context.
-You can also invoke them explicitly with `/kitaru-scoping` or `/kitaru-authoring`.
+You can also invoke them explicitly with `/kitaru-quickstart`,
+`/kitaru-scoping`, or `/kitaru-authoring`.
 
 ## Manual installation
 
-If you prefer to copy the skill files directly:
+If you prefer to copy the skill directories directly:
 
 ```bash
-mkdir -p .claude/skills/kitaru-scoping .claude/skills/kitaru-authoring
-
-curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru-skills/main/skills/kitaru-scoping/SKILL.md \
-  -o .claude/skills/kitaru-scoping/SKILL.md
-
-curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru-skills/main/skills/kitaru-authoring/SKILL.md \
-  -o .claude/skills/kitaru-authoring/SKILL.md
+tmpdir=$(mktemp -d)
+git clone --depth 1 https://github.com/zenml-io/kitaru-skills.git "$tmpdir/kitaru-skills"
+mkdir -p .claude/skills
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-quickstart" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-scoping" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-authoring" .claude/skills/
+rm -rf "$tmpdir"
 ```
 
+Copying the full `kitaru-quickstart` directory is important because that skill
+includes reference files used during the guided demo.
+
 ## Good prompts to pair with the skills
+
+**Quickstart:**
+- "I want to try Kitaru — show me what it does."
+- "Give me a five-minute tour of Kitaru's crash recovery."
+- "Set up a Kitaru demo for my data pipeline workflow."
+- "Walk me through Kitaru with MCP integration."
 
 **Scoping:**
 - "I want to build a research agent — is Kitaru right for this?"
 - "Help me figure out where to put checkpoints in my coding agent workflow."
+- "Should repo conventions be stored as explicit artifacts or outside the flow?"
 - "I have a complex agent with 10 steps — help me scope it down."
 
 **Authoring:**
 - "Refactor this script into one `@flow` with explicit checkpoints."
 - "Add a flow-level `kitaru.wait()` approval gate before publish."
-- "Wrap this PydanticAI call in a `@checkpoint` and preserve replay safety."
+- "Add explicit artifact saving to this flow."
+- "How do I inspect executions, waits, logs, and artifacts from the CLI or MCP?"
+- "Convert this PydanticAI agent to `KitaruAgent` and preserve replay safety."
+- "Use `KitaruRunner` for this OpenAI Agents workflow and choose the checkpoint strategy."
+- "Help me add Kitaru durability around a LangGraph graph."
+- "Make this Claude Agent SDK invocation durable without promising granular tool replay."
 
 ## Related pages
 

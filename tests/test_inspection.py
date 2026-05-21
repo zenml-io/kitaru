@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from kitaru._client._mappers import _map_checkpoint_call
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -288,6 +289,155 @@ def test_serialize_artifact_ref_contract() -> None:
         "producing_call": "research",
         "metadata": {"source": "notes"},
     }
+
+
+def test_serialize_input_artifact_ref_includes_direction_fields() -> None:
+    artifact = ArtifactRef(
+        artifact_id="artifact-input-1",
+        name="messages",
+        kind="prompt",
+        save_type="step_output",
+        producing_call=None,
+        metadata={},
+        direction="input",
+        input_type="step_output",
+        _client=cast(Any, SimpleNamespace()),
+    )
+
+    assert serialize_artifact_ref(artifact) == {
+        "artifact_id": "artifact-input-1",
+        "name": "messages",
+        "kind": "prompt",
+        "save_type": "step_output",
+        "producing_call": None,
+        "metadata": {},
+        "direction": "input",
+        "input_type": "step_output",
+    }
+
+
+def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
+    input_artifact = SimpleNamespace(
+        id="input-artifact-id",
+        name="raw-zenml-input-artifact-name",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+        input_type=SimpleNamespace(value="step_output"),
+    )
+    output_artifact = SimpleNamespace(
+        id="output-artifact-id",
+        name="output",
+        run_metadata={"kitaru_artifact_type": "response"},
+        save_type=SimpleNamespace(value="step_output"),
+    )
+    step = SimpleNamespace(
+        id="step-id",
+        name="agent_model_request",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="llm_call"),
+        inputs={"input": [input_artifact]},
+        outputs={"output": [output_artifact]},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert [
+        (artifact.name, artifact.direction) for artifact in checkpoint.artifacts
+    ] == [
+        ("input", "input"),
+        ("output", "output"),
+    ]
+    input_ref = checkpoint.artifacts[0]
+    assert input_ref.kind == "prompt"
+    assert input_ref.producing_call is None
+    assert input_ref.input_type == "step_output"
+    assert checkpoint.artifacts[1].kind == "response"
+
+
+def test_checkpoint_mapping_includes_tool_call_structural_input_artifacts() -> None:
+    input_artifact = SimpleNamespace(
+        id="input-artifact-id",
+        name="raw-zenml-tool-args-artifact-name",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+        input_type=SimpleNamespace(value="step_output"),
+    )
+    output_artifact = SimpleNamespace(
+        id="output-artifact-id",
+        name="output",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+    )
+    step = SimpleNamespace(
+        id="step-id",
+        name="agent_tool_call",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={"tool_args": [input_artifact]},
+        outputs={"output": [output_artifact]},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert [
+        (artifact.name, artifact.direction) for artifact in checkpoint.artifacts
+    ] == [
+        ("tool_args", "input"),
+        ("output", "output"),
+    ]
+    assert checkpoint.artifacts[0].kind == "input"
+    assert checkpoint.artifacts[0].producing_call is None
+    assert checkpoint.artifacts[0].input_type == "step_output"
+    assert checkpoint.artifacts[1].kind == "output"
+
+
+def test_checkpoint_mapping_does_not_expose_generic_input_artifacts() -> None:
+    input_artifact = SimpleNamespace(
+        id="input-artifact-id",
+        name="raw-zenml-input-artifact-name",
+        run_metadata={},
+        save_type=SimpleNamespace(value="step_output"),
+        input_type=SimpleNamespace(value="step_output"),
+    )
+    step = SimpleNamespace(
+        id="step-id",
+        name="ordinary_checkpoint",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="checkpoint"),
+        inputs={"messages": [input_artifact]},
+        outputs={},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert checkpoint.artifacts == []
 
 
 def test_serialize_artifact_value_json_contract() -> None:

@@ -14,6 +14,8 @@ This example walks through that idea in three runnable stages, each adding one d
 
 Each stage builds on the previous one. The Claude boundary is the same from Stage 1 onwards: every Claude-running checkpoint returns a `ClaudeAgentResult` Pydantic model, and every later stage reuses that shape rather than inventing a new one.
 
+If you want the generic adapter rather than this domain-specific teaching helper, see `examples/integrations/claude_agent_sdk_agent/` and the [Claude Agent SDK Adapter](https://kitaru.ai/docs/guides/claude-agent-sdk-adapter) guide. The generic adapter has the same honest v0.1 boundary: one Claude SDK invocation becomes one Kitaru checkpoint. Neither this example nor the generic adapter claims granular replay of Claude-internal model calls, Bash commands, built-in tools, MCP calls, hooks, or file edits.
+
 ## Quick start
 
 From the repository root:

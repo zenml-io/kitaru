@@ -26,7 +26,8 @@ docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 zenmldock
 
 <Callout type="info">
   Use a version-pinned tag (e.g. `zenmldocker/kitaru:0.2.0`) that matches your
-  client SDK version to avoid API incompatibilities.
+  client SDK version to avoid API incompatibilities. The official image already
+  includes the Kitaru UI bundled with that Kitaru release.
 </Callout>
 
 The server initializes an internal SQLite database on first startup. Wait for
@@ -78,7 +79,7 @@ docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
 
 ### Building from source
 
-If you are testing changes from a local checkout:
+If you are testing changes from a local checkout, use `just` when possible:
 
 <Tabs items={["just (recommended)", "Docker"]}>
   <Tab value="just (recommended)">
@@ -88,10 +89,17 @@ If you are testing changes from a local checkout:
   </Tab>
   <Tab value="Docker">
     ```bash
+    bash scripts/download-ui.sh
     docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
     ```
   </Tab>
 </Tabs>
+
+The important detail is that the UI is selected before Docker builds. The
+`server-image` recipe runs `scripts/download-ui.sh`, which bundles a stable/full
+Kitaru UI release into the Kitaru package tree. Docker then installs Kitaru and
+copies the packaged UI into the server dashboard. There is no Docker build arg
+for choosing a UI release tag.
 
 Then run it:
 
@@ -367,8 +375,8 @@ Common causes:
 - Ensure the `/health` endpoint returns 200 before attempting login.
   The server takes ~20 seconds on first startup to initialize the database.
 - If the browser shows `{"detail":"An unexpected error occurred."}`, the
-  dashboard assets may be missing from the image. Rebuild from source or use a
-  newer image tag.
+  dashboard assets may be missing from the image. Rebuild from source after
+  running `bash scripts/download-ui.sh`, or use a newer published image tag.
 - If the CLI keeps printing `authorization_pending`, the server may not be
   fully initialized. Wait and retry.
 - Port **8383** belongs to bare `kitaru login` local-server mode. To connect

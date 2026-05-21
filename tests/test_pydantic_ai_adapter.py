@@ -29,6 +29,40 @@ from kitaru.adapters.pydantic_ai._utils import (
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
+def test_synthetic_checkpoint_marks_flow_result_non_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _utils
+
+    captured: dict[str, Any] = {}
+
+    class FakeCheckpoint:
+        _step = object()
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        def decorate(func: Any) -> FakeCheckpoint:
+            captured["decorated_name"] = func.__name__
+            return FakeCheckpoint()
+
+        return decorate
+
+    monkeypatch.setattr(_utils, "_synthetic_checkpoint", fake_checkpoint)
+
+    _utils._build_checkpoint_step(
+        config={"type": "llm_call", "cache": False, "retries": 2},
+        step_name="model_call",
+        body=lambda: "ok",
+    )
+
+    assert captured["flow_result_candidate"] is False
+    assert captured["type"] == "llm_call"
+    assert captured["cache"] is False
+    assert captured["retries"] == 2
+    assert captured["decorated_name"] == "model_call"
+
+
 def _with_tool_call_id(ctx: Any, tool_call_id: str = "call_123") -> Any:
     ctx.tool_call_id = tool_call_id
     return ctx
@@ -173,6 +207,191 @@ class TestTurnCacheKeyCallSites:
         assert captured["conversation_id"] == "conversation-async"
         assert captured["output_retries"] == 3
         assert captured["run_cache_key"] == "cache-async"
+
+
+class TestPydanticAIAutoFlowNaming:
+    def _install_inline_model_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def fake_checkpoint(*, body: Any, **_kwargs: Any) -> Any:
+            return await body()
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+
+    def _install_fake_auto_flow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> list[str]:
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+        from kitaru.runtime import _flow_scope
+
+        flow_names: list[str] = []
+
+        class FakeHandle:
+            def __init__(self, result: Any) -> None:
+                self._result = result
+
+            def wait(self) -> Any:
+                return self._result
+
+        class FakeAutoFlow:
+            def __init__(self, agent_name: str) -> None:
+                self.flow_name = agent_module._auto_flow_name_for_agent(agent_name)
+
+            def run(
+                self,
+                run_id: str,
+                serialized_body_path: str | None = None,
+            ) -> FakeHandle:
+                flow_names.append(self.flow_name)
+                with _flow_scope(name=self.flow_name):
+                    result = agent_module._run_auto_flow_body(
+                        run_id,
+                        serialized_body_path,
+                    )
+                return FakeHandle(result)
+
+        def fake_auto_flow_for_agent(agent_name: str) -> FakeAutoFlow:
+            return FakeAutoFlow(agent_name)
+
+        monkeypatch.setattr(
+            agent_module,
+            "_auto_flow_for_agent",
+            fake_auto_flow_for_agent,
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_try_serialize_auto_flow_body",
+            lambda _body: None,
+        )
+        return flow_names
+
+    def test_auto_flow_name_helper_uses_flow_name_normalization(self) -> None:
+        from kitaru.adapters.pydantic_ai._agent import _auto_flow_name_for_agent
+
+        assert _auto_flow_name_for_agent("research_agent") == "research_agent_flow"
+        assert _auto_flow_name_for_agent("research agent") == "research_agent_flow"
+        assert _auto_flow_name_for_agent("123") == "flow_123_flow"
+
+    def test_direct_run_sync_uses_wrapped_agent_name_when_wrapper_name_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(Agent(TestModel(), name="wrapped_agent"))
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapped_agent_flow"]
+
+    def test_direct_run_sync_wrapper_name_wins_over_wrapped_agent_name(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="wrapped_agent"),
+            name="wrapper_agent",
+        )
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapper_agent_flow"]
+
+    def test_direct_run_sync_accepts_equal_wrapper_and_wrapped_names(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="shared_agent"),
+            name="shared_agent",
+        )
+        agent.run_sync("hello")
+
+        assert flow_names == ["shared_agent_flow"]
+
+    def test_direct_run_sync_uses_wrapper_name_when_wrapped_agent_is_unnamed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        flow_names = self._install_fake_auto_flow(monkeypatch)
+
+        agent = KitaruAgent(Agent(TestModel()), name="wrapper_only")
+        agent.run_sync("hello")
+
+        assert flow_names == ["wrapper_only_flow"]
+
+    def test_unnamed_wrapper_and_wrapped_agent_still_raise(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UserError
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(UserError, match="requires a stable `name`"):
+            KitaruAgent(Agent(TestModel()))
+
+    def test_inside_explicit_flow_does_not_open_auto_flow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+        from kitaru.runtime import _flow_scope
+
+        def fail_auto_flow(_agent_name: str) -> Any:
+            raise AssertionError("explicit flow should not use auto-flow")
+
+        self._install_inline_model_checkpoint(monkeypatch)
+        monkeypatch.setattr(agent_module, "_auto_flow_for_agent", fail_auto_flow)
+        agent = KitaruAgent(Agent(TestModel(), name="explicit_agent"))
+
+        with _flow_scope(name="explicit_flow"):
+            agent.run_sync("hello")
+
+    def test_real_auto_flow_factory_caches_and_registers_source_alias(self) -> None:
+        from kitaru._source_aliases import build_pipeline_source_alias
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+
+        flow_name = agent_module._auto_flow_name_for_agent("source alias agent")
+        source_alias = build_pipeline_source_alias(flow_name)
+
+        first = agent_module._auto_flow_for_agent("source alias agent")
+        second = agent_module._auto_flow_for_agent("source alias agent")
+
+        assert first is second
+        assert getattr(agent_module, flow_name).__name__ == flow_name
+        assert getattr(agent_module, source_alias) is first._pipeline
 
 
 class TestStreamingHookCapabilities:
@@ -539,6 +758,119 @@ class TestCachedGranularModelCheckpoints:
         assert alpha_context.sequence_index < beta_context.sequence_index
         assert alpha_id.endswith("_tool_call_2")
         assert beta_id.endswith("_tool_call_3")
+
+    @pytest.mark.anyio
+    async def test_granular_model_checkpoint_uses_structural_messages_and_output_refs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.messages import ModelResponse, TextPart
+        from pydantic_ai.models.function import FunctionModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        response = ModelResponse(parts=[TextPart(content="fixed answer")])
+        tracker = EventTracker(agent_name="structural_agent", run_label="structural")
+        captured_checkpoint_inputs: dict[str, Any] = {}
+
+        def model_function(_messages: list[Any], _info: Any) -> Any:
+            return response
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            captured_checkpoint_inputs.update(kwargs.get("checkpoint_inputs") or {})
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "llm_call"),
+            ):
+                return await kwargs["body"]()
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+
+        def fail_model_manual_save(*args: Any, **kwargs: Any) -> None:
+            pytest.fail(
+                "granular model checkpoint should not manually save "
+                f"{args!r} {kwargs!r}"
+            )
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.kitaru.save",
+            fail_model_manual_save,
+        )
+        model = KitaruModel(
+            FunctionModel(model_function),
+            capture=CapturePolicy(correlate_otel_spans=False),
+            agent_name="structural_agent",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="structural_flow"):
+            actual = await model.request([], None, self._model_request_parameters())
+
+        assert actual is response
+        assert captured_checkpoint_inputs == {"messages": []}
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        model_event = cast(Any, model_events[0])
+        assert model_event.artifacts == {
+            "prompt": "messages",
+            "response": "output",
+        }
+
+    @pytest.mark.anyio
+    async def test_cached_granular_model_event_uses_canonical_refs_when_captured(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+        from kitaru.runtime import _flow_scope
+
+        cached_response = self._tool_call_response()
+        tracker = EventTracker(agent_name="cached_refs", run_label="cached_refs")
+
+        async def fake_checkpoint(**_kwargs: Any) -> Any:
+            return cached_response
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.get_current_tracker",
+            lambda: tracker,
+        )
+        model = KitaruModel(
+            TestModel(),
+            capture=CapturePolicy(correlate_otel_spans=False),
+            agent_name="cached_refs",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="cached_refs_flow"):
+            response = await model.request([], None, self._model_request_parameters())
+
+        assert response is cached_response
+        model_events = [event for event in tracker.events if event.kind == "llm_call"]
+        assert len(model_events) == 1
+        model_event = cast(Any, model_events[0])
+        assert model_event.artifacts == {
+            "prompt": "messages",
+            "response": "output",
+        }
+        assert model_event.checkpoint_name == "cached_refs_model_request"
 
 
 class TestEventTrackerToolCallOrdering:
@@ -979,6 +1311,192 @@ class TestModelMessageCacheSerialization:
         assert len(cached_responses) == 2
 
 
+class TestThreadingCompat:
+    """Compatibility wrapper for Pydantic AI sync-tool threading."""
+
+    def test_inline_sync_tool_execution_enters_available_hook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        events: list[str] = []
+
+        class Manager:
+            def __enter__(self) -> None:
+                events.append("enter")
+
+            def __exit__(self, *_exc_info: object) -> None:
+                events.append("exit")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", lambda: Manager())
+
+        with inline_sync_tool_execution(enabled=True) as active:
+            assert active is True
+            events.append("body")
+
+        assert events == ["enter", "body", "exit"]
+
+    def test_inline_sync_tool_execution_is_noop_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        def fail_if_called() -> object:
+            raise AssertionError("hook should not be called")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", fail_if_called)
+
+        with inline_sync_tool_execution(enabled=False) as active:
+            assert active is False
+
+    def test_inline_sync_tool_execution_fails_fast_when_hook_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        monkeypatch.delattr(pydantic_ai_utils, "disable_threads", raising=False)
+
+        with (
+            pytest.raises(KitaruUsageError, match=r"disable_threads.*missing"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
+
+    def test_inline_sync_tool_execution_fails_fast_when_hook_non_callable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", object())
+
+        with (
+            pytest.raises(KitaruUsageError, match=r"disable_threads.*not callable"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
+
+    def test_inline_sync_tool_execution_fails_fast_when_hook_creation_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        def broken_hook() -> object:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(pydantic_ai_utils, "disable_threads", broken_hook)
+
+        with (
+            pytest.raises(KitaruUsageError, match="could not create"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
+
+    def test_inline_sync_tool_execution_fails_fast_when_hook_entry_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import _utils as pydantic_ai_utils
+
+        from kitaru.adapters.pydantic_ai._threading_compat import (
+            inline_sync_tool_execution,
+        )
+
+        class BrokenManager:
+            def __enter__(self) -> None:
+                raise RuntimeError("boom")
+
+            def __exit__(self, *_exc_info: object) -> None:
+                raise AssertionError("exit should not run after failed enter")
+
+        monkeypatch.setattr(
+            pydantic_ai_utils, "disable_threads", lambda: BrokenManager()
+        )
+
+        with (
+            pytest.raises(KitaruUsageError, match="could not be entered"),
+            inline_sync_tool_execution(enabled=True),
+        ):
+            raise AssertionError("body should not run")
+
+    def test_agent_requests_inline_sync_tools_only_for_explicit_wait_opt_in(
+        self,
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        opted_out = KitaruAgent(
+            Agent(TestModel(), name="inline_tools_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+        )
+        opted_out_with_wait_compat = KitaruAgent(
+            Agent(TestModel(), name="inline_tools_wait_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+            allow_sync_tool_body_waits=True,
+        )
+        ordinary_granular = KitaruAgent(Agent(TestModel(), name="ordinary_tools_agent"))
+        configured_granular = KitaruAgent(
+            Agent(TestModel(), name="configured_tools_agent"),
+            tool_checkpoint_config_by_name={"lookup": {"cache": False}},
+        )
+        turn_mode = KitaruAgent(
+            Agent(TestModel(), name="turn_mode_agent"),
+            granular_checkpoints=False,
+        )
+
+        assert opted_out._should_inline_sync_tools() is False
+        assert opted_out_with_wait_compat._should_inline_sync_tools() is True
+        assert ordinary_granular._should_inline_sync_tools() is False
+        assert configured_granular._should_inline_sync_tools() is False
+        assert turn_mode._should_inline_sync_tools() is False
+
+    def test_sync_tool_body_wait_opt_in_requires_checkpoint_opt_out(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(KitaruUsageError, match="requires at least one"):
+            KitaruAgent(
+                Agent(TestModel(), name="missing_tool_opt_out"),
+                allow_sync_tool_body_waits=True,
+            )
+
+    def test_sync_tool_body_wait_opt_in_requires_granular_mode(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
+            KitaruAgent(
+                Agent(TestModel(), name="turn_mode_wait_compat"),
+                granular_checkpoints=False,
+                tool_checkpoint_config_by_name={"ask_user": False},
+                allow_sync_tool_body_waits=True,
+            )
+
+
 class TestWaitForInput:
     """Adapter-namespaced helper for calling wait from a tool body."""
 
@@ -1015,6 +1533,62 @@ class TestWaitForInput:
             "source": "tool_body",
             "extra": 1,
         }
+
+    def test_wait_for_input_rewrites_pipeline_thread_errors(self, monkeypatch) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+
+        def fake_wait(**_kwargs):
+            raise RuntimeError(
+                "`zenml.wait(...)` must be called from the pipeline thread, "
+                "not from a worker thread spawned inside the pipeline function."
+            )
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wait_for_input(schema=str, question="Need input?")
+
+        message = str(exc_info.value)
+        assert "sync Pydantic AI tool body" in message
+        assert "workflow thread" in message
+        assert "tool_checkpoint_config_by_name" in message
+        assert "allow_sync_tool_body_waits=True" in message
+        assert "@hitl_tool" in message
+
+    def test_wait_for_input_rewrites_checkpoint_scope_errors(self, monkeypatch) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+        from kitaru.errors import KitaruContextError
+        from kitaru.wait import _WAIT_INSIDE_CHECKPOINT_ERROR
+
+        def fake_wait(**_kwargs):
+            raise KitaruContextError(_WAIT_INSIDE_CHECKPOINT_ERROR)
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wait_for_input(schema=str, question="Need input?")
+
+        message = str(exc_info.value)
+        assert "adapter-created checkpoint" in message
+        assert "tool_checkpoint_config_by_name" in message
+        assert "allow_sync_tool_body_waits=True" in message
+        assert "@hitl_tool" in message
+
+    def test_wait_for_input_does_not_rewrite_unrelated_runtime_errors(
+        self, monkeypatch
+    ) -> None:
+        import kitaru as kitaru_module
+        from kitaru.adapters.pydantic_ai import wait_for_input
+
+        def fake_wait(**_kwargs):
+            raise RuntimeError("different runtime failure")
+
+        monkeypatch.setattr(kitaru_module, "wait", fake_wait)
+
+        with pytest.raises(RuntimeError, match="different runtime failure"):
+            wait_for_input(schema=str, question="Need input?")
 
     def test_wait_for_input_adapter_metadata_wins_over_caller_metadata(
         self, monkeypatch
@@ -1788,6 +2362,70 @@ async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
 
     assert result == "ordinary result"
     assert checkpoint_steps == ["ordinary_tool_tool"]
+
+
+@pytest.mark.anyio
+async def test_granular_tool_checkpoint_uses_structural_args_and_output_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.adapters.pydantic_ai._tracking import EventTracker
+    from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    tracker = EventTracker(agent_name="tool_agent", run_label="tool")
+    captured_checkpoint_inputs: dict[str, Any] = {}
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        captured_checkpoint_inputs.update(kwargs.get("checkpoint_inputs") or {})
+        with _checkpoint_scope(
+            name=kwargs["step_name"],
+            checkpoint_type=kwargs["config"].get("type", "tool_call"),
+        ):
+            return await kwargs["body"]()
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: tracker,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.save",
+        lambda *args, **kwargs: pytest.fail(
+            f"granular tool checkpoint should not manually save {args!r} {kwargs!r}"
+        ),
+    )
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["add"]
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("add", {"a": 2, "b": 3}, ctx, tool)
+
+    assert result == 5
+    assert captured_checkpoint_inputs == {"tool_args": {"a": 2, "b": 3}}
+    tool_events = [event for event in tracker.events if event.kind == "tool_call"]
+    assert len(tool_events) == 1
+    tool_event = cast(Any, tool_events[0])
+    assert tool_event.artifacts == {"args": "tool_args", "result": "output"}
 
 
 @pytest.mark.anyio

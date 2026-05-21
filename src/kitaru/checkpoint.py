@@ -6,10 +6,12 @@ Successful outputs become artifacts; failures are recorded for retry.
 
 from __future__ import annotations
 
+import keyword
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from functools import update_wrapper, wraps
+from itertools import islice
 from typing import Any, Literal, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
@@ -52,6 +54,136 @@ _CHECKPOINT_OUTPUT_HANDLE_MESSAGE = (
     "This is a Kitaru checkpoint output handle for `{checkpoint}.{output}`, "
     "not the materialized value. Call `.load()` to materialize the value."
 )
+_KITARU_EXTRA_NAMESPACE = "kitaru"
+_CHECKPOINT_BOUNDARY_KEY = "boundary"
+_CHECKPOINT_BOUNDARY_VALUE = "checkpoint"
+_FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
+
+
+def _is_checkpoint_output_handle(value: Any) -> bool:
+    return isinstance(value, OutputArtifact)
+
+
+def _checkpoint_output_handle_validation_message(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> str:
+    checkpoint_name = getattr(value, "step_name", None)
+    output_name = getattr(value, "output_name", None)
+    handle_context = "a Kitaru checkpoint output handle"
+    if checkpoint_name and output_name:
+        handle_context = (
+            f"a Kitaru checkpoint output handle for `{checkpoint_name}.{output_name}`"
+        )
+
+    return (
+        f"{field_name} received {handle_context}, not {expected}. "
+        "In a flow body, call `.load()` before constructing this request when "
+        "you need the concrete value. To preserve the durable data edge, pass "
+        "the original handle into a downstream `@checkpoint` instead."
+    )
+
+
+def _raise_if_checkpoint_output_handle(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> None:
+    if _is_checkpoint_output_handle(value):
+        raise ValueError(
+            _checkpoint_output_handle_validation_message(
+                value,
+                field_name=field_name,
+                expected=expected,
+            )
+        )
+
+
+_CHECKPOINT_HANDLE_SCAN_MAX_VALUES = 1_000
+
+
+def _format_checkpoint_value_path(parent: str, key: Any) -> str:
+    if isinstance(key, str) and key.isidentifier() and not keyword.iskeyword(key):
+        return f"{parent}.{key}"
+    return f"{parent}[{key!r}]"
+
+
+def _raise_checkpoint_handle_scan_limit_exceeded(field_name: str) -> None:
+    raise ValueError(
+        "Kitaru could not validate "
+        f"{field_name} for checkpoint output handles because the value contains "
+        f"more than {_CHECKPOINT_HANDLE_SCAN_MAX_VALUES} nested values. "
+        "Pass a smaller value, or load any checkpoint output handles with `.load()` "
+        "before passing the value here."
+    )
+
+
+def _raise_if_checkpoint_output_handle_in_value(
+    value: Any,
+    *,
+    field_name: str,
+    expected: str,
+) -> None:
+    stack: list[tuple[Any, str]] = [(value, field_name)]
+    seen_containers: set[int] = set()
+    visited_values = 0
+    scan_limit_exceeded = False
+
+    while stack:
+        item, item_field_name = stack.pop()
+        visited_values += 1
+        if visited_values > _CHECKPOINT_HANDLE_SCAN_MAX_VALUES:
+            _raise_checkpoint_handle_scan_limit_exceeded(field_name)
+
+        _raise_if_checkpoint_output_handle(
+            item,
+            field_name=item_field_name,
+            expected=expected,
+        )
+
+        if isinstance(item, Mapping):
+            container_id = id(item)
+            if container_id in seen_containers:
+                continue
+            seen_containers.add(container_id)
+
+            remaining_values = _CHECKPOINT_HANDLE_SCAN_MAX_VALUES - (
+                visited_values + len(stack)
+            )
+            if remaining_values <= 0:
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
+            children = list(islice(item.items(), remaining_values))
+            stack.extend(
+                (child, _format_checkpoint_value_path(item_field_name, key))
+                for key, child in reversed(children)
+            )
+            continue
+
+        if isinstance(item, (list, tuple)):
+            container_id = id(item)
+            if container_id in seen_containers:
+                continue
+            seen_containers.add(container_id)
+
+            remaining_values = _CHECKPOINT_HANDLE_SCAN_MAX_VALUES - (
+                visited_values + len(stack)
+            )
+            if remaining_values <= 0:
+                scan_limit_exceeded = scan_limit_exceeded or bool(item)
+                continue
+            scan_limit_exceeded = scan_limit_exceeded or len(item) > remaining_values
+            stack.extend(
+                (child, f"{item_field_name}[{index}]")
+                for index, child in reversed(list(enumerate(item[:remaining_values])))
+            )
+
+    if scan_limit_exceeded:
+        _raise_checkpoint_handle_scan_limit_exceeded(field_name)
 
 
 class _KitaruOutputArtifact(OutputArtifact):
@@ -110,12 +242,18 @@ def _to_retry_config(retries: int) -> StepRetryConfig | None:
     return StepRetryConfig(max_retries=retries)
 
 
-def _build_checkpoint_extra(checkpoint_type: str | None) -> dict[str, Any]:
+def _build_checkpoint_extra(
+    checkpoint_type: str | None,
+    *,
+    flow_result_candidate: bool | None = None,
+) -> dict[str, Any]:
     """Build namespaced step metadata for dashboard rendering."""
-    payload: dict[str, Any] = {"boundary": "checkpoint"}
+    payload: dict[str, Any] = {_CHECKPOINT_BOUNDARY_KEY: _CHECKPOINT_BOUNDARY_VALUE}
     if checkpoint_type is not None:
         payload["type"] = checkpoint_type
-    return {"kitaru": payload}
+    if flow_result_candidate is not None:
+        payload[_FLOW_RESULT_CANDIDATE_KEY] = flow_result_candidate
+    return {_KITARU_EXTRA_NAMESPACE: payload}
 
 
 _KNOWN_STEP_TYPES: dict[str, StepType] = {
@@ -129,6 +267,17 @@ def _to_step_type(checkpoint_type: str | None) -> StepType | None:
     if checkpoint_type is None:
         return None
     return _KNOWN_STEP_TYPES.get(checkpoint_type)
+
+
+def _normalize_flow_result_candidate(value: bool | None) -> bool | None:
+    """Validate the private terminal-result eligibility flag."""
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise KitaruUsageError(
+            "Synthetic checkpoint flow_result_candidate must be a bool when provided."
+        )
+    return value
 
 
 _KNOWN_STEP_RUNTIMES: dict[str, StepRuntime] = {
@@ -212,6 +361,7 @@ class _CheckpointDefinition:
         checkpoint_type: str | None,
         runtime: StepRuntime | str | None,
         cache: bool | None,
+        flow_result_candidate: bool | None,
     ) -> None:
         """Initialize a Kitaru checkpoint wrapper."""
         self._func = func
@@ -220,6 +370,7 @@ class _CheckpointDefinition:
         self._runtime = _normalize_runtime(runtime)
         self._cache = cache
         self._cache_explicitly_set = cache is not None
+        flow_result_candidate = _normalize_flow_result_candidate(flow_result_candidate)
 
         wrapped_entrypoint = _wrap_entrypoint(
             func,
@@ -236,7 +387,10 @@ class _CheckpointDefinition:
             name=registration_name,
             retry=_to_retry_config(self._default_retries),
             enable_cache=self._cache,
-            extra=_build_checkpoint_extra(checkpoint_type),
+            extra=_build_checkpoint_extra(
+                checkpoint_type,
+                flow_result_candidate=flow_result_candidate,
+            ),
             step_type=_to_step_type(checkpoint_type),
             runtime=self._runtime,
         )(wrapped_entrypoint)
@@ -344,6 +498,34 @@ def checkpoint(
 ) -> Callable[[Callable[..., Any]], _CheckpointDefinition]: ...
 
 
+def _synthetic_checkpoint(
+    func: Callable[..., Any] | None = None,
+    *,
+    retries: int = 0,
+    type: str | None = None,
+    runtime: str | None = None,
+    cache: bool | None = None,
+    flow_result_candidate: bool | None = None,
+) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
+    """Create a checkpoint with optional internal metadata."""
+    checkpoint_type = type
+
+    def _decorate(target: Callable[..., Any]) -> _CheckpointDefinition:
+        return _CheckpointDefinition(
+            target,
+            retries=retries,
+            checkpoint_type=checkpoint_type,
+            runtime=runtime,
+            cache=cache,
+            flow_result_candidate=flow_result_candidate,
+        )
+
+    if func is not None:
+        return _decorate(func)
+
+    return _decorate
+
+
 def checkpoint(
     func: Callable[..., Any] | None = None,
     *,
@@ -382,22 +564,13 @@ def checkpoint(
             for this checkpoint, ``False`` disables it, and ``None`` defers to
             higher-level flow/default cache behavior. Useful for forcing one
             expensive step to re-run while the rest of the flow stays cached.
-
     Returns:
         The wrapped checkpoint object or a decorator that returns it.
     """
-    checkpoint_type = type
-
-    def _decorate(target: Callable[..., Any]) -> _CheckpointDefinition:
-        return _CheckpointDefinition(
-            target,
-            retries=retries,
-            checkpoint_type=checkpoint_type,
-            runtime=runtime,
-            cache=cache,
-        )
-
-    if func is not None:
-        return _decorate(func)
-
-    return _decorate
+    return _synthetic_checkpoint(
+        func,
+        retries=retries,
+        type=type,
+        runtime=runtime,
+        cache=cache,
+    )

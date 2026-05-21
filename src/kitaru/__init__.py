@@ -95,6 +95,7 @@ from kitaru.errors import (
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.runtime import current_execution_id
 from kitaru.secrets import (
     Secret,
     SecretSummary,
@@ -136,6 +137,7 @@ __all__ = [
     "connect",
     "create_secret",
     "create_stack",
+    "current_execution_id",
     "current_stack",
     "delete_secret",
     "delete_stack",

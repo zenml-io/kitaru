@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Download and bundle Kitaru UI assets for wheel inclusion.
+# Download and bundle Kitaru UI assets for wheel inclusion or local testing.
 #
-# Fetches kitaru-ui.tar.gz from the kitaru-ui GitHub releases,
-# verifies its SHA256 checksum, extracts it into src/kitaru/_ui/dist/,
-# and writes a bundle_manifest.json for runtime idempotence checks.
+# Fetches kitaru-ui.tar.gz from zenml-io/zenml-frontend-monorepo GitHub
+# releases, verifies its SHA256 checksum, extracts it into a Kitaru UI package
+# directory, and writes a bundle_manifest.json for runtime identity checks.
 #
 # Environment variables:
-#   TAG                 — explicit release tag (e.g. v0.2.0); if unset, uses latest
-#   KITARU_UI_TAG       — alias for TAG (used by release.yml)
-#   VERIFY_CHECKSUM     — set to "false" to skip checksum verification (default: true)
+#   TAG                         — explicit release tag (kitaru-ui-v<semver>)
+#   KITARU_UI_TAG               — alias for TAG (used by release workflows)
+#   KITARU_UI_ALLOW_PRERELEASE  — set to "true" to allow prerelease tags
+#   KITARU_UI_RELEASE_TOKEN     — GitHub token with Contents: read access
+#   KITARU_UI_INSTALL_DIR       — destination parent dir (default: src/kitaru/_ui)
+#   VERIFY_CHECKSUM             — set to "false" to skip checksum verification
+#   PYTHON_BIN                  — Python executable for JSON/semver parsing
 #
 # Usage:
-#   bash scripts/download-ui.sh          # download latest release
-#   TAG=v0.2.0 bash scripts/download-ui.sh  # download specific tag
+#   bash scripts/download-ui.sh
+#   TAG=kitaru-ui-v0.2.0 bash scripts/download-ui.sh
+#   KITARU_UI_ALLOW_PRERELEASE=true TAG=kitaru-ui-v0.3.0-rc.1 bash scripts/download-ui.sh
 
 set -euo pipefail
 
@@ -20,40 +25,217 @@ TMP_DIR=""
 cleanup() { [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
-REPO_URL="https://github.com/zenml-io/kitaru-ui"
+UI_RELEASE_REPO="${KITARU_UI_RELEASE_REPO:-zenml-io/zenml-frontend-monorepo}"
+GITHUB_API_URL="${GITHUB_API_URL:-https://api.github.com}"
 ARCHIVE_NAME="kitaru-ui.tar.gz"
-INSTALL_DIR="./src/kitaru/_ui"
+INSTALL_DIR="${KITARU_UI_INSTALL_DIR:-./src/kitaru/_ui}"
 DIST_DIR="$INSTALL_DIR/dist"
 MANIFEST_FILE="$INSTALL_DIR/bundle_manifest.json"
 VERIFY_CHECKSUM="${VERIFY_CHECKSUM:-true}"
+ALLOW_PRERELEASE="${KITARU_UI_ALLOW_PRERELEASE:-false}"
+TAG_PATTERN='^kitaru-ui-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$'
 
-# --- Tag resolution ---
+find_python() {
+    if [ -n "${PYTHON_BIN:-}" ]; then
+        echo "$PYTHON_BIN"
+        return
+    fi
+    if command -v python3 &>/dev/null; then
+        echo "python3"
+        return
+    fi
+    if command -v python &>/dev/null; then
+        echo "python"
+        return
+    fi
+    echo "Error: python3 or python required" >&2
+    exit 1
+}
+
+PYTHON_BIN="$(find_python)"
+
+# --- GitHub helpers ---
+
+github_headers() {
+    printf '%s\0%s\0' \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28'
+    if [ -n "${KITARU_UI_RELEASE_TOKEN:-}" ]; then
+        printf '%s\0%s\0' -H "Authorization: Bearer ${KITARU_UI_RELEASE_TOKEN}"
+    fi
+}
+
+github_api() {
+    local url="$1"
+    local -a headers=()
+    while IFS= read -r -d '' item; do
+        headers+=("$item")
+    done < <(github_headers)
+    curl -fSsL "${headers[@]}" "$url"
+}
+
+download_github_asset() {
+    local url="$1" dest="$2"
+    local -a headers=(
+        -H 'Accept: application/octet-stream'
+        -H 'X-GitHub-Api-Version: 2022-11-28'
+    )
+    if [ -n "${KITARU_UI_RELEASE_TOKEN:-}" ]; then
+        headers+=(-H "Authorization: Bearer ${KITARU_UI_RELEASE_TOKEN}")
+    fi
+    echo "Downloading $url"
+    curl -fSsL "${headers[@]}" "$url" -o "$dest"
+}
+
+# --- Tag and release resolution ---
+
+validate_tag_shape() {
+    local tag="$1"
+    if [[ ! "$tag" =~ $TAG_PATTERN ]]; then
+        echo "Error: Kitaru UI release tags must use kitaru-ui-v<semver> shape." >&2
+        echo "Received: $tag" >&2
+        echo "Example: kitaru-ui-v0.2.0" >&2
+        exit 1
+    fi
+}
+
+fetch_release_pages() {
+    local releases_file="$1"
+    local page=1
+    local page_count=0
+    local -a page_files=()
+
+    while true; do
+        local page_file="$TMP_DIR/releases-page-$page.json"
+        github_api "$GITHUB_API_URL/repos/$UI_RELEASE_REPO/releases?per_page=100&page=$page" > "$page_file"
+        page_files+=("$page_file")
+        page_count=$("$PYTHON_BIN" - "$page_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    releases = json.load(handle)
+if not isinstance(releases, list):
+    print("Error: GitHub releases response was not a JSON array.", file=sys.stderr)
+    raise SystemExit(1)
+print(len(releases))
+PY
+)
+        if [ "$page_count" -lt 100 ]; then
+            break
+        fi
+        page=$((page + 1))
+    done
+
+    "$PYTHON_BIN" - "$releases_file" "${page_files[@]}" <<'PY'
+import json
+import sys
+
+output_file = sys.argv[1]
+all_releases: list[object] = []
+for page_file in sys.argv[2:]:
+    with open(page_file, encoding="utf-8") as handle:
+        releases = json.load(handle)
+    if not isinstance(releases, list):
+        print("Error: GitHub releases response was not a JSON array.", file=sys.stderr)
+        raise SystemExit(1)
+    all_releases.extend(releases)
+with open(output_file, "w", encoding="utf-8") as handle:
+    json.dump(all_releases, handle)
+PY
+}
+
+select_latest_stable_tag() {
+    local releases_file="$1"
+    "$PYTHON_BIN" - "$releases_file" <<'PY'
+import json
+import re
+import sys
+
+releases = json.loads(open(sys.argv[1], encoding="utf-8").read())
+pattern = re.compile(r"^kitaru-ui-v(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$")
+valid: list[tuple[tuple[int, int, int], str]] = []
+for release in releases:
+    tag = str(release.get("tag_name", ""))
+    match = pattern.match(tag)
+    if not match:
+        continue
+    if release.get("draft") or release.get("prerelease"):
+        continue
+    valid.append(((int(match.group(1)), int(match.group(2)), int(match.group(3))), tag))
+if not valid:
+    print(
+        "Error: no stable kitaru-ui-v<semver> releases found in zenml-frontend-monorepo.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print(max(valid)[1])
+PY
+}
 
 resolve_tag() {
-    # Prefer explicit TAG, then KITARU_UI_TAG, then resolve latest from GitHub.
+    # Prefer explicit TAG, then KITARU_UI_TAG, then resolve highest stable release.
     if [ -n "${TAG:-}" ]; then
+        validate_tag_shape "$TAG"
         return
     fi
     if [ -n "${KITARU_UI_TAG:-}" ]; then
         TAG="$KITARU_UI_TAG"
+        validate_tag_shape "$TAG"
         return
     fi
-    echo "No TAG or KITARU_UI_TAG set; resolving latest release..."
-    TAG=$(curl -Ls -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest" \
-        | grep -oE "[^/]+$")
-    if [ -z "$TAG" ]; then
-        echo "Error: could not resolve latest release tag" >&2
-        exit 1
-    fi
-    echo "Resolved latest tag: $TAG"
+
+    echo "No TAG or KITARU_UI_TAG set; resolving highest stable Kitaru UI release..."
+    local releases_file="$TMP_DIR/releases.json"
+    fetch_release_pages "$releases_file"
+    TAG=$(select_latest_stable_tag "$releases_file")
+    echo "Resolved stable tag: $TAG"
 }
 
-# --- Download ---
+load_release_metadata() {
+    local release_file="$1" metadata_file="$2"
+    "$PYTHON_BIN" - "$release_file" "$TAG" "$ALLOW_PRERELEASE" "$ARCHIVE_NAME" <<'PY' > "$metadata_file"
+import json
+import re
+import shlex
+import sys
 
-download_file() {
-    local url="$1" dest="$2"
-    echo "Downloading $url"
-    curl -fSsL "$url" -o "$dest"
+release_file, tag, allow_prerelease, archive_name = sys.argv[1:]
+release = json.loads(open(release_file, encoding="utf-8").read())
+
+if release.get("draft"):
+    print(f"Error: release {tag} is a draft and cannot be bundled.", file=sys.stderr)
+    raise SystemExit(1)
+
+metadata_prerelease = bool(release.get("prerelease"))
+tag_prerelease = bool(re.match(r"^kitaru-ui-v\d+\.\d+\.\d+-", tag))
+is_prerelease = metadata_prerelease or tag_prerelease
+if is_prerelease and allow_prerelease != "true":
+    print(
+        f"Error: release {tag} is a prerelease. Set "
+        "KITARU_UI_ALLOW_PRERELEASE=true for local/smoke testing.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+assets = {asset.get("name"): asset for asset in release.get("assets", [])}
+archive = assets.get(archive_name)
+checksum = assets.get(f"{archive_name}.sha256")
+missing = [name for name, asset in ((archive_name, archive), (f"{archive_name}.sha256", checksum)) if not asset]
+if missing:
+    print(f"Error: release {tag} is missing required assets: {', '.join(missing)}", file=sys.stderr)
+    raise SystemExit(1)
+
+archive_url = archive.get("url") or archive.get("browser_download_url")
+checksum_url = checksum.get("url") or checksum.get("browser_download_url")
+if not archive_url or not checksum_url:
+    print(f"Error: release {tag} assets do not expose download URLs.", file=sys.stderr)
+    raise SystemExit(1)
+
+print(f"ASSET_SOURCE_URL={shlex.quote(str(archive_url))}")
+print(f"CHECKSUM_SOURCE_URL={shlex.quote(str(checksum_url))}")
+print(f"RELEASE_PRERELEASE={shlex.quote(str(is_prerelease).lower())}")
+PY
 }
 
 # --- Checksum verification ---
@@ -92,31 +274,48 @@ verify_checksum() {
 # --- Manifest generation ---
 
 write_manifest() {
-    local sha256="$1" tag="$2" source_url="$3" dest="$4"
-    cat > "$dest" <<EOF
-{
+    local sha256="$1" tag="$2" asset_source_url="$3" checksum_source_url="$4" dest="$5"
+    mkdir -p "$(dirname "$dest")"
+    "$PYTHON_BIN" - "$UI_RELEASE_REPO" "$tag" "$asset_source_url" "$checksum_source_url" "$sha256" "$dest" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo, tag, asset_source_url, checksum_source_url, sha256, dest = sys.argv[1:]
+manifest = {
     "schema_version": 1,
-    "ui_version": "$tag",
-    "bundle_sha256": "$sha256",
-    "source": "$source_url"
+    "ui_version": tag,
+    "repo": repo,
+    "tag": tag,
+    "bundle_sha256": sha256,
+    "checksum": sha256,
+    "source": asset_source_url,
+    "asset_source_url": asset_source_url,
+    "checksum_source_url": checksum_source_url,
 }
-EOF
+Path(dest).write_text(json.dumps(manifest, indent=4) + "\n", encoding="utf-8")
+PY
     echo "Wrote manifest: $dest"
 }
 
 # --- Main ---
 
 main() {
+    TMP_DIR=$(mktemp -d -t kitaru-ui-XXXXXX)
     resolve_tag
 
-    local base_url="$REPO_URL/releases/download/$TAG"
-    TMP_DIR=$(mktemp -d -t kitaru-ui-XXXXXX)
+    local release_file="$TMP_DIR/release.json"
+    local metadata_file="$TMP_DIR/release.env"
+    github_api "$GITHUB_API_URL/repos/$UI_RELEASE_REPO/releases/tags/$TAG" > "$release_file"
+    load_release_metadata "$release_file" "$metadata_file"
+    # shellcheck source=/dev/null
+    . "$metadata_file"
 
     local archive="$TMP_DIR/$ARCHIVE_NAME"
     local checksum_file="$TMP_DIR/$ARCHIVE_NAME.sha256"
 
-    download_file "$base_url/$ARCHIVE_NAME" "$archive"
-    download_file "$base_url/$ARCHIVE_NAME.sha256" "$checksum_file"
+    download_github_asset "$ASSET_SOURCE_URL" "$archive"
+    download_github_asset "$CHECKSUM_SOURCE_URL" "$checksum_file"
     verify_checksum "$archive" "$checksum_file"
 
     local bundle_sha256
@@ -136,7 +335,7 @@ main() {
     fi
 
     # Write bundle manifest.
-    write_manifest "$bundle_sha256" "$TAG" "$base_url/$ARCHIVE_NAME" "$MANIFEST_FILE"
+    write_manifest "$bundle_sha256" "$TAG" "$ASSET_SOURCE_URL" "$CHECKSUM_SOURCE_URL" "$MANIFEST_FILE"
 
     echo ""
     echo "Kitaru UI $TAG bundled successfully into $DIST_DIR"

@@ -15,11 +15,13 @@ from kitaru._local_server import (
     LocalServerConnectionResult,
     _deploy_and_connect,
     _resolve_bundled_ui_dir,
+    _resolve_env_ui_dist_path,
+    _resolve_kitaru_ui_dir,
     _track_local_server_started,
     start_or_connect_local_server,
 )
 from kitaru.analytics import AnalyticsEvent
-from kitaru.errors import KitaruBackendError
+from kitaru.errors import KitaruBackendError, KitaruUsageError
 
 # ---------------------------------------------------------------------------
 # Test-local helpers
@@ -105,6 +107,71 @@ class TestResolveBundledUiDir:
 
 
 # ---------------------------------------------------------------------------
+# KITARU_UI_DIST_PATH resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveUiDistPathOverride:
+    def test_valid_override_path_wins_over_bundled_ui(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        override_dist = tmp_path / "override" / "dist"
+        override_dist.mkdir(parents=True)
+        (override_dist / "index.html").write_text("<html>override</html>")
+        bundled_dist = tmp_path / "pkg" / "_ui" / "dist"
+        bundled_dist.mkdir(parents=True)
+        (bundled_dist / "index.html").write_text("<html>bundled</html>")
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", str(override_dist))
+        monkeypatch.setattr(
+            ls_mod, "__file__", str(tmp_path / "pkg" / "_local_server.py")
+        )
+
+        assert _resolve_env_ui_dist_path() == override_dist
+        assert _resolve_kitaru_ui_dir() == override_dist
+
+    def test_relative_override_path_resolves_to_absolute_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        override_dist = tmp_path / "relative" / "dist"
+        override_dist.mkdir(parents=True)
+        (override_dist / "index.html").write_text("<html>override</html>")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", "relative/dist")
+
+        assert _resolve_env_ui_dist_path() == override_dist.resolve()
+
+    def test_invalid_override_path_raises_user_facing_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        missing_dist = tmp_path / "missing" / "dist"
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", str(missing_dist))
+
+        with pytest.raises(KitaruUsageError, match="KITARU_UI_DIST_PATH"):
+            _resolve_env_ui_dist_path()
+
+    def test_override_without_index_html_raises_user_facing_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        override_dist = tmp_path / "override" / "dist"
+        override_dist.mkdir(parents=True)
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", str(override_dist))
+
+        with pytest.raises(KitaruUsageError, match=r"index\.html"):
+            _resolve_env_ui_dist_path()
+
+    def test_no_override_and_no_bundle_falls_back_to_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_pkg = tmp_path / "pkg"
+        fake_pkg.mkdir()
+        monkeypatch.delenv("KITARU_UI_DIST_PATH", raising=False)
+        monkeypatch.setattr(ls_mod, "__file__", str(fake_pkg / "_local_server.py"))
+
+        assert _resolve_env_ui_dist_path() is None
+        assert _resolve_kitaru_ui_dir() is None
+
+
+# ---------------------------------------------------------------------------
 # _track_local_server_started
 # ---------------------------------------------------------------------------
 
@@ -162,12 +229,97 @@ class TestDeployAndConnect:
         assert captured_env["analytics"] == "kitaru-api"
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
 
         assert result == LocalServerConnectionResult(
             url="http://127.0.0.1:9090", action="started"
         )
         deployer.connect_to_server.assert_called_once()
+
+    def test_env_override_sets_dashboard_path_and_wins_over_bundled_ui(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ZENML_SERVER_DASHBOARD_FILES_PATH", raising=False)
+        monkeypatch.delenv("ZENML_DEFAULT_ANALYTICS_SOURCE", raising=False)
+        override_dist = tmp_path / "override" / "dist"
+        override_dist.mkdir(parents=True)
+        (override_dist / "index.html").write_text("<html>override</html>")
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", str(override_dist))
+
+        captured_env: dict[str, str | None] = {}
+
+        def capture_env_during_deploy(_config: Any, **_kw: Any) -> SimpleNamespace:
+            captured_env["dashboard"] = os.environ.get(
+                "ZENML_SERVER_DASHBOARD_FILES_PATH"
+            )
+            return SimpleNamespace(status=SimpleNamespace(url="http://127.0.0.1:9090"))
+
+        deployer = MagicMock()
+        deployer.deploy_server.side_effect = capture_env_during_deploy
+
+        with patch.object(
+            ls_mod, "_resolve_bundled_ui_dir", return_value=Path("/fake/bundled/dist")
+        ):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=9090,
+                timeout=30,
+                action="started",
+            )
+
+        assert captured_env["dashboard"] == str(override_dist)
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
+        assert os.environ.get("KITARU_UI_DIST_PATH") == str(override_dist)
+
+    def test_restores_preexisting_env_vars_after_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        captured_env: dict[str, str | None] = {}
+        fake_ui_dir = Path("/fake/ui/dist")
+
+        def capture_env_during_deploy(_config: Any, **_kw: Any) -> SimpleNamespace:
+            captured_env["deploy_dashboard"] = os.environ.get(
+                "ZENML_SERVER_DASHBOARD_FILES_PATH"
+            )
+            captured_env["deploy_analytics"] = os.environ.get(
+                "ZENML_DEFAULT_ANALYTICS_SOURCE"
+            )
+            return SimpleNamespace(status=SimpleNamespace(url="http://127.0.0.1:9090"))
+
+        def capture_env_during_connect() -> None:
+            captured_env["connect_dashboard"] = os.environ.get(
+                "ZENML_SERVER_DASHBOARD_FILES_PATH"
+            )
+            captured_env["connect_analytics"] = os.environ.get(
+                "ZENML_DEFAULT_ANALYTICS_SOURCE"
+            )
+
+        deployer = MagicMock()
+        deployer.deploy_server.side_effect = capture_env_during_deploy
+        deployer.connect_to_server.side_effect = capture_env_during_connect
+
+        with patch.object(ls_mod, "_resolve_bundled_ui_dir", return_value=fake_ui_dir):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=9090,
+                timeout=30,
+                action="started",
+            )
+
+        assert captured_env["deploy_dashboard"] == str(fake_ui_dir)
+        assert captured_env["deploy_analytics"] == "kitaru-api"
+        assert captured_env["connect_dashboard"] == str(fake_ui_dir)
+        assert captured_env["connect_analytics"] == "kitaru-api"
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
 
     def test_cleans_up_env_on_deploy_failure(
         self, monkeypatch: pytest.MonkeyPatch
@@ -194,7 +346,35 @@ class TestDeployAndConnect:
             )
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
+
+    def test_restores_preexisting_env_vars_on_deploy_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        deployer = MagicMock()
+        deployer.deploy_server.side_effect = RuntimeError("connection refused")
+
+        with (
+            patch.object(
+                ls_mod, "_resolve_bundled_ui_dir", return_value=Path("/fake/ui/dist")
+            ),
+            pytest.raises(KitaruBackendError, match="failed to start"),
+        ):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=8383,
+                timeout=30,
+                action="started",
+            )
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
+        deployer.connect_to_server.assert_not_called()
 
     def test_cleans_up_env_on_connect_failure(
         self, monkeypatch: pytest.MonkeyPatch
@@ -224,7 +404,37 @@ class TestDeployAndConnect:
             )
 
         assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") is None
-        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "kitaru-python"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") is None
+
+    def test_restores_preexisting_env_vars_on_connect_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ZENML_SERVER_DASHBOARD_FILES_PATH", "/caller/ui")
+        monkeypatch.setenv("ZENML_DEFAULT_ANALYTICS_SOURCE", "caller-source")
+
+        deployer = MagicMock()
+        deployer.deploy_server.return_value = SimpleNamespace(
+            status=SimpleNamespace(url="http://127.0.0.1:8383")
+        )
+        deployer.connect_to_server.side_effect = RuntimeError("refused")
+
+        with (
+            patch.object(
+                ls_mod, "_resolve_bundled_ui_dir", return_value=Path("/fake/ui/dist")
+            ),
+            pytest.raises(KitaruBackendError, match="failed to start"),
+        ):
+            _deploy_and_connect(
+                deployer=deployer,
+                deployment_config_cls=_FakeDeploymentConfig,
+                provider_type=_FAKE_PROVIDER,
+                port=8383,
+                timeout=30,
+                action="started",
+            )
+
+        assert os.environ.get("ZENML_SERVER_DASHBOARD_FILES_PATH") == "/caller/ui"
+        assert os.environ.get("ZENML_DEFAULT_ANALYTICS_SOURCE") == "caller-source"
 
     def test_restart_action_produces_restart_error_message(
         self, monkeypatch: pytest.MonkeyPatch
@@ -341,6 +551,27 @@ class TestStartOrConnectLocalServer:
         deployer.connect_to_server.assert_called_once()
         deployer.remove_server.assert_not_called()
         mock_track.assert_called_once_with(result)
+
+    def test_existing_running_server_with_ui_override_raises_restart_guidance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        override_dist = tmp_path / "override" / "dist"
+        override_dist.mkdir(parents=True)
+        (override_dist / "index.html").write_text("<html>override</html>")
+        monkeypatch.setenv("KITARU_UI_DIST_PATH", str(override_dist))
+        deployer = MagicMock()
+        local_server = _make_local_server("http://127.0.0.1:8383", is_running=True)
+        runtime = _make_runtime_tuple(deployer, local_server)
+
+        with (
+            patch(f"{_PATCH_PREFIX}._ensure_local_server_dependencies"),
+            patch(f"{_PATCH_PREFIX}._load_local_server_runtime", return_value=runtime),
+            pytest.raises(KitaruUsageError, match="kitaru logout"),
+        ):
+            start_or_connect_local_server(port=None, timeout=30)
+
+        deployer.connect_to_server.assert_not_called()
+        deployer.remove_server.assert_not_called()
 
     def test_existing_running_server_logs_stale_ui_warning(self) -> None:
         deployer = MagicMock()

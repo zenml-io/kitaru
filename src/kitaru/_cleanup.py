@@ -65,6 +65,7 @@ class CleanupPlan:
     model_registry_alias_count: int | None = None
     local_server_status: str | None = None
     local_server_would_stop: bool = False
+    local_server_inspection_failed: bool = False
     custom_config_path_warning: str | None = None
     active_environment_overrides: tuple[ActiveEnvironmentVariable, ...] = ()
     can_reinitialize_project: bool = False
@@ -87,6 +88,7 @@ class CleanupResult:
     preview_entries: tuple[CleanupPreviewEntry, ...] = ()
     total_bytes: int = 0
     local_server_status: str | None = None
+    local_server_inspection_failed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -417,27 +419,40 @@ def _compute_backup_path(config_root: Path) -> str | None:
     return str(backup_dir / f"backup-{timestamp}.db")
 
 
-def _describe_local_server_for_cleanup() -> tuple[str | None, bool]:
-    """Return local server status description and whether it would be stopped."""
+def _describe_local_server_for_cleanup() -> tuple[str | None, bool, bool]:
+    """Return local server status, stop intent, and inspection-failure state."""
     try:
         from zenml.utils.server_utils import get_local_server
     except ImportError:
-        return None, False
+        return None, False, False
 
     try:
         local_server = get_local_server()
-    except Exception:
-        return None, False
+    except Exception as exc:
+        logger.warning("Could not inspect registered local server", exc_info=True)
+        return f"unknown (inspection failed: {exc})", True, True
 
     if local_server is None:
-        return "not running", False
+        return "not running", False, False
 
     from kitaru._local_server import _existing_local_server_url
 
     url = _existing_local_server_url(local_server)
     if url:
-        return f"running at {url}", True
-    return "registered but not running", True
+        return f"running at {url}", True, False
+    return "registered but not running", True, False
+
+
+def _local_server_inspection_warning(
+    status: str | None, *, inspection_failed: bool
+) -> str | None:
+    """Build the warning shown when local-server inspection failed."""
+    if not inspection_failed:
+        return None
+    return (
+        "Could not inspect the registered local server. Cleanup will attempt "
+        f"safe daemon shutdown before deleting global state. Status: {status}"
+    )
 
 
 def build_cleanup_plan(
@@ -452,6 +467,7 @@ def build_cleanup_plan(
     custom_config_warning: str | None = None
     local_server_status: str | None = None
     local_server_would_stop = False
+    local_server_inspection_failed = False
     can_reinit = False
     preview_entries: list[CleanupPreviewEntry] = []
     total_bytes = 0
@@ -482,9 +498,11 @@ def build_cleanup_plan(
 
         alias_count = _read_alias_count()
         backup_path = _compute_backup_path(config_root)
-        local_server_status, local_server_would_stop = (
-            _describe_local_server_for_cleanup()
-        )
+        (
+            local_server_status,
+            local_server_would_stop,
+            local_server_inspection_failed,
+        ) = _describe_local_server_for_cleanup()
 
         global_entries = _build_global_preview(
             config_root,
@@ -521,6 +539,7 @@ def build_cleanup_plan(
         model_registry_alias_count=alias_count,
         local_server_status=local_server_status,
         local_server_would_stop=local_server_would_stop,
+        local_server_inspection_failed=local_server_inspection_failed,
         custom_config_path_warning=custom_config_warning,
         active_environment_overrides=tuple(env_overrides),
         can_reinitialize_project=can_reinit,
@@ -529,17 +548,24 @@ def build_cleanup_plan(
 
 def build_cleanup_preview_result(plan: CleanupPlan) -> CleanupResult:
     """Build a dry-run CleanupResult from a resolved plan."""
-    warnings: tuple[str, ...] = ()
+    warnings: list[str] = []
     if plan.custom_config_path_warning:
-        warnings = (plan.custom_config_path_warning,)
+        warnings.append(plan.custom_config_path_warning)
+    inspection_warning = _local_server_inspection_warning(
+        plan.local_server_status,
+        inspection_failed=plan.local_server_inspection_failed,
+    )
+    if inspection_warning:
+        warnings.append(inspection_warning)
     return CleanupResult(
         scope=plan.scope,
         dry_run=True,
         preview_entries=plan.preview_entries,
         total_bytes=plan.total_bytes,
         local_server_status=plan.local_server_status,
+        local_server_inspection_failed=plan.local_server_inspection_failed,
         active_environment_overrides=plan.active_environment_overrides,
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
 
 
@@ -668,6 +694,12 @@ def execute_cleanup_plan(
 
     if plan.custom_config_path_warning:
         warnings.append(plan.custom_config_path_warning)
+    inspection_warning = _local_server_inspection_warning(
+        plan.local_server_status,
+        inspection_failed=plan.local_server_inspection_failed,
+    )
+    if inspection_warning:
+        warnings.append(inspection_warning)
 
     # Enforce --force for model registry protection
     if scope in (CleanScope.GLOBAL, CleanScope.ALL):
@@ -713,14 +745,11 @@ def execute_cleanup_plan(
             server_result = stop_registered_local_server_for_cleanup(timeout=10)
             server_stopped = server_result.stopped
             force_killed_pid = server_result.force_killed_pid
-            if force_killed_pid is not None:
+            if not server_result.stopped:
                 warnings.append(
-                    "Local server did not shut down gracefully. "
-                    f"Force-killed process {force_killed_pid}."
-                )
-            elif not server_result.stopped:
-                warnings.append(
-                    "Could not stop the local server. The database backup "
+                    "Could not stop the local server. Kitaru did not kill "
+                    "the stored PID because PID-only evidence can be stale "
+                    "and may refer to another process. The database backup "
                     "may be incomplete if the server is still writing."
                 )
 
@@ -796,6 +825,7 @@ def execute_cleanup_plan(
         preview_entries=plan.preview_entries,
         total_bytes=plan.total_bytes,
         local_server_status=plan.local_server_status,
+        local_server_inspection_failed=plan.local_server_inspection_failed,
     )
 
 

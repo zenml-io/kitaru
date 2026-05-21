@@ -1,0 +1,212 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">Hatchet · OTEL spans across tasks</span>
+      <span class="panel-sub">LLM logging is glue inside your task body</span>
+    </div>
+
+    <div class="code">
+      <div class="code-row"><span class="mono code-deco">@review_flow.task()</span></div>
+      <div class="code-row"><span class="mono">async def research(input, ctx):</span></div>
+      <div class="code-row indent"><span class="mono code-comment"># wrap OpenAI / Anthropic yourself</span></div>
+      <div class="code-row indent"><span class="mono">return await call_llm(...)</span></div>
+    </div>
+
+    <div class="otel">
+      <span class="otel-label">OTEL trace</span>
+      <div class="span">
+        <span class="mono span-name">task · research</span>
+        <span class="span-meta">4.2s</span>
+      </div>
+      <div class="span span--child">
+        <span class="mono span-name">└─ http.post openai.com</span>
+        <span class="span-meta">4.1s</span>
+      </div>
+    </div>
+
+    <div class="foot">Generic spans. No prompt, response, tokens, or cost in the box.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · LLM as a captured checkpoint event</span>
+      <span class="panel-sub">Prompt, response, tokens, latency, and cost on every call</span>
+    </div>
+
+    <div class="code code--accent">
+      <div class="code-row"><span class="mono code-deco">@checkpoint</span></div>
+      <div class="code-row"><span class="mono">def research(topic):</span></div>
+      <div class="code-row indent"><span class="mono">return <span class="code-accent">kitaru.llm</span>(prompt=..., model="fast")</span></div>
+    </div>
+
+    <div class="record">
+      <span class="record-label">checkpoint.research · captured</span>
+      <div class="record-rows">
+        <div class="record-row"><span class="rkey">prompt</span><span class="rval">"Research: durable agents..."</span></div>
+        <div class="record-row"><span class="rkey">response</span><span class="rval">"A durable agent runtime..."</span></div>
+        <div class="record-row"><span class="rkey">model</span><span class="rval mono">claude-sonnet-4-6</span></div>
+        <div class="record-row"><span class="rkey">tokens</span><span class="rval">in 312 · out 488</span></div>
+        <div class="record-row"><span class="rkey">latency</span><span class="rval">4.1s</span></div>
+        <div class="record-row"><span class="rkey">cost</span><span class="rval">$0.012</span></div>
+      </div>
+    </div>
+
+    <div class="foot foot--accent">Captured by default. Linked to the checkpoint, queryable per run.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 12px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .code {
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--color-bg);
+    margin-bottom: 12px;
+  }
+  .code--accent {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+  }
+  .code-row {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .code-row.indent { padding-left: 16px; }
+  .code-deco { color: var(--color-accent); font-weight: 700; }
+  .code-comment { color: var(--color-muted); font-style: italic; }
+  .code-accent { color: var(--color-accent); font-weight: 700; }
+  .mono { font-family: var(--font-mono); }
+
+  .otel {
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    margin-bottom: 10px;
+  }
+  .otel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 6px;
+  }
+  .span {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    background: var(--color-bg);
+    border-radius: 4px;
+    margin-bottom: 3px;
+  }
+  .span--child { margin-left: 10px; background: var(--color-surface-warm); }
+  .span-name {
+    font-size: 10.5px;
+    color: var(--color-primary);
+  }
+  .span-meta {
+    font-size: 10px;
+    color: var(--color-muted);
+  }
+
+  .record {
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    margin-bottom: 10px;
+  }
+  .record-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-accent);
+    margin-bottom: 8px;
+  }
+  .record-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .record-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 8px;
+    font-size: 10.5px;
+  }
+  .rkey {
+    color: var(--color-muted);
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .rval {
+    color: var(--color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .rval.mono { font-size: 10px; }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+  }
+</style>

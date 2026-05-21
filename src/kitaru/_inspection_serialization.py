@@ -114,7 +114,7 @@ def serialize_pending_wait(wait: PendingWait | None) -> dict[str, Any] | None:
 
 def serialize_artifact_ref(artifact: ArtifactRef) -> dict[str, Any]:
     """Serialize artifact metadata."""
-    return {
+    payload = {
         "artifact_id": artifact.artifact_id,
         "name": artifact.name,
         "kind": artifact.kind,
@@ -122,6 +122,11 @@ def serialize_artifact_ref(artifact: ArtifactRef) -> dict[str, Any]:
         "producing_call": artifact.producing_call,
         "metadata": to_jsonable(artifact.metadata, fallback_repr=True),
     }
+    if artifact.direction == "input":
+        payload["direction"] = "input"
+    if artifact.input_type is not None:
+        payload["input_type"] = artifact.input_type
+    return payload
 
 
 def serialize_artifact_value(value: Any) -> dict[str, Any]:

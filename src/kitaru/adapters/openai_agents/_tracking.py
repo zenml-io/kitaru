@@ -22,9 +22,15 @@ from ._events import (
     dump_openai_events,
     error_from_exception,
 )
-from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._kitaru_internal import (
+    get_current_checkpoint_id,
+    get_current_checkpoint_name,
+    is_inside_checkpoint,
+    is_inside_flow,
+)
 
 _NON_WORD_PATTERN = re.compile(r"\W+")
+_EVENT_ID_DISPLAY_PATTERN = re.compile(r"^(.+)_(llm_call|tool_call)_(\d+)$")
 ArtifactKind = Literal["input", "result", "response", "usage", "error"]
 
 
@@ -34,12 +40,33 @@ def normalize_agent_name(agent_name: str | None) -> str:
 
 
 def artifact_name(event_id: str, kind: ArtifactKind) -> str:
-    return f"{event_id}_{kind}"
+    match = _EVENT_ID_DISPLAY_PATTERN.match(event_id)
+    if match is None:
+        return f"{event_id}_{kind}"
+    namespace, event_kind, sequence_index = match.groups()
+    return f"{event_kind}_{sequence_index}_{kind}__{namespace}"
 
 
 @dataclass(frozen=True)
 class EventContext:
     sequence_index: int
+    checkpoint_id: str | None = None
+    checkpoint_name: str | None = None
+
+
+def _current_checkpoint_identity() -> tuple[str | None, str | None]:
+    """Return active checkpoint identity without letting observability fail calls."""
+    try:
+        if not is_inside_checkpoint():
+            return None, None
+        checkpoint_id = get_current_checkpoint_id()
+        checkpoint_name = get_current_checkpoint_name()
+        return (
+            str(checkpoint_id) if checkpoint_id is not None else None,
+            str(checkpoint_name) if checkpoint_name is not None else None,
+        )
+    except Exception:
+        return None, None
 
 
 @dataclass(frozen=True)
@@ -83,11 +110,11 @@ class EventTracker:
 
     @property
     def event_log_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_event_log"
+        return f"event_log__{self.agent_name}_{self.run_label}"
 
     @property
     def run_summary_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_run_summary"
+        return f"run_summary__{self.agent_name}_{self.run_label}"
 
     def _next_event_id(self, event_kind: str) -> tuple[str, int]:
         self._counter += 1
@@ -105,8 +132,13 @@ class EventTracker:
             if not self._active_tool_event_ids:
                 self._clear_reserved_tool_events_unlocked()
             event_id, sequence_index = self._next_event_id("llm_call")
+            checkpoint_id, checkpoint_name = _current_checkpoint_identity()
             self._model_call_count += 1
-            return event_id, EventContext(sequence_index=sequence_index)
+            return event_id, EventContext(
+                sequence_index=sequence_index,
+                checkpoint_id=checkpoint_id,
+                checkpoint_name=checkpoint_name,
+            )
 
     def reserve_tool_call_order(
         self,
@@ -162,9 +194,14 @@ class EventTracker:
                 event_id = reservation.event_id
                 sequence_index = reservation.sequence_index
 
+            checkpoint_id, checkpoint_name = _current_checkpoint_identity()
             self._tool_call_count += 1
             self._active_tool_event_ids.add(event_id)
-            return event_id, EventContext(sequence_index=sequence_index)
+            return event_id, EventContext(
+                sequence_index=sequence_index,
+                checkpoint_id=checkpoint_id,
+                checkpoint_name=checkpoint_name,
+            )
 
     def record_event(
         self,
@@ -177,6 +214,8 @@ class EventTracker:
         artifacts: dict[str, str] | None = None,
         metadata: dict[str, object] | None = None,
         error: BaseException | None = None,
+        checkpoint_id: str | None = None,
+        checkpoint_name: str | None = None,
     ) -> None:
         with self._lock:
             if kind == "tool_call":
@@ -189,6 +228,10 @@ class EventTracker:
                     sequence_index=context.sequence_index,
                     run_label=self.run_label,
                     agent_name=self.agent_name,
+                    checkpoint_id=checkpoint_id
+                    or getattr(context, "checkpoint_id", None),
+                    checkpoint_name=checkpoint_name
+                    or getattr(context, "checkpoint_name", None),
                     duration_ms=duration_ms,
                     metadata=metadata or {},
                     artifacts=artifacts or {},
@@ -196,10 +239,22 @@ class EventTracker:
                 )
             )
 
-    def set_run_error(self, error: BaseException) -> None:
+    def set_run_error(
+        self,
+        error: BaseException,
+        *,
+        overwrite: bool = True,
+    ) -> None:
         with self._lock:
             self._status = "failed"
-            self._error = error
+            if (
+                self._error is not None
+                and getattr(self._error, "_kitaru_redacted_run_error", False)
+                and not getattr(error, "_kitaru_redacted_run_error", False)
+            ):
+                return
+            if overwrite or self._error is None:
+                self._error = error
 
     def _build_run_summary_unlocked(
         self,
@@ -267,7 +322,7 @@ def tracker_scope(agent_name: str | None) -> Iterator[EventTracker]:
     try:
         yield tracker
     except Exception as error:
-        tracker.set_run_error(error)
+        tracker.set_run_error(error, overwrite=False)
         raise
     finally:
         try:

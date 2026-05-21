@@ -10,15 +10,19 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
+from kitaru._env import _temporary_env
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
-from kitaru.checkpoint import checkpoint
+from kitaru.checkpoint import (
+    _raise_if_checkpoint_output_handle,
+    _raise_if_checkpoint_output_handle_in_value,
+    checkpoint,
+)
 from kitaru.config import ResolvedModelSelection, resolve_model_selection
 from kitaru.errors import (
     KitaruBackendError,
@@ -67,6 +71,26 @@ class _LLMRequest(BaseModel):
     call_name: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def _reject_prompt_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle_in_value(
+            value,
+            field_name="_LLMRequest.prompt",
+            expected="materialized prompt content",
+        )
+        return value
+
+    @field_validator("system", mode="before")
+    @classmethod
+    def _reject_system_checkpoint_handle(cls, value: Any) -> Any:
+        _raise_if_checkpoint_output_handle(
+            value,
+            field_name="_LLMRequest.system",
+            expected="a materialized system prompt string",
+        )
+        return value
 
 
 @dataclass(frozen=True)
@@ -258,24 +282,6 @@ def _normalize_messages(
 # ---------------------------------------------------------------------------
 # Provider SDK helpers (lazy imports)
 # ---------------------------------------------------------------------------
-
-
-@contextmanager
-def _temporary_env(additions: Mapping[str, str]) -> Any:
-    """Temporarily add/override environment variables for one call."""
-    previous_values: dict[str, str | None] = {}
-    for key, value in additions.items():
-        previous_values[key] = os.environ.get(key)
-        os.environ[key] = value
-
-    try:
-        yield
-    finally:
-        for key, previous in previous_values.items():
-            if previous is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = previous
 
 
 def _call_openai(

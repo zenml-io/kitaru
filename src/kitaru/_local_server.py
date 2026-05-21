@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+from kitaru._env import ZENML_DEFAULT_ANALYTICS_SOURCE_ENV, _temporary_env
 from kitaru.errors import KitaruBackendError, KitaruUsageError
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCAL_SERVER_HOST = "127.0.0.1"
 _DEFAULT_LOCAL_SERVER_PORT = 8383
+_KITARU_UI_DIST_PATH_ENV = "KITARU_UI_DIST_PATH"
 _LOCAL_INSTALL_GUIDANCE = "\n".join(
     [
         "Local server requires additional dependencies.",
@@ -52,6 +54,60 @@ def _resolve_bundled_ui_dir() -> Path | None:
     if ui_dir.is_dir() and (ui_dir / "index.html").is_file():
         return ui_dir
     return None
+
+
+def _resolve_env_ui_dist_path() -> Path | None:
+    """Return the validated KITARU_UI_DIST_PATH override, if configured."""
+    raw_path = os.environ.get(_KITARU_UI_DIST_PATH_ENV)
+    if not raw_path:
+        return None
+
+    ui_dir = Path(raw_path).expanduser().resolve()
+    if not ui_dir.is_dir():
+        raise KitaruUsageError(
+            "\n".join(
+                [
+                    f"{_KITARU_UI_DIST_PATH_ENV} points to a missing directory:",
+                    f"  {ui_dir}",
+                    "Set it to a built Kitaru UI dist directory that "
+                    "contains index.html.",
+                ]
+            )
+        )
+    if not (ui_dir / "index.html").is_file():
+        raise KitaruUsageError(
+            "\n".join(
+                [
+                    f"{_KITARU_UI_DIST_PATH_ENV} must point to a UI dist "
+                    "directory containing index.html.",
+                    f"Checked: {ui_dir}",
+                ]
+            )
+        )
+    return ui_dir
+
+
+def _resolve_kitaru_ui_dir() -> Path | None:
+    """Return the UI dist directory Kitaru should ask ZenML to serve."""
+    return _resolve_env_ui_dist_path() or _resolve_bundled_ui_dir()
+
+
+def _local_server_ui_override_running_error(
+    *, existing_url: str, ui_dir: Path
+) -> KitaruUsageError:
+    """Build the error for an already-running server and UI override."""
+    return KitaruUsageError(
+        "\n".join(
+            [
+                f"A local Kitaru server is already running at {existing_url}.",
+                f"{_KITARU_UI_DIST_PATH_ENV} only applies when the local "
+                "server starts, so this running server cannot pick up:",
+                f"  {ui_dir}",
+                "Restart the local server with the override, for example:",
+                f"  kitaru logout && {_KITARU_UI_DIST_PATH_ENV}={ui_dir} kitaru login",
+            ]
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -184,24 +240,23 @@ def _deploy_and_connect(
         provider_type=provider_type,
         port=port,
     )
+    env_overlay = {ZENML_DEFAULT_ANALYTICS_SOURCE_ENV: "kitaru-api"}
+    if ui_dir := _resolve_kitaru_ui_dir():
+        env_overlay["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
+        logger.info("Kitaru UI directory: %s", ui_dir)
+    else:
+        logger.debug(
+            "No Kitaru UI override or bundled UI found (expected bundled UI at %s); "
+            "server will use default ZenML dashboard",
+            Path(__file__).parent / "_ui" / "dist",
+        )
+
     try:
-        if ui_dir := _resolve_bundled_ui_dir():
-            os.environ["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
-            logger.info("Kitaru UI directory: %s", ui_dir)
-        else:
-            logger.debug(
-                "No bundled Kitaru UI found (expected at %s); "
-                "server will use default ZenML dashboard",
-                Path(__file__).parent / "_ui" / "dist",
-            )
-        os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
-        deployed_server = deployer.deploy_server(config, timeout=timeout)
-        deployer.connect_to_server()
+        with _temporary_env(env_overlay):
+            deployed_server = deployer.deploy_server(config, timeout=timeout)
+            deployer.connect_to_server()
     except Exception as exc:
         raise _local_server_start_error(action=action, exc=exc) from exc
-    finally:
-        os.environ.pop("ZENML_SERVER_DASHBOARD_FILES_PATH", None)
-        os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-python"
 
     deployed_url = (
         _existing_local_server_url(deployed_server)
@@ -240,6 +295,7 @@ def start_or_connect_local_server(
 
     deployer = local_server_deployer_cls()
     local_server = get_local_server()
+    ui_override_dir = _resolve_env_ui_dist_path()
 
     if local_server is not None:
         existing_url = _existing_local_server_url(local_server)
@@ -247,6 +303,12 @@ def start_or_connect_local_server(
         is_running = _is_server_running(local_server) and bool(existing_url)
 
         if is_running and (port is None or port == existing_port):
+            if ui_override_dir is not None:
+                assert existing_url is not None
+                raise _local_server_ui_override_running_error(
+                    existing_url=existing_url,
+                    ui_dir=ui_override_dir,
+                )
             if _resolve_bundled_ui_dir() is not None:
                 logger.debug(
                     "Connecting to existing server; dashboard may differ "
@@ -300,59 +362,15 @@ class LocalServerCleanupResult:
     force_killed_pid: int | None = None
 
 
-def _force_kill_server_process(local_server: Any) -> int | None:
-    """Attempt to force-kill the local server daemon process.
-
-    Returns the killed PID, or None if the PID could not be resolved
-    or the kill failed.
-    """
-    import signal
-
-    pid: int | None = None
-
-    status = getattr(local_server, "status", None)
-    if status is not None:
-        pid = getattr(status, "pid", None)
-
-    if pid is None:
-        config = getattr(local_server, "config", None)
-        if config is not None:
-            pid = getattr(config, "pid", None)
-
-    if pid is None or not isinstance(pid, int) or pid <= 0:
-        return None
-
-    # Verify the process still exists before sending SIGKILL.
-    # Note: this cannot confirm it's the *same* server process (the PID
-    # may have been recycled), but it avoids killing a non-existent PID.
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        logger.debug("Server PID %d no longer exists", pid)
-        return None
-    except OSError:
-        pass  # EPERM means the process exists but we may not own it
-
-    try:
-        os.kill(pid, signal.SIGKILL)
-        return pid
-    except ProcessLookupError:
-        # Process already exited — don't claim we killed it
-        return None
-    except OSError:
-        logger.warning("Could not force-kill server process %d", pid, exc_info=True)
-        return None
-
-
 def stop_registered_local_server_for_cleanup(
     *,
     timeout: int = 10,
 ) -> LocalServerCleanupResult:
-    """Stop the registered local server for cleanup, with force-kill fallback.
+    """Stop the registered local server for cleanup.
 
     Unlike ``stop_registered_local_server``, this function:
     - uses a timeout on graceful shutdown
-    - force-kills the daemon if graceful stop fails
+    - never force-kills a PID-only daemon record
     - never raises; always returns a result
     """
     try:
@@ -360,24 +378,26 @@ def stop_registered_local_server_for_cleanup(
     except ImportError:
         return LocalServerCleanupResult(stopped=False, url=None)
 
-    local_server = get_local_server()
-    if local_server is None:
-        return LocalServerCleanupResult(stopped=False, url=None)
+    try:
+        local_server = get_local_server()
+        if local_server is None:
+            return LocalServerCleanupResult(stopped=False, url=None)
 
-    url = _existing_local_server_url(local_server)
+        url = _existing_local_server_url(local_server)
+    except Exception:
+        logger.warning("Could not inspect registered local server", exc_info=True)
+        return LocalServerCleanupResult(stopped=False, url=None)
 
     try:
         local_server_deployer_cls().remove_server(timeout=timeout)
         return LocalServerCleanupResult(stopped=True, url=url)
     except Exception:
-        logger.warning("Graceful local server shutdown failed; attempting force-kill")
-
-    killed_pid = _force_kill_server_process(local_server)
-    return LocalServerCleanupResult(
-        stopped=killed_pid is not None,
-        url=url,
-        force_killed_pid=killed_pid,
-    )
+        logger.warning(
+            "Graceful local server shutdown failed; not killing the stored PID "
+            "because PID-only evidence can be stale",
+            exc_info=True,
+        )
+        return LocalServerCleanupResult(stopped=False, url=url)
 
 
 def stop_registered_local_server() -> LocalServerStopResult:
