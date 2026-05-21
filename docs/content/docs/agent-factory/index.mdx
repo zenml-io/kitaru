@@ -28,7 +28,7 @@ This is a **runnable local reference architecture**. You can clone the repo, run
 
 This also shows **forkable platform seams**. The credential proxy, typed service boundary, profile gates, sandbox, and human-in-the-loop pause are all shown as separate pieces because those are the pieces you would usually want to harden, replace, or connect to your own infrastructure.
 
-This is **not** a turnkey enterprise platform. It does not ship your identity provider, policy engine, observability stack, deployment system, or production secret store. It is also **not** a hostile-code security boundary. The sandbox pattern is useful for local isolation and for showing where command execution belongs, but running untrusted code safely requires much more infrastructure and review than this example includes.
+This is **not** a turnkey enterprise platform. It does not ship your identity provider, policy engine, observability stack, deployment system, or production secret store. It is also **not** a hostile-code security boundary. The sandbox pattern is useful for local isolation and for showing where command execution belongs, but running untrusted code safely requires much more infrastructure and review than this example includes. For the full inventory of which pieces are teaching stand-ins and what to harden first, see [Production notes and upgrade paths](/agent-factory/production-notes).
 
 If you only want to make one function durable, start with the [Quickstart](/getting-started/quickstart). Come back here when you want to see how the same Kitaru primitives fit into a larger internal platform shape.
 
