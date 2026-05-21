@@ -203,18 +203,37 @@ Never push without that explicit confirmation — the release workflow reads `CH
 
 Expected runtime: 3-5 minutes. The script:
 
-- Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp`
+- Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `langgraph`)
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
-- Exercises CLI, SDK flows (including replay), MCP tools, and (if `OPENAI_API_KEY` is set) an end-to-end LLM flow
+- Exercises CLI, SDK flows (including replay), MCP tools, the four adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK), and an end-to-end LLM flow
 - Tears down the server
 
-If `OPENAI_API_KEY` is not set, LLM tests will be marked SKIPPED — surface this to the user so they can decide whether to re-run with the key set.
+**Set credentials before running, or most of the meaningful work is SKIPPED.** The four adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a release-grade run, export the full set first:
+
+```bash
+export OPENAI_API_KEY=...        # OpenAI Agents real run, LangGraph `calls`, research bot
+export ANTHROPIC_API_KEY=...     # Claude Agent SDK real run (or CLAUDE_CODE_USE_BEDROCK=1 / _VERTEX=1)
+export KITARU_SMOKE_RESEARCH_BOT=1  # opt in to the real web-search research-bot test
+./scripts/smoke-test.sh
+```
+
+Parse the final summary and **tell the user exactly which checks were SKIPPED and why** (which key was unset), so they can decide whether a partial run is good enough or they want to re-run with the missing key. A bare run with no keys is a weak release gate — flag that explicitly rather than reporting "all passed" when half the adapter suite was skipped.
 
 The script uses `set -uo pipefail` **without `-e`** deliberately — it continues past failures to collect all results and prints a final `Passed: N  Failed: M  Skipped: K` summary.
 
 Prefer running in the background with `run_in_background: true` and tail the log afterwards — the full output is verbose and not useful in conversation context.
 
-**If running from a git worktree:** a fresh worktree may not have `src/kitaru/_ui/dist/` populated yet. If the user wants the Kitaru UI during smoke testing, run `just ui-bundle` followed by `just ui-smoke`, or run `bash scripts/download-ui.sh` before `./scripts/smoke-test.sh`. The direct override path is `KITARU_UI_DIST_PATH=/path/to/dist ./scripts/smoke-test.sh --keep-server`.
+**Verify the bundled UI too (recommended pre-release check).** The Python smoke test above does not exercise the dashboard. To click through the exact UI release that will ship, bundle it and run the UI smoke against it:
+
+```bash
+export KITARU_UI_RELEASE_TOKEN=<token-with-contents-read>  # the private monorepo needs auth
+just UI_TAG=kitaru-ui-v<X.Y.Z> ui-bundle    # use the tag from Step 3; or bare `just ui-bundle` for highest stable
+just UI_TAG=kitaru-ui-v<X.Y.Z> ui-smoke     # runs the smoke test with that UI and keeps the server up
+```
+
+`ui-smoke` runs `KITARU_UI_DIST_PATH=<prepared-dist> ./scripts/smoke-test.sh --keep-server`, so after it passes the server stays up and prints a dashboard URL for manual click-through. `KITARU_UI_RELEASE_TOKEN` is required because `ui-bundle` downloads from the **private** `zenml-io/zenml-frontend-monorepo`; without it you get a `curl: (22) ... 404`. Read **`FRONTEND-TESTING.md`** (repo root) for the full stable/prerelease bundle runbook.
+
+**If running from a git worktree:** a fresh worktree may not have `src/kitaru/_ui/dist/` populated yet. The same `just ui-bundle` / `just ui-smoke` path above prepares it, or run `bash scripts/download-ui.sh` before `./scripts/smoke-test.sh`. The direct override path is `KITARU_UI_DIST_PATH=/path/to/dist ./scripts/smoke-test.sh --keep-server`.
 
 ## Step 8: ★ Pause — verify smoke test
 
@@ -228,11 +247,13 @@ Only when `Failed: 0` and the user confirms, proceed.
 
 ## Step 9: Trigger release workflow
 
+**Dry-run first when the release machinery itself changed.** A dry-run (`-f dry-run=true`) builds the wheel, downloads + bundles the UI, and builds the Docker image, but skips every publish/push/tag and the `pypi` approval gate — so it surfaces workflow bugs *before* any irreversible step. Strongly prefer a dry-run first whenever `release.yml`, `scripts/download-ui.sh`, the Docker/Helm packaging, or the UI-bundling path has changed since the last release, or when a new secret/credential is involved. (This is exactly what caught the missing `KITARU_UI_RELEASE_TOKEN` and the PyPI-verify bug before they could half-publish a release.) For a routine release with no machinery changes, a dry-run is optional but cheap.
+
 ```bash
 gh workflow run release.yml --ref develop \
   -f version=<AGREED_VERSION> \
   [-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>]  # only if pinning a specific stable/full UI version
-  [-f dry-run=true]                      # only if user requested
+  [-f dry-run=true]                      # do a dry-run pass first; re-run without it after it's green
 ```
 
 Confirm the trigger succeeded:
@@ -372,7 +393,10 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **PyPI approval gate.** The `pypi` environment has required reviewers (`kitaru-admins` team, `prevent_self_review: false`). Every non-dry-run release pauses partway through awaiting approval. The triggering user can approve their own deployment if they're in `kitaru-admins`. If they're not, the release will sit waiting indefinitely until an admin approves — do not forget this step. `gh run watch` will show the run in `waiting` state while the gate is open; this is normal, not a hang.
 - **Non-dry-run releases require `RELEASE_GIT_TOKEN` for protected branch pushes.** `release.yml` now fails early if `secrets.RELEASE_GIT_TOKEN` is missing on a real release, before any PyPI/Docker/Helm side effects. The secret is only used for the protected branch pushes to `develop`, `main`, and `release/*`; checkout, GitHub API reads, and the Kitaru repo tag push still use the default `GITHUB_TOKEN`. If a later push step still gets a 403/permission error, check that the token's identity is actually allowed to bypass the `develop`/`main` rulesets and create `release/*` branches. Dry-runs do not require this secret.
 - **Non-dry-run releases require `CLOUD_PLUGINS_REPO_PAT` for the downstream Kitaru Pro trigger.** `release.yml` validates this secret before expensive publish work, pins the current `zenml-io/zenml-cloud-plugins` `main` SHA, and fails early if `refs/tags/kitaru-$VERSION` already exists somewhere else. After Docker and Helm have been published, the workflow creates that tag at the pinned SHA. The secret needs read access to `zenml-cloud-plugins/main` and permission to create Git tags in `zenml-io/zenml-cloud-plugins`. Existing matching tags are treated as recovery-safe and skipped; existing divergent tags fail the release and require manual investigation. Dry-runs do not require this secret and do not create the downstream tag.
+- **All releases require `KITARU_UI_RELEASE_TOKEN` to fetch the UI.** The "Download stable Kitaru UI" step (`scripts/download-ui.sh`) pulls the bundle from the **private** `zenml-io/zenml-frontend-monorepo`, and only sends an auth header when the token is set. A missing/empty secret resolves to an empty string (not a hard error), so the request goes out unauthenticated and the private repo answers `404` → `curl: (22)` → the step dies *before* any publish. The token is a fine-grained PAT with **Contents: read** on the monorepo — and fine-grained PATs **expire**, so a release that worked months ago can fail here later. If you see the 404 at "Download stable Kitaru UI", check the secret exists (`gh secret list -R zenml-io/kitaru`) and that the PAT hasn't expired or hit org pending-approval. This step runs on dry-runs too, so a dry-run catches a missing/expired token safely.
 - **Recovery dispatch skips file mutations.** When `v$VERSION` already exists on origin, the workflow detects this pre-checkout, checks out the tag itself, and skips the "Bump version" / "Update CHANGELOG" / "Update lockfile" / "Commit release changes" steps. This is intentional: `uv lock` is not stable across time (it regenerates `exclude-newer` timestamps and may re-resolve transitive deps if newer versions have been released between the original tag push and the recovery dispatch), so running it would create a commit on top of the tagged SHA and fail the consistency check. Do not re-enable those steps for recovery — the tag is the authoritative identity anchor.
+- **Recovering when the fix is in `release.yml` itself.** If a release fails partway (e.g. after PyPI publish + tag push but before Docker/Helm/main/GitHub-Release) and the fix lives in the workflow file, do **not** commit the fix to `develop`. The "Push release commit to develop" step does a *plain, non-force* push of the bump commit and only succeeds as a fast-forward; advancing `develop` breaks that and the recovery fails one step later. Instead: `git checkout -b fix-branch v$VERSION` (off the tag), commit the workflow fix, push the branch, and dispatch `gh workflow run release.yml --ref fix-branch -f version=$VERSION`. GitHub runs the workflow YAML from the dispatched ref (so it gets your fix) while the recovery logic still checks out the *tag* for the build (so `develop` stays put and the bump commit fast-forwards). All downstream ref/publish steps are idempotent (skip-existing / fast-forward-only / create-or-match), so the recovery picks up exactly where it died. Afterwards, open a normal PR from `fix-branch` into `develop` so the fix lands for future releases.
+- **Editing `release.yml` triggers `zizmor`.** Any change under `.github/workflows/**` fires the path-filtered `zizmor.yml` security scan, which runs `uvx zizmor` **unpinned** (latest). Because it drifts stricter over time and only re-scans on workflow edits, a recovery/fix PR can inherit a *pre-existing* finding it didn't cause (e.g. a floating `# v7` action comment that now needs the exact `# v7.1.0`). Run `just zizmor` locally before pushing any workflow change — `just check` does **not** include zizmor (it runs actionlint, a different tool).
 - **The `prompt-exports/` directory** is commonly untracked in the working tree — ignore it when staging CHANGELOG commits.
 
 ## Inputs and outputs reference
