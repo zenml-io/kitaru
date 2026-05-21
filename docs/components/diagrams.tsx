@@ -1810,3 +1810,261 @@ export function HitlPauseResumeDiagram() {
     </DiagramFrame>
   );
 }
+
+// ------------------------------------------------------------
+// Diagram 17: Cached output vs shell side effects (Stage 2)
+// ------------------------------------------------------------
+
+export function SandboxReplaySideEffectsDiagram() {
+  return (
+    <DiagramFrame>
+      <div style={{ ...col, gap: 18, minWidth: 640 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              fontFamily: mono,
+              color: 'var(--color-fd-muted-foreground)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}
+          >
+            First run · FORCE_FAILURE=1
+          </div>
+          <div style={{ ...col, gap: 10 }}>
+            <div style={{ ...row, alignItems: 'center' }}>
+              <Node
+                title="default"
+                subtitle="turn 1 · runs in the sandbox shell"
+                tone="success"
+                isMono
+                minWidth={200}
+              />
+              <HArrow label="output checkpointed" />
+              <Node
+                title="✗ crash"
+                subtitle="dies before default_2"
+                tone="danger"
+                isMono
+                minWidth={170}
+              />
+              <Node
+                title="default_2"
+                subtitle="turn 2 · never reached"
+                tone="muted"
+                isMono
+                minWidth={150}
+              />
+            </div>
+            <Node
+              title="shell side effects · live container"
+              subtitle="happen now, but never enter the checkpoint"
+              bullets={['cd /tmp', 'exports, temp files, background jobs']}
+              tone="warn"
+              isMono
+              fullWidth
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '8px 14px',
+            border: '1px dashed var(--color-fd-border)',
+            borderRadius: 8,
+            fontSize: 12,
+            color: 'var(--color-fd-muted-foreground)',
+            textAlign: 'center',
+          }}
+        >
+          re-run · <code>python stage_2_sandboxed_exec.py</code>
+        </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              fontFamily: mono,
+              color: 'var(--color-fd-muted-foreground)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}
+          >
+            Retry · no flag
+          </div>
+          <div style={{ ...col, gap: 10 }}>
+            <div style={{ ...row, alignItems: 'center' }}>
+              <Node
+                title="default"
+                subtitle="↺ cache hit · saved output returned · $0"
+                tone="muted"
+                isMono
+                minWidth={220}
+              />
+              <HArrow />
+              <Node
+                title="default_2"
+                subtitle="● runs fresh · shell starts at /workspace"
+                tone="accent"
+                isMono
+                minWidth={220}
+              />
+              <HArrow />
+              <Node
+                title="result"
+                subtitle="flow finishes"
+                tone="success"
+                isMono
+                minWidth={120}
+              />
+            </div>
+            <Node
+              title="shell side effects · not replayed"
+              subtitle="the cache returns saved output, not live shell state"
+              bullets={['cd /tmp · skipped', 'writes outside /workspace · not restored']}
+              tone="warn"
+              isMono
+              fullWidth
+              conceptual
+            />
+          </div>
+        </div>
+
+        <Node
+          title="/workspace · or a checkpointed value"
+          subtitle="keep state a later turn depends on here, so a cached turn can't strand it"
+          tone="info"
+          isMono
+          fullWidth
+        />
+      </div>
+      <Legend
+        items={[
+          { tone: 'success', label: 'Ran · output checkpointed' },
+          { tone: 'muted', label: 'Cache hit · output returned ($0)' },
+          { tone: 'accent', label: 'Re-executed fresh' },
+          { tone: 'warn', label: 'Shell side effect · happened live' },
+          {
+            tone: 'warn',
+            label: 'Side effect · not replayed',
+            conceptual: true,
+          },
+          { tone: 'danger', label: 'Crash' },
+        ]}
+      />
+      <Caption>
+        Kitaru caches each turn&rsquo;s output, so the retry hands turn 1&rsquo;s
+        result back for free. It does not re-run the shell. The{' '}
+        <code>cd /tmp</code> and any non-persisted shell side effects from that
+        cached turn ran once, in a container the retry never touches. Writes
+        already placed in <code>/workspace</code> may still be there, but the
+        write command itself is not replayed. Any state a later turn needs has
+        to live in <code>/workspace</code> or a checkpointed value, because the
+        shell a cached turn leaves behind is gone.
+      </Caption>
+    </DiagramFrame>
+  );
+}
+
+// ------------------------------------------------------------
+// Diagram 18: Skill procedure flow (Stage 3)
+// ------------------------------------------------------------
+
+export function SkillProcedureFlowDiagram() {
+  return (
+    <DiagramFrame>
+      <div style={{ ...col, gap: 14, minWidth: 640 }}>
+        <Node
+          title="Profile"
+          subtitle="one per agent · mostly configuration"
+          bullets={[
+            'allowed_tools = {"skill", "exec"}',
+            'skill_source = skills/basic/default-agent/',
+          ]}
+          tone="default"
+          isMono
+          fullWidth
+        />
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <VArrow label="configures one durable agent" />
+        </div>
+
+        <Subgraph
+          label="Kitaru durable flow"
+          tone="accent"
+          annotation="each turn checkpointed · replayable"
+        >
+          <div style={{ ...col, alignItems: 'center', gap: 10 }}>
+            <Node
+              title="PydanticAI agent"
+              subtitle={'system prompt shrinks to: "find your skill and follow it"'}
+              tone="accent"
+              isMono
+              minWidth={360}
+            />
+            <VArrow label={'1 · skill(action="list") → skill(action="read")'} />
+            <div
+              style={{ ...row, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Node
+                title="skill tool"
+                subtitle="host-side Python · not in the sandbox"
+                tone="muted"
+                isMono
+                minWidth={210}
+              />
+              <HArrow label="reads" />
+              <Node
+                title="SKILL.md"
+                subtitle="skills/basic/default-agent/ · operator edits in place"
+                tone="muted"
+                isMono
+                minWidth={250}
+              />
+            </div>
+            <VArrow label="procedure text returned to the agent" />
+            <Node
+              title="agent receives the procedure text"
+              subtitle="then picks the commands the skill describes"
+              tone="accent"
+              isMono
+              minWidth={360}
+            />
+            <VArrow label="2 · exec(command)" />
+            <div style={{ width: '100%' }}>
+              <Subgraph
+                label="Docker sandbox"
+                tone="success"
+                annotation="Stage 2 boundary"
+              >
+                <Node
+                  title="exec → shell command"
+                  subtitle="runs the procedure's steps inside the container"
+                  tone="success"
+                  isMono
+                  fullWidth
+                />
+              </Subgraph>
+            </div>
+          </div>
+        </Subgraph>
+      </div>
+      <Legend
+        items={[
+          { tone: 'accent', label: 'Kitaru durable flow + agent' },
+          { tone: 'muted', label: 'Host-side skill file (operator-editable)' },
+          { tone: 'success', label: 'Sandboxed shell (exec)' },
+        ]}
+      />
+      <Caption>
+        The Profile names a <code>skill_source</code>. The host-side{' '}
+        <code>skill</code> tool reads <code>SKILL.md</code> from it and hands the
+        procedure text to the agent, which only then runs those steps through{' '}
+        <code>exec</code> in the Docker sandbox. Edit the markdown and the agent
+        behaves differently on the next run, with no Python change.
+      </Caption>
+    </DiagramFrame>
+  );
+}

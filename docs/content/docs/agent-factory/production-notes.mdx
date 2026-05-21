@@ -5,22 +5,22 @@ description: Which pieces of the Agent Factory tour are teaching stand-ins, wher
 
 Every stage in this tour runs on a laptop. To keep it that way, the example uses stand-ins: Docker for the sandbox, local markdown files for procedures, a self-signed proxy and mock HTTP services for credentials and internal calls. Those stand-ins are good enough to run and read, but they are not the part you would ship.
 
-The part worth keeping is the shape. Each capability sits behind a small, named seam, so you can replace the laptop-friendly version with something your platform team trusts without rewriting the agent. This page is the honest inventory: which pieces are teaching stand-ins, what they stand in for, and where you swap them.
+The part worth keeping is the shape. Each capability sits behind a small, named swap point, so you can replace the laptop-friendly version with something your platform team trusts without rewriting the agent. This page lists the teaching stand-ins, the production pieces they stand in for, and the place where each swap happens.
 
 The Kitaru primitives do not change: durability, wait/resume, and replay are the same concepts you would use in production. The production work is configuring the runtime and storage properly, then hardening the platform around those primitives. Everything else on this page lives in the example's forkable `agent_factory/` library, not in Kitaru itself.
 
 <Callout type="warn">
-  This example is a runnable reference architecture, not a hardened platform. As shipped it is not a hostile-code security boundary and not a turnkey production system. Treat the sections below as a starting checklist, not a guarantee.
+  This example is a runnable reference architecture, not a hardened platform. As shipped it cannot safely contain code that is actively trying to break out, and it is not a turnkey production system. Treat the sections below as a starting checklist rather than a guarantee.
 </Callout>
 
 ## Stand-ins at a glance
 
 | Capability | Tutorial stand-in | What a fork swaps in | The seam |
 |---|---|---|---|
-| Durable execution (Stage 1) | `granular_checkpoints=False` for readable logs | The `KitaruAgent` per-call default | a flag, not a rewrite |
+| Durable execution (Stage 1) | `granular_checkpoints=False` for readable logs | The `KitaruAgent` default: granular checkpoints for model requests and tool calls | the `granular_checkpoints` flag |
 | Command sandbox (Stage 2) | `DockerSandbox` on your laptop | Stronger isolation for risky commands | `run(command) -> ExecResult` |
 | Agent procedures (Stage 3) | `LocalSkillSource` over local markdown | A reviewed, versioned procedure store | `SkillSource.resolve() -> Path` |
-| Service credentials (Stage 4) | mitmproxy + self-signed CA on a shared Docker network | A real secret and network trust boundary | `SandboxProxyRule` plus the proxy container |
+| Service credentials (Stage 4) | mitmproxy + self-signed CA on a shared Docker network | Network isolation, proxy authorization, and production secret handling | `SandboxProxyRule` plus the proxy container |
 | Structured actions (Stage 5) | Typed handlers calling `mocks/server.py` | Real internal services with per-action authorization | the `exec_service` registry |
 | Human approval (Stage 6) | Local terminal prompt | Dashboard, CLI, or REST answered by a known operator | `kitaru.wait()` |
 
@@ -34,14 +34,14 @@ The durability story is identical either way. The only change is how finely work
 
 ## Sandbox isolation
 
-The `exec` tool depends on one method: `run(command) -> ExecResult`. `DockerSandbox` is the laptop implementation. Docker gives a real filesystem, process, and network boundary, which contains an agent that runs a bad `rm`. It is not a wall against code that is actively trying to break out, because the container shares the host's Linux kernel. When the commands matter, swap the backend at that one seam, roughly in order of how much isolation each one buys:
+The `exec` tool depends on one method: `run(command) -> ExecResult`. `DockerSandbox` is the laptop implementation. Docker gives a real filesystem, process, and network boundary, which contains an agent that runs a bad `rm`. It is not a wall against code that is actively trying to break out, because the container shares the host's Linux kernel. When the commands matter, swap the backend at that one seam. These common options often move toward stronger isolation, but the right choice depends on your threat model, workload, and platform configuration:
 
-- **Docker** is the easy local default and stops accidental damage to the host.
-- **gVisor** runs each container against a user-space kernel, so syscalls hit gVisor before the host kernel. Container-shaped UX, stronger isolation.
-- **Kata Containers** wraps each container in a lightweight VM, so a kernel escape lands in the VM rather than on the host.
-- **Firecracker** gives each run its own minimal microVM with a small attack surface (the technology behind AWS Lambda).
-- **Hosted sandboxes** such as E2B, Modal, or Daytona run the commands on isolated infrastructure, so nothing executes on your own machine.
-- **WebAssembly** isolates by default but is a poor fit for arbitrary `bash`; it suits cases where you can constrain what the agent runs.
+- [Docker](https://docs.docker.com/engine/security/) is the easy local default and stops accidental damage to the host.
+- [gVisor](https://gvisor.dev/) runs each container against a user-space kernel, so syscalls hit gVisor before the host kernel. It keeps the container-shaped experience while adding stronger isolation.
+- [Kata Containers](https://katacontainers.io/) wraps each container in a lightweight VM, so a kernel escape lands in the VM rather than on the host.
+- [Firecracker](https://firecracker-microvm.github.io/) gives each run its own minimal microVM with a small attack surface (the technology behind AWS Lambda).
+- Hosted sandboxes such as [E2B](https://e2b.dev/), [Modal](https://modal.com/products/sandboxes), or [Daytona](https://www.daytona.io/) run the commands on isolated infrastructure, so nothing executes on your own machine.
+- [WebAssembly](https://webassembly.org/) isolates by default but is a poor fit for arbitrary `bash`; it suits cases where you can constrain what the agent runs.
 
 The agent's tool wiring does not change when you swap, because the swap happens behind `run(command)`. See [Stage 2](/agent-factory/02-sandbox).
 
@@ -49,11 +49,11 @@ The agent's tool wiring does not change when you swap, because the swap happens 
 
 Procedures live behind `SkillSource`, an alias with a single method, `resolve() -> Path`. The `skill` tool only ever sees a directory of markdown; it never learns where that directory came from. The example ships `LocalSkillSource` for local files. Common fork targets:
 
-- **`GitRepoSkillSource`** clones a versioned skill repo at flow start, so procedures are reviewed through pull requests and shared across teammates and running agents.
-- **`InlineMarkdownSkillSource`** bakes the markdown straight into the `Profile`, which suits one-off agents, tests, or skills generated by another flow.
-- **Object storage, Kitaru artifacts, or a container-image bake** cover stricter deployment shapes.
+- `GitRepoSkillSource` clones a versioned skill repo at flow start, so procedures are reviewed through pull requests and shared across teammates and running agents.
+- `InlineMarkdownSkillSource` bakes the markdown straight into the `Profile`, which suits one-off agents, tests, or skills generated by another flow.
+- Object storage, Kitaru artifacts, or a container-image bake cover stricter deployment shapes.
 
-Be clear about what Kitaru does and does not do here. Kitaru supplies the durable flow the read-and-act cycle runs inside, profile-gated access to the tool, and the swappable source seam. It does not ship skill versioning, review, diffs, change history, or any UI that surfaces edits. Those are real concerns, and a `SkillSource` subclass is where your fork adds them. See [Stage 3](/agent-factory/03-skills).
+Be clear about what Kitaru does and does not do here. Kitaru supplies the durable flow the read-and-act cycle runs inside. The example library supplies `Profile.skill_source`, `SkillSource`, `LocalSkillSource`, profile-gated access to the tool, and the swappable source seam. Kitaru does not ship skill versioning, review, diffs, change history, or any UI that surfaces edits. Those are real concerns, and a `SkillSource` subclass is where your fork adds them. See [Stage 3](/agent-factory/03-skills).
 
 ## Credential architecture
 
@@ -87,7 +87,7 @@ Adding a service is three files: a handler, an args and result Pydantic pair, an
 
 ## Human approval and operator surface
 
-On a laptop the operator answers `ask_question` at the same terminal. On a server the same `kitaru.wait()` record is answered through the dashboard, CLI, or REST API, and the non-interactive run in Stage 6 is already that shape. The durable pause already works the same way in production. The surface around it is where a real platform adds more:
+On a laptop the operator answers `ask_question` at the same terminal. On a server the same `kitaru.wait()` record is answered through the dashboard, CLI, or REST API, and the non-interactive run in Stage 6 is already that shape. The durable pause already works the same way in production. `kitaru.wait()` provides the pause/resume mechanism; the operator surface around it enforces identity, authentication, authorization, and audit policy. A real platform also adds more:
 
 - treat operator input as untrusted and escape it before it reaches anything that interprets bytes, such as an HTML renderer, a shell, or SQL; the example passes it through verbatim;
 - record who approved what when your environment needs an audit trail of approver identity and time;
@@ -102,8 +102,11 @@ If you adopt this pattern for real work, work through these in roughly this orde
 1. **Isolation for command execution.** If the agent can run model-authored or untrusted commands that matter, replace Docker with a stronger backend (gVisor, Kata, Firecracker, or a hosted sandbox). Docker alone is not a hostile-code boundary.
 2. **The credential and network boundary.** Put the worker on its own network, add host, path, and method allowlists to the proxy, move secrets to files or a secret manager, and prefer mTLS. The shared Docker network and the visible proxy bearer are tutorial shortcuts.
 3. **Authorization at the service boundary.** Decide which agent may call which `exec_service` action, and enforce it in one place rather than trusting the model to stay in bounds.
-4. **Input that crosses a trust boundary.** Validate and escape operator answers, model-authored commands, and service arguments before anything acts on them.
-5. **Procedure governance.** Add the review, provenance, and version pinning that Kitaru does not ship for skills, on whichever `SkillSource` you choose.
-6. **The platform around all of this.** Identity, policy, observability, deployment, and a production secret store are out of scope for the example. They are yours to bring.
+4. **Input that crosses a trust boundary.** Treat operator answers and service arguments as untrusted data. Validate and escape them before they reach anything that interprets bytes, such as HTML, SQL, or a shell.
+5. **Model-authored commands.** Do not rely on escaping to make arbitrary shell commands safe. Use sandboxing, command allowlists, typed service alternatives, and careful action design.
+6. **Side-effect idempotency.** Design shell and API mutations around replay and cache behavior. Actions such as `git push`, `curl POST`, database writes, ticket creation, and webhook posts need operation IDs, idempotency keys, deduplication, or checkpoint boundaries that prevent accidental double or missing effects.
+7. **Procedure governance.** Add the review, provenance, and version pinning that Kitaru does not ship for skills, on whichever `SkillSource` you choose.
+8. **Checkpoint and log data governance.** Treat checkpoint data, tool arguments and results, model messages, wait answers, and logs as potentially sensitive. Add retention rules, access controls, redaction or filtering, and deletion or export rules where your environment requires them.
+9. **The platform around all of this.** Identity, policy, observability, deployment, and a production secret store are out of scope for the example. They are yours to bring.
 
 Kitaru's job in this list is narrow: durable execution, wait/resume, and replay survive process failure for you once the runtime and storage are configured for your environment. The rest is platform work, and the point of the example is that each item above has an obvious place to land.

@@ -97,7 +97,9 @@ FORCE_FAILURE=1 python stage_2_sandboxed_exec.py
 
 Turn 1 runs its commands in the container and gets checkpointed, then the flow raises before turn 2 starts. Run it once more with no flags, and turn 1's saved output comes back from cache while turn 2 runs fresh.
 
-There is one important difference from Stage 1: cached shell turns do not replay their side effects. The saved output comes back, but the earlier `cd /tmp` or file writes do not run again. If the next live turn needs filesystem state, put it in `/workspace` or write it as its own checkpointed value. The warning below spells this out because it is exactly the kind of detail that matters when agents start touching real files.
+There is one important difference from Stage 1: cached shell turns do not replay their side effects. The saved output comes back, but the earlier `cd /tmp` or file writes do not run again. If the next live turn needs filesystem state, put it in `/workspace` or write it as its own checkpointed value. The diagram and warning below spell this out because it is exactly the kind of detail that matters when agents start touching real files.
+
+<SandboxReplaySideEffectsDiagram />
 
 ## What's simplified for the tutorial
 
@@ -111,15 +113,15 @@ Shell state is also not carried across separate runs, and that is deliberate. Th
 
 ## Production upgrade path
 
-Stage 2 uses Docker, but the `exec` tool never learns that. It calls `sandbox.run(command)` and expects an `ExecResult` back (an exit code plus captured stdout). Anything that satisfies that one method is a valid sandbox, so changing the backend never touches the agent's tool wiring. `DockerSandbox` is simply the implementation that runs easily on a laptop.
+Stage 2 uses [Docker](https://docs.docker.com/engine/security/), but the `exec` tool never learns that. It calls `sandbox.run(command)` and expects an `ExecResult` back (an exit code plus captured stdout). Anything that satisfies that one method is a valid sandbox, so changing the backend never touches the agent's tool wiring. `DockerSandbox` is simply the implementation that runs easily on a laptop.
 
 When you need a real boundary against untrusted code, that seam is where you swap it. A few backends to reach for, roughly in order of how much isolation they buy:
 
-- gVisor runs each container against a user-space kernel, so syscalls hit gVisor rather than the host kernel directly. Stronger than plain Docker, still container-shaped.
-- Kata Containers wraps each container in a lightweight VM, so a kernel escape lands in the VM instead of on the host.
-- Firecracker microVMs give each run its own minimal VM with a small attack surface (the same technology behind AWS Lambda).
-- Hosted sandboxes like E2B, Modal, or Daytona run commands on isolated infrastructure, so nothing executes on your own machine.
-- WebAssembly isolates by default, though arbitrary `bash` is not its strong suit, so it fits best when you can constrain what the agent runs.
+- [gVisor](https://gvisor.dev/) runs each container against a user-space kernel, so syscalls hit gVisor rather than the host kernel directly. Stronger than plain Docker, still container-shaped.
+- [Kata Containers](https://katacontainers.io/) wraps each container in a lightweight VM, so a kernel escape lands in the VM instead of on the host.
+- [Firecracker](https://firecracker-microvm.github.io/) microVMs give each run its own minimal VM with a small attack surface (the same technology behind AWS Lambda).
+- Hosted sandboxes like [E2B](https://e2b.dev/), [Modal](https://modal.com/products/sandboxes), or [Daytona](https://www.daytona.io/) run commands on isolated infrastructure, so nothing executes on your own machine.
+- [WebAssembly](https://webassembly.org/) isolates by default, though arbitrary `bash` is not its strong suit, so it fits best when you can constrain what the agent runs.
 
 Credentials are the next gap. If the next tool needs a secret, the obvious shortcut is to put that secret in the worker's environment, which puts it one shell command away from the agent.
 

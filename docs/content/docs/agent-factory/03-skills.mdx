@@ -19,6 +19,8 @@ Picture a support lead who wants the triage agent to run one extra verification 
 
 Stage 3 pulls the procedure out of the code. It adds a `skill` tool, and the system prompt shrinks to a single instruction: find your skill and follow it. The steps themselves live in a markdown file, `skills/basic/default-agent/SKILL.md`, that an operator edits in their own editor. The agent calls `skill(action="list")` to discover its skill files, `skill(action="read", path=...)` to load one, then carries out what it read using the `exec` tool from the earlier stages. Edit the markdown, re-run, and the agent behaves differently with no change to Python.
 
+<SkillProcedureFlowDiagram />
+
 ## One-time setup
 
 Stage 3 runs its shell commands in the same Docker sandbox as [Stage 2](/agent-factory/02-sandbox). If you skipped that stage, build the image once:

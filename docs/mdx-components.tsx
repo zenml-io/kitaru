@@ -19,7 +19,9 @@ import {
   HarnessRuntimePlatformDiagram,
   HitlPauseResumeDiagram,
   SandboxBoundaryDiagram,
+  SandboxReplaySideEffectsDiagram,
   ServiceCallPathsDiagram,
+  SkillProcedureFlowDiagram,
   ThreePlanesDiagram,
   WaitResumeDiagram,
 } from '@/components/diagrams';
@@ -48,8 +50,10 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     AgentFactoryOverviewDiagram,
     DurableAgentReplayDiagram,
     SandboxBoundaryDiagram,
+    SandboxReplaySideEffectsDiagram,
     CredentialProxyDiagram,
     ServiceCallPathsDiagram,
+    SkillProcedureFlowDiagram,
     HitlPauseResumeDiagram,
     ...components,
   };
