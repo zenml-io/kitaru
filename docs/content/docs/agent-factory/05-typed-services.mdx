@@ -3,43 +3,50 @@ title: Stage 5 — Your agents need typed services
 description: Add exec_service for structured host-side calls (look up a record, create a ticket, publish a summary) when a shell command is the wrong shape
 ---
 
-**Stage file:** `stage_5_typed_services.py`
+By the end of [Stage 4](/agent-factory/04-credential-proxy), the agent could call internal HTTP endpoints without ever holding a secret. It ran `curl http://wiki.local/...` inside the sandbox, the proxy added the `Authorization` header on the way out, and the token never touched the agent or its container. The credential problem was solved.
 
-## The problem
+What stayed unsolved is the shape of the interaction. A `curl` is a fine way to hit an endpoint when the agent is poking around and reasoning about whatever comes back. It is an awkward way to take a specific, structured action, the kind where the agent has a defined input in mind and cares about a defined result. Stage 5 gives the agent typed service tools for exactly that: it names an action, fills in the arguments, and gets a structured result back. The action runs in your host process, behind a dispatcher you control.
 
-The agent's `exec` tool is a shell, and a shell is the right tool when the agent is genuinely reasoning about command output: reading a file, grepping a log, checking which version of something is installed. It is the wrong tool the moment the agent wants to do one specific, structured thing: publish a summary, look up a customer record, create a ticket, call an internal control plane. Those actions have a defined input and a defined result, and the result is the point, not the raw bytes that came back.
+<Callout type="info">
+  This walkthrough uses `stage_5_typed_services.py` from the runnable Agent Factory example. If you have not cloned the repo yet, start with [Get the code](/agent-factory/#get-the-code) on the overview page.
+</Callout>
 
-## What goes wrong without it
+## When a shell is the wrong shape
 
-With only `exec`, the agent has to hand-assemble the `curl`, get the headers right, and parse the JSON that comes back. That is fragile in both directions: the model can mangle the request (post to the wrong webhook, drop a required field) or misread the response (treat a `500` body as success). A structured action becomes shell-shaped glue the model has to get right character by character, when what the platform wants is typed inputs, typed outputs, and a clear permission boundary.
+Picture the agent at the end of its task. It has a two-sentence summary written, and the next thing it needs to do is post that summary to a team channel. With only the `exec` shell, the only way to do that is to assemble the whole HTTP call by hand: the right URL, a `POST`, an `Authorization` header in the exact format the endpoint wants, and a JSON body with every required field named correctly. Then it has to read the response and decide whether it worked.
 
-## What this stage adds
+Every one of those is a place the model can slip. It posts to the wrong webhook. It drops a required field and the request comes back `400`. It gets a `500`, reads the error body as if it were a normal response, and reports success anyway. A shell is the right tool when the agent is genuinely reasoning about command output, reading a file or grepping a log. It is the wrong tool the moment the agent wants to do one specific structured thing and the result, not the raw bytes, is what matters.
 
-Stage 5 adds a second tool, `exec_service`, for exactly those structured calls. Each service has a typed input and a typed output; the agent picks one by name and fills in its arguments. That splits the work cleanly: `exec` is for shell-shaped work the agent reasons about as command output, and `exec_service` is for structured host-side work where the typed result matters more than the bytes. The agent only sees the services this profile allows, because the tool's description is built from the profile's `allowed_services`.
+Stage 5 adds a second tool, `exec_service`. The agent keeps `exec` for shell-shaped work, but now it also has a set of named services it calls with typed arguments and gets a typed result back. Two of them ship with the example:
+
+- `lookup_wiki` takes a topic string and returns wiki snippets as structured objects, not a blob of text the agent has to parse.
+- `publish_summary` takes a summary string, posts it to a webhook, and returns the `message_id` and timestamp the webhook handed back.
+
+The agent only sees the services this profile allows. The `exec_service` tool's description is built from the profile's `allowed_services` set, so an agent that isn't allowed to publish never sees `publish_summary` in the tool description. Here is how the two paths run side by side:
 
 <ServiceCallPathsDiagram />
 
-## One-time setup
+## Run it
 
-Same `setup.sh` as earlier stages; it also adds the `webhook-token` secret. Idempotent; re-run if you skipped stage 4.
+### One-time setup
+
+Stage 5 uses the same `setup.sh` as the earlier stages, plus one new secret (`webhook-token`) for the publish call. It is idempotent, so re-running it is safe even if you already ran it for an earlier stage.
 
 ```bash
 bash setup.sh
 ```
 
-## Run it
+Then run the stage:
 
 ```bash
 DISABLE_CACHE=1 python stage_5_typed_services.py
 ```
 
-### Env-var toggles
+`DISABLE_CACHE=1` forces every checkpoint to re-execute, the same flag the earlier stages use, so you get a clean run while you are learning instead of cached output. The agent follows a skill that mixes both paths on purpose: `exec` to read some OS facts out of the sandbox, then `exec_service` for the typed lookup and publish. At the end it prints a `Published ...` line.
 
-- `DISABLE_CACHE=1` — same as earlier stages.
+## What you should see in the logs
 
-## What to look for in the logs
-
-The agent follows a skill mixing both paths: sandboxed `exec` for OS info, host-side `exec_service` for the typed lookup + publish:
+The run prints a log that interleaves the container startup, the agent's tool calls, and the final result:
 
 ```text
 [mock-services]  Started container … (host=http://localhost:54321)
@@ -61,47 +68,58 @@ Published <message_id> at <timestamp>: <one- or two-sentence summary
 the agent drafted from the wiki snippet>.
 ```
 
-The summary text is whatever the LLM produced this turn, so it's not canonical and will vary across runs. The structure is what's stable: `<message_id>` and `<timestamp>` come back as typed fields from `publish_summary`, and the agent stitches them into the line.
+The summary text is whatever the model wrote this turn, so it changes from run to run. The structure is what stays put: `<message_id>` and `<timestamp>` come back as typed fields from `publish_summary`, and the agent drops them into the line.
 
-Notice what's *not* in the log: there are no `[sandbox]` lines for the `lookup_wiki` or `publish_summary` calls because they run host-side, not in the worker container. The proxy stays idle for those; `[proxy]` only appears at startup/teardown. Only the two `exec` shell commands traverse the sandbox.
+The part to notice is what's missing. The two `exec` commands show up as `[sandbox] $ ...` lines, because they ran inside the worker container. The `lookup_wiki` and `publish_summary` calls have no `[sandbox]` lines at all. They appear only as the two `[mock-services]` HTTP lines, because they ran in your host process and went straight to the service. The `[proxy]` line shows up only at startup and teardown; it sits idle through the whole turn, because nothing routed an HTTP call through the sandbox during the service work.
 
-## How it works
+## What just happened?
 
-`exec` and `exec_service` are the two credential paths, and they resolve secrets in different places:
+The agent did two different kinds of work, and Stage 5 sent each down its own path.
 
-| Path | Where it runs | Creds resolved | Stage |
-|---|---|---|---|
-| `exec` (sandboxed) | inside the worker container | proxy injects matching `Authorization` headers | 4 |
-| `exec_service` (typed) | in the host process | host resolves `kitaru.get_secret(...)` directly | 5 |
+The OS-info steps are genuinely shell-shaped. The agent runs `cat /etc/os-release`, reads the output, and reasons about it. That is what `exec` is for, and it runs where Stage 2 put it: inside the sandbox container, isolated from your machine.
 
-The proxy is **not** involved for `exec_service`. The pieces involved:
+The lookup and the publish are not shell-shaped. `lookup_wiki` has a fixed input (a topic) and a fixed output (wiki snippets). `publish_summary` has a fixed input (a summary) and a fixed output (a message id and a timestamp). For those, the agent never built an HTTP request. It named the service, handed over typed arguments, and `exec_service` ran the matching handler in your host process. The handler resolved its own credential with `kitaru.get_secret(...)` and made the call itself.
 
-- [`agent_factory/services/schemas.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/services/schemas.py) — Pydantic models for each service's args + result (`LookupWikiArgs`, `LookupWikiResult`, `PublishSummaryArgs`, `PublishSummaryResult`, `WikiSnippet`).
-- [`agent_factory/services/registry.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/services/registry.py) — `ALL_SERVICES` mapping service name → `(args_model, handler, summary)`. `build_service_description(allowed)` renders the dynamic tool description from a set of allowed services.
-- `agent_factory/services/lookup_wiki.py` + `publish_summary.py` — the host-side handlers. Each one resolves its credential via `kitaru.get_secret(...)` and makes an HTTP call to the mock.
-- `agent_factory/tools.py` — `exec_service` tool factory. Validates `args` against the right Pydantic model on every call, so a malformed arg dict surfaces a Pydantic `ValidationError` to the agent rather than blowing up inside the handler.
-- `agent_factory/profile.py` — adds `allowed_services: set[str]` field. The `exec_service` tool's description is built from this set, so the LLM sees only the services this agent can dispatch to.
-- `mocks/server.py` — adds `POST /webhooks/{webhook_id}` (Discord-shaped, returns `{message_id, posted_at}`). Auth via `Authorization: Bot webhook-token`.
-- `mocks/runner.py` — publishes the mock on a free host port (Docker assigns it) and exports `AGENT_FACTORY_MOCK_BASE_URL` in the host process environment so service handlers can reach it without taking the runner instance as a dependency.
-- `skills/with-services/default-agent/SKILL.md` — stage 5's skill. Uses `exec` for the OS-info steps and `exec_service` for the lookup + publish.
+That host-side path is why the proxy stayed idle for the service work. The proxy from Stage 4 injects credentials for HTTP that leaves the sandbox; the service handlers never enter the sandbox, so there is nothing for it to inject into. The separation is deliberate too: a webhook token or an internal control-plane credential never has to travel into the sandbox network at all. Two credential paths, for two kinds of work:
 
-A few mechanics worth knowing:
+| Path | Where it runs | How it gets its credentials |
+|---|---|---|
+| `exec` (shell) | inside the sandbox container | the proxy injects the `Authorization` header on the way out (Stage 4) |
+| `exec_service` (typed) | in your host process | the handler resolves `kitaru.get_secret(...)` itself (Stage 5) |
 
-- **Why a flat `(service_name, args)` shape, not a typed union directly?** Some LLM providers handle JSON-Schema `oneOf`/`anyOf` inconsistently. A flat `service_name: str` + `args: dict` parameter shape is reliable across providers; the body re-validates by constructing `<ArgsModel>(**args)` based on the chosen `service_name`. The dynamic tool description embeds each service's args schema as plain text so the LLM sees what it needs to emit.
-- **Why host-side, not in the sandbox?** Two reasons. (1) The result is structured, so the agent doesn't need to parse `curl` output; it just gets `WikiSnippet` objects back. (2) Some services (publishing webhooks, hitting internal control planes) shouldn't run from the worker container at all; their credentials never touch the sandbox network. The host-side path keeps that separation explicit.
-- **HTTP errors surface to the agent as typed results, not exceptions.** `lookup_wiki` and `publish_summary` catch `urllib.error.HTTPError` and return a result with an error-shaped field (`topic="<error 401: …>"` or `message_id="<error 401: …>"`) so the LLM can reason about the failure rather than crashing the turn.
+## Try one small change
 
-## What's simplified for the tutorial
+Want to see the permission boundary do its job? Open `stage_5_typed_services.py` and narrow the profile's `allowed_services` from both services down to just the lookup:
 
-The services here hit a local mock (`mocks/server.py`), not real internal APIs, and each handler holds a single credential resolved from a kitaru secret. The shapes are realistic (a wiki lookup, a Discord-style webhook publish), but the endpoints are stand-ins for whatever your platform actually exposes.
+```python
+allowed_services={"lookup_wiki"},
+```
 
-## Production upgrade path
+Re-run with `DISABLE_CACHE=1`. The agent can still look up the wiki snippet, but `publish_summary` is no longer in the tool description it sees, so it has no way to post. You will watch it do the lookup and then report that it can't publish, rather than quietly calling an action it was never granted. That set is the list of actions this agent is allowed to take. Shrink the set and the agent's reach shrinks with it.
 
-Swap the mock handlers for your real internal services, and add per-service authorization where it belongs: the typed boundary is a natural place to enforce which agent may call which action. Adding a service is three files: a new `<name>.py` handler, a new args + result Pydantic pair in `schemas.py`, and a new entry in `ALL_SERVICES`. The tool surface and its dynamic description update automatically. A real platform engineer's skill can mix both paths: `exec` to grep a logfile inside the worker, then `exec_service` to file a typed record in their internal ticketing system.
+## How the pieces fit together
 
-## Source
+Adding a service touches a small set of files, each with one job:
 
-- [`stage_5_typed_services.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/stage_5_typed_services.py)
-- [`agent_factory/services/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/services)
+- `agent_factory/services/schemas.py` holds the Pydantic models for each service's arguments and result (`LookupWikiArgs`, `LookupWikiResult`, `PublishSummaryArgs`, `PublishSummaryResult`, `WikiSnippet`).
+- `agent_factory/services/registry.py` maps each service name to its `(args_model, handler, summary)` triple in `ALL_SERVICES`, and `build_service_description(allowed)` renders the tool description from the set of allowed services.
+- `agent_factory/services/lookup_wiki.py` and `publish_summary.py` are the host-side handlers. Each resolves its credential with `kitaru.get_secret(...)` and makes one HTTP call to the mock.
+- `agent_factory/tools.py` builds the `exec_service` tool. It validates `args` against the right Pydantic model on every call, so a malformed argument dict comes back to the agent as a `ValidationError` it can read instead of crashing inside the handler.
+- `agent_factory/profile.py` adds the `allowed_services` field, which is what the tool description is built from.
+- `mocks/server.py` adds the `POST /webhooks/{webhook_id}` endpoint (Discord-shaped, returns `{message_id, posted_at}`, auth via `Authorization: Bot webhook-token`).
+- `mocks/runner.py` publishes the mock on a free host port and exports `AGENT_FACTORY_MOCK_BASE_URL` so the handlers can reach it.
+- `skills/with-services/default-agent/SKILL.md` is the procedure the agent follows: `exec` for the OS-info steps, `exec_service` for the lookup and publish.
 
-Next up: [Stage 6 — Your agents need to ask humans things](/agent-factory/06-hitl).
+Two design choices are worth calling out. The tool takes a flat `(service_name, args)` shape rather than a typed union of every service, because some model providers handle JSON-Schema `oneOf`/`anyOf` inconsistently; a plain `service_name: str` plus `args: dict` is reliable across providers, and the body re-validates by constructing the right args model from the chosen name. And HTTP failures come back to the agent as typed results, not exceptions: `lookup_wiki` and `publish_summary` catch `urllib.error.HTTPError` and return a result with an error-shaped field (`topic="<error 401: …>"` or `message_id="<error 401: …>"`), so the model can reason about the failure instead of the turn blowing up.
+
+## From mock to real
+
+Everything the services talk to here is a local mock (`mocks/server.py`), not a real internal API, and each handler holds a single credential resolved from a Kitaru secret. The shapes are realistic, a wiki lookup and a Discord-style webhook publish, but the endpoints stand in for whatever your platform actually exposes.
+
+For a real fork, swap the mock handlers for your services and add per-service authorization at the typed boundary. It is the natural place to enforce which agent may call which action, the same boundary you narrowed by hand in the experiment above. Adding a service is three files: a `<name>.py` handler, an args-and-result Pydantic pair in `schemas.py`, and an entry in `ALL_SERVICES`. The tool and its description pick up the new service on their own. A real platform skill can mix both paths freely: `exec` to grep a logfile inside the sandbox, then `exec_service` to file a typed record in your ticketing system.
+
+## Where this leaves us
+
+The agent now has two clean ways to act. It reasons over command output with `exec` inside the sandbox, and it takes specific, structured actions with `exec_service` through a dispatcher you control. Between the sandbox, the skill files, the credential proxy, and now typed services, you have narrowed what the agent can do down to a set of actions you actually approve of.
+
+But narrowing is not the same as judgment. Some of those approved actions still should not happen on the model's say-so alone. Posting that summary to a live channel can't be undone once it fires, and some forks in a task are genuinely a person's call. The next stage gives the agent a way to stop and ask one, then pick the run back up once the answer comes in.
