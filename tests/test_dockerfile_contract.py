@@ -127,11 +127,34 @@ def test_dockerfile_installs_kitaru() -> None:
     assert "KITARU_VERSION" in dockerfile
 
 
-def test_dockerfile_downloads_kitaru_ui() -> None:
-    """The image should download the Kitaru UI release archive."""
+def test_dockerfile_copies_packaged_kitaru_ui() -> None:
+    """The image should copy UI files from the installed Kitaru package."""
     dockerfile = _read_dockerfile()
-    assert "kitaru-ui.tar.gz" in dockerfile
-    assert "sha256sum" in dockerfile or "sha256" in dockerfile
+    assert "KITARU_UI_DIST" in dockerfile
+    assert "Path(kitaru.__file__).parent" in dockerfile
+    assert '"_ui" / "dist"' in dockerfile
+    assert "Kitaru package UI assets missing" in dockerfile
+    assert 'cp -a "$KITARU_UI_DIST/." "$DASHBOARD_DIR/"' in dockerfile
+
+
+def test_dockerfile_does_not_download_kitaru_ui_release_assets() -> None:
+    """Docker must not have a second hidden UI release download path."""
+    dockerfile = _read_dockerfile()
+    forbidden_markers = [
+        "ARG KITARU_UI_TAG",
+        "KITARU_UI_REPO_URL",
+        "zenml-io/kitaru-ui",
+        "kitaru-ui.tar.gz",
+        "releases/latest/download",
+        "releases/download",
+        "curl ",
+        "sha256sum",
+    ]
+    for marker in forbidden_markers:
+        assert marker not in dockerfile, (
+            f"Dockerfile still contains UI download marker {marker!r}. "
+            "Bundle UI into the Kitaru package before Docker builds instead."
+        )
 
 
 def test_dockerfile_configures_workload_manager_for_deployments() -> None:
@@ -382,14 +405,25 @@ def test_dockerfile_dev_zenml_minimum_matches_package_contract() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dockerfile_uses_curl_fail_flag() -> None:
-    """curl must use --fail (-f) so HTTP errors are not silently ignored."""
-    dockerfile = _read_dockerfile()
-    for line in dockerfile.splitlines():
-        if "curl " in line and "-o " in line:
-            assert re.search(r"-[a-zA-Z]*f", line) or "--fail" in line, (
-                f"curl download missing --fail flag: {line.strip()}"
-            )
+def test_dockerignore_allows_generated_package_ui() -> None:
+    """Source Docker builds must include generated package UI but not local caches."""
+    dockerignore = _read_file(".dockerignore")
+    assert "dist/" in dockerignore
+    assert "!src/kitaru/_ui/dist/" in dockerignore
+    assert "!src/kitaru/_ui/dist/**" in dockerignore
+    assert "!src/kitaru/_ui/bundle_manifest.json" in dockerignore
+    assert ".kitaru-ui-bundles/" in dockerignore
+
+
+def test_just_server_image_bundles_ui_before_docker_build() -> None:
+    """Local source server builds should prepare package UI before Docker runs."""
+    justfile = _read_file("Justfile")
+    server_image_recipe = justfile.split("\nserver-image:", maxsplit=1)[1].split(
+        "\n# Build and push production server image",
+        maxsplit=1,
+    )[0]
+    assert "bash scripts/download-ui.sh" in server_image_recipe
+    assert "--build-arg KITARU_UI_TAG" not in server_image_recipe
 
 
 def test_server_dockerfiles_switch_to_root_for_build() -> None:
