@@ -34,7 +34,7 @@ If you would rather build everything at once, `bash setup.sh` builds this image 
 ## Run it
 
 ```bash
-DISABLE_CACHE=1 python stage_2_sandboxed_exec.py
+DISABLE_CACHE=1 uv run python stage_2_sandboxed_exec.py
 ```
 
 The flow runs two `agent.run_sync()` turns that share a single `with DockerSandbox(...)`. Turn 1 looks around the machine and `cd`s into `/tmp`. Turn 2 writes a `summary.txt` "in the current directory," and because the container's shell is long-lived, turn 1's `cd` is still in effect, so the file lands at `/tmp/summary.txt` even though turn 2 never names an absolute path.
@@ -92,7 +92,7 @@ The second is a workspace that outlives the container. A named volume, `workspac
 Stage 1's durability did not disappear when the sandbox arrived. This time leave `DISABLE_CACHE` off so the cache is live, and make the flow crash between the two turns:
 
 ```bash
-FORCE_FAILURE=1 python stage_2_sandboxed_exec.py
+FORCE_FAILURE=1 uv run python stage_2_sandboxed_exec.py
 ```
 
 Turn 1 runs its commands in the container and gets checkpointed, then the flow raises before turn 2 starts. Run it once more with no flags, and turn 1's saved output comes back from cache while turn 2 runs fresh.

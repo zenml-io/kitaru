@@ -13,15 +13,16 @@ Stage 1 needs only an OpenAI key, no Docker. From the repository root:
 ```bash
 cd examples/end_to_end/agent_harness_platform
 uv sync
+uv run kitaru init
 export OPENAI_API_KEY=sk-...
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 The agent investigates the host (OS, kernel, current user, process count) and returns a one-paragraph summary. That is durable PydanticAI in about 30 lines.
 
 ## The six stages
 
-Every stage calls the LLM, so keep `OPENAI_API_KEY` set throughout. Stage 1 runs on its own; stages 2-6 need Docker running and a one-time `bash setup.sh` first (see [Setup for stages 2-6](#setup-for-stages-2-6)). The usual run command is `DISABLE_CACHE=1 python <stage_file>`.
+Every stage calls the LLM, so keep `OPENAI_API_KEY` set throughout. Stage 1 runs on its own; stages 2-6 need Docker running and a one-time `bash setup.sh` first (see [Setup for stages 2-6](#setup-for-stages-2-6)). The usual run command is `DISABLE_CACHE=1 uv run python <stage_file>`.
 
 | Stage | Setup | Demonstrates | What to look for |
 |---|---|---|---|
@@ -45,7 +46,7 @@ This builds the three local images (sandbox, proxy, mock services) and creates t
 Then run any stage:
 
 ```bash
-DISABLE_CACHE=1 python stage_2_sandboxed_exec.py
+DISABLE_CACHE=1 uv run python stage_2_sandboxed_exec.py
 ```
 
 To watch the containers while a stage runs, open a second terminal. `docker ps` shows them suffixed with the execution ID (for example `agent_harness_platform_sandbox_<id>`), and `docker logs <name>` tails one.
@@ -57,9 +58,9 @@ To watch the containers while a stage runs, open a second terminal. `docker ps` 
 
 ```bash
 # 1. Crash after turn 1 finishes its real LLM + tool work.
-FORCE_FAILURE=1 python stage_1_basic_agent.py
+FORCE_FAILURE=1 uv run python stage_1_basic_agent.py
 # 2. Re-run without the flag. Turn 1 comes from cache; turn 2 runs fresh.
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 | | Step 1 (crash) | Step 2 (re-run) |
@@ -76,7 +77,7 @@ Stage 6 pauses at `ask_question`. There are two ways to answer it.
 **Interactive** (simplest for a first run):
 
 ```bash
-DISABLE_CACHE=1 python stage_6_hitl.py
+DISABLE_CACHE=1 uv run python stage_6_hitl.py
 ```
 
 The local runtime prompts on the same terminal. Type an answer, press enter, and the flow resumes.
@@ -84,10 +85,10 @@ The local runtime prompts on the same terminal. Type an answer, press enter, and
 **Non-interactive** (the shape a server uses):
 
 ```bash
-DISABLE_CACHE=1 python stage_6_hitl.py </dev/null &
+DISABLE_CACHE=1 uv run python stage_6_hitl.py </dev/null &
 # once "Waiting on ask_question..." appears:
-kitaru executions list
-kitaru executions input <execution_id> --value '"Verified by ops on call"'
+uv run kitaru executions list
+uv run kitaru executions input <execution_id> --value '"Verified by ops on call"'
 ```
 
 On the local stack the flow polls for input until a 600s timeout, so you do need to answer it or it eventually times out. On a remote stack the same wait record is answered through the dashboard, CLI, or REST API.

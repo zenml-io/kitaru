@@ -81,8 +81,9 @@ The local tour needs Docker and one model-provider API key. The wiki and webhook
 git clone https://github.com/zenml-io/kitaru.git
 cd kitaru/examples/end_to_end/agent_harness_platform
 uv sync
+uv run kitaru init
 export OPENAI_API_KEY=sk-...
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 The full source lives in [`examples/end_to_end/agent_harness_platform/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_harness_platform) on GitHub. It includes the runnable stage files, the reusable `agent_harness_platform/` library, mocks, skills, and Dockerfiles.

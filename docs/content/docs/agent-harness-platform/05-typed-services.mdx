@@ -39,7 +39,7 @@ bash setup.sh
 Then run the stage:
 
 ```bash
-DISABLE_CACHE=1 python stage_5_typed_services.py
+DISABLE_CACHE=1 uv run python stage_5_typed_services.py
 ```
 
 `DISABLE_CACHE=1` forces every checkpoint to re-execute, the same flag the earlier stages use, so you get a clean run while you are learning instead of cached output. The agent follows a skill that mixes both paths on purpose: `exec` to read some OS facts out of the sandbox, then `exec_service` for the typed lookup and publish. At the end it prints a `Published ...` line.

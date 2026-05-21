@@ -43,7 +43,7 @@ uv run kitaru status
 
 ## Start here — Agent Harness Platform
 
-A platform engineer's starter kit for building their org's internal agent harness platform on top of Kitaru + PydanticAI. **Bring Docker and one model-provider API key; then `bash setup.sh && python stage_N_*.py`.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
+A platform engineer's starter kit for building their org's internal agent harness platform on top of Kitaru + PydanticAI. **Bring Docker and one model-provider API key; then `bash setup.sh && uv run python stage_N_*.py`.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
 
 Use it as the first thing you read end-to-end, and as the thing you fork for your team.
 
@@ -53,8 +53,9 @@ Use it as the first thing you read end-to-end, and as the thing you fork for you
 git clone https://github.com/zenml-io/kitaru.git
 cd kitaru/examples/end_to_end/agent_harness_platform
 uv sync
+uv run kitaru init
 export OPENAI_API_KEY=sk-...
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 ## Other end-to-end examples

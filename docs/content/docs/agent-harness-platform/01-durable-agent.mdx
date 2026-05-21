@@ -42,7 +42,7 @@ The stage file uses a `FORCE_FAILURE` environment variable to fake a downstream 
 Crash on purpose, between the two turns.
 
 ```bash
-FORCE_FAILURE=1 python stage_1_basic_agent.py
+FORCE_FAILURE=1 uv run python stage_1_basic_agent.py
 ```
 
 Turn 1 (the `default` checkpoint) does its real LLM and shell work and is written to durable storage. Then the flow raises before turn 2 ever starts, and you see the failure printed at the end.
@@ -54,7 +54,7 @@ Turn 1 (the `default` checkpoint) does its real LLM and shell work and is writte
 Re-run, this time for real.
 
 ```bash
-python stage_1_basic_agent.py
+uv run python stage_1_basic_agent.py
 ```
 
 Now turn 1 is served straight from the cache (no model call, basically instant), turn 2 runs fresh, and the flow returns the combined result.
@@ -98,7 +98,7 @@ The practical payoff is that you did not rewrite the agent as a state machine, l
 Want to prove the cache is doing the work, rather than the task just being cheap the second time? Force every checkpoint to re-run with `DISABLE_CACHE`:
 
 ```bash
-DISABLE_CACHE=1 python stage_1_basic_agent.py
+DISABLE_CACHE=1 uv run python stage_1_basic_agent.py
 ```
 
 With the cache off, turn 1 re-executes from scratch every time, even when a finished copy is sitting in storage. Run it once normally, then once with `DISABLE_CACHE=1`, and watch the wall-clock time and the LLM call count for `default` jump back up. That gap is what the cache saves on every retry. The flag is also handy while you are editing the flow and want a clean run each time.
