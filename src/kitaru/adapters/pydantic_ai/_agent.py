@@ -29,7 +29,6 @@ from kitaru.flow import _is_multiple_terminal_steps_output_error
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
 from pydantic_ai.agent.abstract import (
-    AgentBuiltinTool,
     AgentInstructions,
     AgentMetadata,
     AgentModelSettings,
@@ -39,7 +38,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT, OutputSpec
-from pydantic_ai.tools import AgentDepsT, DeferredToolResults
+from pydantic_ai.tools import AgentDepsT, AgentNativeTool, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
@@ -60,6 +59,12 @@ from ._utils import (
     validate_checkpoint_config,
     validate_tool_checkpoint_overrides,
 )
+
+# Pydantic AI renamed "built-in tools" to "native tools" in v1.95 while
+# keeping the old ``builtin_tools=`` runtime keyword as a deprecated alias.
+# Kitaru still exposes the old keyword for compatibility, so keep the local
+# type name stable while importing the new upstream type.
+AgentBuiltinTool = AgentNativeTool
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar("kitaru_tracking_active", default=False)
 _INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar(
@@ -97,6 +102,15 @@ def _has_tool_checkpoint_opt_out(
 ) -> bool:
     """Return whether any named tool explicitly opts out of checkpointing."""
     return bool(overrides and any(override is False for override in overrides.values()))
+
+
+def _builtin_tools_kwargs(
+    builtin_tools: Sequence[AgentBuiltinTool[Any]] | None,
+) -> dict[str, Sequence[AgentBuiltinTool[Any]]]:
+    """Return deprecated upstream kwargs only when the caller supplied tools."""
+    if builtin_tools is None:
+        return {}
+    return {"builtin_tools": builtin_tools}
 
 
 class _AutoFlowSlot:
@@ -1022,7 +1036,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     metadata=metadata,
                     infer_name=infer_name,
                     toolsets=prepared_toolsets,
-                    builtin_tools=builtin_tools,
+                    **_builtin_tools_kwargs(builtin_tools),
                     event_stream_handler=wrapped_handler,
                     capabilities=capabilities,
                     spec=spec,
@@ -1133,7 +1147,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         metadata=metadata,
                         infer_name=infer_name,
                         toolsets=prepared_toolsets,
-                        builtin_tools=builtin_tools,
+                        **_builtin_tools_kwargs(builtin_tools),
                         event_stream_handler=wrapped_handler,
                         capabilities=capabilities,
                         spec=spec,
@@ -1240,7 +1254,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 metadata=metadata,
                 infer_name=infer_name,
                 toolsets=prepared_toolsets,
-                builtin_tools=builtin_tools,
+                **_builtin_tools_kwargs(builtin_tools),
                 event_stream_handler=wrapped_handler,
                 capabilities=capabilities,
                 spec=spec,
@@ -1304,7 +1318,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 metadata=metadata,
                 infer_name=infer_name,
                 toolsets=prepared_toolsets,
-                builtin_tools=builtin_tools,
+                **_builtin_tools_kwargs(builtin_tools),
                 capabilities=capabilities,
                 spec=spec,
             ) as run:
