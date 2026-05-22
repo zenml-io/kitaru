@@ -123,7 +123,7 @@ What to expect in Kitaru:
   `run_summary__langgraph_local_calls_demo_...`;
 - one user-facing summary artifact: `summary__langgraph_demo`.
 
-This is the granular mode. Kitaru is not splitting open arbitrary LangGraph nodes. It can create true call checkpoints because the middleware is physically wrapped around the synchronous LangChain model/tool handlers.
+This is `checkpoint_strategy="calls"`. Kitaru is not splitting open arbitrary LangGraph nodes. It can create true call checkpoints because the middleware is physically wrapped around the synchronous LangChain model/tool handlers.
 
 ## Why `thread_id` matters
 

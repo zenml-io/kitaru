@@ -109,7 +109,7 @@ def demo_auto_flow() -> str:
 
 
 def demo_granular() -> str:
-    """Granular mode: each model / tool / MCP call becomes its own checkpoint."""
+    """Calls strategy: each model / tool / MCP call becomes its own checkpoint."""
     inner = Agent(
         TestModel(call_tools=[]), name=f"granular_agent_{_RUN_TAG}", output_type=str
     )
@@ -120,7 +120,7 @@ def demo_granular() -> str:
 
     researcher = KitaruAgent(
         inner,
-        granular_checkpoints=True,
+        checkpoint_strategy="calls",
         model_checkpoint_config={"retries": 2},
         tool_checkpoint_config={"retries": 1},
         tool_checkpoint_config_by_name={

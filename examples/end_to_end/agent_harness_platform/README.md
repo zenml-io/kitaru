@@ -95,7 +95,7 @@ On the local stack the flow polls for input until a 600s timeout, so you do need
 
 ## A note on the logs
 
-Every stage file passes `granular_checkpoints=False` so each agent turn shows up as one readable log block (`default`, `default_2`) while you learn the primitives. A real fork drops that flag and takes the `KitaruAgent` default, where every model request and tool call gets its own checkpoint and cache key. The one exception is wait-bearing tools: keep `ask_question` at flow scope (for example `tool_checkpoint_config_by_name={"ask_question": False}`) so the pause still resolves. The [production notes](https://kitaru.ai/docs/agent-harness-platform/production-notes/) cover this in full.
+Every stage file passes `checkpoint_strategy="turn"` so each agent turn shows up as one readable log block (`default`, `default_2`) while you learn the primitives. A real fork drops that setting and takes the `KitaruAgent` default, `checkpoint_strategy="calls"`, where every model request and tool call gets its own checkpoint and cache key. The one exception is wait-bearing tools: keep `ask_question` at flow scope (for example `tool_checkpoint_config_by_name={"ask_question": False}`) so the pause still resolves. The [production notes](https://kitaru.ai/docs/agent-harness-platform/production-notes/) cover this in full.
 
 Replay is a general Kitaru primitive rather than a stage of its own here. See [Replay and overrides](https://kitaru.ai/docs/guides/replay-and-overrides/) to re-run a flow from a chosen checkpoint.
 

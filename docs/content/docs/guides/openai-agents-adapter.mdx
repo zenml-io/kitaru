@@ -144,9 +144,11 @@ You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
 
 ### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
 
-Kitaru places one checkpoint around the outer `Runner.run(...)` call. That
+Kitaru places one checkpoint around the outer OpenAI `Runner.run(...)` call. That
 single checkpoint becomes the flow's terminal artifact, so
-`flow.run(...).wait()` returns the run result cleanly.
+`flow.run(...).wait()` returns the run result cleanly. The name
+`"runner_call"` is deliberately specific: it means Kitaru is wrapping the outer
+OpenAI runner call, not claiming to own every SDK-internal step.
 
 Use this when you want one coarse replay boundary for the whole agent run, or
 whenever you want a clean Python value back from `.wait()`.

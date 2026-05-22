@@ -107,7 +107,7 @@ A hard cap of 50 model requests keeps runaway agents from emptying your wallet.
 
 ## Why every tool call is its own checkpoint
 
-The agent is wrapped with `KitaruAgent(granular_checkpoints=True)`. That turns
+The agent is wrapped with `KitaruAgent(checkpoint_strategy="calls")`. That turns
 each model request, each tool call, and each MCP invocation into its own Kitaru
 checkpoint — individually cached, individually replayable, visible in the
 dashboard.

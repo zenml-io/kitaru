@@ -289,6 +289,8 @@ KitaruGraphRunner(graph, name="review_graph", checkpoint_strategy="graph_call")
 
 `graph_call` is the universal, coarse strategy. It means one Kitaru checkpoint is placed around each outer graph invocation. It works for raw LangGraph graphs, LangChain agents that behave like LangGraph runnables, and any compatible object with `invoke(...)` / `ainvoke(...)`.
 
+The name stays `"graph_call"` because LangGraph still owns graph-internal state and replay. Kitaru is making the outer graph invocation durable; it is not replacing LangGraph's own checkpointer or claiming every node is a Kitaru replay boundary.
+
 The outer graph-call checkpoint defaults are conservative:
 
 | Setting | Default | Why |

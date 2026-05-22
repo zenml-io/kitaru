@@ -130,7 +130,7 @@ Three files carry the change:
 
 What keeps this small is that the example writes almost no HITL-specific code. The `wait_for_input` call inside the tool body is the only piece of it. The adapter handles the suspend-and-resume mechanics, so the tool body reads like an ordinary function that happens to take a while. The wait's schema is left open (any JSON), so the operator can answer with a plain string or a structured value; the tool body coerces the result to a string before handing it to the agent.
 
-The one constraint to know about is the per-tool checkpoint wrapper. Stage 6 runs the same teaching setting as the rest of the tour, `granular_checkpoints=False`, so `ask_question` is not wrapped in its own tool checkpoint while the agent turn is running. That keeps the wait path simple for the tutorial.
+The one constraint to know about is the per-tool checkpoint wrapper. Stage 6 runs the same teaching setting as the rest of the tour, `checkpoint_strategy="turn"`, so `ask_question` is not wrapped in its own tool checkpoint while the agent turn is running. That keeps the wait path simple for the tutorial.
 
 ## What's simplified for the tutorial
 
@@ -140,7 +140,7 @@ Two things here are teaching shortcuts. The tool calls `wait_for_input(...)` fro
 
 On a server the operator answers through the dashboard, CLI, or REST API instead of a local terminal prompt; the non-interactive run above is already that shape. One thing to fix before you rely on it: the example passes operator input through unescaped, so before you hand that input to anything that interprets the bytes (an HTML renderer, a shell, a SQL query), escape it yourself.
 
-If you drop the teaching-only `granular_checkpoints=False` and run granular (the upgrade [Stage 1](/agent-harness-platform/01-durable-agent) describes), exempt `ask_question` from per-tool checkpoints by passing `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`. The other tools (`exec`, `skill`, `exec_service`) stay granular.
+If you drop the teaching-only `checkpoint_strategy="turn"` and use the default `checkpoint_strategy="calls"` (the upgrade [Stage 1](/agent-harness-platform/01-durable-agent) describes), exempt `ask_question` from per-tool checkpoints by passing `tool_checkpoint_config_by_name={"ask_question": False}` to `KitaruAgent`. The other tools (`exec`, `skill`, `exec_service`) stay per-call checkpointed.
 
 ## Where this leaves us
 

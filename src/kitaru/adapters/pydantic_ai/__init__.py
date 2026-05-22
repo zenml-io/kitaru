@@ -24,7 +24,12 @@ from ._mcp_server import KitaruMCPServer, kitaruify_mcp_server
 from ._model import KitaruModel
 from ._policy import CaptureMode, CapturePolicy
 from ._toolset import KitaruToolset, kitaruify_toolset
-from ._utils import CheckpointConfig, CheckpointRuntime
+from ._utils import (
+    CheckpointConfig,
+    CheckpointRuntime,
+    CheckpointStrategy,
+    validate_checkpoint_strategy,
+)
 from ._wait_for_input import wait_for_input
 
 ensure_pydantic_ai_mcp_import_compat()
@@ -100,6 +105,7 @@ __all__ = [
     'CapturePolicy',
     'CheckpointConfig',
     'CheckpointRuntime',
+    'CheckpointStrategy',
     'KitaruAgent',
     'KitaruFunctionToolset',
     'KitaruMCPServer',
@@ -108,6 +114,7 @@ __all__ = [
     'hitl_tool',
     'kitaruify_mcp_server',
     'kitaruify_toolset',
+    'validate_checkpoint_strategy',
     'wait_for_input',
     'wrap',
 ]

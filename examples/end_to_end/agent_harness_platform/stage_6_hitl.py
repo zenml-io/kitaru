@@ -91,13 +91,10 @@ def agent_harness_platform_flow() -> str:
         DockerSandbox(execution_id=execution_id, proxy=proxy) as sandbox,
     ):
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
-        # Turn mode for log-clarity — see stage 1's note. Turn mode also
-        # sidesteps the wait-in-checkpoint constraint that granular mode
-        # would put on `ask_question` (which calls `wait_for_input` from
-        # its body — that path requires flow scope). In production, run
-        # granular and pass `tool_checkpoint_config_by_name={
-        #   "ask_question": False}` to opt that one tool out.
-        agent = KitaruAgent(agent, granular_checkpoints=False)
+        # Use turn strategy for this tour; stage 1 explains why. It also keeps
+        # `ask_question` out of per-call tool checkpoints; production can use
+        # `checkpoint_strategy="calls"` with an `ask_question` checkpoint opt-out.
+        agent = KitaruAgent(agent, checkpoint_strategy="turn")
         result = agent.run_sync("Carry out your procedure and return the result.")
 
     print(f"\n{result.output}\n")

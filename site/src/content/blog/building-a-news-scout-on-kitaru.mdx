@@ -23,7 +23,7 @@ scout_agent = KitaruAgent(
         tools=[search_news, search_twitter, investigate, fetch_url],
         system_prompt=SYSTEM_PROMPT,
     ),
-    granular_checkpoints=True,
+    checkpoint_strategy="calls",
     capture=CapturePolicy(tool_capture="full"),
 )
 ```
@@ -32,21 +32,21 @@ The inner `Agent(...)` is a regular [PydanticAI](https://ai.pydantic.dev) agent.
 
 The `capture=CapturePolicy(tool_capture="full")` flag saves tool arguments and results as artifacts on every call. That's what makes the dashboard actually useful for debugging. Click a failed `investigate` call, see which URL the agent tried, see what came back.
 
-## Granular checkpoints
+## Per-call checkpoints
 
-The `granular_checkpoints=True` flag is doing most of the work here. Every model request and every tool call inside the agent loop becomes its own Kitaru checkpoint that you can cache and replay on its own.
+The `checkpoint_strategy="calls"` setting is doing most of the work here. Every model request and every tool call inside the agent loop becomes its own Kitaru checkpoint that you can cache and replay on its own.
 
-A typical run is 8–15 tool calls. Any one of them can flake: a paywall, a rate limit, a flaky DNS resolver on one article. Without granular checkpoints, recovering from a single dead URL means rerunning the whole agent from scratch — replanning, re-searching, re-investigating. With them on, I replay from exactly the failed call:
+A typical run is 8–15 tool calls. Any one of them can flake: a paywall, a rate limit, a flaky DNS resolver on one article. Without per-call checkpoints, recovering from a single dead URL means rerunning the whole agent from scratch — replanning, re-searching, re-investigating. With them on, I replay from exactly the failed call:
 
 ```bash
 kitaru executions replay <exec_id> --from investigate_tool_5
 ```
 
-Granular is right for *this* agent because the work is exploratory. The agent decides what to do at runtime. For a coding agent that runs a fixed set of phases (analyze, explore, plan, edit, test), I'd checkpoint at the phase, not the individual tool call. The shape of the work should decide where you draw the checkpoint.
+The calls strategy is right for *this* agent because the work is exploratory. The agent decides what to do at runtime. For a coding agent that runs a fixed set of phases (analyze, explore, plan, edit, test), I'd checkpoint at the phase, not the individual tool call. The shape of the work should decide where you draw the checkpoint.
 
 ## A named final artifact
 
-Granular has a downside I hit immediately. A 12-call run produces 12 checkpoints, plus the model requests in between. When I open a run in the dashboard to read the brief, I don't want to scroll past every tool call to find it.
+Per-call checkpointing has a downside I hit immediately. A 12-call run produces 12 checkpoints, plus the model requests in between. When I open a run in the dashboard to read the brief, I don't want to scroll past every tool call to find it.
 
 So the flow ends with one extra checkpoint that promotes the agent's text into a named artifact:
 

@@ -520,10 +520,10 @@ def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
 
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
-    """Turn mode should persist tracker metadata and checkpoint artifacts."""
-    durable_agent = _make_wrapped_agent(
-        name_prefix="turn_agent",
-        granular_checkpoints=False,
+    """Turn strategy should persist tracker metadata and checkpoint artifacts."""
+    durable_agent = KitaruAgent(
+        _make_test_agent(name_prefix="turn_agent"),
+        checkpoint_strategy="turn",
     )
 
     @flow

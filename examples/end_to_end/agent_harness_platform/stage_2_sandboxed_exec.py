@@ -67,9 +67,8 @@ def agent_harness_platform_flow() -> str:
 
     with DockerSandbox(execution_id=execution_id) as sandbox:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
-        # Turn mode for log-clarity — see stage 1's note. Production
-        # forks should drop the kwarg for per-call durability.
-        agent = KitaruAgent(agent, granular_checkpoints=False)
+        # Use turn strategy for this tour; stage 1 explains why.
+        agent = KitaruAgent(agent, checkpoint_strategy="turn")
 
         # Turn 1: investigates the machine and cd's into /tmp.
         turn_1 = agent.run_sync(_TURN_1_PROMPT)
