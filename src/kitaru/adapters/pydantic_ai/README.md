@@ -220,7 +220,10 @@ The turn checkpoint is configured via `turn_checkpoint_config=` with `checkpoint
 durable_agent = KitaruAgent(agent, checkpoint_strategy="turn")
 ```
 
-Existing code that passes `granular_checkpoints=True` or `granular_checkpoints=False` still works. The preferred spelling is now `checkpoint_strategy="calls"` for the old `True` behavior and `checkpoint_strategy="turn"` for the old `False` behavior.
+**Looking for `granular_checkpoints`?** It still works as a backwards-compatible alias, not a removed feature. Prefer `checkpoint_strategy` in new code:
+
+- `granular_checkpoints=True` → `checkpoint_strategy="calls"`
+- `granular_checkpoints=False` → `checkpoint_strategy="turn"`
 
 **Streaming exception.** `checkpoint_strategy="calls"` cannot apply to streamed turns — per-call checkpointing around an `@asynccontextmanager` would require draining and replaying the stream inside a sync ZenML step. When an `event_stream_handler` is supplied, `KitaruAgent` transparently falls back to opening a turn checkpoint for that call so tracking and durability still work. That fallback disables turn-checkpoint caching for the call, because serving the final result from cache would skip the handler's progress side effects. `run_stream()` and `iter()` always require an explicit `@kitaru.checkpoint` in both modes.
 
@@ -297,6 +300,8 @@ Most users should only need `KitaruAgent`. For custom durable surfaces, the lowe
 - `KitaruModel` — wrap a Pydantic AI `Model` directly.
 - `KitaruToolset` / `KitaruFunctionToolset` / `KitaruMCPServer` — wrap toolsets or MCP servers independently.
 - `kitaruify_toolset(toolset, capture=..., ...)` — dispatch helper that picks the right wrapper class.
+- `CheckpointStrategy` — public type alias for supported checkpoint strategy values.
+- `validate_checkpoint_strategy(...)` — normalize and validate checkpoint strategy inputs.
 - `KitaruRunContext` — `RunContext` subclass that survives isolated-runtime serialization boundaries.
 
 ## Troubleshooting
@@ -320,6 +325,7 @@ from kitaru.adapters.pydantic_ai import (
     KitaruRunContext,
     CapturePolicy, CaptureMode,
     CheckpointConfig, CheckpointRuntime,
+    CheckpointStrategy, validate_checkpoint_strategy,
     hitl_tool,
     wait_for_input,
     kitaruify_toolset,

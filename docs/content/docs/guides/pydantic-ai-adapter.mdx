@@ -253,10 +253,10 @@ durable_agent = KitaruAgent(agent, checkpoint_strategy="turn")
 ```
 
 <Callout type="info">
-  **Compatibility.** Existing code that passes `granular_checkpoints=True` or
-  `granular_checkpoints=False` still works. The preferred spelling is now
-  `checkpoint_strategy="calls"` for the old `True` behavior and
-  `checkpoint_strategy="turn"` for the old `False` behavior.
+  **Looking for `granular_checkpoints`?** It still works as a
+  backwards-compatible alias, not a removed feature. Prefer `checkpoint_strategy` in new code:
+  `granular_checkpoints=True` → `checkpoint_strategy="calls"`; and
+  `granular_checkpoints=False` → `checkpoint_strategy="turn"`.
 </Callout>
 
 <Callout type="info">
