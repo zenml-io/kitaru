@@ -99,6 +99,12 @@ uv run kitaru model list
 
 Use aliases that make sense for your environment. For a quick first run, you need at least `balanced` for observed seeding and `cheap` plus `balanced` for the first two-candidate matrix.
 
+The live example folder has its own README with a shorter map of the files and commands:
+
+```text
+examples/end_to_end/replay_lab/langgraph_requirements_triage/README.md
+```
+
 The example matrix lives here:
 
 ```text
