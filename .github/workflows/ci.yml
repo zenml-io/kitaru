@@ -4,6 +4,12 @@ on:
   push:
     branches: [develop]
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,6 +23,7 @@ env:
   ZENML_ENABLE_RICH_TRACEBACK: false
 jobs:
   lint:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -29,6 +36,7 @@ jobs:
       - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
           -print0 | xargs -0 uv run yamlfix --check
   typos:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -36,6 +44,7 @@ jobs:
           persist-credentials: false
       - uses: crate-ci/typos@5374cbf686e897b15713110e233094e2874de7ef  # v1.46.1
   typecheck:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -45,6 +54,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ty check
   audit:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -57,6 +67,7 @@ jobs:
           awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
   links:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -162,6 +173,7 @@ jobs:
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
   test:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
