@@ -33,7 +33,8 @@ The important safety check is the baseline lane. If production cost was high, bu
 
 The runnable demo lives here:
 
-- `examples/end_to_end/replay_lab/README.md` — user-facing walkthrough.
+- `examples/end_to_end/replay_lab/README.md` — deterministic no-key walkthrough.
+- `examples/end_to_end/replay_lab/MODEL_MATRIX_KIT.md` — generic opt-in live model-matrix walkthrough.
 - `examples/end_to_end/replay_lab/seed_observed.py` — seeds observed executions and writes a generated manifest.
 - `examples/end_to_end/replay_lab/run_replay_lab.py` — runs the comparison.
 - `examples/end_to_end/replay_lab/render_report.py` — renders static HTML from the JSON report.
@@ -50,17 +51,19 @@ Backend entrypoint:
 Use the narrow sub-skill that matches the user's current step:
 
 - Use `kitaru-replay-lab-investigate` when the user has executions or a problem signal and needs a cohort manifest.
-- Use `kitaru-replay-lab-compare` when the manifest and candidate descriptor exist and the user wants to run the comparison.
+- Use `kitaru-replay-lab-compare` when the manifest and candidate descriptor exist and the user wants to run the deterministic single-candidate comparison.
+- Use `kitaru-replay-lab-model-matrix` when the user wants the live requirements-triage matrix: checking aliases, seeding or reusing a manifest, running multiple model candidates, using the evaluator descriptor, rendering HTML, or explaining candidate rankings.
 - Use `kitaru-replay-lab-report` when reports exist and the user wants help reading, explaining, or polishing them.
 
 ## Default workflow
 
-1. Read `examples/end_to_end/replay_lab/README.md` first so your commands match the current demo.
-2. If there is no manifest yet, use the investigate path or run the seed script described in the README.
-3. Confirm the candidate descriptor path, usually `examples/end_to_end/replay_lab/candidates/cheaper_support_agent.json`.
-4. Run or guide the `kitaru_replay_lab_compare` flow through MCP or the local demo script.
-5. Read the JSON/Markdown report in `examples/end_to_end/replay_lab/reports/`.
-6. Explain the result in terms of replay drift and candidate effect.
+1. Read `examples/end_to_end/replay_lab/README.md` first so your commands match the current deterministic demo.
+2. If the user asks about the opt-in live model matrix, switch to `kitaru-replay-lab-model-matrix` and read `examples/end_to_end/replay_lab/MODEL_MATRIX_KIT.md`.
+3. If there is no manifest yet, use the investigate path or run the seed script described in the README.
+4. Confirm the candidate descriptor path, usually `examples/end_to_end/replay_lab/candidates/cheaper_support_agent.json`.
+5. Run or guide the `kitaru_replay_lab_compare` flow through MCP or the local demo script.
+6. Read the JSON/Markdown report in `examples/end_to_end/replay_lab/reports/`.
+7. Explain the result in terms of replay drift and candidate effect.
 
 ## Guardrails
 

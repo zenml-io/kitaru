@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Replay Lab Report: Requirements triage LangGraph demo</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui; }
+    body { margin: 0; background: #f7f4ed; color: #171717; }
+    main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 64px; }
+    .hero { background: #111827; color: white; border-radius: 28px; padding: 32px; }
+    .hero p { color: #d1d5db; max-width: 860px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 6px 12px; font-weight: 800; }
+    .pill.ship { background: #bbf7d0; color: #064e3b; }
+    .pill.caution { background: #fde68a; color: #78350f; }
+    .pill.hold { background: #fecaca; color: #7f1d1d; }
+    .pill.trust { background: #dbeafe; color: #1e3a8a; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin: 20px 0 30px; }
+    .metric, .card, .case-card { background: white; border: 1px solid #e5e7eb; border-radius: 20px; padding: 20px; box-shadow: 0 10px 24px #11182714; }
+    .metric strong { display: block; font-size: 28px; margin-top: 6px; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 16px; overflow: hidden; margin: 18px 0 28px; }
+    th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid #eee; }
+    th { background: #ede9fe; font-size: 13px; text-transform: uppercase; }
+    code { background: #f3f4f6; padding: 2px 5px; border-radius: 6px; }
+    pre { white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; max-height: 260px; overflow: auto; }
+    .recommendation { font-size: 22px; line-height: 1.35; }
+    .muted { color: #64748b; }
+    .section-score { display: flex; gap: 8px; flex-wrap: wrap; }
+    .section-score span { border-radius: 999px; padding: 4px 8px; background: #f1f5f9; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <span class="pill trust">Replay trust: steady</span>
+    <h1>Replay Lab Report: Requirements triage LangGraph demo</h1>
+    <p class="recommendation">Ship candidate `balanced` for a guarded trial: safe enough from this replay cohort, not a blind deployment.</p>
+    <p>Observed and baseline replay lanes stayed within the configured drift threshold for this cohort.</p>
+  </section>
+
+  <section class="grid" aria-label="summary metrics">
+    <div class="metric">Cases<strong>1</strong></div>
+    <div class="metric">Candidates<strong>2</strong></div>
+    <div class="metric">Replay drift warnings<strong>0</strong></div>
+    <div class="metric">Failed/timed-out lanes<strong>0</strong></div>
+  </section>
+
+  <h2>Per-candidate verdicts</h2>
+  <section class="cards"><article class='card'><span class='pill ship'>ship</span><h3>Balanced alias</h3><p><code>balanced</code></p><p>Completed cases: <strong>1</strong></p><p>Changed outputs: <strong>0</strong></p><p>Average quality: <strong>1</strong></p><p>Inspect: none</p></article><article class='card'><span class='pill hold'>hold</span><h3>Cheap alias</h3><p><code>cheap</code></p><p>Completed cases: <strong>1</strong></p><p>Changed outputs: <strong>1</strong></p><p>Average quality: <strong>0.833</strong></p><p>Inspect: onboarding-workflow-access</p></article></section>
+
+  <h2>Candidate ranking</h2>
+  <table>
+    <thead><tr><th>Rank</th><th>Candidate</th><th>Verdict</th><th>Efficiency wins</th><th>Quality losses</th><th>Inspect</th></tr></thead>
+    <tbody><tr><td>1</td><td><strong>Balanced alias</strong><br><code>balanced</code></td><td><span class='pill ship'>ship</span></td><td>1</td><td>0</td><td>none</td></tr><tr><td>2</td><td><strong>Cheap alias</strong><br><code>cheap</code></td><td><span class='pill hold'>hold</span></td><td>1</td><td>1</td><td>onboarding-workflow-access</td></tr></tbody>
+  </table>
+
+  <h2>Case summary</h2>
+  <table>
+    <thead><tr><th>Case</th><th>Replay trust</th><th>Candidate</th><th>Cost Δ</th><th>Latency Δ</th><th>Quality Δ</th><th>Changed?</th><th>Verdict</th></tr></thead>
+    <tbody><tr><td>onboarding-workflow-access</td><td>steady</td><td>Cheap alias</td><td>-0.18 (-42.9%)</td><td>-2.1 (-40.4%)</td><td>-0.167 (-16.7%)</td><td>yes</td><td>hold</td></tr><tr><td>onboarding-workflow-access</td><td>steady</td><td>Balanced alias</td><td>-0.07 (-16.7%)</td><td>-0.8 (-15.4%)</td><td>+0 (+0.0%)</td><td>no</td><td>ship</td></tr></tbody>
+  </table>
+
+  <h2>Case-level details</h2>
+  <section class='case-card'><h3>onboarding-workflow-access</h3><p><strong>Why this case is in the cohort:</strong> Access-control request with compliance-sensitive missing details.</p><table><thead><tr><th>Lane</th><th>Execution</th><th>Status</th><th>Cost</th><th>Latency</th><th>Quality</th><th>LLM calls</th></tr></thead><tbody><tr><td>observed</td><td><code>sample-observed-001</code></td><td>completed</td><td>0.43</td><td>5.3s</td><td>1</td><td>1</td></tr><tr><td>baseline_replay</td><td><code>sample-baseline-001</code></td><td>completed</td><td>0.42</td><td>5.2s</td><td>1</td><td>1</td></tr><tr><td>candidate:cheap</td><td><code>sample-candidate-cheap-001</code></td><td>completed</td><td>0.24</td><td>3.1s</td><td>0.833</td><td>1</td></tr><tr><td>candidate:balanced</td><td><code>sample-candidate-balanced-001</code></td><td>completed</td><td>0.35</td><td>4.4s</td><td>1</td><td>1</td></tr></tbody></table><h4>Changed output: cheap</h4><div class='cards'><article><h5>Baseline replay</h5><pre>Summary
+The request asks for role-based onboarding access with approval and audit needs.
+
+Known requirements
+- Admins can invite users.
+- Managers approve access.
+- Auditors can review changes.
+
+Missing information
+- Approval SLA.
+- Audit retention period.
+- Fallback owner when a manager is unavailable.
+
+Risks
+- Unclear permissions can grant too much access.
+- Missing retention rules can break audit expectations.
+
+Recommended next action
+Confirm the approval SLA and audit retention period before writing implementation tickets.</pre></article><article><h5>Candidate replay</h5><pre>Summary
+The request asks for role-based onboarding access.
+
+Known requirements
+- Admins invite users.
+- Managers approve access.
+- Auditors review changes.
+
+Missing information
+- Approval SLA.
+- Audit retention period.
+
+Recommended next action
+Confirm the approval SLA before implementation.</pre></article></div><h4>baseline_replay evaluator</h4><p>Evaluator: <code>requirements_triage_v1</code>; score: <strong>1</strong>; limitations: none</p><div class='section-score'><span>avoids_false_certainty: yes</span><span>gives_next_action: yes</span><span>has_summary: yes</span><span>lists_known_requirements: yes</span><span>lists_missing_information: yes</span><span>lists_risks: yes</span></div><h4>observed evaluator</h4><p>Evaluator: <code>requirements_triage_v1</code>; score: <strong>1</strong>; limitations: none</p><div class='section-score'><span>avoids_false_certainty: yes</span><span>gives_next_action: yes</span><span>has_summary: yes</span><span>lists_known_requirements: yes</span><span>lists_missing_information: yes</span><span>lists_risks: yes</span></div><h4>candidate:cheap evaluator</h4><p>Evaluator: <code>requirements_triage_v1</code>; score: <strong>0.833</strong>; limitations: Missing Risks section.</p><div class='section-score'><span>avoids_false_certainty: yes</span><span>gives_next_action: yes</span><span>has_summary: yes</span><span>lists_known_requirements: yes</span><span>lists_missing_information: yes</span><span>lists_risks: no</span></div><h4>candidate:balanced evaluator</h4><p>Evaluator: <code>requirements_triage_v1</code>; score: <strong>1</strong>; limitations: none</p><div class='section-score'><span>avoids_false_certainty: yes</span><span>gives_next_action: yes</span><span>has_summary: yes</span><span>lists_known_requirements: yes</span><span>lists_missing_information: yes</span><span>lists_risks: yes</span></div></section>
+</main>
+</body>
+</html>

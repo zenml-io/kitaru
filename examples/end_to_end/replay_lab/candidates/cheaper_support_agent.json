@@ -1,4 +1,5 @@
 {
+  "id": "cheaper",
   "label": "Cheaper deterministic support agent",
   "flow_inputs": {
     "agent_profile": "candidate"

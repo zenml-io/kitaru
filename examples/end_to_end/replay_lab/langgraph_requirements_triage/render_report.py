@@ -1,4 +1,4 @@
-"""Render the deterministic Replay Lab JSON report as static HTML."""
+"""Render the requirements-triage Replay Lab JSON report as static HTML."""
 
 from __future__ import annotations
 
@@ -6,12 +6,17 @@ import argparse
 from pathlib import Path
 
 try:  # Package import path used by tests and repo-root execution.
-    from .verdict_renderer import render_html_report
-except ImportError:  # Direct script path used by README commands.
+    from ..verdict_renderer import render_html_report
+except ImportError:  # Direct script path used by example commands.
+    import sys
+
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
     from verdict_renderer import render_html_report  # type: ignore[no-redef]
 
-DEFAULT_REPORT_JSON = Path(__file__).parent / "reports" / "support-replay-lab-demo.json"
-DEFAULT_HTML = Path(__file__).parent / "reports" / "support-replay-lab-demo.html"
+DEFAULT_REPORT_JSON = (
+    Path(__file__).parent / "reports" / "requirements-triage-sample.json"
+)
+DEFAULT_HTML = Path(__file__).parent / "reports" / "requirements-triage-sample.html"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

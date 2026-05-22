@@ -451,27 +451,54 @@ run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/re
 run_test "Replay Lab seed help"    $UV_RUN python examples/end_to_end/replay_lab/seed_observed.py --help
 run_test "Replay Lab compare help" $UV_RUN python examples/end_to_end/replay_lab/run_replay_lab.py --help
 run_test "Replay Lab render help"  $UV_RUN python examples/end_to_end/replay_lab/render_report.py --help
+run_test "Replay Lab LangGraph flow help" \
+    $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/requirements_flow.py --help
+run_test "Replay Lab LangGraph seed help" \
+    $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py --help
+run_test "Replay Lab LangGraph compare help" \
+    $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/run_replay_lab.py --help
+run_test "Replay Lab LangGraph render help" \
+    $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/render_report.py --help
 
-if [[ "${KITARU_SMOKE_REPLAY_LAB:-}" != "1" ]]; then
-    skip_test "Replay Lab full demo" "set KITARU_SMOKE_REPLAY_LAB=1 to run observed/replay/report path"
+REPLAY_LAB_TMP=$(mktemp -d)
+run_test "Replay Lab seed observed" \
+    timed 120 $UV_RUN python examples/end_to_end/replay_lab/seed_observed.py \
+        --case support-refund-delay \
+        --case regulated-medical-claim \
+        --manifest-path "$REPLAY_LAB_TMP/manifest.json"
+run_test "Replay Lab compare" \
+    timed 180 $UV_RUN python examples/end_to_end/replay_lab/run_replay_lab.py \
+        --manifest-path "$REPLAY_LAB_TMP/manifest.json" \
+        --candidate-path examples/end_to_end/replay_lab/candidates/cheaper_support_agent.json \
+        --report-dir "$REPLAY_LAB_TMP/reports" \
+        --timeout-seconds 120 \
+        --poll-interval-seconds 1
+run_test "Replay Lab render HTML" \
+    $UV_RUN python examples/end_to_end/replay_lab/render_report.py \
+        --json-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.json" \
+        --output-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.html"
+
+if [[ "${KITARU_SMOKE_REPLAY_LAB_LANGGRAPH:-}" != "1" ]]; then
+    skip_test "Replay Lab LangGraph full model matrix" "set KITARU_SMOKE_REPLAY_LAB_LANGGRAPH=1 to run live model calls"
 else
-    REPLAY_LAB_TMP=$(mktemp -d)
-    run_test "Replay Lab seed observed" \
-        timed 120 $UV_RUN python examples/end_to_end/replay_lab/seed_observed.py \
-            --case support-refund-delay \
-            --case regulated-medical-claim \
-            --manifest-path "$REPLAY_LAB_TMP/manifest.json"
-    run_test "Replay Lab compare" \
-        timed 180 $UV_RUN python examples/end_to_end/replay_lab/run_replay_lab.py \
-            --manifest-path "$REPLAY_LAB_TMP/manifest.json" \
-            --candidate-path examples/end_to_end/replay_lab/candidates/cheaper_support_agent.json \
-            --report-dir "$REPLAY_LAB_TMP/reports" \
-            --timeout-seconds 120 \
+    REPLAY_LAB_LANGGRAPH_TMP=$(mktemp -d)
+    run_test "Replay Lab LangGraph seed observed" \
+        timed 180 $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py \
+            --small \
+            --model balanced \
+            --manifest-path "$REPLAY_LAB_LANGGRAPH_TMP/requirements_triage.json"
+    run_test "Replay Lab LangGraph compare matrix" \
+        timed 300 $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/run_replay_lab.py \
+            --manifest-path "$REPLAY_LAB_LANGGRAPH_TMP/requirements_triage.json" \
+            --matrix-path examples/end_to_end/replay_lab/langgraph_requirements_triage/candidates/model_matrix.example.json \
+            --candidate-limit 2 \
+            --report-dir "$REPLAY_LAB_LANGGRAPH_TMP/reports" \
+            --timeout-seconds 180 \
             --poll-interval-seconds 1
-    run_test "Replay Lab render HTML" \
-        $UV_RUN python examples/end_to_end/replay_lab/render_report.py \
-            --json-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.json" \
-            --output-path "$REPLAY_LAB_TMP/reports/support-replay-lab-demo.html"
+    run_test "Replay Lab LangGraph render HTML" \
+        $UV_RUN python examples/end_to_end/replay_lab/langgraph_requirements_triage/render_report.py \
+            --json-path "$REPLAY_LAB_LANGGRAPH_TMP/reports/requirements-triage-langgraph-demo.json" \
+            --output-path "$REPLAY_LAB_LANGGRAPH_TMP/reports/requirements-triage-langgraph-demo.html"
 fi
 
 # ---------------------------------------------------------------------------

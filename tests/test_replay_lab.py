@@ -6,7 +6,8 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +19,7 @@ from kitaru._replay_lab import (
     render_json_report,
     render_markdown_report,
     validate_candidate_descriptor,
+    validate_candidate_descriptors,
 )
 from kitaru.client import ExecutionStatus
 
@@ -58,7 +60,10 @@ class FakeExecutions:
         )
         if len(self.replay_calls) == 1:
             return self._executions["baseline"]
-        return self._executions["candidate"]
+        candidate_index = len(self.replay_calls) - 1
+        return self._executions.get(
+            f"candidate-{candidate_index}", self._executions["candidate"]
+        )
 
 
 def _execution(
@@ -123,6 +128,7 @@ def test_load_manifest_validates_cases_defaults_and_aliases() -> None:
 def test_candidate_descriptor_rejects_unknown_fields() -> None:
     descriptor = validate_candidate_descriptor(
         {
+            "id": "cheap",
             "label": "cheaper prompt",
             "flow_inputs": {"temperature": 0},
             "checkpoint_overrides": {"draft_answer.prompt": "shorter"},
@@ -130,11 +136,29 @@ def test_candidate_descriptor_rejects_unknown_fields() -> None:
         }
     )
 
+    assert descriptor.id == "cheap"
     assert descriptor.label == "cheaper prompt"
     assert descriptor.flow_inputs == {"temperature": 0}
 
     with pytest.raises(ValueError, match="Unsupported candidate descriptor"):
-        validate_candidate_descriptor({"label": "v2", "deployment": "future"})
+        validate_candidate_descriptor(
+            {"id": "v2", "label": "v2", "deployment": "future"}
+        )
+
+
+def test_candidate_descriptors_reject_duplicates_and_non_objects() -> None:
+    with pytest.raises(ValueError, match="Duplicate candidate descriptor id `cheap`"):
+        validate_candidate_descriptors(
+            [
+                {"id": "cheap", "label": "Cheap"},
+                {"id": "cheap", "label": "Cheap again"},
+            ]
+        )
+
+    with pytest.raises(
+        ValueError, match=r"candidate_descriptors\[1\]` must be an object"
+    ):
+        validate_candidate_descriptors(cast(Any, [None]))
 
 
 def test_extract_metrics_prefers_scorecard_and_final_response_artifacts() -> None:
@@ -237,6 +261,7 @@ def test_compare_replay_lab_runs_three_lanes_and_detects_changed_output() -> Non
             ],
         },
         candidate_descriptor={
+            "id": "cheap",
             "label": "cheaper answer",
             "flow_inputs": {"style": "brief"},
             "checkpoint_overrides": {"draft_answer.prompt": "short"},
@@ -248,9 +273,13 @@ def test_compare_replay_lab_runs_three_lanes_and_detects_changed_output() -> Non
     )
 
     case = report.cases[0]
+    assert report.candidates[0].id == "cheap"
+    assert set(case.lanes) == {"observed", "baseline_replay"}
     assert case.replay_drift.cost.absolute == pytest.approx(-0.10)
-    assert case.candidate_effect.cost.absolute == pytest.approx(-0.10)
-    assert case.output_changed_vs_baseline is True
+    candidate_result = case.candidate_results[0]
+    assert candidate_result.candidate_id == "cheap"
+    assert candidate_result.effect_vs_baseline.cost.absolute == pytest.approx(-0.10)
+    assert candidate_result.output_changed_vs_baseline is True
     assert fake_client.executions.replay_calls == [
         {
             "exec_id": "observed",
@@ -294,7 +323,7 @@ def test_compare_replay_lab_marks_timeout_lane_and_keeps_processing() -> None:
                 }
             ],
         },
-        candidate_descriptor={"label": "candidate"},
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
         client=fake_client,
         timeout_seconds=0,
         poll_interval_seconds=0.01,
@@ -304,7 +333,7 @@ def test_compare_replay_lab_marks_timeout_lane_and_keeps_processing() -> None:
     case = report.cases[0]
     assert case.lanes["baseline_replay"].status == "timeout"
     assert case.lanes["baseline_replay"].timed_out is True
-    assert case.lanes["candidate_replay"].status == "completed"
+    assert case.candidate_results[0].lane.status == "completed"
     assert report.summary["failed_or_timed_out_lane_count"] == 1
 
 
@@ -355,7 +384,7 @@ def test_compare_replay_lab_marks_replay_start_failure_as_lane_failure() -> None
                 }
             ],
         },
-        candidate_descriptor={"label": "candidate"},
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
         client=fake_client,
         timeout_seconds=0,
         poll_interval_seconds=0.01,
@@ -363,11 +392,355 @@ def test_compare_replay_lab_marks_replay_start_failure_as_lane_failure() -> None
     )
 
     case = report.cases[0]
-    candidate_lane = case.lanes["candidate_replay"]
+    candidate_lane = case.candidate_results[0].lane
     assert candidate_lane.status == "failed"
     assert candidate_lane.error_message is not None
     assert "candidate crashed" in candidate_lane.error_message
     assert report.summary["failed_or_timed_out_lane_count"] == 1
+
+
+def test_compare_replay_lab_accepts_plural_candidates() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.30}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    cheap = _execution("candidate-1", scorecard={"cost": 0.20}, final_response="b")
+    quality = _execution("candidate-2", scorecard={"cost": 0.35}, final_response="a")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {
+                "observed": observed,
+                "baseline": baseline,
+                "candidate-1": cheap,
+                "candidate-2": quality,
+                "candidate": cheap,
+            }
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "matrix"}],
+        },
+        candidate_descriptors=[
+            {"id": "cheap", "label": "Cheap alias", "flow_inputs": {"model": "cheap"}},
+            {
+                "id": "quality",
+                "label": "Quality alias",
+                "flow_inputs": {"model": "quality"},
+            },
+        ],
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    case = report.cases[0]
+    assert set(case.lanes) == {"observed", "baseline_replay"}
+    assert [result.candidate_id for result in case.candidate_results] == [
+        "cheap",
+        "quality",
+    ]
+    assert report.summary["candidate_ids"] == ["cheap", "quality"]
+    assert report.summary["candidates"]["cheap"]["changed_output_count"] == 1
+    assert report.summary["candidates"]["cheap"]["efficiency_win_count"] == 1
+    assert report.summary["candidates"]["cheap"]["aggregate_verdict"] == "caution"
+    assert report.summary["candidates"]["quality"]["changed_output_count"] == 0
+    assert report.summary["candidate_ranking"][0]["candidate_id"] == "cheap"
+    assert report.summary["replay_trust"]["label"] == "Replay trust: steady"
+    assert "safe enough" not in report.summary["overall_recommendation"]
+    assert fake_client.executions.replay_calls[1]["flow_inputs"] == {"model": "cheap"}
+    assert fake_client.executions.replay_calls[2]["flow_inputs"] == {"model": "quality"}
+
+
+def test_compare_replay_lab_rejects_singular_and_plural_candidates_together() -> None:
+    with pytest.raises(ValueError, match="Provide only one"):
+        compare_replay_lab(
+            manifest={
+                "name": "Support cohort",
+                "default_from_checkpoint": "draft_answer",
+                "cases": [
+                    {"case_id": "case-1", "exec_id": "observed", "reason": "matrix"}
+                ],
+            },
+            candidate_descriptor={"id": "cheap", "label": "Cheap"},
+            candidate_descriptors=[{"id": "quality", "label": "Quality"}],
+        )
+
+
+def test_evaluator_callable_overrides_quality_and_keeps_runtime_facts() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution(
+        "candidate",
+        scorecard={"cost": 0.20, "quality_score": 0.50},
+        final_response="b",
+    )
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    def evaluator(request: Any) -> dict[str, Any]:
+        return {
+            "evaluator_id": "callable-v1",
+            "quality_score": 0.91,
+            "scorecard": {"has_summary": True},
+            "limitations": [f"review {request.lane_name}"],
+            "cost": 999,
+            "cost_usd": 999,
+            "latency_ms": 1,
+        }
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=evaluator,
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    candidate_lane = report.cases[0].candidate_results[0].lane
+    assert candidate_lane.metrics.cost == 0.20
+    assert candidate_lane.metrics.quality_score == 0.91
+    assert candidate_lane.metrics.evaluation == {
+        "evaluator_id": "callable-v1",
+        "quality_score": 0.91,
+        "scorecard": {"has_summary": True},
+        "limitations": ["review candidate_replay"],
+    }
+    assert candidate_lane.metrics.evaluation is not None
+    assert "cost_usd" not in candidate_lane.metrics.evaluation
+    assert "latency_ms" not in candidate_lane.metrics.evaluation
+    assert "review candidate_replay" in candidate_lane.limitations
+
+
+def test_evaluator_recomputes_replay_drift_and_candidate_effect() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="b")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    def evaluator(request: Any) -> dict[str, Any]:
+        scores = {"observed": 0.9, "baseline_replay": 0.5, "candidate_replay": 0.4}
+        return {"quality_score": scores[request.lane_name]}
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=evaluator,
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    case = report.cases[0]
+    assert case.replay_drift.quality_score.absolute == pytest.approx(-0.4)
+    assert case.candidate_results[
+        0
+    ].effect_vs_baseline.quality_score.absolute == pytest.approx(-0.1)
+    assert case.candidate_results[0].verdict == "caution"
+
+
+def test_evaluator_fill_missing_does_not_replace_existing_quality() -> None:
+    observed = _execution(
+        "observed", scorecard={"quality_score": 0.70}, final_response="a"
+    )
+    baseline = _execution(
+        "baseline", scorecard={"quality_score": 0.60}, final_response="a"
+    )
+    candidate = _execution(
+        "candidate", scorecard={"quality_score": 0.50}, final_response="b"
+    )
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=lambda request: {"quality_score": 0.99},
+        evaluator_precedence="fill_missing",
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    assert report.cases[0].candidate_results[0].lane.metrics.quality_score == 0.50
+
+
+def test_evaluator_warns_on_error_by_default() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="b")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=lambda request: (_ for _ in ()).throw(RuntimeError("bad score")),
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    assert any(
+        "Evaluator failed" in limitation for limitation in report.cases[0].limitations
+    )
+
+
+def test_evaluator_fail_policy_raises() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="b")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="bad score"):
+        compare_replay_lab(
+            manifest={
+                "name": "Support cohort",
+                "default_from_checkpoint": "draft_answer",
+                "cases": [
+                    {"case_id": "case-1", "exec_id": "observed", "reason": "eval"}
+                ],
+            },
+            candidate_descriptor={"id": "cheap", "label": "candidate"},
+            evaluator=lambda request: (_ for _ in ()).throw(RuntimeError("bad score")),
+            evaluator_on_error="fail",
+            client=fake_client,
+            timeout_seconds=0,
+            poll_interval_seconds=0.01,
+            sleep=lambda _: None,
+        )
+
+
+def test_evaluator_descriptor_loads_module_function(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_path = tmp_path / "replay_eval.py"
+    module_path.write_text(
+        "def evaluate(request):\n"
+        "    return {'quality_score': 0.77, 'lane_name': request.lane_name}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="b")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator_descriptor={
+            "target": "replay_eval:evaluate",
+            "id": "descriptor-v1",
+        },
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    evaluation = report.cases[0].candidate_results[0].lane.metrics.evaluation
+    assert evaluation == {
+        "quality_score": 0.77,
+        "lane_name": "candidate_replay",
+        "evaluator_id": "descriptor-v1",
+    }
+
+
+def test_replay_lab_compare_tracks_safe_aggregate_analytics() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="b")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    with patch("kitaru._replay_lab.track") as mock_track:
+        compare_replay_lab(
+            manifest={
+                "name": "Support cohort",
+                "default_from_checkpoint": "draft_answer",
+                "cases": [
+                    {"case_id": "case-1", "exec_id": "observed", "reason": "eval"}
+                ],
+            },
+            candidate_descriptor={"id": "cheap", "label": "candidate"},
+            evaluator=lambda request: {"quality_score": 0.99},
+            client=fake_client,
+            timeout_seconds=0,
+            poll_interval_seconds=0.01,
+            source="/tmp/private-user-path",
+            sleep=lambda _: None,
+        )
+
+    requested = mock_track.call_args_list[0].args
+    completed = mock_track.call_args_list[1].args
+    assert requested[0] == "Kitaru Replay Lab compare requested"
+    assert requested[1] == {
+        "case_count": 1,
+        "candidate_count": 1,
+        "has_evaluator": True,
+        "source": "other",
+    }
+    assert completed[0] == "Kitaru Replay Lab compare completed"
+    assert completed[1] == {
+        "case_count": 1,
+        "candidate_count": 1,
+        "has_evaluator": True,
+        "source": "other",
+        "completed": True,
+        "failed_or_timed_out_lane_count": 0,
+    }
 
 
 def test_report_rendering_outputs_json_and_markdown() -> None:
@@ -391,7 +764,7 @@ def test_report_rendering_outputs_json_and_markdown() -> None:
                 }
             ],
         },
-        candidate_descriptor={"label": "candidate"},
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
         client=fake_client,
         timeout_seconds=0,
         poll_interval_seconds=0.01,
@@ -402,6 +775,12 @@ def test_report_rendering_outputs_json_and_markdown() -> None:
     markdown = render_markdown_report(report)
 
     assert json_payload["name"] == "Support cohort"
-    assert json_payload["cases"][0]["output_changed_vs_baseline"] is True
+    assert "candidate" not in json_payload
+    assert json_payload["candidates"][0]["id"] == "cheap"
+    assert "candidate_replay" not in json_payload["cases"][0]["lanes"]
+    assert (
+        json_payload["cases"][0]["candidate_results"][0]["output_changed_vs_baseline"]
+        is True
+    )
     assert "# Replay Lab Report: Support cohort" in markdown
     assert "case-1" in markdown

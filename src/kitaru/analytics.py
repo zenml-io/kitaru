@@ -48,6 +48,9 @@ class AnalyticsEvent(StrEnum):
     FLOW_REPLAYED = "Kitaru flow replayed"
     REPLAY_REQUESTED = "Kitaru flow replay requested"
     REPLAY_FAILED = "Kitaru flow replay failed"
+    REPLAY_LAB_COMPARE_REQUESTED = "Kitaru Replay Lab compare requested"
+    REPLAY_LAB_COMPARE_COMPLETED = "Kitaru Replay Lab compare completed"
+    REPLAY_LAB_COMPARE_FAILED = "Kitaru Replay Lab compare failed"
 
     # Execution management
     WAIT_CREATED = "Kitaru wait created"

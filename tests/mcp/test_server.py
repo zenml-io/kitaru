@@ -938,7 +938,8 @@ def test_replay_lab_compare_delegates_to_internal_module() -> None:
     ) as mock_compare:
         payload = kitaru_replay_lab_compare(
             manifest={"name": "Support cohort"},
-            candidate_descriptor={"label": "candidate"},
+            candidate_descriptors=[{"id": "quality", "label": "Quality"}],
+            evaluator_descriptor={"target": "demo_eval:evaluate", "id": "demo"},
             timeout_seconds=12,
             poll_interval_seconds=0.5,
             report_dir="/tmp/reports",
@@ -947,16 +948,48 @@ def test_replay_lab_compare_delegates_to_internal_module() -> None:
     mock_compare.assert_called_once_with(
         manifest={"name": "Support cohort"},
         manifest_path=None,
-        candidate_descriptor={"label": "candidate"},
+        candidate_descriptor=None,
+        candidate_descriptors=[{"id": "quality", "label": "Quality"}],
+        evaluator_descriptor={"target": "demo_eval:evaluate", "id": "demo"},
         timeout_seconds=12,
         poll_interval_seconds=0.5,
         report_dir="/tmp/reports",
+        source="mcp",
     )
     assert payload["available"] is True
     assert payload["operation"] == "replay_lab_compare"
     assert payload["summary"] == {"case_count": 1}
     assert payload["report_paths"] == {"json": "/tmp/report.json"}
     assert payload["report"] == {"name": "Support cohort"}
+
+
+def test_replay_lab_compare_forwards_singular_candidate_alias() -> None:
+    report = SimpleNamespace(
+        summary={"case_count": 1},
+        report_paths={},
+        to_dict=MagicMock(return_value={"name": "Support cohort"}),
+    )
+
+    with patch(
+        "kitaru.mcp.server.replay_lab.compare_replay_lab",
+        return_value=report,
+    ) as mock_compare:
+        kitaru_replay_lab_compare(
+            manifest={"name": "Support cohort"},
+            candidate_descriptor={"id": "cheap", "label": "candidate"},
+        )
+
+    mock_compare.assert_called_once_with(
+        manifest={"name": "Support cohort"},
+        manifest_path=None,
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        candidate_descriptors=None,
+        evaluator_descriptor=None,
+        timeout_seconds=300,
+        poll_interval_seconds=5,
+        report_dir=None,
+        source="mcp",
+    )
 
 
 def test_execution_mutation_tools_return_serialized_execution(

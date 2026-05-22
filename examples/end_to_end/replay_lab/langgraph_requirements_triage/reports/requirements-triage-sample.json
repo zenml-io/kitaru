@@ -1,0 +1,386 @@
+{
+  "candidates": [
+    {
+      "checkpoint_overrides": {},
+      "flow_inputs": {
+        "model": "cheap"
+      },
+      "id": "cheap",
+      "label": "Cheap alias",
+      "notes": "Lowest-cost local alias for requirements triage."
+    },
+    {
+      "checkpoint_overrides": {},
+      "flow_inputs": {
+        "model": "balanced"
+      },
+      "id": "balanced",
+      "label": "Balanced alias",
+      "notes": "Middle-ground local alias for the first walkthrough."
+    }
+  ],
+  "cases": [
+    {
+      "candidate_results": [
+        {
+          "candidate_id": "cheap",
+          "candidate_label": "Cheap alias",
+          "effect_vs_baseline": {
+            "cost": {
+              "absolute": -0.18,
+              "baseline": 0.42,
+              "comparison": 0.24,
+              "percent": -42.8571428571
+            },
+            "duration_seconds": {
+              "absolute": -3.0,
+              "baseline": 18.0,
+              "comparison": 15.0,
+              "percent": -16.6666666667
+            },
+            "latency_seconds": {
+              "absolute": -2.1,
+              "baseline": 5.2,
+              "comparison": 3.1,
+              "percent": -40.3846153846
+            },
+            "quality_score": {
+              "absolute": -0.167,
+              "baseline": 1.0,
+              "comparison": 0.833,
+              "percent": -16.7
+            }
+          },
+          "lane": {
+            "error_message": null,
+            "exec_id": "sample-candidate-cheap-001",
+            "lane": "candidate_replay",
+            "limitations": [
+              "Missing Risks section."
+            ],
+            "metrics": {
+              "artifact_count": 4,
+              "checkpoint_count": 4,
+              "cost": 0.24,
+              "duration_seconds": 15.0,
+              "error_log_count": 0,
+              "evaluation": {
+                "evaluator_id": "requirements_triage_v1",
+                "limitations": [
+                  "Missing Risks section."
+                ],
+                "quality_score": 0.833,
+                "scorecard": {
+                  "avoids_false_certainty": true,
+                  "gives_next_action": true,
+                  "has_summary": true,
+                  "lists_known_requirements": true,
+                  "lists_missing_information": true,
+                  "lists_risks": false
+                }
+              },
+              "failed_checkpoint_count": 0,
+              "latency_seconds": 3.1,
+              "llm_call_count": 1,
+              "output_text": "Summary\nThe request asks for role-based onboarding access.\n\nKnown requirements\n- Admins invite users.\n- Managers approve access.\n- Auditors review changes.\n\nMissing information\n- Approval SLA.\n- Audit retention period.\n\nRecommended next action\nConfirm the approval SLA before implementation.",
+              "quality_score": 0.833,
+              "scorecard": {
+                "case_id": "onboarding-workflow-access",
+                "llm_call_count": 1,
+                "tool_call_count": 0
+              },
+              "tool_call_count": 0,
+              "warning_log_count": 0
+            },
+            "status": "completed",
+            "timed_out": false
+          },
+          "limitations": [
+            "Missing Risks section."
+          ],
+          "output_changed_vs_baseline": true,
+          "verdict": "hold"
+        },
+        {
+          "candidate_id": "balanced",
+          "candidate_label": "Balanced alias",
+          "effect_vs_baseline": {
+            "cost": {
+              "absolute": -0.07,
+              "baseline": 0.42,
+              "comparison": 0.35,
+              "percent": -16.6666666667
+            },
+            "duration_seconds": {
+              "absolute": -2.0,
+              "baseline": 18.0,
+              "comparison": 16.0,
+              "percent": -11.1111111111
+            },
+            "latency_seconds": {
+              "absolute": -0.8,
+              "baseline": 5.2,
+              "comparison": 4.4,
+              "percent": -15.3846153846
+            },
+            "quality_score": {
+              "absolute": 0.0,
+              "baseline": 1.0,
+              "comparison": 1.0,
+              "percent": 0.0
+            }
+          },
+          "lane": {
+            "error_message": null,
+            "exec_id": "sample-candidate-balanced-001",
+            "lane": "candidate_replay",
+            "limitations": [],
+            "metrics": {
+              "artifact_count": 4,
+              "checkpoint_count": 4,
+              "cost": 0.35,
+              "duration_seconds": 16.0,
+              "error_log_count": 0,
+              "evaluation": {
+                "evaluator_id": "requirements_triage_v1",
+                "limitations": [],
+                "quality_score": 1.0,
+                "scorecard": {
+                  "avoids_false_certainty": true,
+                  "gives_next_action": true,
+                  "has_summary": true,
+                  "lists_known_requirements": true,
+                  "lists_missing_information": true,
+                  "lists_risks": true
+                }
+              },
+              "failed_checkpoint_count": 0,
+              "latency_seconds": 4.4,
+              "llm_call_count": 1,
+              "output_text": "Summary\nThe request asks for role-based onboarding access with approval and audit needs.\n\nKnown requirements\n- Admins can invite users.\n- Managers approve access.\n- Auditors can review changes.\n\nMissing information\n- Approval SLA.\n- Audit retention period.\n- Fallback owner when a manager is unavailable.\n\nRisks\n- Unclear permissions can grant too much access.\n- Missing retention rules can break audit expectations.\n\nRecommended next action\nConfirm the approval SLA and audit retention period before writing implementation tickets.",
+              "quality_score": 1.0,
+              "scorecard": {
+                "case_id": "onboarding-workflow-access",
+                "llm_call_count": 1,
+                "tool_call_count": 0
+              },
+              "tool_call_count": 0,
+              "warning_log_count": 0
+            },
+            "status": "completed",
+            "timed_out": false
+          },
+          "limitations": [],
+          "output_changed_vs_baseline": false,
+          "verdict": "ship"
+        }
+      ],
+      "case_id": "onboarding-workflow-access",
+      "from_checkpoint": "requirements_triage_langgraph_call",
+      "labels": {
+        "tier": "regulated",
+        "trigger": "missing permissions"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "sample-baseline-001",
+          "lane": "baseline_replay",
+          "limitations": [],
+          "metrics": {
+            "artifact_count": 4,
+            "checkpoint_count": 4,
+            "cost": 0.42,
+            "duration_seconds": 18.0,
+            "error_log_count": 0,
+            "evaluation": {
+              "evaluator_id": "requirements_triage_v1",
+              "limitations": [],
+              "quality_score": 1.0,
+              "scorecard": {
+                "avoids_false_certainty": true,
+                "gives_next_action": true,
+                "has_summary": true,
+                "lists_known_requirements": true,
+                "lists_missing_information": true,
+                "lists_risks": true
+              }
+            },
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.2,
+            "llm_call_count": 1,
+            "output_text": "Summary\nThe request asks for role-based onboarding access with approval and audit needs.\n\nKnown requirements\n- Admins can invite users.\n- Managers approve access.\n- Auditors can review changes.\n\nMissing information\n- Approval SLA.\n- Audit retention period.\n- Fallback owner when a manager is unavailable.\n\nRisks\n- Unclear permissions can grant too much access.\n- Missing retention rules can break audit expectations.\n\nRecommended next action\nConfirm the approval SLA and audit retention period before writing implementation tickets.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "case_id": "onboarding-workflow-access",
+              "llm_call_count": 1,
+              "tool_call_count": 0
+            },
+            "tool_call_count": 0,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "sample-observed-001",
+          "lane": "observed",
+          "limitations": [],
+          "metrics": {
+            "artifact_count": 4,
+            "checkpoint_count": 4,
+            "cost": 0.43,
+            "duration_seconds": 18.5,
+            "error_log_count": 0,
+            "evaluation": {
+              "evaluator_id": "requirements_triage_v1",
+              "limitations": [],
+              "quality_score": 1.0,
+              "scorecard": {
+                "avoids_false_certainty": true,
+                "gives_next_action": true,
+                "has_summary": true,
+                "lists_known_requirements": true,
+                "lists_missing_information": true,
+                "lists_risks": true
+              }
+            },
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.3,
+            "llm_call_count": 1,
+            "output_text": "Summary\nThe request asks for role-based onboarding access with approval and audit needs.\n\nKnown requirements\n- Admins can invite users.\n- Managers approve access.\n- Auditors can review changes.\n\nMissing information\n- Approval SLA.\n- Audit retention period.\n- Fallback owner when a manager is unavailable.\n\nRisks\n- Unclear permissions can grant too much access.\n- Missing retention rules can break audit expectations.\n\nRecommended next action\nConfirm the approval SLA and audit retention period before writing implementation tickets.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "case_id": "onboarding-workflow-access",
+              "llm_call_count": 1,
+              "tool_call_count": 0
+            },
+            "tool_call_count": 0,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [],
+      "reason": "Access-control request with compliance-sensitive missing details.",
+      "replay_drift": {
+        "cost": {
+          "absolute": -0.01,
+          "baseline": 0.43,
+          "comparison": 0.42,
+          "percent": -2.3255813953
+        },
+        "duration_seconds": {
+          "absolute": -0.5,
+          "baseline": 18.5,
+          "comparison": 18.0,
+          "percent": -2.7027027027
+        },
+        "latency_seconds": {
+          "absolute": -0.1,
+          "baseline": 5.3,
+          "comparison": 5.2,
+          "percent": -1.8867924528
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "replay_drift_warning": false,
+      "source_exec_id": "sample-observed-001"
+    }
+  ],
+  "created_at": "2026-05-21T12:00:00Z",
+  "description": "Sanitized sample report for a live opt-in LangGraph requirements-triage model-matrix run.",
+  "expected_artifacts": [
+    "scorecard",
+    "final_response"
+  ],
+  "name": "Requirements triage LangGraph demo",
+  "report_paths": {},
+  "summary": {
+    "candidate_count": 2,
+    "candidate_ids": [
+      "cheap",
+      "balanced"
+    ],
+    "candidate_ranking": [
+      {
+        "aggregate_verdict": "ship",
+        "average_cost": 0.35,
+        "average_latency_seconds": 4.4,
+        "average_quality_score": 1.0,
+        "candidate_id": "balanced",
+        "cases_to_inspect": [],
+        "changed_output_count": 0,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Balanced alias",
+        "quality_loss_count": 0
+      },
+      {
+        "aggregate_verdict": "hold",
+        "average_cost": 0.24,
+        "average_latency_seconds": 3.1,
+        "average_quality_score": 0.833,
+        "candidate_id": "cheap",
+        "cases_to_inspect": [
+          "onboarding-workflow-access"
+        ],
+        "changed_output_count": 1,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Cheap alias",
+        "quality_loss_count": 1
+      }
+    ],
+    "candidates": {
+      "balanced": {
+        "aggregate_verdict": "ship",
+        "average_cost": 0.35,
+        "average_latency_seconds": 4.4,
+        "average_quality_score": 1.0,
+        "candidate_id": "balanced",
+        "cases_to_inspect": [],
+        "changed_output_count": 0,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Balanced alias",
+        "quality_loss_count": 0
+      },
+      "cheap": {
+        "aggregate_verdict": "hold",
+        "average_cost": 0.24,
+        "average_latency_seconds": 3.1,
+        "average_quality_score": 0.833,
+        "candidate_id": "cheap",
+        "cases_to_inspect": [
+          "onboarding-workflow-access"
+        ],
+        "changed_output_count": 1,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Cheap alias",
+        "quality_loss_count": 1
+      }
+    },
+    "case_count": 1,
+    "failed_or_timed_out_lane_count": 0,
+    "overall_recommendation": "Ship candidate `balanced` for a guarded trial: safe enough from this replay cohort, not a blind deployment.",
+    "replay_drift_case_ids": [],
+    "replay_drift_warning_count": 0,
+    "replay_trust": {
+      "detail": "Observed and baseline replay lanes stayed within the configured drift threshold for this cohort.",
+      "label": "Replay trust: steady"
+    }
+  }
+}

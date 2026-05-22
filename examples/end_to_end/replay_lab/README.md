@@ -37,6 +37,23 @@ uv run kitaru init       # one-time project marker, safe to skip if it exists
 You do **not** need `OPENAI_API_KEY` or any provider credentials for the default
 path.
 
+## Optional: live model-matrix kit
+
+This README keeps the deterministic support-agent walkthrough as the first path
+because it is the easiest way to understand Replay Lab without spending money or
+needing provider credentials.
+
+If you want the opt-in live LangGraph version, use the generic model-matrix kit:
+
+```text
+examples/end_to_end/replay_lab/MODEL_MATRIX_KIT.md
+```
+
+That kit walks through registering local model aliases, seeding live
+requirements-triage executions, running a two-candidate first matrix, optionally
+expanding to three candidates, using the deterministic evaluator descriptor, and
+reading the HTML verdict report.
+
 ## Step 1: create the observed production-like executions
 
 Sarah first needs executions that stand in for last week's production cases. In
@@ -195,8 +212,13 @@ uv run kitaru executions get <execution-id-from-report>
 - `run_replay_lab.py` — runs baseline and candidate replay, then writes JSON and
   Markdown reports.
 - `render_report.py` — turns the JSON report into a static HTML artifact.
-- `manifests/` and `reports/` — generated-output directories. Only `.gitkeep`
-  should be committed from these directories.
+- `MODEL_MATRIX_KIT.md` — generic walkthrough for the opt-in live LangGraph
+  requirements-triage model-matrix kit.
+- `langgraph_requirements_triage/` — live model-matrix example using local
+  Kitaru model aliases, a deterministic evaluator descriptor, and a static HTML
+  verdict report.
+- `manifests/` and `reports/` — generated-output directories. Generated files
+  should stay untracked unless explicitly allowlisted as sanitized samples.
 
 ## Candidate descriptor shape
 
@@ -217,27 +239,34 @@ Replay Lab does not need to know what `agent_profile` means. It only passes the
 candidate's supported replay changes into Kitaru replay. In this example, the
 flow uses that input to choose the deterministic candidate behavior.
 
-## Optional: a future live-model variant
+## Optional: live requirements-triage model matrix
 
 The default demo is deterministic on purpose. It makes the baseline replay
 column easy to trust.
 
-A later variant could use a real model such as `gpt-5-nano` behind the same
-Replay Lab shape:
+The opt-in live variant is documented in `MODEL_MATRIX_KIT.md`. It uses a
+LangGraph requirements-triage flow and compares local Kitaru model aliases such
+as `cheap`, `balanced`, and `quality`. The committed matrix does not contain
+provider model names; you register those aliases locally before running it.
 
-```bash
-OPENAI_API_KEY=...
-KITARU_REPLAY_LAB_LIVE_LLM=1
-KITARU_REPLAY_LAB_MODEL=gpt-5-nano
-```
-
-That would make the demo feel more realistic, but it should stay opt-in. Live
-models introduce output variance, and Replay Lab's first job is to teach the
-measurement model clearly.
+Start with the deterministic path in this README, then move to the model-matrix
+kit when you want realistic live model calls.
 
 ## Keeping generated files out of git
 
 `seed_observed.py`, `run_replay_lab.py`, and `render_report.py` write generated
 files under `manifests/` and `reports/`. These artifacts are useful locally, but
-should not be committed. The repository keeps only `.gitkeep` placeholders for
-those directories.
+should not be committed by default.
+
+The live model-matrix kit has exactly two tracked report artifacts, both
+sanitized samples:
+
+```text
+examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.json
+examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.html
+```
+
+Generated manifests, generated JSON reports, generated Markdown reports, and
+generated HTML reports from local or live runs should stay untracked unless they
+are intentionally sanitized and allowlisted first. The `.gitkeep` files only keep
+empty output directories present in the repository.

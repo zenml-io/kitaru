@@ -440,6 +440,8 @@ def kitaru_replay_lab_compare(
     manifest: dict[str, Any] | None = None,
     manifest_path: str | None = None,
     candidate_descriptor: dict[str, Any] | None = None,
+    candidate_descriptors: list[dict[str, Any]] | None = None,
+    evaluator_descriptor: dict[str, Any] | None = None,
     timeout_seconds: float = 300,
     poll_interval_seconds: float = 5,
     report_dir: str | None = None,
@@ -451,9 +453,12 @@ def kitaru_replay_lab_compare(
             manifest=manifest,
             manifest_path=manifest_path,
             candidate_descriptor=candidate_descriptor,
+            candidate_descriptors=candidate_descriptors,
+            evaluator_descriptor=evaluator_descriptor,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
             report_dir=report_dir,
+            source="mcp",
         )
         return {
             "available": True,

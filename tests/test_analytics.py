@@ -150,6 +150,17 @@ def test_flow_lifecycle_event_canonical_strings() -> None:
     assert AnalyticsEvent.FLOW_SUBMITTED == "Kitaru flow submitted"
     assert AnalyticsEvent.REPLAY_REQUESTED == "Kitaru flow replay requested"
     assert AnalyticsEvent.REPLAY_FAILED == "Kitaru flow replay failed"
+    assert (
+        AnalyticsEvent.REPLAY_LAB_COMPARE_REQUESTED
+        == "Kitaru Replay Lab compare requested"
+    )
+    assert (
+        AnalyticsEvent.REPLAY_LAB_COMPARE_COMPLETED
+        == "Kitaru Replay Lab compare completed"
+    )
+    assert (
+        AnalyticsEvent.REPLAY_LAB_COMPARE_FAILED == "Kitaru Replay Lab compare failed"
+    )
 
 
 def test_core_funnel_event_canonical_strings() -> None:

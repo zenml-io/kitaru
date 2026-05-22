@@ -1,0 +1,26 @@
+{
+  "description": "Example model-alias matrix for the live requirements-triage Replay Lab demo. Register these aliases locally before running the live path.",
+  "candidates": [
+    {
+      "id": "cheap",
+      "label": "Cheap alias",
+      "flow_inputs": {"model": "cheap"},
+      "checkpoint_overrides": {},
+      "notes": "Lowest-cost local alias. Use replay results to check whether missing-information and risk sections survive."
+    },
+    {
+      "id": "balanced",
+      "label": "Balanced alias",
+      "flow_inputs": {"model": "balanced"},
+      "checkpoint_overrides": {},
+      "notes": "Middle-ground local alias for the first two-candidate walkthrough."
+    },
+    {
+      "id": "quality",
+      "label": "Quality alias",
+      "flow_inputs": {"model": "quality"},
+      "checkpoint_overrides": {},
+      "notes": "Higher-quality local alias for the expanded three-candidate matrix."
+    }
+  ]
+}
