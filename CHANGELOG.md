@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-05-21
+
 ### Added
-- **Agent Factory** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_factory/` and a dedicated docs section at [`/docs/agent-factory/`](https://kitaru.ai/docs/agent-factory/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_factory/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_factory_example.py`. (#288)
+- **Agent Harness Platform** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_harness_platform/` and a dedicated docs section at [`/docs/agent-harness-platform/`](https://kitaru.ai/docs/agent-harness-platform/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_harness_platform/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_harness_platform_example.py`. (#288)
 
 ### Changed
-- `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Factory tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
+- `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Harness Platform tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
 - `docs/content/docs/guides/news-scout.mdx` removed; the `news_scout` example itself stays runnable in the repo and is now listed under "Other end-to-end examples" on the docs site. The guides section is reserved for Kitaru-feature how-tos. (#288)
 
 ### Fixed
