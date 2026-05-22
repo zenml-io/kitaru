@@ -1,5 +1,5 @@
 {
-  "description": "Example model-alias matrix for the live requirements-triage Replay Lab demo. Register these aliases locally before running the live path.",
+  "description": "Example replacement-candidate model-alias matrix for the live requirements-triage Replay Lab demo. Register these aliases locally before running the live path. Use a separate `current` alias when seeding observed runs.",
   "candidates": [
     {
       "id": "cheap",
@@ -13,14 +13,14 @@
       "label": "Balanced alias",
       "flow_inputs": {"model": "balanced"},
       "checkpoint_overrides": {},
-      "notes": "Middle-ground local alias for the first two-candidate walkthrough."
+      "notes": "Middle-ground replacement alias for the first two-candidate walkthrough. This is intentionally separate from the observed `current` alias."
     },
     {
       "id": "quality",
       "label": "Quality alias",
       "flow_inputs": {"model": "quality"},
       "checkpoint_overrides": {},
-      "notes": "Higher-quality local alias for the expanded three-candidate matrix."
+      "notes": "Higher-quality replacement alias for the expanded three-candidate matrix."
     }
   ]
 }

@@ -16,7 +16,7 @@
       },
       "id": "balanced",
       "label": "Balanced alias",
-      "notes": "Middle-ground local alias for the first walkthrough."
+      "notes": "Middle-ground replacement alias for the first walkthrough. This is separate from the observed `current` alias."
     }
   ],
   "cases": [
@@ -296,7 +296,7 @@
     }
   ],
   "created_at": "2026-05-21T12:00:00Z",
-  "description": "Sanitized sample report for a live opt-in LangGraph requirements-triage model-matrix run.",
+  "description": "Sanitized sample report for a live opt-in LangGraph requirements-triage replacement-candidate matrix run. The observed lane represents a separate `current` alias.",
   "expected_artifacts": [
     "scorecard",
     "final_response"
@@ -308,6 +308,38 @@
     "candidate_ids": [
       "cheap",
       "balanced"
+    ],
+    "candidate_decision_evidence": [
+      {
+        "aggregate_verdict": "ship",
+        "average_cost": 0.35,
+        "average_latency_seconds": 4.4,
+        "average_quality_score": 1.0,
+        "candidate_id": "balanced",
+        "cases_to_inspect": [],
+        "changed_output_count": 0,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Balanced alias",
+        "quality_loss_count": 0
+      },
+      {
+        "aggregate_verdict": "hold",
+        "average_cost": 0.24,
+        "average_latency_seconds": 3.1,
+        "average_quality_score": 0.833,
+        "candidate_id": "cheap",
+        "cases_to_inspect": [
+          "onboarding-workflow-access"
+        ],
+        "changed_output_count": 1,
+        "completed_count": 1,
+        "efficiency_win_count": 1,
+        "failed_or_timed_out_lane_count": 0,
+        "label": "Cheap alias",
+        "quality_loss_count": 1
+      }
     ],
     "candidate_ranking": [
       {
@@ -375,7 +407,7 @@
     },
     "case_count": 1,
     "failed_or_timed_out_lane_count": 0,
-    "overall_recommendation": "Ship candidate `balanced` for a guarded trial: safe enough from this replay cohort, not a blind deployment.",
+    "overall_recommendation": "For this small cohort, `balanced` is the safest replacement candidate to trial: it preserved the required answer shape while still reducing cost and latency versus baseline replay.",
     "replay_drift_case_ids": [],
     "replay_drift_warning_count": 0,
     "replay_trust": {

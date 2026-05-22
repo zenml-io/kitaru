@@ -15,13 +15,6 @@ from typing import Any
 REPLAY_DRIFT_QUALITY_THRESHOLD = 0.10
 EFFICIENCY_WIN_THRESHOLD = 0.10
 MAX_CHANGED_OUTPUT_CHARS = 2500
-REQUIRED_TRIAGE_SECTIONS = (
-    "has_summary",
-    "lists_known_requirements",
-    "lists_missing_information",
-    "lists_risks",
-    "gives_next_action",
-)
 
 
 @dataclass(frozen=True)
@@ -94,8 +87,8 @@ def build_html_report(
     )
     title = f"Replay Lab Report: {report.get('name', 'Untitled comparison')}"
     candidate_cards = "".join(_candidate_card(item) for item in verdict.candidates)
-    ranking_rows = "".join(
-        _ranking_row(index, item)
+    evidence_rows = "".join(
+        _evidence_row(index, item)
         for index, item in enumerate(verdict.candidates, start=1)
     )
     case_rows = "".join(_case_summary_row(case) for case in _cases(report))
@@ -154,10 +147,11 @@ def build_html_report(
   <h2>Per-candidate verdicts</h2>
   <section class="cards">{candidate_cards}</section>
 
-  <h2>Candidate ranking</h2>
+  <h2>Candidate decision evidence</h2>
+  <p class="section-note">This order is evidence for this replay cohort, not a universal model leaderboard.</p>
   <table>
-    <thead><tr><th>Rank</th><th>Candidate</th><th>Verdict</th><th>Efficiency wins</th><th>Quality losses</th><th>Inspect</th></tr></thead>
-    <tbody>{ranking_rows}</tbody>
+    <thead><tr><th>Evidence order</th><th>Candidate</th><th>Verdict</th><th>Efficiency wins</th><th>Quality losses</th><th>Inspect</th></tr></thead>
+    <tbody>{evidence_rows}</tbody>
   </table>
 
   <h2>Case summary</h2>
@@ -180,35 +174,31 @@ def build_report_verdict(
     replay_drift_quality_threshold: float = REPLAY_DRIFT_QUALITY_THRESHOLD,
     efficiency_win_threshold: float = EFFICIENCY_WIN_THRESHOLD,
 ) -> ReportVerdict:
-    """Read canonical aggregate verdicts from the report, with legacy fallback."""
+    """Read canonical aggregate verdicts from the report.
+
+    New reports already contain the decision. The renderer should display that
+    decision, not quietly invent a different one. The only recomputation below is
+    an explicit legacy adapter for old demo JSON that predates canonical summary
+    verdicts/trust fields.
+    """
     summary = _mapping(report.get("summary"))
     candidates = _canonical_candidate_verdicts(summary)
-    if not candidates:
-        candidates = [
-            _candidate_verdict(report, candidate, efficiency_win_threshold)
-            for candidate in _candidate_descriptors(report)
-        ]
-        candidates = sorted(candidates, key=_candidate_rank_key)
-
     trust = _mapping(summary.get("replay_trust"))
     trust_label = str(trust.get("label", ""))
     trust_detail = str(trust.get("detail", ""))
     overall = str(summary.get("overall_recommendation", ""))
-    if not trust_label or not trust_detail or not overall:
-        fallback = _fallback_report_verdict(
-            report,
-            candidates,
-            replay_drift_quality_threshold=replay_drift_quality_threshold,
+    if candidates and trust_label and trust_detail and overall:
+        return ReportVerdict(
+            overall=overall,
+            trust_label=trust_label,
+            trust_detail=trust_detail,
+            candidates=candidates,
         )
-        trust_label = trust_label or fallback.trust_label
-        trust_detail = trust_detail or fallback.trust_detail
-        overall = overall or fallback.overall
 
-    return ReportVerdict(
-        overall=overall,
-        trust_label=trust_label,
-        trust_detail=trust_detail,
-        candidates=candidates,
+    return _legacy_report_verdict(
+        report,
+        replay_drift_quality_threshold=replay_drift_quality_threshold,
+        efficiency_win_threshold=efficiency_win_threshold,
     )
 
 
@@ -230,25 +220,29 @@ def case_has_high_replay_drift(
     ):
         return True
 
-    observed = _mapping(
-        _mapping(_mapping(case.get("lanes")).get("observed")).get("metrics")
-    ).get("evaluation")
-    baseline = _mapping(
-        _mapping(_mapping(case.get("lanes")).get("baseline_replay")).get("metrics")
-    ).get("evaluation")
-    if not observed or not baseline:
-        return False
-    return _required_section_signature(observed) != _required_section_signature(
-        baseline
+    observed_signature = _drift_signature(
+        _mapping(
+            _mapping(_mapping(case.get("lanes")).get("observed")).get("metrics")
+        ).get("evaluation")
     )
+    baseline_signature = _drift_signature(
+        _mapping(
+            _mapping(_mapping(case.get("lanes")).get("baseline_replay")).get("metrics")
+        ).get("evaluation")
+    )
+    if observed_signature is None or baseline_signature is None:
+        return False
+    return observed_signature != baseline_signature
 
 
 def _canonical_candidate_verdicts(summary: Mapping[str, Any]) -> list[CandidateVerdict]:
-    ranking = summary.get("candidate_ranking", [])
-    if not isinstance(ranking, list):
+    evidence = summary.get(
+        "candidate_decision_evidence", summary.get("candidate_ranking", [])
+    )
+    if not isinstance(evidence, list):
         return []
     verdicts: list[CandidateVerdict] = []
-    for item in ranking:
+    for item in evidence:
         item_map = _mapping(item)
         candidate_id = item_map.get("candidate_id")
         if not candidate_id:
@@ -276,12 +270,18 @@ def _canonical_candidate_verdicts(summary: Mapping[str, Any]) -> list[CandidateV
     return verdicts
 
 
-def _fallback_report_verdict(
+def _legacy_report_verdict(
     report: Mapping[str, Any],
-    candidates: Sequence[CandidateVerdict],
     *,
     replay_drift_quality_threshold: float,
+    efficiency_win_threshold: float,
 ) -> ReportVerdict:
+    """Adapt old demo JSON that lacks canonical summary verdict fields."""
+    candidates = [
+        _legacy_candidate_verdict(report, candidate, efficiency_win_threshold)
+        for candidate in _candidate_descriptors(report)
+    ]
+    candidates = sorted(candidates, key=_candidate_rank_key)
     drift_cases = [
         str(case.get("case_id", "unknown"))
         for case in _cases(report)
@@ -297,7 +297,7 @@ def _fallback_report_verdict(
         trust_label = "Replay trust: inspect first"
         trust_detail = (
             "High replay drift was detected for "
-            f"{', '.join(drift_cases)}. Treat candidate rankings as directional "
+            f"{', '.join(drift_cases)}. Treat candidate ordering as directional "
             "until those baseline replays are understood."
         )
     elif failed_count:
@@ -337,7 +337,7 @@ def _fallback_report_verdict(
     )
 
 
-def _candidate_verdict(
+def _legacy_candidate_verdict(
     report: Mapping[str, Any],
     candidate: Mapping[str, Any],
     efficiency_win_threshold: float,
@@ -413,7 +413,7 @@ def _candidate_card(item: CandidateVerdict) -> str:
     )
 
 
-def _ranking_row(index: int, item: CandidateVerdict) -> str:
+def _evidence_row(index: int, item: CandidateVerdict) -> str:
     inspect = ", ".join(item.cases_to_inspect) if item.cases_to_inspect else "none"
     return (
         "<tr>"
@@ -429,7 +429,7 @@ def _ranking_row(index: int, item: CandidateVerdict) -> str:
 
 def _case_summary_row(case: Mapping[str, Any]) -> str:
     case_id = str(case.get("case_id", "unknown"))
-    trust = "inspect" if case_has_high_replay_drift(case) else "steady"
+    trust = _case_trust_status(case)
     rows = []
     for result in _candidate_results(case):
         effect = _mapping(result.get("effect_vs_baseline"))
@@ -555,6 +555,14 @@ def _evaluator_block(title: str, metrics_value: Any) -> str:
     )
 
 
+def _case_trust_status(case: Mapping[str, Any]) -> str:
+    trust = _mapping(case.get("replay_trust"))
+    status = trust.get("status")
+    if isinstance(status, str) and status:
+        return status
+    return "inspect" if case_has_high_replay_drift(case) else "steady"
+
+
 def _candidate_descriptors(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     candidates = report.get("candidates", [])
     if isinstance(candidates, list):
@@ -592,14 +600,11 @@ def _has_quality_loss(result: Mapping[str, Any]) -> bool:
     return quality_delta is not None and quality_delta < -REPLAY_DRIFT_QUALITY_THRESHOLD
 
 
-def _required_section_signature(
-    evaluation: Mapping[str, Any],
-) -> tuple[bool | None, ...]:
-    scorecard = _mapping(evaluation.get("scorecard"))
-    return tuple(
-        scorecard.get(section) if isinstance(scorecard.get(section), bool) else None
-        for section in REQUIRED_TRIAGE_SECTIONS
-    )
+def _drift_signature(evaluation: Any) -> Any | None:
+    evaluation_map = _mapping(evaluation)
+    if "drift_signature" not in evaluation_map:
+        return None
+    return evaluation_map["drift_signature"]
 
 
 def _candidate_rank_key(item: CandidateVerdict) -> tuple[int, int, int, str]:

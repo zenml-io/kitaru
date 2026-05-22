@@ -925,12 +925,29 @@ def test_executions_replay_returns_structured_execution(
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 
-def test_replay_lab_compare_delegates_to_internal_module() -> None:
+def test_replay_lab_compare_rejects_mcp_evaluator_descriptor_by_default() -> None:
+    with (
+        patch("kitaru.mcp.server.replay_lab.compare_replay_lab") as mock_compare,
+        pytest.raises(ValueError, match="KITARU_MCP_ALLOW_LOCAL_EVALUATORS"),
+    ):
+        kitaru_replay_lab_compare(
+            manifest={"name": "Support cohort"},
+            candidate_descriptors=[{"id": "quality", "label": "Quality"}],
+            evaluator_descriptor={"target": "demo_eval:evaluate", "id": "demo"},
+        )
+
+    mock_compare.assert_not_called()
+
+
+def test_replay_lab_compare_delegates_to_internal_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     report = SimpleNamespace(
         summary={"case_count": 1},
         report_paths={"json": "/tmp/report.json"},
         to_dict=MagicMock(return_value={"name": "Support cohort"}),
     )
+    monkeypatch.setenv("KITARU_MCP_ALLOW_LOCAL_EVALUATORS", "1")
 
     with patch(
         "kitaru.mcp.server.replay_lab.compare_replay_lab",

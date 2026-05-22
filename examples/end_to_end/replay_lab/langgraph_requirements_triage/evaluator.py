@@ -44,6 +44,7 @@ def evaluate_requirements_triage(request: Any) -> dict[str, Any]:
     return {
         "quality_score": quality_score,
         "scorecard": scorecard,
+        "drift_signature": scorecard,
         "limitations": limitations,
     }
 

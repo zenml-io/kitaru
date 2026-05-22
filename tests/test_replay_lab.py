@@ -20,6 +20,7 @@ from kitaru._replay_lab import (
     render_markdown_report,
     validate_candidate_descriptor,
     validate_candidate_descriptors,
+    validate_evaluator_descriptor,
 )
 from kitaru.client import ExecutionStatus
 
@@ -144,6 +145,14 @@ def test_candidate_descriptor_rejects_unknown_fields() -> None:
         validate_candidate_descriptor(
             {"id": "v2", "label": "v2", "deployment": "future"}
         )
+
+
+def test_evaluator_descriptor_rejects_path_like_module_targets() -> None:
+    with pytest.raises(ValueError, match="module:function reference"):
+        validate_evaluator_descriptor({"target": "foo.py:evaluate"})
+
+    with pytest.raises(ValueError, match="module:function reference"):
+        validate_evaluator_descriptor({"target": "pkg/eval:evaluate"})
 
 
 def test_candidate_descriptors_reject_duplicates_and_non_objects() -> None:
@@ -447,7 +456,11 @@ def test_compare_replay_lab_accepts_plural_candidates() -> None:
     assert report.summary["candidates"]["cheap"]["efficiency_win_count"] == 1
     assert report.summary["candidates"]["cheap"]["aggregate_verdict"] == "caution"
     assert report.summary["candidates"]["quality"]["changed_output_count"] == 0
-    assert report.summary["candidate_ranking"][0]["candidate_id"] == "cheap"
+    assert report.summary["candidate_decision_evidence"][0]["candidate_id"] == "cheap"
+    assert (
+        report.summary["candidate_ranking"]
+        is report.summary["candidate_decision_evidence"]
+    )
     assert report.summary["replay_trust"]["label"] == "Replay trust: steady"
     assert "safe enough" not in report.summary["overall_recommendation"]
     assert fake_client.executions.replay_calls[1]["flow_inputs"] == {"model": "cheap"}
@@ -521,6 +534,109 @@ def test_evaluator_callable_overrides_quality_and_keeps_runtime_facts() -> None:
     assert "cost_usd" not in candidate_lane.metrics.evaluation
     assert "latency_ms" not in candidate_lane.metrics.evaluation
     assert "review candidate_replay" in candidate_lane.limitations
+
+
+def test_candidate_verdict_requires_quality_and_efficiency_evidence() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="a")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    result = report.cases[0].candidate_results[0]
+    assert result.verdict == "caution"
+    assert "Missing candidate-vs-baseline quality evidence." in result.limitations
+    assert report.summary["candidates"]["cheap"]["quality_evidence_count"] == 0
+    assert report.summary["candidates"]["cheap"]["aggregate_verdict"] == "caution"
+
+
+def test_candidate_verdict_can_ship_with_trust_quality_and_efficiency() -> None:
+    observed = _execution(
+        "observed",
+        scorecard={"cost": 0.30, "quality_score": 0.80},
+        final_response="a",
+    )
+    baseline = _execution(
+        "baseline",
+        scorecard={"cost": 0.30, "quality_score": 0.80},
+        final_response="a",
+    )
+    candidate = _execution(
+        "candidate",
+        scorecard={"cost": 0.20, "quality_score": 0.80},
+        final_response="a",
+    )
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    assert report.cases[0].replay_trust.status == "steady"
+    assert report.cases[0].candidate_results[0].verdict == "ship"
+    assert report.summary["candidates"]["cheap"]["aggregate_verdict"] == "ship"
+    assert report.summary["replay_trust"]["status"] == "steady"
+
+
+def test_evaluator_refresh_drops_stale_missing_evidence_limitations() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.30}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.30}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="a")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    def evaluator(_request: Any) -> dict[str, Any]:
+        return {"quality_score": 0.8}
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=evaluator,
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    result = report.cases[0].candidate_results[0]
+    assert result.verdict == "ship"
+    assert "Missing candidate-vs-baseline quality evidence." not in result.limitations
 
 
 def test_evaluator_recomputes_replay_drift_and_candidate_effect() -> None:
@@ -651,6 +767,47 @@ def test_evaluator_fail_policy_raises() -> None:
         )
 
 
+def test_evaluator_drift_signature_marks_replay_trust_inspect() -> None:
+    observed = _execution("observed", scorecard={"cost": 0.40}, final_response="a")
+    baseline = _execution("baseline", scorecard={"cost": 0.40}, final_response="a")
+    candidate = _execution("candidate", scorecard={"cost": 0.20}, final_response="a")
+    fake_client = SimpleNamespace(
+        executions=FakeExecutions(
+            {"observed": observed, "baseline": baseline, "candidate": candidate}
+        )
+    )
+
+    def evaluator(request: Any) -> dict[str, Any]:
+        signatures = {
+            "observed": {"sections": ["summary", "risks"]},
+            "baseline_replay": {"sections": ["summary"]},
+            "candidate_replay": {"sections": ["summary"]},
+        }
+        return {"quality_score": 0.9, "drift_signature": signatures[request.lane_name]}
+
+    report = compare_replay_lab(
+        manifest={
+            "name": "Support cohort",
+            "default_from_checkpoint": "draft_answer",
+            "cases": [{"case_id": "case-1", "exec_id": "observed", "reason": "eval"}],
+        },
+        candidate_descriptor={"id": "cheap", "label": "candidate"},
+        evaluator=evaluator,
+        client=fake_client,
+        timeout_seconds=0,
+        poll_interval_seconds=0.01,
+        sleep=lambda _: None,
+    )
+
+    assert report.cases[0].replay_drift_warning is True
+    assert report.cases[0].replay_trust.status == "inspect"
+    assert report.summary["replay_drift_warning_count"] == len(
+        report.summary["replay_drift_case_ids"]
+    )
+    assert report.cases[0].candidate_results[0].verdict == "caution"
+    assert report.summary["replay_trust"]["status"] == "inspect"
+
+
 def test_evaluator_descriptor_loads_module_function(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -719,7 +876,7 @@ def test_replay_lab_compare_tracks_safe_aggregate_analytics() -> None:
             client=fake_client,
             timeout_seconds=0,
             poll_interval_seconds=0.01,
-            source="/tmp/private-user-path",
+            source="script",
             sleep=lambda _: None,
         )
 
@@ -730,14 +887,14 @@ def test_replay_lab_compare_tracks_safe_aggregate_analytics() -> None:
         "case_count": 1,
         "candidate_count": 1,
         "has_evaluator": True,
-        "source": "other",
+        "source": "script",
     }
     assert completed[0] == "Kitaru Replay Lab compare completed"
     assert completed[1] == {
         "case_count": 1,
         "candidate_count": 1,
         "has_evaluator": True,
-        "source": "other",
+        "source": "script",
         "completed": True,
         "failed_or_timed_out_lane_count": 0,
     }

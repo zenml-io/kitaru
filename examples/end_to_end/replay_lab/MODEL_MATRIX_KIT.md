@@ -1,19 +1,21 @@
 # Replay Lab model-matrix kit
 
-This kit shows how to use Replay Lab when the question is not only “did one candidate help?” but “which model alias looks safest for this cohort?”
+Imagine a production requirements-triage agent is already helping your team make small but important product decisions. It reads messy requests, points out missing details, names risks, and recommends the next action. Later, someone asks the natural question: can we change the model or prompt to save money or improve behavior without losing the judgment the team relies on?
+
+This kit shows how Replay Lab turns that question into evidence. It replays the same production-like cases through candidate changes and helps you inspect whether the replacement preserves important behavior, where it changed the answer, and whether any savings are worth the risk.
 
 It has two paths:
 
 1. **Deterministic support demo** — no provider key, no live model calls, cheap and repeatable. Start here if you want to learn the measurement shape.
 2. **Live requirements-triage model matrix** — opt-in LangGraph path that calls models through Kitaru aliases. Use this when you want to compare a small set of real model choices.
 
-The story is simple. Imagine you have a few requirements requests that made your current assistant look shaky: one request is missing important access details, another has unclear approval rules, another has deadline risk. You do not want to swap models because a dashboard says one model is cheaper. You want to replay the same cases, compare candidates side by side, and see what changed.
+The story is intentionally practical. You have a few requirements requests that made your current assistant look shaky: one request is missing important access details, another has unclear approval rules, another has deadline risk. You do not want to swap models because a leaderboard says one model is cheaper or “better.” You want to replay the same cases, compare candidate replacements side by side, and see what changed in the concrete answers.
 
-Replay Lab gives you three kinds of lanes:
+Replay Lab gives you three kinds of lanes. Think of them as camera angles on the same case:
 
 - **Observed lane** — what happened in the original run.
 - **Baseline replay lane** — the same case replayed from the chosen checkpoint with no candidate change.
-- **Candidate lanes** — the same case replayed from the same checkpoint with candidate-specific inputs, such as a different model alias.
+- **Candidate lanes** — the same case replayed from the same checkpoint with candidate-specific inputs, such as a replacement model alias.
 
 The baseline lane is the control. If observed cost was high, but baseline replay is already cheaper before any candidate is applied, the candidate should not get credit for the whole drop. Candidate lanes tell you what each candidate changed beyond normal replay effects.
 
@@ -78,7 +80,7 @@ Open `/tmp/requirements-triage-sample.html` and read it like a reviewer would:
 
 - Start with the overall recommendation.
 - Check the replay trust indicator.
-- Look at the candidate ranking.
+- Look at the candidate decision evidence.
 - Open the case rows that changed output.
 - Read evaluator details before trusting a quality score.
 
@@ -86,18 +88,21 @@ Open `/tmp/requirements-triage-sample.html` and read it like a reviewer would:
 
 The live matrix uses Kitaru aliases, not provider model names, inside committed files.
 
-That means the repository can safely say “cheap”, “balanced”, and “quality” without exposing or prescribing your actual provider choices. You decide locally what each alias points to.
+That means the repository can safely say “current”, “cheap”, “balanced”, and “quality” without exposing or prescribing your actual provider choices. You decide locally what each alias points to.
+
+Use `current` for the model that produced the observed lane. Use the candidate aliases for possible replacements. Keeping those names separate prevents a confusing report where the current production model appears to be a winning replacement candidate.
 
 Example shape:
 
 ```bash
+uv run kitaru model register current --model <provider/model-for-current-production-alias>
 uv run kitaru model register cheap --model <provider/model-for-cheap-alias>
 uv run kitaru model register balanced --model <provider/model-for-balanced-alias>
 uv run kitaru model register quality --model <provider/model-for-quality-alias>
 uv run kitaru model list
 ```
 
-Use aliases that make sense for your environment. For a quick first run, you need at least `balanced` for observed seeding and `cheap` plus `balanced` for the first two-candidate matrix.
+Use aliases that make sense for your environment. For a quick first run, you need at least `current` for observed seeding and `cheap` plus `balanced` for the first two-candidate matrix.
 
 The live example folder has its own README with a shorter map of the files and commands:
 
@@ -121,12 +126,12 @@ The first walkthrough uses only the first two with `--candidate-limit 2`. The th
 
 ## Seed live observed requirements-triage executions
 
-Now create the observed lane for a small live cohort. This calls your `balanced` alias.
+Now create the observed lane for a small live cohort. This calls your `current` alias: the model you want to treat as today’s production behavior.
 
 ```bash
 uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py \
   --small \
-  --model balanced
+  --model current
 ```
 
 This writes:
@@ -141,10 +146,10 @@ Useful variants:
 
 ```bash
 # Default: seed three cases
-uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py --model balanced
+uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py --model current
 
 # Custom case count
-uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py --count 3 --model balanced
+uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/seed_observed.py --count 3 --model current
 ```
 
 ## Run the first two-candidate matrix
@@ -160,10 +165,12 @@ uv run python examples/end_to_end/replay_lab/langgraph_requirements_triage/run_r
 
 This compares:
 
-- observed `balanced` run,
+- observed `current` run,
 - baseline replay with no candidate change,
 - candidate replay for `cheap`,
 - candidate replay for `balanced`.
+
+That does **not** mean Replay Lab is ranking your current production model against itself. The observed and baseline lanes are the control group. The candidate lanes are proposed replacements.
 
 The script also attaches a deterministic evaluator descriptor:
 
@@ -206,7 +213,7 @@ When you open the HTML, read it in this order:
 
 1. **Overall recommendation** — a summary judgment across candidates.
 2. **Replay trust** — whether baseline replay stayed close enough to observed production.
-3. **Candidate ranking** — which alias looks best on this cohort.
+3. **Candidate decision evidence** — which alias looks safest for this specific cohort, and which cases make that evidence weaker.
 4. **Cost, latency, and quality deltas** — what changed compared with baseline replay.
 5. **Changed output sections** — where a candidate said something materially different.
 6. **Evaluator scorecard** — why the evaluator did or did not trust the answer shape.
@@ -275,6 +282,6 @@ To adapt this kit to your own workflow:
 4. Use aliases for model choices instead of committing provider model names.
 5. Start with two candidates so the report is easy to inspect.
 6. Add a deterministic evaluator before trying a subjective one.
-7. Treat the HTML report as a review aid, not a deployment approval button.
+7. Treat the HTML report as a review aid, not a deployment approval button or universal model leaderboard.
 
 The useful habit is the same in every domain: freeze a few real cases, replay them from the same point, compare candidate effects against baseline replay, and read the cases that changed before you ship.

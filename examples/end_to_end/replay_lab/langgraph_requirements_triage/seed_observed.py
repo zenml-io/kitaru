@@ -19,7 +19,7 @@ except ImportError:  # Direct script path used by example commands.
 
 DEFAULT_MANIFEST_PATH = Path(__file__).parent / "manifests" / "requirements_triage.json"
 EXPECTED_ARTIFACTS = ["scorecard", "final_response"]
-DEFAULT_MODEL_ALIAS = "balanced"
+DEFAULT_MODEL_ALIAS = "current"
 
 
 def build_manifest_payload(observed_runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -73,7 +73,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL_ALIAS,
-        help="Observed-lane Kitaru model alias. Defaults to `balanced`.",
+        help="Observed-lane Kitaru model alias. Defaults to `current`.",
     )
     parser.add_argument(
         "--manifest-path",

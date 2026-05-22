@@ -34,6 +34,8 @@ from kitaru_init_hook import (
     apply_env_translations,
 )
 
+KITARU_MCP_ALLOW_LOCAL_EVALUATORS_ENV = "KITARU_MCP_ALLOW_LOCAL_EVALUATORS"
+
 
 @contextmanager
 def _temporary_env(additions: Mapping[str, str]) -> Any:
@@ -59,6 +61,7 @@ __all__ = [
     "KITARU_CONFIG_PATH_ENV",
     "KITARU_DEBUG_ENV",
     "KITARU_DEFAULT_ANALYTICS_SOURCE_ENV",
+    "KITARU_MCP_ALLOW_LOCAL_EVALUATORS_ENV",
     "KITARU_MODEL_REGISTRY_ENV",
     "KITARU_PROJECT_ENV",
     "KITARU_REPOSITORY_DIRECTORY_NAME",

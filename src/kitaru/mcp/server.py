@@ -24,6 +24,7 @@ from kitaru._client._deployments import (
     resolve_deployment_exclusive,
 )
 from kitaru._config import _stacks as stack_ops
+from kitaru._env import KITARU_MCP_ALLOW_LOCAL_EVALUATORS_ENV
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
@@ -449,6 +450,13 @@ def kitaru_replay_lab_compare(
     """Compare observed, baseline replay, and candidate replay lanes."""
 
     def _compare() -> dict[str, Any]:
+        if evaluator_descriptor is not None and not _allow_mcp_local_evaluators():
+            raise ValueError(
+                "MCP evaluator descriptors import and execute local Python code. "
+                f"Start the MCP server with {KITARU_MCP_ALLOW_LOCAL_EVALUATORS_ENV}=1 "
+                "only in a trusted local environment, or call the local SDK/script "
+                "with an evaluator callable instead."
+            )
         report = replay_lab.compare_replay_lab(
             manifest=manifest,
             manifest_path=manifest_path,
@@ -469,6 +477,17 @@ def kitaru_replay_lab_compare(
         }
 
     return run_with_mcp_error_boundary(_compare)
+
+
+def _allow_mcp_local_evaluators() -> bool:
+    """Return whether this MCP server trusts local evaluator imports.
+
+    The gate is deliberately exact: only `1` opts the local server owner into
+    importing and executing evaluator Python code in this MCP server process.
+    """
+    import os
+
+    return os.getenv(KITARU_MCP_ALLOW_LOCAL_EVALUATORS_ENV) == "1"
 
 
 @tracked_mcp_tool

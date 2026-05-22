@@ -17,6 +17,9 @@ from examples.end_to_end.replay_lab.langgraph_requirements_triage import (
 from examples.end_to_end.replay_lab.langgraph_requirements_triage import (
     run_replay_lab as requirements_replay,
 )
+from examples.end_to_end.replay_lab.langgraph_requirements_triage import (
+    seed_observed as requirements_seed,
+)
 from examples.end_to_end.replay_lab.render_report import render_html_report
 from examples.end_to_end.replay_lab.scenarios import (
     DEFAULT_VARIANTS_PER_BASE,
@@ -459,17 +462,19 @@ def test_requirements_seed_selection_defaults_to_three_and_small_to_two() -> Non
     assert capped_ids == default_ids[:1]
 
 
-def test_requirements_candidate_matrix_uses_aliases_only() -> None:
+def test_requirements_candidate_matrix_uses_replacement_aliases_only() -> None:
     candidates = requirements_replay.load_candidate_descriptors(
         matrix_path=requirements_replay.DEFAULT_MATRIX_PATH,
         candidate_paths=None,
     )
 
+    assert requirements_seed.DEFAULT_MODEL_ALIAS == "current"
     assert [candidate["id"] for candidate in candidates] == [
         "cheap",
         "balanced",
         "quality",
     ]
+    assert "current" not in [candidate["id"] for candidate in candidates]
     assert all("/" not in candidate["flow_inputs"]["model"] for candidate in candidates)
     assert (
         requirements_replay.load_candidate_descriptors(
@@ -522,6 +527,7 @@ def test_requirements_evaluator_scores_sectioned_text() -> None:
 
     assert result["quality_score"] == 1.0
     assert result["scorecard"]["lists_missing_information"] is True
+    assert result["drift_signature"] == result["scorecard"]
     assert result["limitations"] == []
 
 
@@ -559,9 +565,10 @@ def test_verdict_renderer_flags_section_drift() -> None:
     report["summary"].pop("replay_trust", None)
     case = report["cases"][0]
     case.pop("replay_drift_warning", None)
-    case["lanes"]["baseline_replay"]["metrics"]["evaluation"]["scorecard"][
-        "lists_risks"
-    ] = False
+    observed_eval = case["lanes"]["observed"]["metrics"]["evaluation"]
+    baseline_eval = case["lanes"]["baseline_replay"]["metrics"]["evaluation"]
+    observed_eval["drift_signature"] = {"sections": ["summary", "risks"]}
+    baseline_eval["drift_signature"] = {"sections": ["summary"]}
 
     assert verdict_renderer.case_has_high_replay_drift(case)
     verdict = verdict_renderer.build_report_verdict(report)
@@ -585,7 +592,11 @@ def test_committed_requirements_sample_renders(tmp_path: Path) -> None:
 
     assert render_html_report(sample_json, rendered) == rendered
     html = rendered.read_text(encoding="utf-8")
+    committed_html = sample_html.read_text(encoding="utf-8")
+
+    assert html == committed_html
     assert "Replay Lab Report: Requirements triage LangGraph demo" in html
+    assert "Candidate decision evidence" in html
+    assert "not a universal model leaderboard" in html
     assert "Balanced alias" in html
     assert "requirements_triage_v1" in html
-    assert sample_html.read_text(encoding="utf-8").startswith("<!doctype html>")

@@ -36,7 +36,7 @@
   <section class="hero">
     <span class="pill trust">Replay trust: steady</span>
     <h1>Replay Lab Report: Requirements triage LangGraph demo</h1>
-    <p class="recommendation">Ship candidate `balanced` for a guarded trial: safe enough from this replay cohort, not a blind deployment.</p>
+    <p class="recommendation">For this small cohort, `balanced` is the safest replacement candidate to trial: it preserved the required answer shape while still reducing cost and latency versus baseline replay.</p>
     <p>Observed and baseline replay lanes stayed within the configured drift threshold for this cohort.</p>
   </section>
 
@@ -50,9 +50,10 @@
   <h2>Per-candidate verdicts</h2>
   <section class="cards"><article class='card'><span class='pill ship'>ship</span><h3>Balanced alias</h3><p><code>balanced</code></p><p>Completed cases: <strong>1</strong></p><p>Changed outputs: <strong>0</strong></p><p>Average quality: <strong>1</strong></p><p>Inspect: none</p></article><article class='card'><span class='pill hold'>hold</span><h3>Cheap alias</h3><p><code>cheap</code></p><p>Completed cases: <strong>1</strong></p><p>Changed outputs: <strong>1</strong></p><p>Average quality: <strong>0.833</strong></p><p>Inspect: onboarding-workflow-access</p></article></section>
 
-  <h2>Candidate ranking</h2>
+  <h2>Candidate decision evidence</h2>
+  <p class="section-note">This order is evidence for this replay cohort, not a universal model leaderboard.</p>
   <table>
-    <thead><tr><th>Rank</th><th>Candidate</th><th>Verdict</th><th>Efficiency wins</th><th>Quality losses</th><th>Inspect</th></tr></thead>
+    <thead><tr><th>Evidence order</th><th>Candidate</th><th>Verdict</th><th>Efficiency wins</th><th>Quality losses</th><th>Inspect</th></tr></thead>
     <tbody><tr><td>1</td><td><strong>Balanced alias</strong><br><code>balanced</code></td><td><span class='pill ship'>ship</span></td><td>1</td><td>0</td><td>none</td></tr><tr><td>2</td><td><strong>Cheap alias</strong><br><code>cheap</code></td><td><span class='pill hold'>hold</span></td><td>1</td><td>1</td><td>onboarding-workflow-access</td></tr></tbody>
   </table>
 
