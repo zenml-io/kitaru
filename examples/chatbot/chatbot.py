@@ -1,23 +1,39 @@
-"""Simple durable chatbot using Kitaru + PydanticAI.
+"""Durable chatbot using Kitaru + PydanticAI.
 
-The flow greets the user first, then suspends waiting for input. Each turn:
-wait for input → chat_turn checkpoint (LLM reply + history saved as artifact) → wait.
-Close your terminal and resume any time — conversation is fully durable.
+The flow opens with a ``greet`` checkpoint that produces the bot's first
+message and seeds the conversation history. Each subsequent turn is
+``wait(user input) → chat_turn(reply) → wait(...)``. Both checkpoints save
+the **full** conversation as a single ``history`` artifact, so any UI can
+rehydrate a session by loading the latest ``history`` artifact.
 
-Run:
-    export OPENAI_API_KEY=sk-...
-    uv run examples/chatbot/chatbot.py
+History is stored as plain ``dict[str, str]`` (``role``/``content``) so the
+artifact can be deserialized from any import context (script, Gradio UI,
+CLI) without depending on a project-specific class.
 
-To continue from another terminal:
+Recommended workflow — deploy the flow once, then invoke it from a UI or
+CLI without holding a Python process open:
+
+    # one-time deploy (rerun after editing this file)
+    kitaru deploy chatbot.py:chatbot --tag prod --stack <remote-stack> --exclusive
+
+    # invoke from anywhere via the Python client
+    from kitaru.client import KitaruClient
+    handle = KitaruClient().deployments.invoke(flow="chatbot", tag="prod")
+
+    # … or interactively from the CLI
+    kitaru invoke chatbot --tag prod
+
+For quick local testing without deploying, ``python chatbot.py`` runs the
+flow on the active stack. To continue a paused execution from a separate
+terminal:
+
     kitaru executions input <exec_id> --value '"your message"'
-    kitaru executions resume <exec_id>
 
 Type "exit", "quit", or "bye" to end the conversation.
 """
 
 from typing import Any
 
-from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelRequest,
@@ -27,43 +43,31 @@ from pydantic_ai.messages import (
 )
 
 import kitaru
-from kitaru import checkpoint, flow
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru import ImageSettings, checkpoint, flow
+
+CHATBOT_IMAGE = ImageSettings(
+    requirements=["pydantic-ai", "openai"],
+    # Injects the secret's keys (here: ``OPENAI_API_KEY``) into the runtime
+    # environment of every checkpoint pod.
+    secret_environment_from=["openai-creds"],
+)
 
 SYSTEM_PROMPT = "You are a helpful, concise assistant."
 MODEL = "openai:gpt-4o-mini"
-MAX_TURNS = 20
+MAX_TURNS = 50
 STOP_WORDS = {"exit", "quit", "bye", "/done", "done"}
 GREETING_PROMPT = "Greet the user warmly but briefly. Ask how you can help."
 
-_raw: Agent[None, str] | None = None
-_agent: KitaruAgent | None = None
-
-
-def _get_agents() -> tuple[Agent[None, str], KitaruAgent]:
-    """Lazy-initialize agents so module import doesn't require OPENAI_API_KEY."""
-    global _raw, _agent
-    if _raw is None:
-        _raw = Agent(
-            MODEL, name="chatbot", system_prompt=SYSTEM_PROMPT, output_type=str
-        )
-        _agent = KitaruAgent(_raw)
-    assert _agent is not None
-    return _raw, _agent
-
-
-class Message(BaseModel):
-    role: str
-    content: str
+Message = dict[str, str]  # {"role": "user" | "assistant", "content": ...}
 
 
 def _to_pydantic_history(messages: list[Message]) -> list[ModelRequest | ModelResponse]:
-    history = []
+    history: list[ModelRequest | ModelResponse] = []
     for m in messages:
-        if m.role == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=m.content)]))
+        if m["role"] == "user":
+            history.append(ModelRequest(parts=[UserPromptPart(content=m["content"])]))
         else:
-            history.append(ModelResponse(parts=[TextPart(m.content)]))
+            history.append(ModelResponse(parts=[TextPart(m["content"])]))
     return history
 
 
@@ -73,49 +77,59 @@ def _load(handle: Any) -> Any:
     return load_fn() if callable(load_fn) else handle
 
 
+def _agent() -> Agent[None, str]:
+    return Agent(MODEL, name="chatbot", system_prompt=SYSTEM_PROMPT, output_type=str)
+
+
+@checkpoint(cache=False)
+def greet() -> list[Message]:
+    """Produce the opening assistant message and seed the conversation history.
+
+    Caching is disabled because ``greet`` takes no inputs — without ``cache=False``,
+    every new chat would reuse the very first greeting ever generated.
+    """
+    reply: str = _agent().run_sync(GREETING_PROMPT).output
+    history: list[Message] = [{"role": "assistant", "content": reply}]
+    kitaru.save("history", history)
+    return history
+
+
 @checkpoint
-def chat_turn(user_message: str, history: list[Message]) -> str:
-    """Generate a reply and save the updated conversation history as an artifact."""
-    raw, _ = _get_agents()
-    result = raw.run_sync(user_message, message_history=_to_pydantic_history(history))
-    assistant_reply: str = result.output
-    updated = [
+def chat_turn(user_message: str, history: list[Message]) -> list[Message]:
+    """Reply to one user message and save the updated conversation history."""
+    reply: str = (
+        _agent()
+        .run_sync(user_message, message_history=_to_pydantic_history(history))
+        .output
+    )
+    updated: list[Message] = [
         *history,
-        Message(role="user", content=user_message),
-        Message(role="assistant", content=assistant_reply),
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": reply},
     ]
     kitaru.save("history", updated)
-    return assistant_reply
+    return updated
 
 
-@flow
+@flow(image=CHATBOT_IMAGE)
 def chatbot(max_turns: int = MAX_TURNS) -> str:
     """Durable chatbot: greets the user, then waits for input each turn."""
-    history: list[Message] = []
-
-    # Bot greets first; KitaruAgent auto-opens a turn checkpoint
-    _, agent = _get_agents()
-    assistant_reply: str = agent.run_sync(GREETING_PROMPT).output
+    history: list[Message] = _load(greet())
 
     for turn in range(max_turns):
         user_message: str = kitaru.wait(
             name=f"user_turn_{turn}",
             schema=str,
-            question=assistant_reply,
+            question=history[-1]["content"],
             timeout=3600,
         )
 
         if user_message.strip().lower() in STOP_WORDS:
             break
 
-        assistant_reply = _load(chat_turn(user_message, history))
-        history = [
-            *history,
-            Message(role="user", content=user_message),
-            Message(role="assistant", content=assistant_reply),
-        ]
+        history = _load(chat_turn(user_message, history))
 
-    return assistant_reply
+    return history[-1]["content"]
 
 
 def main() -> None:
