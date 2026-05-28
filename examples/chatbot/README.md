@@ -1,6 +1,6 @@
 # Durable chatbot
 
-![PydanticAI agent driving a chatbot with kitaru.wait under the hood](pydnatickitaru.png)
+![PydanticAI agent driving a chatbot with kitaru.wait under the hood](hero.png)
 
 > **Are modern chatbots just long-horizon async agents?**
 > If you squint, yes — a chat session is an agent that thinks for a few seconds, hands the turn over to a human, and waits. Sometimes for minutes. Sometimes for days.
