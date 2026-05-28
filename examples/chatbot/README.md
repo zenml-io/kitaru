@@ -25,13 +25,28 @@ In this paradigm — where the runtime is smart enough to release compute during
 ```bash
 cd examples/chatbot
 uv sync --extra pydantic-ai
-
-# Deploy the flow once to a stack the server can execute remotely
-kitaru deploy chatbot.py:chatbot --tag prod --stack <remote-stack> --exclusive
-
-# Run the Gradio UI
 uv add --dev gradio
-export OPENAI_API_KEY=sk-...
+```
+
+The deployment pod (not the UI process) needs an OpenAI key. Put it in a
+Kitaru secret named `openai-creds` — that name matches
+`secret_environment_from=["openai-creds"]` in `chatbot.py`, and the server
+injects it as `OPENAI_API_KEY` in every checkpoint pod:
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+```
+
+Deploy the flow once to a stack the server can execute remotely (a local
+stack won't work — Kitaru needs to schedule the pod itself):
+
+```bash
+kitaru deploy chatbot.py:chatbot --tag prod --stack <remote-stack> --exclusive
+```
+
+Run the Gradio UI:
+
+```bash
 uv run python ui.py
 ```
 
