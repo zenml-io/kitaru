@@ -1,49 +1,36 @@
 """Durable chatbot using Kitaru + PydanticAI.
 
-The flow opens with a ``greet`` checkpoint that produces the bot's first
-message and seeds the conversation history. Each subsequent turn is
-``wait(user input) → chat_turn(reply) → wait(...)``. Both checkpoints save
-the **full** conversation as a single ``history`` artifact, so any UI can
-rehydrate a session by loading the latest ``history`` artifact.
+The chatbot is one agent with a single ``say_and_wait`` tool. The LLM drives
+the whole conversation: every time it wants to talk to the user it calls
+``say_and_wait(message=...)``, which suspends the run via ``kitaru.wait`` and
+returns whatever the user typed back. The agent stops calling the tool when
+the conversation is over.
 
-History is stored as plain ``dict[str, str]`` (``role``/``content``) so the
-artifact can be deserialized from any import context (script, Gradio UI,
-CLI) without depending on a project-specific class.
+No turn loop, no manual checkpoint boundaries, no per-turn bookkeeping — the
+KitaruAgent adapter wraps each model + tool call in a synthetic checkpoint
+for replay, and the tool body saves the running ``history`` artifact so any
+UI can rehydrate a session by loading the latest one.
 
-Recommended workflow — deploy the flow once, then invoke it from a UI or
-CLI without holding a Python process open:
+Recommended workflow:
 
     # one-time deploy (rerun after editing this file)
     kitaru deploy chatbot.py:chatbot --tag prod --stack <remote-stack> --exclusive
 
-    # invoke from anywhere via the Python client
+    # invoke from anywhere
     from kitaru.client import KitaruClient
-    handle = KitaruClient().deployments.invoke(flow="chatbot", tag="prod")
-
-    # … or interactively from the CLI
-    kitaru invoke chatbot --tag prod
+    KitaruClient().deployments.invoke(flow="chatbot", tag="prod")
 
 For quick local testing without deploying, ``python chatbot.py`` runs the
-flow on the active stack. To continue a paused execution from a separate
-terminal:
-
-    kitaru executions input <exec_id> --value '"your message"'
-
-Type "exit", "quit", or "bye" to end the conversation.
+flow against the active stack.
 """
 
-from typing import Any
+from dataclasses import dataclass, field
 
-from pydantic_ai import Agent
-from pydantic_ai.messages import (
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    UserPromptPart,
-)
+from pydantic_ai import Agent, RunContext
 
 import kitaru
-from kitaru import ImageSettings, checkpoint, flow
+from kitaru import ImageSettings, flow
+from kitaru.adapters.pydantic_ai import KitaruAgent, wait_for_input
 
 CHATBOT_IMAGE = ImageSettings(
     requirements=["pydantic-ai", "openai"],
@@ -52,84 +39,75 @@ CHATBOT_IMAGE = ImageSettings(
     secret_environment_from=["openai-creds"],
 )
 
-SYSTEM_PROMPT = "You are a helpful, concise assistant."
 MODEL = "openai:gpt-4o-mini"
-MAX_TURNS = 50
-STOP_WORDS = {"exit", "quit", "bye", "/done", "done"}
-GREETING_PROMPT = "Greet the user warmly but briefly. Ask how you can help."
+SYSTEM_PROMPT = (
+    "You are a helpful, concise assistant. Talk to the user via the "
+    "`say_and_wait` tool — pass your reply as the `message` argument and "
+    "the user's next message will come back as the tool result. "
+    "Open the conversation by greeting them warmly with `say_and_wait`. "
+    "End the conversation gracefully when the user says bye/quit/exit: "
+    "send one final `say_and_wait` goodbye, then stop calling the tool."
+)
 
 Message = dict[str, str]  # {"role": "user" | "assistant", "content": ...}
 
 
-def _to_pydantic_history(messages: list[Message]) -> list[ModelRequest | ModelResponse]:
-    history: list[ModelRequest | ModelResponse] = []
-    for m in messages:
-        if m["role"] == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=m["content"])]))
-        else:
-            history.append(ModelResponse(parts=[TextPart(m["content"])]))
-    return history
+@dataclass
+class Conversation:
+    """Per-run state threaded through the agent via PydanticAI deps."""
 
-
-def _load(handle: Any) -> Any:
-    """Materialize a @checkpoint output handle when used directly in a flow body."""
-    load_fn = getattr(handle, "load", None)
-    return load_fn() if callable(load_fn) else handle
-
-
-def _agent() -> Agent[None, str]:
-    return Agent(MODEL, name="chatbot", system_prompt=SYSTEM_PROMPT, output_type=str)
-
-
-@checkpoint(cache=False)
-def greet() -> list[Message]:
-    """Produce the opening assistant message and seed the conversation history.
-
-    Caching is disabled because ``greet`` takes no inputs — without ``cache=False``,
-    every new chat would reuse the very first greeting ever generated.
-    """
-    reply: str = _agent().run_sync(GREETING_PROMPT).output
-    history: list[Message] = [{"role": "assistant", "content": reply}]
-    kitaru.save("history", history)
-    return history
-
-
-@checkpoint
-def chat_turn(user_message: str, history: list[Message]) -> list[Message]:
-    """Reply to one user message and save the updated conversation history."""
-    reply: str = (
-        _agent()
-        .run_sync(user_message, message_history=_to_pydantic_history(history))
-        .output
-    )
-    updated: list[Message] = [
-        *history,
-        {"role": "user", "content": user_message},
-        {"role": "assistant", "content": reply},
-    ]
-    kitaru.save("history", updated)
-    return updated
+    history: list[Message] = field(default_factory=list)
+    turn: int = 0
 
 
 @flow(image=CHATBOT_IMAGE)
-def chatbot(max_turns: int = MAX_TURNS) -> str:
-    """Durable chatbot: greets the user, then waits for input each turn."""
-    history: list[Message] = _load(greet())
+def chatbot() -> str:
+    """Durable chatbot: the agent runs until it stops calling ``say_and_wait``."""
+    agent: Agent[Conversation, str] = Agent(
+        MODEL,
+        name="chatbot",
+        system_prompt=SYSTEM_PROMPT,
+        deps_type=Conversation,
+        output_type=str,
+    )
 
-    for turn in range(max_turns):
-        user_message: str = kitaru.wait(
-            name=f"user_turn_{turn}",
+    @agent.tool
+    def say_and_wait(ctx: RunContext[Conversation], message: str) -> str:
+        """Send MESSAGE to the user and return whatever they reply.
+
+        Call this every time you want to speak to the user; the tool result
+        is the user's next message.
+        """
+        conv = ctx.deps
+        conv.history.append({"role": "assistant", "content": message})
+        kitaru.save("history", list(conv.history))
+
+        user_reply = wait_for_input(
             schema=str,
-            question=history[-1]["content"],
+            question=message,
+            name=f"user_turn_{conv.turn}",
             timeout=3600,
         )
+        conv.turn += 1
+        conv.history.append({"role": "user", "content": user_reply})
+        kitaru.save("history", list(conv.history))
+        return user_reply
 
-        if user_message.strip().lower() in STOP_WORDS:
-            break
+    # ``say_and_wait`` opts out of the adapter's synthetic tool checkpoint so
+    # the body can call ``wait_for_input`` (which must run at flow scope, not
+    # inside a checkpoint). ``allow_sync_tool_body_waits=True`` keeps the
+    # tool on the workflow thread so the wait is allowed.
+    kitaru_agent = KitaruAgent(
+        agent,
+        tool_checkpoint_config_by_name={"say_and_wait": False},
+        allow_sync_tool_body_waits=True,
+    )
 
-        history = _load(chat_turn(user_message, history))
-
-    return history[-1]["content"]
+    conv = Conversation()
+    return kitaru_agent.run_sync(
+        "Begin the conversation by greeting the user.",
+        deps=conv,
+    ).output
 
 
 def main() -> None:

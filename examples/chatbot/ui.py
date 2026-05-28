@@ -377,37 +377,194 @@ def respond(message: str, history: list[dict], state: dict):
 
 
 # ---------------------------------------------------------------------------
-# Layout
+# Theme + layout
 # ---------------------------------------------------------------------------
 
+# Kitaru palette — exact OKLCH → sRGB conversion of the `[data-app="kitaru"]`
+# block from zenml-frontend-monorepo/shared/hashi.
+_KITARU = {
+    "background": "#faf8f4",
+    "card": "#fffefb",
+    "foreground": "#2e2016",
+    "muted": "#f2e9e2",
+    "muted_fg": "#988573",
+    "border": "#e8e0d4",
+    "sidebar": "#f9f3eb",
+    "primary": "#e28c46",
+    "primary_hover": "#cf7a32",
+    "primary_fg": "#ffffff",
+    "ring": "#ce8e58",
+}
+
+KITARU_THEME = gr.themes.Default(
+    primary_hue=gr.themes.Color(
+        c50="#ffde98",
+        c100="#ffd08b",
+        c200="#ffba74",
+        c300="#f8a05b",
+        c400="#ea934e",
+        c500=_KITARU["primary"],
+        c600=_KITARU["primary_hover"],
+        c700="#b46210",
+        c800="#934400",
+        c900="#6d2000",
+        c950="#3c0000",
+    ),
+    neutral_hue=gr.themes.Color(
+        c50=_KITARU["card"],
+        c100=_KITARU["sidebar"],
+        c200=_KITARU["border"],
+        c300="#d4c6b1",
+        c400=_KITARU["muted_fg"],
+        c500="#7a6c5d",
+        c600="#5b4f44",
+        c700="#3f372f",
+        c800=_KITARU["foreground"],
+        c900="#1e1814",
+        c950="#100c0a",
+    ),
+    radius_size=gr.themes.sizes.radius_md,
+    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
+).set(
+    body_background_fill=_KITARU["background"],
+    body_text_color=_KITARU["foreground"],
+    body_text_color_subdued=_KITARU["muted_fg"],
+    background_fill_primary=_KITARU["card"],
+    background_fill_secondary=_KITARU["sidebar"],
+    block_background_fill=_KITARU["card"],
+    block_label_background_fill=_KITARU["sidebar"],
+    block_border_color=_KITARU["border"],
+    border_color_primary=_KITARU["border"],
+    border_color_accent=_KITARU["primary"],
+    color_accent=_KITARU["primary"],
+    color_accent_soft=_KITARU["muted"],
+    input_background_fill=_KITARU["card"],
+    input_border_color=_KITARU["border"],
+    input_border_color_focus=_KITARU["ring"],
+    button_primary_background_fill=_KITARU["primary"],
+    button_primary_background_fill_hover=_KITARU["primary_hover"],
+    button_primary_text_color=_KITARU["primary_fg"],
+    button_primary_border_color=_KITARU["primary"],
+    button_secondary_background_fill=_KITARU["card"],
+    button_secondary_background_fill_hover=_KITARU["muted"],
+    button_secondary_text_color=_KITARU["foreground"],
+    button_secondary_border_color=_KITARU["border"],
+    code_background_fill=_KITARU["muted"],
+)
+
+# Polished slab layout (no viewport-lock — that broke things).
 CSS = """
-#sidebar { border-right: 1px solid var(--border-color-primary); padding-right: 12px; }
-#status-bar { color: var(--body-text-color-subdued); font-size: 0.85em; }
+.gradio-container { padding: 0 !important; }
+
+#chat-shell { padding: 24px 28px 28px 28px; }
+#side-rail {
+    background: #f9f3eb;
+    border-right: 1px solid #e8e0d4;
+    padding: 24px 18px;
+}
+#side-rail .form, #side-rail .block, #side-rail label {
+    background: transparent !important;
+}
+
+#brand { margin: 0 0 24px 0; line-height: 1.1; }
+#brand .wordmark {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+    color: #2e2016;
+}
+#brand .wordmark .accent { color: #e28c46; }
+#brand .subtitle {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: #988573;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-top: 4px;
+}
+
+#side-rail .rail-label {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: #988573;
+    margin: 20px 0 8px 0;
+}
+#side-rail button { width: 100%; justify-content: flex-start; }
+
+#chat-col {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+#chat-col .chatbot, #chat-col .block {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+#composer textarea {
+    font-size: 1rem;
+    line-height: 1.45;
+    padding: 14px 16px !important;
+    border-radius: 14px !important;
+    background: #fffefb !important;
+    border: 1px solid #e8e0d4 !important;
+}
+#composer textarea:focus {
+    outline: none !important;
+    border-color: #ce8e58 !important;
+    box-shadow: 0 0 0 4px rgba(226, 140, 70, 0.12) !important;
+}
+#composer textarea::placeholder { color: #988573; }
+
+#status-bar {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: #988573;
+    letter-spacing: 0.04em;
+    min-height: 1.2rem;
+}
 """
 
 with gr.Blocks(title="Kitaru Chatbot") as demo:
     state = gr.State({})
 
-    with gr.Row():
-        with gr.Column(scale=1, min_width=240, elem_id="sidebar"):
-            gr.Markdown("### Sessions")
-            new_btn = gr.Button("+ New chat", variant="primary")
-            refresh_btn = gr.Button("Refresh", variant="secondary", size="sm")
+    with gr.Row(equal_height=False):
+        with gr.Column(scale=1, min_width=240, elem_id="side-rail"):
+            gr.HTML(
+                '<div id="brand">'
+                '<div class="wordmark">kitaru<span class="accent">.</span></div>'
+                '<div class="subtitle">Durable chatbot</div>'
+                "</div>"
+            )
+            new_btn = gr.Button("Start a new chat", variant="primary")
+            gr.HTML('<div class="rail-label">Recent sessions</div>')
             sessions = gr.Dropdown(
                 choices=_list_sessions(),
-                label="Recent",
+                show_label=False,
                 interactive=True,
                 container=False,
             )
+            refresh_btn = gr.Button("Refresh", variant="secondary", size="sm")
 
-        with gr.Column(scale=4):
-            gr.Markdown("## Kitaru Chatbot")
-            chatbot_ui = gr.Chatbot(height=520, show_label=False)
+        with (
+            gr.Column(scale=4, elem_id="chat-shell"),
+            gr.Column(elem_id="chat-col"),
+        ):
+            chatbot_ui = gr.Chatbot(height=620, show_label=False, container=False)
             msg = gr.Textbox(
-                placeholder='Pick a session or start a new chat. Type "exit" to end.',
+                placeholder="Message…",
                 show_label=False,
                 interactive=False,
                 autofocus=True,
+                elem_id="composer",
+                container=False,
+                lines=1,
+                max_lines=5,
             )
             status_bar = gr.Markdown("", elem_id="status-bar")
 
@@ -426,4 +583,4 @@ with gr.Blocks(title="Kitaru Chatbot") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(css=CSS)
+    demo.launch(css=CSS, theme=KITARU_THEME)
