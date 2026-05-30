@@ -17,7 +17,7 @@ The Kitaru primitives do not change: durability, wait/resume, and replay are the
 
 | Capability | Tutorial stand-in | What a fork swaps in | The seam |
 |---|---|---|---|
-| Durable execution (Stage 1) | `granular_checkpoints=False` for readable logs | The `KitaruAgent` default: granular checkpoints for model requests and tool calls | the `granular_checkpoints` flag |
+| Durable execution (Stage 1) | `checkpoint_strategy="turn"` for readable logs | The `KitaruAgent` default: `checkpoint_strategy="calls"` for model requests and tool calls | the `checkpoint_strategy` setting |
 | Command sandbox (Stage 2) | `DockerSandbox` on your laptop | Stronger isolation for risky commands | `run(command) -> ExecResult` |
 | Agent procedures (Stage 3) | `LocalSkillSource` over local markdown | A reviewed, versioned procedure store | `SkillSource.resolve() -> Path` |
 | Service credentials (Stage 4) | mitmproxy + self-signed CA on a shared Docker network | Network isolation, proxy authorization, and production secret handling | `SandboxProxyRule` plus the proxy container |
@@ -28,7 +28,7 @@ The rest of this page walks each row in tour order.
 
 ## Durable execution
 
-The tour passes `granular_checkpoints=False` so each agent turn is one log block you can point at while learning. A real fork removes it and takes the `KitaruAgent` default, where every model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request then resumes by replaying only the calls after the third.
+The tour passes `checkpoint_strategy="turn"` so each agent turn is one log block you can point at while learning. A real fork usually removes it and takes the `KitaruAgent` default, `checkpoint_strategy="calls"`, where every model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request then resumes by replaying only the calls after the third.
 
 The durability story is identical either way. The only change is how finely work is cached and how finely it shows up on the dashboard. Nothing about Kitaru itself changes here. See [Stage 1](/agent-harness-platform/01-durable-agent).
 
@@ -91,7 +91,7 @@ On a laptop the operator answers `ask_question` at the same terminal. On a serve
 
 - treat operator input as untrusted and escape it before it reaches anything that interprets bytes, such as an HTML renderer, a shell, or SQL; the example passes it through verbatim;
 - record who approved what when your environment needs an audit trail of approver identity and time;
-- when you drop the teaching-only `granular_checkpoints=False`, exempt wait-bearing tools so they still run at flow scope, for example `tool_checkpoint_config_by_name={"ask_question": False}`.
+- when you drop the teaching-only `checkpoint_strategy="turn"` and use the default `checkpoint_strategy="calls"`, exempt wait-bearing tools so they still run at flow scope, for example `tool_checkpoint_config_by_name={"ask_question": False}`.
 
 See [Stage 6](/agent-harness-platform/06-hitl).
 

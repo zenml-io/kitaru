@@ -1,4 +1,4 @@
-"""Unit coverage for the PydanticAI adapter's granular-mode helpers.
+"""Unit coverage for the PydanticAI adapter's calls-strategy helpers.
 
 Focuses on the logic that doesn't require spinning up a flow — the dispatcher
 decision, the per-tool override resolution, and the isolated-runtime guard.
@@ -24,6 +24,7 @@ from kitaru.adapters.pydantic_ai._utils import (
     resolve_tool_checkpoint_config,
     turn_cache_key,
     validate_checkpoint_config,
+    validate_checkpoint_strategy,
     with_default_type,
 )
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -114,6 +115,22 @@ class TestValidateCheckpointConfig:
             exc_info.value
         )
         assert "'cache'" in str(exc_info.value)
+
+
+class TestValidateCheckpointStrategy:
+    @pytest.mark.parametrize("strategy", ["calls", "turn"])
+    def test_accepts_supported_values(self, strategy: str) -> None:
+        assert validate_checkpoint_strategy(strategy) == strategy
+
+    @pytest.mark.parametrize("strategy", ["step", "run", "runner_call"])
+    def test_rejects_invalid_values_with_accepted_values(self, strategy: str) -> None:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            validate_checkpoint_strategy(strategy)
+
+        message = str(exc_info.value)
+        assert "checkpoint_strategy" in message
+        assert "'calls'" in message
+        assert "'turn'" in message
 
 
 class TestTurnCacheKeyCallSites:
@@ -613,7 +630,7 @@ class TestModelToolCallReservations:
         ) == ["call_alpha_1", "call_alpha_2"]
 
 
-class TestCachedGranularModelCheckpoints:
+class TestCachedCallsStrategyModelCheckpoints:
     def _tool_call_response(self) -> Any:
         from pydantic_ai.messages import ModelResponse, ToolCallPart
 
@@ -760,7 +777,7 @@ class TestCachedGranularModelCheckpoints:
         assert beta_id.endswith("_tool_call_3")
 
     @pytest.mark.anyio
-    async def test_granular_model_checkpoint_uses_structural_messages_and_output_refs(
+    async def test_calls_strategy_model_checkpoint_uses_structural_io_refs(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -798,7 +815,7 @@ class TestCachedGranularModelCheckpoints:
 
         def fail_model_manual_save(*args: Any, **kwargs: Any) -> None:
             pytest.fail(
-                "granular model checkpoint should not manually save "
+                "calls-strategy model checkpoint should not manually save "
                 f"{args!r} {kwargs!r}"
             )
 
@@ -827,7 +844,7 @@ class TestCachedGranularModelCheckpoints:
         }
 
     @pytest.mark.anyio
-    async def test_cached_granular_model_event_uses_canonical_refs_when_captured(
+    async def test_cached_calls_strategy_model_event_uses_canonical_refs_when_captured(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1179,7 +1196,7 @@ class TestModelMessageCacheSerialization:
         )
         assert cache_key_a != cache_key_b
 
-    def test_granular_model_checkpoint_uses_stable_cache_key(
+    def test_calls_strategy_model_checkpoint_uses_stable_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1226,7 +1243,7 @@ class TestModelMessageCacheSerialization:
                 name="stable_cache_agent",
                 output_type=str,
             ),
-            granular_checkpoints=True,
+            checkpoint_strategy="calls",
             model_checkpoint_config={"cache": True},
         )
 
@@ -1240,7 +1257,7 @@ class TestModelMessageCacheSerialization:
         assert calls == {"model": 1}
         assert len(cached_responses) == 1
 
-    def test_granular_model_cache_key_includes_explicit_conversation_id(
+    def test_calls_strategy_model_cache_key_includes_explicit_conversation_id(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1287,7 +1304,7 @@ class TestModelMessageCacheSerialization:
                 name="conversation_cache_agent",
                 output_type=str,
             ),
-            granular_checkpoints=True,
+            checkpoint_strategy="calls",
             model_checkpoint_config={"cache": True},
         )
 
@@ -1454,21 +1471,23 @@ class TestThreadingCompat:
             tool_checkpoint_config_by_name={"ask_user": False},
             allow_sync_tool_body_waits=True,
         )
-        ordinary_granular = KitaruAgent(Agent(TestModel(), name="ordinary_tools_agent"))
-        configured_granular = KitaruAgent(
+        ordinary_calls_strategy = KitaruAgent(
+            Agent(TestModel(), name="ordinary_tools_agent")
+        )
+        configured_calls_strategy = KitaruAgent(
             Agent(TestModel(), name="configured_tools_agent"),
             tool_checkpoint_config_by_name={"lookup": {"cache": False}},
         )
-        turn_mode = KitaruAgent(
-            Agent(TestModel(), name="turn_mode_agent"),
-            granular_checkpoints=False,
+        turn_strategy = KitaruAgent(
+            Agent(TestModel(), name="turn_strategy_agent"),
+            checkpoint_strategy="turn",
         )
 
         assert opted_out._should_inline_sync_tools() is False
         assert opted_out_with_wait_compat._should_inline_sync_tools() is True
-        assert ordinary_granular._should_inline_sync_tools() is False
-        assert configured_granular._should_inline_sync_tools() is False
-        assert turn_mode._should_inline_sync_tools() is False
+        assert ordinary_calls_strategy._should_inline_sync_tools() is False
+        assert configured_calls_strategy._should_inline_sync_tools() is False
+        assert turn_strategy._should_inline_sync_tools() is False
 
     def test_sync_tool_body_wait_opt_in_requires_checkpoint_opt_out(self) -> None:
         from pydantic_ai import Agent
@@ -1482,19 +1501,23 @@ class TestThreadingCompat:
                 allow_sync_tool_body_waits=True,
             )
 
-    def test_sync_tool_body_wait_opt_in_requires_granular_mode(self) -> None:
+    def test_sync_tool_body_wait_opt_in_requires_calls_strategy(self) -> None:
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         from kitaru.adapters.pydantic_ai import KitaruAgent
 
-        with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
+        with pytest.raises(KitaruUsageError) as exc_info:
             KitaruAgent(
                 Agent(TestModel(), name="turn_mode_wait_compat"),
-                granular_checkpoints=False,
+                checkpoint_strategy="turn",
                 tool_checkpoint_config_by_name={"ask_user": False},
                 allow_sync_tool_body_waits=True,
             )
+
+        message = str(exc_info.value)
+        assert 'checkpoint_strategy="calls"' in message
+        assert "granular_checkpoints=True" in message
 
 
 class TestWaitForInput:
@@ -1792,37 +1815,123 @@ class TestHitlConfigJsonSerialization:
         assert dumped["schema"] is None
 
 
-class TestUseGranular:
-    def _make_agent(self, *, granular_checkpoints: bool):
+class TestCheckpointStrategyDispatch:
+    def _make_agent(
+        self,
+        *,
+        checkpoint_strategy: Any | None = None,
+        granular_checkpoints: bool | None = None,
+    ):
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         from kitaru.adapters.pydantic_ai import KitaruAgent
 
         inner = Agent(TestModel(), name="streamer")
-        return KitaruAgent(inner, granular_checkpoints=granular_checkpoints)
+        return KitaruAgent(
+            inner,
+            checkpoint_strategy=checkpoint_strategy,
+            granular_checkpoints=granular_checkpoints,
+        )
 
-    def test_granular_off_always_false(self) -> None:
+    def test_legacy_granular_checkpoints_false_selects_turn_strategy(self) -> None:
         agent = self._make_agent(granular_checkpoints=False)
+        assert agent.checkpoint_strategy == "turn"
         assert agent._use_granular(force_turn_checkpoint=False) is False
         assert agent._use_granular(force_turn_checkpoint=True) is False
 
-    def test_granular_on_without_stream_handler(self) -> None:
+    def test_legacy_granular_checkpoints_true_selects_calls_strategy(self) -> None:
         agent = self._make_agent(granular_checkpoints=True)
+        assert agent.checkpoint_strategy == "calls"
         assert agent._use_granular(force_turn_checkpoint=False) is True
 
-    def test_granular_on_with_stream_handler_falls_back(self) -> None:
-        agent = self._make_agent(granular_checkpoints=True)
+    def test_calls_strategy_falls_back_to_turn_checkpoint_for_streaming_hooks(
+        self,
+    ) -> None:
+        agent = self._make_agent(checkpoint_strategy="calls")
+        assert agent.checkpoint_strategy == "calls"
         assert agent._use_granular(force_turn_checkpoint=True) is False
 
-    def test_granular_is_default_and_enables_per_call_checkpoint_configs(self) -> None:
+    def test_turn_strategy_never_uses_calls_checkpoints(self) -> None:
+        agent = self._make_agent(checkpoint_strategy="turn")
+        assert agent._uses_calls_strategy is False
+        assert agent._use_granular(force_turn_checkpoint=False) is False
+        assert agent._use_granular(force_turn_checkpoint=True) is False
+
+    def test_legacy_granular_checkpoints_may_match_checkpoint_strategy(self) -> None:
+        granular = self._make_agent(
+            checkpoint_strategy="calls",
+            granular_checkpoints=True,
+        )
+        turn = self._make_agent(
+            checkpoint_strategy="turn",
+            granular_checkpoints=False,
+        )
+
+        assert granular.checkpoint_strategy == "calls"
+        assert granular._uses_calls_strategy is True
+        assert turn.checkpoint_strategy == "turn"
+        assert turn._uses_calls_strategy is False
+
+    @pytest.mark.parametrize(
+        ("checkpoint_strategy", "granular_checkpoints"),
+        [
+            ("calls", False),
+            ("turn", True),
+        ],
+    )
+    def test_legacy_granular_checkpoints_conflicting_with_strategy_are_rejected(
+        self,
+        checkpoint_strategy: str,
+        granular_checkpoints: bool,
+    ) -> None:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            self._make_agent(
+                checkpoint_strategy=checkpoint_strategy,
+                granular_checkpoints=granular_checkpoints,
+            )
+
+        message = str(exc_info.value)
+        assert "checkpoint_strategy" in message
+        assert "granular_checkpoints" in message
+        assert 'checkpoint_strategy="calls"' in message
+        assert "granular_checkpoints=True" in message
+        assert 'checkpoint_strategy="turn"' in message
+        assert "granular_checkpoints=False" in message
+
+    def test_invalid_strategy_with_legacy_bool_reports_invalid_strategy(self) -> None:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            self._make_agent(
+                checkpoint_strategy=cast(Any, "step"),
+                granular_checkpoints=False,
+            )
+
+        message = str(exc_info.value)
+        assert "checkpoint_strategy" in message
+        assert "'calls'" in message
+        assert "'turn'" in message
+        assert "conflict" not in message
+
+    def test_invalid_strategy_names_are_rejected(self) -> None:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            self._make_agent(checkpoint_strategy=cast(Any, "step"))
+
+        message = str(exc_info.value)
+        assert "checkpoint_strategy" in message
+        assert "'calls'" in message
+        assert "'turn'" in message
+
+    def test_calls_strategy_is_default_and_enables_per_call_checkpoint_configs(
+        self,
+    ) -> None:
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         from kitaru.adapters.pydantic_ai import KitaruAgent
 
         agent = KitaruAgent(Agent(TestModel(), name="streamer"))
-        assert agent._granular_checkpoints is True
+        assert agent.checkpoint_strategy == "calls"
+        assert agent._uses_calls_strategy is True
         assert agent._use_granular(force_turn_checkpoint=False) is True
         assert agent._model_checkpoint_config == {}
         assert agent._tool_checkpoint_config == {}
@@ -1836,7 +1945,7 @@ class TestUseGranular:
 
         agent = KitaruAgent(
             Agent(TestModel(), name="cache_config_agent"),
-            granular_checkpoints=True,
+            checkpoint_strategy="calls",
             turn_checkpoint_config={"cache": True},
             model_checkpoint_config={"cache": True},
             tool_checkpoint_config={"cache": False},
@@ -1856,19 +1965,64 @@ class TestUseGranular:
         }
         assert agent._mcp_checkpoint_config == {"cache": None}
 
-    def test_per_call_configs_require_granular_mode(self) -> None:
+    @pytest.mark.parametrize(
+        "strategy_kwargs",
+        [
+            {"checkpoint_strategy": "turn"},
+            {"granular_checkpoints": False},
+        ],
+    )
+    def test_per_call_configs_require_calls_strategy(
+        self,
+        strategy_kwargs: dict[str, Any],
+    ) -> None:
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         from kitaru.adapters.pydantic_ai import KitaruAgent
 
         inner = Agent(TestModel(), name="streamer")
-        with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
+        with pytest.raises(KitaruUsageError) as exc_info:
             KitaruAgent(
                 inner,
-                granular_checkpoints=False,
+                **strategy_kwargs,
                 model_checkpoint_config={"retries": 1},
             )
+
+        message = str(exc_info.value)
+        assert 'checkpoint_strategy="calls"' in message
+        assert "granular_checkpoints=True" in message
+
+    def test_wrapped_event_tracks_resolved_strategy_and_legacy_boolean(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.analytics import AnalyticsEvent
+
+        tracked: list[tuple[AnalyticsEvent, dict[str, Any]]] = []
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._agent.track",
+            lambda event, payload: tracked.append((event, payload)),
+        )
+
+        KitaruAgent(
+            Agent(TestModel(), name="analytics_turn_agent"),
+            checkpoint_strategy="turn",
+        )
+
+        event, payload = tracked[-1]
+        assert event == AnalyticsEvent.PYDANTIC_AI_WRAPPED
+        assert payload["checkpoint_strategy"] == "turn"
+        assert payload["granular_checkpoints"] is False
+
+    def test_public_package_exports_checkpoint_strategy_helpers(self) -> None:
+        from kitaru.adapters import pydantic_ai as kp
+
+        assert kp.validate_checkpoint_strategy("calls") == "calls"
+        assert kp.validate_checkpoint_strategy("turn") == "turn"
 
     def test_wrap_compatibility_shim_translates_legacy_capture_modes(self) -> None:
         from pydantic_ai import Agent
@@ -2244,7 +2398,7 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.anyio
-async def test_explicit_hitl_tool_bypasses_granular_tool_checkpoint(
+async def test_explicit_hitl_tool_bypasses_calls_strategy_tool_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
@@ -2273,7 +2427,9 @@ async def test_explicit_hitl_tool_bypasses_granular_tool_checkpoint(
     tool = (await wrapped.get_tools(ctx))["ask_human"]
 
     async def fail_checkpoint(**_kwargs: Any) -> Any:
-        raise AssertionError("explicit HITL should not open a granular tool checkpoint")
+        raise AssertionError(
+            "explicit HITL should not open a calls-strategy tool checkpoint"
+        )
 
     monkeypatch.setattr(
         "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
@@ -2330,7 +2486,7 @@ async def test_explicit_hitl_tool_without_tool_call_id_raises_usage_error(
 
 
 @pytest.mark.anyio
-async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
+async def test_non_hitl_tool_still_uses_calls_strategy_tool_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic_ai import FunctionToolset
@@ -2365,7 +2521,7 @@ async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
 
 
 @pytest.mark.anyio
-async def test_granular_tool_checkpoint_uses_structural_args_and_output_refs(
+async def test_calls_strategy_tool_checkpoint_uses_structural_args_and_output_refs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic_ai import FunctionToolset
@@ -2406,7 +2562,8 @@ async def test_granular_tool_checkpoint_uses_structural_args_and_output_refs(
     monkeypatch.setattr(
         "kitaru.adapters.pydantic_ai._toolset.kitaru.save",
         lambda *args, **kwargs: pytest.fail(
-            f"granular tool checkpoint should not manually save {args!r} {kwargs!r}"
+            "calls-strategy tool checkpoint should not manually save "
+            f"{args!r} {kwargs!r}"
         ),
     )
     wrapped = kitaruify_toolset(
@@ -2429,7 +2586,7 @@ async def test_granular_tool_checkpoint_uses_structural_args_and_output_refs(
 
 
 @pytest.mark.anyio
-async def test_running_mcp_server_bypasses_granular_checkpoint_bridge(
+async def test_running_mcp_server_bypasses_calls_strategy_checkpoint_bridge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic_ai import FunctionToolset
@@ -2514,7 +2671,7 @@ async def test_auto_flow_rejects_preopened_mcp_server_before_worker_thread(
 
 
 @pytest.mark.anyio
-async def test_closed_mcp_server_still_uses_granular_checkpoint(
+async def test_closed_mcp_server_still_uses_calls_strategy_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic_ai import FunctionToolset

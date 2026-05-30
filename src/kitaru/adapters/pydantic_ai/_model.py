@@ -2,8 +2,8 @@
 
 We do not route through ``kitaru.llm`` — it is a text-in/text-out facade over
 OpenAI and Anthropic only and would discard streaming, tool calls, structured
-output, and every other provider PydanticAI supports. Granular mode reuses the
-``type='llm_call'`` checkpoint convention so dashboards group native and adapter
+output, and every other provider PydanticAI supports. The calls strategy reuses
+the ``type='llm_call'`` checkpoint convention so dashboards group native and adapter
 LLM calls uniformly.
 """
 

@@ -51,12 +51,14 @@ from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_e
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
+    CheckpointStrategy,
     ToolCheckpointOverrides,
     checkpoint_input_value,
     run_async_in_checkpoint,
     run_sync_in_checkpoint,
     turn_cache_key,
     validate_checkpoint_config,
+    validate_checkpoint_strategy,
     validate_tool_checkpoint_overrides,
 )
 
@@ -102,6 +104,36 @@ def _has_tool_checkpoint_opt_out(
 ) -> bool:
     """Return whether any named tool explicitly opts out of checkpointing."""
     return bool(overrides and any(override is False for override in overrides.values()))
+
+
+def _strategy_from_granular_checkpoints(
+    granular_checkpoints: bool,
+) -> CheckpointStrategy:
+    return "calls" if granular_checkpoints else "turn"
+
+
+def _resolve_checkpoint_strategy(
+    *,
+    checkpoint_strategy: CheckpointStrategy | None,
+    granular_checkpoints: bool | None,
+) -> CheckpointStrategy:
+    if checkpoint_strategy is None:
+        if granular_checkpoints is None:
+            return "calls"
+        return _strategy_from_granular_checkpoints(granular_checkpoints)
+
+    validated_strategy = validate_checkpoint_strategy(checkpoint_strategy)
+    if granular_checkpoints is None:
+        return validated_strategy
+
+    mapped_from_bool = _strategy_from_granular_checkpoints(granular_checkpoints)
+    if mapped_from_bool != validated_strategy:
+        raise KitaruUsageError(
+            "`checkpoint_strategy` and `granular_checkpoints` conflict. "
+            'Use `checkpoint_strategy="calls"` with `granular_checkpoints=True`, '
+            'or `checkpoint_strategy="turn"` with `granular_checkpoints=False`.'
+        )
+    return validated_strategy
 
 
 def _builtin_tools_kwargs(
@@ -306,7 +338,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         capture: CapturePolicy | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         turn_checkpoint_config: CheckpointConfig | None = None,
-        granular_checkpoints: bool = True,
+        checkpoint_strategy: CheckpointStrategy | None = None,
+        granular_checkpoints: bool | None = None,
         model_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
@@ -318,18 +351,20 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         Outside a flow, ``run()`` / ``run_sync()`` auto-open a ``@kitaru.flow``.
 
-        **Granular mode (default):** no turn checkpoint; each top-level
+        **Calls strategy (default):** no turn checkpoint; each top-level
         model/tool/MCP call per turn opens its own checkpoint, giving per-call
         replay/retry boundaries and a less crowded artifact view. Sub-calls
         nested inside an already-open granular checkpoint (for example tool
         calls inside the turn's model request) fall back to inline tracking —
         they do *not* open a second checkpoint. The ``model_/tool_/mcp_checkpoint_config``
         kwargs (and the per-tool ``tool_checkpoint_config_by_name`` map, where
-        ``False`` opts a tool out entirely) are honored in this mode. Cross-run
-        cache behavior for adapter-created granular checkpoints is still being
-        tightened.
+        ``False`` opts a tool out entirely) are honored in this strategy.
+        ``granular_checkpoints=True`` is kept as a legacy-compatible alias.
+        Cross-run cache behavior for adapter-created granular checkpoints is
+        still being tightened.
 
-        **Turn mode** (``granular_checkpoints=False``): each run opens one
+        **Turn strategy** (``checkpoint_strategy="turn"`` or legacy
+        ``granular_checkpoints=False``): each run opens one
         ``@kitaru.checkpoint`` named after the agent; model/tool/MCP calls are
         recorded as child events under that checkpoint.
 
@@ -383,7 +418,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             )
             or {}
         )
-        self._granular_checkpoints = granular_checkpoints
+        self._checkpoint_strategy = _resolve_checkpoint_strategy(
+            checkpoint_strategy=checkpoint_strategy,
+            granular_checkpoints=granular_checkpoints,
+        )
         self._warned_streaming_fallback = False
         self._warned_checkpoint_history_limit = False
         has_granular_configs = any(
@@ -395,15 +433,17 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 mcp_checkpoint_config,
             )
         )
-        if has_granular_configs and not granular_checkpoints:
+        if has_granular_configs and not self._uses_calls_strategy:
             raise KitaruUsageError(
-                "Per-call checkpoint configs require `granular_checkpoints=True`."
+                'Per-call checkpoint configs require `checkpoint_strategy="calls"` '
+                "or legacy `granular_checkpoints=True`."
             )
-        if allow_sync_tool_body_waits and not granular_checkpoints:
+        if allow_sync_tool_body_waits and not self._uses_calls_strategy:
             raise KitaruUsageError(
-                "`allow_sync_tool_body_waits=True` requires `granular_checkpoints=True` "
-                "and a matching checkpoint opt-out such as "
-                "`tool_checkpoint_config_by_name={\"tool_name\": False}`."
+                "`allow_sync_tool_body_waits=True` requires "
+                '`checkpoint_strategy="calls"` or legacy '
+                "`granular_checkpoints=True`, and a matching checkpoint opt-out "
+                'such as `tool_checkpoint_config_by_name={"tool_name": False}`.'
             )
         if allow_sync_tool_body_waits and not _has_tool_checkpoint_opt_out(
             tool_checkpoint_config_by_name
@@ -411,13 +451,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             raise KitaruUsageError(
                 "`allow_sync_tool_body_waits=True` requires at least one per-tool "
                 "checkpoint opt-out such as "
-                "`tool_checkpoint_config_by_name={\"tool_name\": False}`. "
+                '`tool_checkpoint_config_by_name={"tool_name": False}`. '
                 "The opt-out keeps `kp.wait_for_input(...)` out of a synthetic "
                 "tool checkpoint; the flag only controls Pydantic AI sync-tool "
                 "threading."
             )
         self._allow_sync_tool_body_waits = allow_sync_tool_body_waits
-        if granular_checkpoints:
+        if self._uses_calls_strategy:
             self._model_checkpoint_config = (
                 validate_checkpoint_config(
                     model_checkpoint_config or {},
@@ -464,7 +504,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             AnalyticsEvent.PYDANTIC_AI_WRAPPED,
             {
                 "toolset_count": len(self._toolsets),
-                "granular_checkpoints": granular_checkpoints,
+                "checkpoint_strategy": self._checkpoint_strategy,
+                "granular_checkpoints": self._uses_calls_strategy,
                 "persist_message_history": persist_message_history,
                 "allow_sync_tool_body_waits": allow_sync_tool_body_waits,
             },
@@ -495,6 +536,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     @property
     def capture(self) -> CapturePolicy:
         return self._capture
+
+    @property
+    def checkpoint_strategy(self) -> CheckpointStrategy:
+        return self._checkpoint_strategy
+
+    @property
+    def _uses_calls_strategy(self) -> bool:
+        return self._checkpoint_strategy == "calls"
 
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:
@@ -595,7 +644,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             return False
         if is_inside_checkpoint():
             return True
-        return self._granular_checkpoints and is_inside_flow()
+        return self._uses_calls_strategy and is_inside_flow()
 
     @contextmanager
     def _tracking_scope(self) -> Iterator[None]:
@@ -807,11 +856,11 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         warnings.warn(message, UserWarning, stacklevel=3)
 
     def _use_granular(self, force_turn_checkpoint: bool) -> bool:
-        # Granular mode cannot apply to streaming turns: per-call checkpointing
+        # The calls strategy cannot apply to streaming turns: per-call checkpointing
         # a streamed ``request_stream`` would require draining and replaying
         # the stream inside a sync ZenML step. Fall back to the turn checkpoint
         # so model/tool events still land under a tracked boundary.
-        return self._granular_checkpoints and not force_turn_checkpoint
+        return self._uses_calls_strategy and not force_turn_checkpoint
 
     def _log_streaming_fallback(self) -> None:
         if self._warned_streaming_fallback:
@@ -1063,7 +1112,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             capabilities=capabilities,
             spec=spec,
         )
-        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+        if turn_call_config.force_turn_checkpoint and self._uses_calls_strategy:
             self._log_streaming_fallback()
 
         error: BaseException | None = None
@@ -1176,7 +1225,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             capabilities=capabilities,
             spec=spec,
         )
-        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+        if turn_call_config.force_turn_checkpoint and self._uses_calls_strategy:
             self._log_streaming_fallback()
 
         error: BaseException | None = None

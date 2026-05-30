@@ -86,7 +86,7 @@ What PydanticAI does not do, and what no plain in-process agent loop does on its
 That second job is Kitaru's. A single line wraps the agent:
 
 ```python
-agent = KitaruAgent(agent, granular_checkpoints=False)
+agent = KitaruAgent(agent, checkpoint_strategy="turn")
 ```
 
 After that, each `agent.run_sync(...)` call becomes a Kitaru checkpoint. The moment a turn finishes, Kitaru writes its output to durable storage. One way to hold it in your head: the PydanticAI loop is what the agent is thinking right now, and Kitaru is what it has already written down and cannot lose. When a retry reaches a turn that already finished, Kitaru hands back the saved output instead of calling the model again.
@@ -114,13 +114,13 @@ The stage uses a few plain Python objects:
 
 The main control here is `Profile.allowed_tools`. Stage 1 sets it to `{"exec"}`, so the agent gets exactly one tool: a runner that executes a shell command in the host process. `build_tools` reads that set directly. If the profile did not ask for a tool, the code never builds that tool. Later stages add more names to the set and gain new capabilities. The older stage files keep working because the shared library only adds new tools; it does not remove the old ones.
 
-## Why `granular_checkpoints=False`
+## Why `checkpoint_strategy="turn"`
 
-You will notice the wrapper passes `granular_checkpoints=False`. That is a teaching choice, not a default you would normally set.
+You will notice the wrapper passes `checkpoint_strategy="turn"`. That is a teaching choice, not a default you would normally set.
 
-With it off, each `agent.run_sync()` turn becomes one checkpoint (`default`, then `default_2`). That keeps the log output clean enough to point at while you are learning, and it lands the `FORCE_FAILURE` crash neatly on a turn boundary.
+With the turn strategy, each `agent.run_sync()` turn becomes one checkpoint (`default`, then `default_2`). That keeps the log output clean enough to point at while you are learning, and it lands the `FORCE_FAILURE` crash neatly on a turn boundary.
 
-In a real fork you drop the kwarg. `KitaruAgent` defaults to `granular_checkpoints=True`, where every individual model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request then resumes by replaying only the calls after the third. The durability is the same, but the cache entries and dashboard rows are more precise.
+In a real fork you usually drop the kwarg and take the default `checkpoint_strategy="calls"`, where every individual model request and every tool call gets its own checkpoint and its own cache key. A flow that crashed after the third model request then resumes by replaying only the calls after the third. The durability is the same, but the cache entries and dashboard rows are more precise.
 
 ## Where this leaves us
 

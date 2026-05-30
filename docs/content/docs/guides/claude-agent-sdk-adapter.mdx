@@ -379,9 +379,11 @@ The Claude Agent SDK adapter currently supports one strategy:
 KitaruClaudeRunner(name="claude_reviewer", checkpoint_strategy="invocation")
 ```
 
-`"invocation"` is also the default. Strategies such as `"calls"`,
-`"runner_call"`, `"model_call"`, and `"tool_call"` are rejected on purpose
-because they would imply granular durability that this adapter does not provide.
+`"invocation"` is also the default. It is the only replay-honest boundary the
+Claude SDK exposes to Kitaru today: one Claude query goes in, one durable result
+comes out. Strategies such as `"calls"`, `"runner_call"`, `"model_call"`, and
+`"tool_call"` are rejected on purpose because they would imply granular
+durability that this adapter does not provide.
 
 `checkpoint_config=` accepts the same small checkpoint knobs used by other
 adapter-created checkpoints:

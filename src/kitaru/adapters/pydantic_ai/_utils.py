@@ -20,6 +20,8 @@ from kitaru.errors import KitaruUsageError
 from pydantic_core import to_jsonable_python
 
 CheckpointRuntime = Literal["inline", "isolated"]
+CheckpointStrategy = Literal["calls", "turn"]
+_ALLOWED_CHECKPOINT_STRATEGIES = ("calls", "turn")
 
 
 class CheckpointConfig(TypedDict, total=False):
@@ -126,6 +128,17 @@ def checkpoint_cache_key(payload: Any) -> str:
         normalized, sort_keys=True, separators=(",", ":"), default=repr
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_checkpoint_strategy(value: str) -> CheckpointStrategy:
+    """Return a supported PydanticAI checkpoint strategy."""
+    if value in _ALLOWED_CHECKPOINT_STRATEGIES:
+        return cast(CheckpointStrategy, value)
+    accepted = ", ".join(repr(strategy) for strategy in _ALLOWED_CHECKPOINT_STRATEGIES)
+    raise KitaruUsageError(
+        f"Unsupported PydanticAI checkpoint_strategy {value!r}. "
+        f"Accepted values are: {accepted}."
+    )
 
 
 def validate_checkpoint_config(
