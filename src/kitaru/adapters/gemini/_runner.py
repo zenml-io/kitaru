@@ -183,7 +183,9 @@ def normalize_interaction(
         _summarize_step(index=index, value=value)
         for index, value in enumerate(raw_steps)
     ]
-    output_text = _extract_output_text(raw_steps)
+    output_text = _string_or_none(_extract(interaction, "output_text"))
+    if output_text is None:
+        output_text = _extract_output_text(raw_steps)
     usage = _dict_or_none(_extract(interaction, "usage"))
     return GeminiInteractionPayload(
         status=str(_extract(interaction, "status") or "unknown"),

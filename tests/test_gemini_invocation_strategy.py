@@ -253,6 +253,39 @@ def test_real_steps_are_normalized_before_outputs_fallback(
     assert "outputs rather than `steps`" not in " ".join(result.warnings)
 
 
+def test_sdk_output_text_takes_precedence_over_timeline_step_text(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                output_text="final answer",
+                steps=[
+                    SimpleNamespace(type="user_input", text="original user prompt"),
+                    SimpleNamespace(type="tool_result", text="intermediate tool text"),
+                    SimpleNamespace(type="message", text="final answer"),
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text == "final answer"
+    assert [step.type for step in result.steps] == [
+        "user_input",
+        "tool_result",
+        "message",
+    ]
+
+
 def test_function_result_request_constructs_matching_create_payload(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
