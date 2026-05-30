@@ -35,33 +35,6 @@ def to_json_safe(value: Any) -> Any:
         }
 
 
-def to_cache_identity(value: Any) -> Any:
-    """Best-effort shallow identity for synthetic checkpoint cache keys."""
-    try:
-        if value is None or isinstance(value, _PRIMITIVE_TYPES):
-            return value
-        if callable(value):
-            return _callable_manifest(value)
-        if isinstance(value, Mapping):
-            return {
-                "python_type": _python_type(value),
-                "keys": sorted(str(key) for key in value),
-            }
-        if isinstance(value, Sequence) and not isinstance(
-            value, str | bytes | bytearray
-        ):
-            return {
-                "python_type": _python_type(value),
-                "length": len(value),
-            }
-        return {"python_type": _python_type(value)}
-    except Exception as exc:
-        return {
-            "python_type": _python_type(value),
-            "cache_identity_error": type(exc).__name__,
-        }
-
-
 def redacted_request_manifest(
     request: GeminiInteractionRequest,
     *,

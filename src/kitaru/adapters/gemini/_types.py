@@ -39,8 +39,10 @@ class GeminiInteractionRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
-    def target_kind(self) -> Literal["agent", "model"]:
+    def target_kind(self) -> Literal["agent", "model", "poll"]:
         """Return the Gemini target family for metadata and analytics."""
+        if self.kind == "poll":
+            return "poll"
         return "agent" if self.agent is not None else "model"
 
     @classmethod

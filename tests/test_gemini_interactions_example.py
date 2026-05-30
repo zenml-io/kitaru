@@ -35,6 +35,20 @@ def test_gemini_interactions_example_dry_run_without_credentials(
     assert "Dry run only: no Google request was made" in output
     assert "Status: completed" in output
     assert "Agent: antigravity-preview-05-2026" in output
+    assert "Input: (disabled)" in output
+    assert "Raw interaction: (disabled)" in output
+    assert "Steps: (disabled)" in output
+
+
+def test_gemini_interactions_example_google_api_key_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "alias-key")
+
+    gemini_interactions_adapter._prepare_google_credentials()
+
+    assert gemini_interactions_adapter.os.environ["GEMINI_API_KEY"] == "alias-key"
 
 
 def test_gemini_interactions_example_coerces_foreign_model_result() -> None:

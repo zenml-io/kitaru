@@ -65,6 +65,7 @@ def test_public_import_surface_uses_interaction_vocabulary(
     signature = inspect.signature(gemini_adapter.KitaruGeminiInteractionsRunner)
     assert "checkpoint_strategy" in signature.parameters
     assert "client_factory" in signature.parameters
+    assert "cache_identity" in signature.parameters
     assert "allow_direct_execution_inside_checkpoint" in signature.parameters
 
 
@@ -110,6 +111,43 @@ def test_gemini_analytics_events_do_not_use_granular_vocabulary() -> None:
     assert values
     assert all("tool checkpoint" not in value.lower() for value in values)
     assert all("steps checkpoint" not in value.lower() for value in values)
+
+
+def test_installed_google_genai_interactions_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard the installed google-genai SDK surface without network calls."""
+    cached_genai = sys.modules.get("google.genai")
+    if cached_genai is not None and not hasattr(cached_genai, "Client"):
+        monkeypatch.delitem(sys.modules, "google.genai", raising=False)
+        monkeypatch.delitem(sys.modules, "google", raising=False)
+
+    genai = pytest.importorskip("google.genai")
+    interaction_types = pytest.importorskip("google.genai._interactions.types")
+
+    client = genai.Client(api_key="test-key")
+    create_signature = inspect.signature(client.interactions.create)
+    get_signature = inspect.signature(client.interactions.get)
+
+    for field in {
+        "input",
+        "model",
+        "agent",
+        "agent_config",
+        "extra_body",
+        "timeout",
+        "previous_interaction_id",
+        "store",
+    }:
+        assert field in create_signature.parameters
+    assert "id" in get_signature.parameters
+    assert "extra_body" in get_signature.parameters
+    assert "timeout" in get_signature.parameters
+
+    function_call_fields = interaction_types.FunctionCallContent.__annotations__
+    function_result_fields = interaction_types.FunctionResultContent.__annotations__
+    assert "id" in function_call_fields
+    assert "call_id" in function_result_fields
 
 
 def test_runner_accepts_interaction_strategy(gemini_adapter: types.ModuleType) -> None:
@@ -226,6 +264,7 @@ def test_gemini_request_constructors_and_validation(
     assert function_result.input[0]["type"] == "function_result"
     assert function_result.input[0]["call_id"] == "call-1"
     assert poll.kind == "poll"
+    assert poll.target_kind == "poll"
 
     with pytest.raises(ValidationError, match="exactly one"):
         gemini_adapter.GeminiInteractionRequest.start("hello")
@@ -318,6 +357,18 @@ def test_gemini_request_rejects_checkpoint_handles(
             metadata={"source": cast(str, handle)},
         )
     assert_checkpoint_handle_error(metadata_exc, field_name="GeminiInteractionRequest")
+
+
+def test_capture_policy_defaults_raw_provider_payloads_to_opt_in(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    policy = gemini_adapter.GeminiInteractionCapturePolicy()
+
+    assert policy.save_input is False
+    assert policy.save_raw_interaction is False
+    assert policy.save_steps is False
+    assert policy.save_output is True
+    assert policy.save_usage is True
 
 
 def test_capture_policy_accepts_strict_capture_failure_knobs(

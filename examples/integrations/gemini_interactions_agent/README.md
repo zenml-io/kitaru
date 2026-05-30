@@ -88,8 +88,9 @@ A good way to read the run is:
 2. `KitaruGeminiInteractionsRunner.run_sync(...)` turns that request into one
    Interactions API call.
 3. The checkpoint output is a `GeminiInteractionResult`.
-4. The printed artifact names point to the captured input, redacted request
-   manifest, raw interaction, steps, output, usage, event log, and run summary.
+4. The printed artifact names point to the captured redacted request manifest,
+   output, usage, event log, and run summary. Raw input, raw interaction, and
+   raw step artifacts are disabled by default unless you opt in.
 
 The script prints:
 
@@ -111,9 +112,11 @@ state one by one.
 
 If a later part of your Kitaru flow fails, Kitaru can replay from the saved
 `GeminiInteractionResult` instead of calling Google again for that completed or
-`requires_action` interaction. If a file or other output must be durable in your
-workflow, explicitly return it from Gemini or write it in a later Kitaru-owned
-checkpoint.
+`requires_action` interaction. If Gemini reports another status, Kitaru raises
+instead of saving that unfinished remote job as a successful checkpoint; poll the
+same interaction ID rather than starting a duplicate job. If a file or other
+output must be durable in your workflow, explicitly return it from Gemini or
+write it in a later Kitaru-owned checkpoint.
 
 For the concept walkthrough, see
 [Gemini Interactions Adapter](https://kitaru.ai/docs/guides/gemini-interactions-adapter).

@@ -4,9 +4,11 @@ import asyncio
 import inspect
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from importlib import metadata
-from typing import Any, cast
+from typing import Any, NoReturn, cast
+
+from kitaru.errors import KitaruRuntimeError
 
 from ._serialization import to_json_safe
 from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
@@ -85,8 +87,13 @@ async def run_gemini_interaction(
             interaction_id = _string_or_none(_extract(interaction, "id"))
             if interaction_id is not None and request.timeout_s is not None:
                 deadline = time.perf_counter() + request.timeout_s
-                while time.perf_counter() < deadline:
-                    await asyncio.sleep(poll_interval_s)
+                while True:
+                    remaining_s = deadline - time.perf_counter()
+                    if remaining_s <= 0:
+                        break
+                    await asyncio.sleep(min(poll_interval_s, remaining_s))
+                    if deadline - time.perf_counter() <= 0:
+                        break
                     poll_count += 1
                     interaction = await _maybe_await(
                         interaction_resource.get(interaction_id)
@@ -99,19 +106,24 @@ async def run_gemini_interaction(
         poll_count=poll_count,
     )
     if payload.status not in _STABLE_STATUSES:
-        payload = replace(
-            payload,
-            warnings=[
-                *payload.warnings,
-                (
-                    "Gemini interaction did not reach a v1 stable status. "
-                    "Use GeminiInteractionRequest.poll(interaction_id=...) to "
-                    "continue an existing background interaction instead of "
-                    "starting a duplicate job."
-                ),
-            ],
-        )
+        _raise_unstable_status(payload)
     return payload
+
+
+def _raise_unstable_status(payload: GeminiInteractionPayload) -> NoReturn:
+    interaction_id = payload.interaction_id or "(not reported by SDK)"
+    stable_statuses = ", ".join(repr(status) for status in sorted(_STABLE_STATUSES))
+    raise KitaruRuntimeError(
+        "Gemini interaction "
+        f"{interaction_id!r} returned non-stable status {payload.status!r}. "
+        "Kitaru will not store this as a successful durable checkpoint because "
+        "replay would treat an unfinished provider job as completed work. "
+        f"Only statuses {stable_statuses} complete normally. "
+        "For background jobs, use "
+        f"GeminiInteractionRequest.poll(interaction_id={interaction_id!r}) "
+        "to continue polling the same remote job instead of starting a "
+        "duplicate job."
+    )
 
 
 def _build_create_kwargs(request: GeminiInteractionRequest) -> dict[str, Any]:

@@ -9,10 +9,10 @@ class GeminiInteractionCapturePolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     emit_events: bool = True
-    save_input: bool = True
+    save_input: bool = False
     save_request_manifest: bool = True
-    save_raw_interaction: bool = True
-    save_steps: bool = True
+    save_raw_interaction: bool = False
+    save_steps: bool = False
     save_output: bool = True
     save_usage: bool = True
     redact_request_manifest: bool = True

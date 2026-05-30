@@ -18,10 +18,7 @@ from ._runner import (
     google_genai_version,
     run_gemini_interaction,
 )
-from ._serialization import (
-    redacted_request_manifest,
-    to_cache_identity,
-)
+from ._serialization import redacted_request_manifest
 from ._tracking import (
     ArtifactKind,
     ArtifactNameByKind,
@@ -149,6 +146,7 @@ class KitaruGeminiInteractionsRunner:
         checkpoint_strategy: CheckpointStrategy = "interaction",
         capture: GeminiInteractionCapturePolicy | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        cache_identity: str | None = None,
         allow_direct_execution_inside_checkpoint: bool = False,
         poll_interval_s: float = 2.0,
     ) -> None:
@@ -166,12 +164,15 @@ class KitaruGeminiInteractionsRunner:
             )
         if poll_interval_s <= 0:
             raise KitaruUsageError("`poll_interval_s` must be positive.")
+        if cache_identity is not None and not isinstance(cache_identity, str):
+            raise KitaruUsageError("`cache_identity` must be a stable string.")
 
         self._name = name
         self._client = client
         self._client_factory = client_factory
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
         self._capture = capture or GeminiInteractionCapturePolicy()
+        self._cache_identity = cache_identity
         self._allow_direct_execution_inside_checkpoint = (
             allow_direct_execution_inside_checkpoint
         )
@@ -187,6 +188,7 @@ class KitaruGeminiInteractionsRunner:
                 "checkpoint_strategy": self._checkpoint_strategy,
                 "has_client": client is not None,
                 "has_client_factory": client_factory is not None,
+                "has_cache_identity": cache_identity is not None,
                 "allow_direct_execution_inside_checkpoint": (
                     self._allow_direct_execution_inside_checkpoint
                 ),
@@ -584,8 +586,7 @@ class KitaruGeminiInteractionsRunner:
                 "google_genai_version": google_genai_version(),
                 "runner_name": self._name,
                 "request": request.model_dump(mode="json"),
-                "client": to_cache_identity(self._client),
-                "client_factory": to_cache_identity(self._client_factory),
+                "cache_identity": self._cache_identity,
             }
         )
 

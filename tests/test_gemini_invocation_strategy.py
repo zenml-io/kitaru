@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import types
@@ -68,20 +69,41 @@ def _completed_interaction(**updates: Any) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def _patch_flow_checkpoint(
+def _patch_invocation_scope(
     monkeypatch: pytest.MonkeyPatch,
-    gemini_adapter: types.ModuleType,
-) -> list[dict[str, Any]]:
+) -> tuple[types.ModuleType, list[dict[str, Any]]]:
     agent = importlib.import_module("kitaru.adapters.gemini._agent")
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(agent, "is_inside_flow", lambda: True)
     monkeypatch.setattr(agent, "is_inside_checkpoint", lambda: False)
+    return agent, calls
+
+
+def _patch_flow_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> list[dict[str, Any]]:
+    agent, calls = _patch_invocation_scope(monkeypatch)
 
     def fake_checkpoint(**kwargs: Any) -> Any:
         calls.append(kwargs)
         return kwargs["body"]()
 
     monkeypatch.setattr(agent, "run_sync_in_checkpoint", fake_checkpoint)
+    return calls
+
+
+def _patch_async_flow_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> list[dict[str, Any]]:
+    agent, calls = _patch_invocation_scope(monkeypatch)
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return await kwargs["body"]()
+
+    monkeypatch.setattr(agent, "run_async_in_checkpoint", fake_checkpoint)
     return calls
 
 
@@ -117,6 +139,26 @@ def test_run_sync_creates_one_synthetic_interaction_checkpoint(
     assert create_kwargs["model"] == "gemini-test"
     assert create_kwargs["generation_config"] == {"temperature": 0.1}
     assert "agent" not in create_kwargs
+
+
+def test_async_run_creates_one_synthetic_interaction_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    checkpoint_calls = _patch_async_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    result = asyncio.run(runner.run(request))
+
+    assert len(checkpoint_calls) == 1
+    assert checkpoint_calls[0]["step_name"] == "gemini_gemini_interaction"
+    assert result.status == "completed"
+    assert client.interactions.create_calls[0]["input"] == "hello"
 
 
 def test_antigravity_environment_uses_top_level_extra_body(
@@ -176,6 +218,39 @@ def test_requires_action_normalizes_function_call(
     assert result.steps[0].type == "function_call"
     assert result.steps[0].call_id == "call-1"
     assert result.steps[0].tool_name == "lookup"
+
+
+def test_real_steps_are_normalized_before_outputs_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                steps=[
+                    SimpleNamespace(
+                        id="step-1",
+                        type="message",
+                        status="completed",
+                        content=[{"type": "text", "text": "from real steps"}],
+                    )
+                ],
+                outputs=[SimpleNamespace(type="text", text="fallback output")],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text == "from real steps"
+    assert result.steps[0].step_id == "step-1"
+    assert "outputs rather than `steps`" not in " ".join(result.warnings)
 
 
 def test_function_result_request_constructs_matching_create_payload(
@@ -263,6 +338,77 @@ def test_background_polling_reuses_created_interaction_id(
     assert result.poll_count == 1
 
 
+def test_unstable_status_raises_instead_of_successful_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient([_completed_interaction(id="background-1", status="queued")])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "long task",
+        agent="deep-research",
+        background=True,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        runner.run_sync(request)
+
+    message = str(exc_info.value)
+    assert "background-1" in message
+    assert "non-stable status 'queued'" in message
+    assert "GeminiInteractionRequest.poll" in message
+    assert "duplicate job" in message
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == []
+
+
+def test_background_poll_timeout_raises_without_full_interval_oversleep(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    clock = {"now": 100.0}
+    sleep_durations: list[float] = []
+
+    def fake_perf_counter() -> float:
+        return clock["now"]
+
+    async def fake_sleep(duration_s: float) -> None:
+        sleep_durations.append(duration_s)
+        clock["now"] += duration_s + 0.000001
+
+    monkeypatch.setattr(runner_module.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(runner_module.asyncio, "sleep", fake_sleep)
+    client = FakeClient(
+        [
+            _completed_interaction(id="background-1", status="in_progress"),
+            _completed_interaction(id="background-1", status="in_progress"),
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        poll_interval_s=10.0,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "long task",
+        agent="deep-research",
+        background=True,
+        timeout_s=0.001,
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="background-1"):
+        runner.run_sync(request)
+
+    assert client.interactions.get_calls == []
+    assert sleep_durations == pytest.approx([0.001])
+
+
 def test_nested_checkpoint_rejected_before_sdk_invocation(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -304,16 +450,46 @@ def test_direct_execution_inside_checkpoint_warns(
     assert len(client.interactions.create_calls) == 1
 
 
-def test_cache_identity_for_client_is_shallow(
+def test_cache_key_uses_explicit_cache_identity_not_live_client_state(
     gemini_adapter: types.ModuleType,
 ) -> None:
-    serialization = importlib.import_module("kitaru.adapters.gemini._serialization")
-    client = ClientWithPublicState()
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+    runner_a = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=ClientWithPublicState(),
+    )
+    runner_b = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=object(),
+    )
+    project_a = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=ClientWithPublicState(),
+        cache_identity="project-a/us-central1",
+    )
+    project_b = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=ClientWithPublicState(),
+        cache_identity="project-b/us-central1",
+    )
 
-    identity = serialization.to_cache_identity(client)
+    assert runner_a._interaction_cache_key(request) == runner_b._interaction_cache_key(
+        request
+    )
+    assert project_a._interaction_cache_key(
+        request
+    ) != project_b._interaction_cache_key(request)
 
-    assert list(identity) == ["python_type"]
-    assert identity["python_type"].endswith(".ClientWithPublicState")
+
+def test_cache_identity_must_be_stable_string(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="stable string"):
+        gemini_adapter.KitaruGeminiInteractionsRunner(
+            name="gemini",
+            client=ClientWithPublicState(),
+            cache_identity=object(),
+        )
 
 
 def test_request_manifest_redacts_secret_like_fields(
