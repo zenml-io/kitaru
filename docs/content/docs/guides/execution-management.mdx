@@ -134,6 +134,12 @@ Supported groupings are:
 - `time:hour`, `time:day`, `time:week`, `time:month`
 - `metadata:<key>` → the value stored for that execution metadata key
 
+<Callout type="warn">
+  Grouping by `metadata:<key>` includes the matching metadata values in the
+  statistics output. Only use it for metadata keys whose values are safe to show
+  to whoever can read the CLI, SDK, or MCP response.
+</Callout>
+
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
 Multiple tag filters mean "executions that have all of these tags". v1 returns
 counts only; it does not return averages, durations, or cost totals yet.

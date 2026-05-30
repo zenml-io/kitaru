@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
 from kitaru._client._mappers import (
-    _RAW_STATUS_TO_PUBLIC_STATUS,
     _RAW_STATUSES_BY_PUBLIC_STATUS,
+    _coerce_status_filter,
     _to_public_status,
 )
 from kitaru._client._models import (
@@ -33,8 +33,7 @@ if TYPE_CHECKING:
 
 JsonScalar = str | int | float | bool | None
 GroupMergeKey = tuple[tuple[str, JsonScalar], ...]
-
-_RAW_STATUS_COUNT = len(_RAW_STATUS_TO_PUBLIC_STATUS)
+GroupEntry = tuple[dict[str, Any], int]
 
 
 @dataclass(frozen=True)
@@ -56,7 +55,10 @@ class _RunStatisticsRequestParts:
 
     request: Any
     groupings: list[ExecutionStatisticsGrouping]
+    backend_groupings: list[ExecutionStatisticsGrouping]
     max_groups: int
+    public_status_filter: ExecutionStatus | None
+    status_grouping_name: str | None
 
 
 def _statistics_model_import_error(exc: Exception) -> KitaruFeatureNotAvailableError:
@@ -197,46 +199,6 @@ def normalize_execution_statistics_tags(
     return normalized_tags
 
 
-def _backend_max_groups(
-    *,
-    groupings: Sequence[ExecutionStatisticsGrouping],
-    public_max_groups: int,
-    status_filter: ExecutionStatus | None,
-) -> int:
-    """Return a backend limit large enough for Kitaru status merging."""
-    has_status_grouping = any(
-        grouping.dimension is ExecutionStatisticsDimension.STATUS
-        for grouping in groupings
-    )
-    if not has_status_grouping:
-        return public_max_groups
-
-    raw_status_count = (
-        len(_RAW_STATUSES_BY_PUBLIC_STATUS[status_filter])
-        if status_filter is not None
-        else _RAW_STATUS_COUNT
-    )
-    return min(10_000, public_max_groups * raw_status_count)
-
-
-def _coerce_public_status(
-    status: ExecutionStatus | str | None,
-) -> ExecutionStatus | None:
-    """Normalize a public status filter."""
-    if status is None:
-        return None
-    if isinstance(status, ExecutionStatus):
-        return status
-    normalized = status.strip().lower()
-    try:
-        return ExecutionStatus(normalized)
-    except ValueError as exc:
-        expected = ", ".join(item.value for item in ExecutionStatus)
-        raise KitaruUsageError(
-            f"Unsupported status filter {status!r}. Expected one of: {expected}."
-        ) from exc
-
-
 def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
     """Map a public status filter to the backend string-filter syntax."""
     if public_status is None:
@@ -246,6 +208,40 @@ def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
     if len(raw_statuses) == 1:
         return raw_statuses[0]
     return f"oneof:{json.dumps(list(raw_statuses), separators=(',', ':'))}"
+
+
+def _status_grouping_name(
+    groupings: Sequence[ExecutionStatisticsGrouping],
+) -> str | None:
+    """Return the public status grouping output name, if present."""
+    return next(
+        (
+            grouping.name
+            for grouping in groupings
+            if grouping.dimension is ExecutionStatisticsDimension.STATUS
+        ),
+        None,
+    )
+
+
+def _backend_groupings_for_status_split(
+    groupings: Sequence[ExecutionStatisticsGrouping],
+) -> list[ExecutionStatisticsGrouping]:
+    """Return backend groupings with public status removed."""
+    return [
+        grouping
+        for grouping in groupings
+        if grouping.dimension is not ExecutionStatisticsDimension.STATUS
+    ]
+
+
+def _public_status_buckets_to_query(
+    status_filter: ExecutionStatus | None,
+) -> tuple[ExecutionStatus, ...]:
+    """Return the public status buckets needed for an exact status query."""
+    if status_filter is not None:
+        return (status_filter,)
+    return tuple(ExecutionStatus)
 
 
 def _zenml_grouping(
@@ -313,7 +309,13 @@ def _build_run_statistics_request_parts(
     normalized_groupings = normalize_execution_statistics_groupings(group_by)
     validated_max_groups = validate_statistics_max_groups(max_groups)
     normalized_tags = normalize_execution_statistics_tags(tags)
-    public_status_filter = _coerce_public_status(status)
+    public_status_filter = _coerce_status_filter(status)
+    status_grouping_name = _status_grouping_name(normalized_groupings)
+    backend_groupings = (
+        _backend_groupings_for_status_split(normalized_groupings)
+        if status_grouping_name is not None
+        else list(normalized_groupings)
+    )
 
     try:
         run_filter = models.pipeline_run_filter(
@@ -326,14 +328,10 @@ def _build_run_statistics_request_parts(
         request = models.run_statistics_request(
             filter=run_filter,
             groupings=[
-                _zenml_grouping(grouping, models) for grouping in normalized_groupings
+                _zenml_grouping(grouping, models) for grouping in backend_groupings
             ],
             metrics=[],
-            max_groups=_backend_max_groups(
-                groupings=normalized_groupings,
-                public_max_groups=validated_max_groups,
-                status_filter=public_status_filter,
-            ),
+            max_groups=validated_max_groups,
         )
     except ValidationError as exc:
         raise KitaruUsageError(f"Invalid execution statistics request: {exc}") from exc
@@ -341,7 +339,10 @@ def _build_run_statistics_request_parts(
     return _RunStatisticsRequestParts(
         request=request,
         groupings=normalized_groupings,
+        backend_groupings=backend_groupings,
         max_groups=validated_max_groups,
+        public_status_filter=public_status_filter,
+        status_grouping_name=status_grouping_name,
     )
 
 
@@ -355,10 +356,18 @@ def build_run_statistics_request(
     tags: Sequence[str] | None,
     max_groups: int,
 ) -> Any:
-    """Build the ZenML run-statistics request for public execution statistics."""
+    """Build one ZenML run-statistics request for public execution statistics."""
+    normalized_groupings = normalize_execution_statistics_groupings(group_by)
+    if _status_grouping_name(normalized_groupings) is not None:
+        raise KitaruUsageError(
+            "`build_run_statistics_request` cannot build status-grouped "
+            "statistics because exact public status grouping requires multiple "
+            "backend requests. Use `get_execution_statistics(...)` instead."
+        )
+
     return _build_run_statistics_request_parts(
         project=project,
-        group_by=group_by,
+        group_by=normalized_groupings,
         flow=flow,
         status=status,
         stack=stack,
@@ -383,11 +392,16 @@ def _public_group_keys(
         if key in status_grouping_names and value is not None:
             status_value = _normalize_raw_status_value(value)
             try:
-                public_keys[key] = _to_public_status(status_value).value
-            except Exception as exc:
-                raise KitaruBackendError(
-                    f"Backend returned unsupported execution status {status_value!r}."
-                ) from exc
+                public_keys[key] = ExecutionStatus(status_value).value
+            except ValueError:
+                try:
+                    public_keys[key] = _to_public_status(status_value).value
+                except Exception as exc:
+                    message = (
+                        "Backend returned unsupported execution status "
+                        f"{status_value!r}."
+                    )
+                    raise KitaruBackendError(message) from exc
         else:
             public_keys[key] = value
     return public_keys
@@ -397,7 +411,7 @@ def _group_sort_key(
     group: ExecutionStatisticsGroup,
     *,
     time_grouping_name: str | None,
-) -> tuple[str, tuple[tuple[str, str], ...], int]:
+) -> tuple[Any, ...]:
     """Sort statistics groups deterministically."""
     if time_grouping_name is not None:
         time_value = repr(group.keys.get(time_grouping_name))
@@ -409,16 +423,17 @@ def _group_sort_key(
         return (time_value, other_items, -group.execution_count)
 
     key_items = tuple((key, repr(value)) for key, value in sorted(group.keys.items()))
-    return ("", key_items, -group.execution_count)
+    return (-group.execution_count, key_items)
 
 
-def _map_run_statistics_response_with_groupings(
-    response: Any,
+def _map_run_statistics_group_entries(
+    group_entries: Iterable[GroupEntry],
     *,
     normalized_groupings: Sequence[ExecutionStatisticsGrouping],
     max_groups: int,
+    truncated: bool,
 ) -> ExecutionStatistics:
-    """Map a run-statistics response using already-normalized groupings."""
+    """Map and merge backend statistics groups using normalized public groupings."""
     status_grouping_names = {
         grouping.name
         for grouping in normalized_groupings
@@ -437,17 +452,14 @@ def _map_run_statistics_response_with_groupings(
     merged_counts: dict[GroupMergeKey, int] = {}
     merged_keys: dict[GroupMergeKey, dict[str, JsonScalar]] = {}
 
-    for group in getattr(response, "groups", []):
-        raw_keys = dict(getattr(group, "group_keys", {}))
+    for raw_keys, run_count in group_entries:
         public_keys = _public_group_keys(
             raw_keys,
             status_grouping_names=status_grouping_names,
         )
         merge_key = tuple(sorted(public_keys.items()))
         merged_keys.setdefault(merge_key, public_keys)
-        merged_counts[merge_key] = merged_counts.get(merge_key, 0) + int(
-            getattr(group, "run_count", 0)
-        )
+        merged_counts[merge_key] = merged_counts.get(merge_key, 0) + run_count
 
     groups = [
         ExecutionStatisticsGroup(
@@ -463,12 +475,32 @@ def _map_run_statistics_response_with_groupings(
         )
     )
 
-    truncated = bool(getattr(response, "truncated", False))
     if len(groups) > max_groups:
         groups = groups[:max_groups]
         truncated = True
 
     return ExecutionStatistics(groups=groups, truncated=truncated)
+
+
+def _map_run_statistics_response_with_groupings(
+    response: Any,
+    *,
+    normalized_groupings: Sequence[ExecutionStatisticsGrouping],
+    max_groups: int,
+) -> ExecutionStatistics:
+    """Map a run-statistics response using already-normalized groupings."""
+    return _map_run_statistics_group_entries(
+        (
+            (
+                dict(getattr(group, "group_keys", {})),
+                int(getattr(group, "run_count", 0)),
+            )
+            for group in getattr(response, "groups", [])
+        ),
+        normalized_groupings=normalized_groupings,
+        max_groups=max_groups,
+        truncated=bool(getattr(response, "truncated", False)),
+    )
 
 
 def map_run_statistics_response(
@@ -530,21 +562,56 @@ def get_execution_statistics(
     except AttributeError as exc:
         raise _statistics_model_import_error(exc) from exc
 
-    try:
-        response = get_run_statistics(request_parts.request)
-    except AttributeError as exc:
-        raise _statistics_model_import_error(exc) from exc
-    except Exception as exc:
-        if _is_statistics_endpoint_missing_error(exc):
+    def fetch_response(request: Any) -> Any:
+        try:
+            return get_run_statistics(request)
+        except AttributeError as exc:
             raise _statistics_model_import_error(exc) from exc
-        raise KitaruBackendError(
-            f"Failed to fetch execution statistics: {exc}"
-        ) from exc
+        except Exception as exc:
+            if _is_statistics_endpoint_missing_error(exc):
+                raise _statistics_model_import_error(exc) from exc
+            raise KitaruBackendError(
+                f"Failed to fetch execution statistics: {exc}"
+            ) from exc
 
-    return _map_run_statistics_response_with_groupings(
-        response,
+    if request_parts.status_grouping_name is None:
+        response = fetch_response(request_parts.request)
+        return _map_run_statistics_response_with_groupings(
+            response,
+            normalized_groupings=request_parts.groupings,
+            max_groups=request_parts.max_groups,
+        )
+
+    group_entries: list[GroupEntry] = []
+    truncated = False
+    for public_status in _public_status_buckets_to_query(
+        request_parts.public_status_filter
+    ):
+        if request_parts.public_status_filter is not None:
+            bucket_request = request_parts.request
+        else:
+            bucket_request = _build_run_statistics_request_parts(
+                project=client._project,
+                group_by=request_parts.backend_groupings,
+                flow=flow,
+                status=public_status,
+                stack=stack,
+                tags=tags,
+                max_groups=request_parts.max_groups,
+            ).request
+        response = fetch_response(bucket_request)
+        truncated = truncated or bool(getattr(response, "truncated", False))
+
+        for group in getattr(response, "groups", []):
+            raw_keys = dict(getattr(group, "group_keys", {}))
+            raw_keys[request_parts.status_grouping_name] = public_status.value
+            group_entries.append((raw_keys, int(getattr(group, "run_count", 0))))
+
+    return _map_run_statistics_group_entries(
+        group_entries,
         normalized_groupings=request_parts.groupings,
         max_groups=request_parts.max_groups,
+        truncated=truncated,
     )
 
 

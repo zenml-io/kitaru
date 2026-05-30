@@ -268,6 +268,12 @@ Supported groupings are `status`, `flow`, `stack`, `tag`, `time:hour`,
 names. The v1 tool returns counts only, not duration/cost metrics, and it does
 not yet filter by time range or metadata value.
 
+<Callout type="warn">
+  Grouping by `metadata:<key>` includes the matching metadata values in the MCP
+  response. Only use it for metadata keys whose values are safe for the MCP
+  client and transcript to see.
+</Callout>
+
 ## Starting executions with `kitaru_executions_run`
 
 The `kitaru_executions_run` tool requires a `target` string in the format:

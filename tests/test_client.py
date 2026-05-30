@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -427,10 +428,10 @@ def test_execution_status_mapping_covers_zenml_execution_status_values() -> None
         ZenMLExecutionStatus.SKIPPED: ExecutionStatus.COMPLETED,
         ZenMLExecutionStatus.FAILED: ExecutionStatus.FAILED,
         ZenMLExecutionStatus.RETRIED: ExecutionStatus.FAILED,
-        ZenMLExecutionStatus.CANCELLING: ExecutionStatus.CANCELLED,
+        ZenMLExecutionStatus.CANCELLING: ExecutionStatus.RUNNING,
         ZenMLExecutionStatus.CANCELLED: ExecutionStatus.CANCELLED,
         ZenMLExecutionStatus.STOPPED: ExecutionStatus.CANCELLED,
-        ZenMLExecutionStatus.STOPPING: ExecutionStatus.CANCELLED,
+        ZenMLExecutionStatus.STOPPING: ExecutionStatus.RUNNING,
     }
 
     assert set(expected_statuses) == set(ZenMLExecutionStatus)
@@ -2486,7 +2487,7 @@ def test_auth_pagination_rejects_non_integer_inputs() -> None:
 def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
     request = build_run_statistics_request(
         project="project-a",
-        group_by=["status", "flow", "time:day", "metadata:customer_tier"],
+        group_by=["flow", "time:day", "metadata:customer_tier"],
         flow="support_flow",
         status="completed",
         stack="prod-stack",
@@ -2499,21 +2500,32 @@ def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
     assert request.filter.stack == "prod-stack"
     assert request.filter.tags == ["release", "replay"]
     assert request.filter.status == 'oneof:["completed","cached","skipped"]'
-    assert request.max_groups == 36
+    assert request.max_groups == 12
     assert [grouping.name for grouping in request.groupings] == [
-        "status",
         "flow_id",
         "day",
         "customer_tier",
     ]
     assert [grouping.type.value for grouping in request.groupings] == [
-        "status",
         "pipeline",
         "time",
         "metadata",
     ]
-    assert request.groupings[2].granularity.value == "day"
-    assert request.groupings[3].metadata_key == "customer_tier"
+    assert request.groupings[1].granularity.value == "day"
+    assert request.groupings[2].metadata_key == "customer_tier"
+
+
+def test_build_run_statistics_request_rejects_status_grouping() -> None:
+    with pytest.raises(KitaruUsageError, match="multiple backend requests"):
+        build_run_statistics_request(
+            project="project-a",
+            group_by=["status", "flow"],
+            flow=None,
+            status=None,
+            stack=None,
+            tags=None,
+            max_groups=12,
+        )
 
 
 def test_map_run_statistics_response_merges_public_status_groups() -> None:
@@ -2587,6 +2599,29 @@ def test_map_run_statistics_response_preserves_time_order() -> None:
         ExecutionStatisticsGroup(keys={"day": "2026-03-14"}, execution_count=1),
         ExecutionStatisticsGroup(keys={"day": "2026-03-15"}, execution_count=20),
     ]
+
+
+def test_map_run_statistics_response_sorts_counts_before_trimming() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"flow_id": "flow-a"}, run_count=1),
+            SimpleNamespace(group_keys={"flow_id": "flow-c"}, run_count=9),
+            SimpleNamespace(group_keys={"flow_id": "flow-b"}, run_count=9),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["flow"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"flow_id": "flow-b"}, execution_count=9),
+        ExecutionStatisticsGroup(keys={"flow_id": "flow-c"}, execution_count=9),
+    ]
+    assert statistics.truncated is True
 
 
 def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> None:
@@ -2682,11 +2717,20 @@ def test_statistics_fetches_global_count_from_zen_store() -> None:
     )
 
 
-def test_status_grouping_without_status_filter_expands_raw_statuses() -> None:
-    response = SimpleNamespace(
-        groups=[SimpleNamespace(group_keys={"status": "completed"}, run_count=4)],
-        truncated=False,
-    )
+def _raw_statuses_from_backend_filter(filter_value: str) -> tuple[str, ...]:
+    if filter_value.startswith("oneof:"):
+        return tuple(json.loads(filter_value.removeprefix("oneof:")))
+    return (filter_value,)
+
+
+def test_status_grouping_without_status_filter_splits_by_public_status() -> None:
+    responses = [
+        SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=index)],
+            truncated=False,
+        )
+        for index, _public_status in enumerate(ExecutionStatus, start=1)
+    ]
 
     with (
         patch(
@@ -2696,20 +2740,37 @@ def test_status_grouping_without_status_filter_expands_raw_statuses() -> None:
         patch("kitaru.client.Client") as client_cls,
         patch("kitaru.client.track"),
     ):
-        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        zen_store = SimpleNamespace(get_run_statistics=Mock(side_effect=responses))
         client_cls.return_value.zen_store = zen_store
 
         client = KitaruClient()
-        client.executions.statistics(group_by=["status"], max_groups=5)
+        statistics = client.executions.statistics(group_by=["status"], max_groups=5)
 
-    request = zen_store.get_run_statistics.call_args.args[0]
-    assert request.filter.status is None
-    assert request.max_groups == 5 * len(_RAW_STATUS_TO_PUBLIC_STATUS)
+    requests = [
+        call_args.args[0] for call_args in zen_store.get_run_statistics.call_args_list
+    ]
+    assert len(requests) == len(ExecutionStatus)
+    assert {
+        frozenset(_raw_statuses_from_backend_filter(request.filter.status))
+        for request in requests
+    } == {
+        frozenset(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
+        for public_status in ExecutionStatus
+    }
+    assert all(request.groupings == [] for request in requests)
+    assert all(request.max_groups == 5 for request in requests)
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"status": "cancelled"}, execution_count=5),
+        ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=4),
+        ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=3),
+        ExecutionStatisticsGroup(keys={"status": "waiting"}, execution_count=2),
+        ExecutionStatisticsGroup(keys={"status": "running"}, execution_count=1),
+    ]
 
 
 def test_statistics_status_filter_uses_one_backend_request() -> None:
     response = SimpleNamespace(
-        groups=[SimpleNamespace(group_keys={"status": "stopped"}, run_count=4)],
+        groups=[SimpleNamespace(group_keys={}, run_count=4)],
         truncated=False,
     )
 
@@ -2732,13 +2793,78 @@ def test_statistics_status_filter_uses_one_backend_request() -> None:
         )
 
     request = zen_store.get_run_statistics.call_args.args[0]
-    assert request.filter.status == (
-        'oneof:["cancelling","cancelled","stopped","stopping"]'
-    )
-    assert request.max_groups == 20
+    assert request.filter.status == 'oneof:["cancelled","stopped"]'
+    assert request.groupings == []
+    assert request.max_groups == 5
     assert statistics.groups == [
         ExecutionStatisticsGroup(keys={"status": "cancelled"}, execution_count=4)
     ]
+
+
+def test_statistics_status_grouping_does_not_undercount_raw_status_truncation() -> None:
+    responses_by_status = {
+        ExecutionStatus.RUNNING: SimpleNamespace(groups=[], truncated=False),
+        ExecutionStatus.WAITING: SimpleNamespace(groups=[], truncated=False),
+        ExecutionStatus.COMPLETED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(group_keys={"flow_id": "flow-a"}, run_count=15),
+            ],
+            truncated=True,
+        ),
+        ExecutionStatus.FAILED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(group_keys={"flow_id": "flow-b"}, run_count=8),
+            ],
+            truncated=False,
+        ),
+        ExecutionStatus.CANCELLED: SimpleNamespace(groups=[], truncated=False),
+    }
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(
+                side_effect=[
+                    responses_by_status[public_status]
+                    for public_status in ExecutionStatus
+                ]
+            )
+        )
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status", "flow"],
+            max_groups=10,
+        )
+
+    requests = [
+        call_args.args[0] for call_args in zen_store.get_run_statistics.call_args_list
+    ]
+    assert len(requests) == len(ExecutionStatus)
+    assert all(
+        [grouping.type.value for grouping in request.groupings] == ["pipeline"]
+        for request in requests
+    )
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-a", "status": "completed"},
+                execution_count=15,
+            ),
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-b", "status": "failed"},
+                execution_count=8,
+            ),
+        ],
+        truncated=True,
+    )
 
 
 def test_statistics_rejects_bare_string_tags() -> None:

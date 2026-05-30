@@ -51,22 +51,19 @@ _WAIT_CONDITION_STATUS_PENDING = "pending"
 
 _RAW_STATUSES_BY_PUBLIC_STATUS: dict[ExecutionStatus, tuple[str, ...]] = {
     ExecutionStatus.RUNNING: (
+        "cancelling",
         "initializing",
         "provisioning",
         "queued",
         "running",
         "retrying",
         "resuming",
+        "stopping",
     ),
     ExecutionStatus.WAITING: ("paused",),
     ExecutionStatus.COMPLETED: ("completed", "cached", "skipped"),
     ExecutionStatus.FAILED: ("failed", "retried"),
-    ExecutionStatus.CANCELLED: (
-        "cancelling",
-        "cancelled",
-        "stopped",
-        "stopping",
-    ),
+    ExecutionStatus.CANCELLED: ("cancelled", "stopped"),
 }
 _RAW_STATUS_TO_PUBLIC_STATUS: dict[str, ExecutionStatus] = {
     raw_status: public_status
