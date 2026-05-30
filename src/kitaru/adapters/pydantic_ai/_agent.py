@@ -46,6 +46,12 @@ from ._logging import logger
 from ._mcp_server import has_running_mcp_toolset
 from ._model import KitaruModel, model_cache_run_context
 from ._policy import CapturePolicy
+from ._streaming import (
+    PydanticAIStreamPublisher,
+    current_stream_surface,
+    stream_surface,
+    suppress_model_stream_live_events,
+)
 from ._toolset import kitaruify_toolset
 from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_execution
 from ._tracking import get_current_tracker, tracker_scope
@@ -576,11 +582,31 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         async def _tracked_handler(ctx: Any, stream: AsyncIterable[Any]) -> None:
             started_at = time.perf_counter()
-            error: Exception | None = None
+            error: BaseException | None = None
+            event_count = 0
+            publisher = PydanticAIStreamPublisher(
+                agent_name=self._name,
+                surface=current_stream_surface(default="event_stream_handler"),
+                source="event_stream_handler",
+                include_content=self._capture.save_stream_transcripts,
+                enabled=self._capture.emit_child_events,
+            )
+
+            async def _live_stream() -> AsyncIterator[Any]:
+                nonlocal event_count
+                async for event in stream:
+                    event_count += 1
+                    publisher.event(event)
+                    yield event
+
+            publisher.started()
             try:
-                await effective_handler(ctx, stream)
-            except Exception as exc:
+                with suppress_model_stream_live_events():
+                    await effective_handler(ctx, _live_stream())
+                publisher.completed(event_count=event_count)
+            except BaseException as exc:
                 error = exc
+                publisher.failed(exc)
                 raise
             finally:
                 tracker = get_current_tracker()
@@ -1065,6 +1091,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                stream_surface("run"),
                 _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
@@ -1174,6 +1201,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._kitaru_overrides(),
                 self._tracking_scope(),
                 self._allow_internal_iter(),
+                stream_surface("run_sync"),
                 _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
@@ -1284,6 +1312,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with (
             self._kitaru_overrides(),
             self._tracking_scope(),
+            stream_surface("run_stream"),
             model_cache_run_context(
                 conversation_id=conversation_id, message_history=message_history
             ),
@@ -1345,30 +1374,45 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             conversation_id=conversation_id,
             output_retries=output_retries,
         )
+        publisher = PydanticAIStreamPublisher(
+            agent_name=self._name,
+            surface="iter",
+            source="iter_lifecycle",
+            include_content=self._capture.save_stream_transcripts,
+            enabled=self._capture.emit_child_events,
+        )
         with (
             self._kitaru_overrides(),
             self._tracking_scope(),
+            stream_surface("iter"),
             model_cache_run_context(
                 conversation_id=conversation_id, message_history=message_history
             ),
         ):
-            async with self.wrapped.iter(
-                user_prompt=user_prompt,
-                output_type=output_type,
-                message_history=message_history,
-                deferred_tool_results=deferred_tool_results,
-                **upstream_run_kwargs,
-                model=None,
-                instructions=instructions,
-                deps=deps,
-                model_settings=model_settings,
-                usage_limits=usage_limits,
-                usage=usage,
-                metadata=metadata,
-                infer_name=infer_name,
-                toolsets=prepared_toolsets,
-                **_builtin_tools_kwargs(builtin_tools),
-                capabilities=capabilities,
-                spec=spec,
-            ) as run:
-                yield run
+            publisher.started()
+            try:
+                async with self.wrapped.iter(
+                    user_prompt=user_prompt,
+                    output_type=output_type,
+                    message_history=message_history,
+                    deferred_tool_results=deferred_tool_results,
+                    **upstream_run_kwargs,
+                    model=None,
+                    instructions=instructions,
+                    deps=deps,
+                    model_settings=model_settings,
+                    usage_limits=usage_limits,
+                    usage=usage,
+                    metadata=metadata,
+                    infer_name=infer_name,
+                    toolsets=prepared_toolsets,
+                    **_builtin_tools_kwargs(builtin_tools),
+                    capabilities=capabilities,
+                    spec=spec,
+                ) as run:
+                    yield run
+            except BaseException as exc:
+                publisher.failed(exc)
+                raise
+            else:
+                publisher.completed()

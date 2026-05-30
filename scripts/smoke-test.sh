@@ -376,6 +376,13 @@ section_header "PydanticAI adapter"
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+else
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example"
+fi
+
 section_header "LangGraph adapter"
 
 run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \

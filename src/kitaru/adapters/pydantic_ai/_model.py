@@ -41,6 +41,11 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
+from ._streaming import (
+    PydanticAIStreamPublisher,
+    current_stream_surface,
+    model_stream_live_events_suppressed,
+)
 from ._tracking import EventTracker, ModelEventContext, get_current_tracker
 from ._utils import (
     CheckpointConfig,
@@ -207,6 +212,9 @@ class KitaruStreamedResponse(StreamedResponse):
         super().__init__(wrapped.model_request_parameters)
         self._wrapped = wrapped
         self._on_event = on_event
+
+    def __aiter__(self) -> AsyncIterator[ModelResponseStreamEvent]:
+        return self._get_event_iterator()
 
     async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:
         try:
@@ -508,14 +516,26 @@ class KitaruModel(WrapperModel):
         save_responses = self._capture.save_responses
         stream_events: list[dict[str, Any]] = []
         stream_event_count = 0
+        live_publisher = PydanticAIStreamPublisher(
+            agent_name=self._agent_name,
+            surface=current_stream_surface(default="model_request_stream"),
+            source="model_request_stream",
+            include_content=save_transcripts,
+            enabled=(
+                self._capture.emit_child_events
+                and not model_stream_live_events_suppressed()
+            ),
+        )
 
         def _on_stream_event(event: Any) -> None:
             nonlocal stream_event_count
             stream_event_count += 1
+            live_publisher.event(event)
             if save_transcripts:
                 stream_events.append(_serialize_stream_event(event))
 
         started_at = time.perf_counter()
+        live_publisher.started()
         try:
             async with super().request_stream(
                 messages, model_settings, model_request_parameters, run_context
@@ -525,7 +545,9 @@ class KitaruModel(WrapperModel):
                 )
                 yield tracked_stream
             response = tracked_stream.get()
-        except Exception as error:
+            live_publisher.completed(event_count=stream_event_count)
+        except BaseException as error:
+            live_publisher.failed(error)
             tracker.record_model_event(
                 event_id,
                 event_context,

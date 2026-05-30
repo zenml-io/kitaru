@@ -123,6 +123,19 @@ the matching checkpoint step may not exist yet when the watcher starts.
 
 There is no CLI watcher yet. Use the Python watcher for now.
 
+## Adapter live events
+
+Some agent adapters publish their own live events while an adapter-owned
+checkpoint is running. For example, the PydanticAI adapter emits
+`pydantic_ai.stream.started`, `pydantic_ai.stream.event`,
+`pydantic_ai.stream.completed`, and `pydantic_ai.stream.failed` when you use
+PydanticAI streaming hooks. The mechanism is the same as custom checkpoint live
+events: watch them with `KitaruClient().executions.events(...)`, and treat them
+as best-effort progress rather than saved state.
+
+See [PydanticAI Adapter](/guides/pydantic-ai-adapter/#streaming) for the
+recommended `event_stream_handler` pattern and a runnable streaming example.
+
 ## Backend requirements
 
 Live-event publishing and watching use the active Kitaru backend's streaming
