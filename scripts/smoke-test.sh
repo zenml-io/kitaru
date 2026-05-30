@@ -232,6 +232,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# SDK API surface
+# ---------------------------------------------------------------------------
+section_header "SDK API surface"
+
+run_test "checkpoint live-event API imports" \
+    $UV_RUN python -c 'import kitaru; assert callable(kitaru.progress); assert callable(kitaru.events.publish); assert isinstance(kitaru.events.flush(), bool)'
+
+# ---------------------------------------------------------------------------
 # Clear state
 # ---------------------------------------------------------------------------
 section_header "Clear state"

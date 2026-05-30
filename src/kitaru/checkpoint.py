@@ -22,6 +22,7 @@ from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
+from kitaru import events
 from kitaru._source_aliases import (
     build_checkpoint_registration_name,
     build_checkpoint_source_alias,
@@ -345,7 +346,14 @@ def _wrap_entrypoint(
                     checkpoint_id=checkpoint_id,
                 )
             )
-            return func(*args, **kwargs)
+            events._publish_checkpoint_started()
+            try:
+                result = func(*args, **kwargs)
+            except BaseException as exc:
+                events._publish_checkpoint_failed(exc)
+                raise
+            events._publish_checkpoint_completed()
+            return result
 
     return _wrapped
 

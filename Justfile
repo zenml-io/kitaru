@@ -1,7 +1,7 @@
 # Pinned ZenML server image version — bump here when upgrading.
 # Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
 # workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
-ZENML_SERVER_TAG := "0.94.4"
+ZENML_SERVER_TAG := "0.94.5"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"

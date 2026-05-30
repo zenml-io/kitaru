@@ -19,6 +19,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 
 - **Run the smallest possible durable flow:** `examples/features/basic_flow/first_working_flow.py`
 - **See structured metadata logging:** `examples/features/basic_flow/flow_with_logging.py`
+- **Publish live checkpoint progress events:** `examples/features/checkpoint_streaming/checkpoint_streaming.py`
 - **Persist and reload artifacts:** `examples/features/basic_flow/flow_with_artifacts.py`
 - **Run checkpoints in isolated containers with fan-out:** `examples/features/basic_flow/flow_with_checkpoint_runtime.py`
 - **Inspect and manage past executions:** `examples/features/execution_management/client_execution_management.py`
@@ -58,6 +59,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 ## How the examples are organized
 
 - [features/basic_flow/README.md](features/basic_flow/README.md) — smallest flows, logging, artifacts, and runtime configuration
+- [features/checkpoint_streaming/README.md](features/checkpoint_streaming/README.md) — publish best-effort live progress and custom events from checkpoints
 - [features/execution_management/README.md](features/execution_management/README.md) — inspect executions, resolve waits, and resume work
 - [features/replay/README.md](features/replay/README.md) — replay from a checkpoint boundary with targeted overrides
 - [features/llm/README.md](features/llm/README.md) — tracked `kitaru.llm()` calls inside flows
@@ -78,6 +80,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 |---|---|---|---|---|---|
 | [Basic flow](features/basic_flow/first_working_flow.py) | `uv run examples/features/basic_flow/first_working_flow.py` | `uv sync --extra local` | The smallest end-to-end `@flow` + `@checkpoint` workflow | [Quickstart](https://kitaru.ai/docs/getting-started/quickstart) | [tests/test_phase5_example.py](../tests/test_phase5_example.py) |
 | [Structured logging](features/basic_flow/flow_with_logging.py) | `uv run examples/features/basic_flow/flow_with_logging.py` | `uv sync --extra local` | `kitaru.log()` metadata at both flow and checkpoint scope | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/test_phase7_logging_example.py](../tests/test_phase7_logging_example.py) |
+| [Checkpoint live events](features/checkpoint_streaming/checkpoint_streaming.py) | `uv run examples/features/checkpoint_streaming/checkpoint_streaming.py` | `uv sync --extra local` | `kitaru.progress()` and `kitaru.events.publish()` from checkpoint bodies | [Checkpoint Live Events](https://kitaru.ai/docs/guides/checkpoint-streaming) | — |
 | [Artifacts](features/basic_flow/flow_with_artifacts.py) | `uv run examples/features/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](features/basic_flow/flow_with_configuration.py) | `uv run examples/features/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
 | [Checkpoint runtime](features/basic_flow/flow_with_checkpoint_runtime.py) | `uv run examples/features/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://kitaru.ai/docs/concepts/checkpoints) | — |
@@ -111,20 +114,21 @@ If you are new to Kitaru, this is the smoothest path:
 
 1. `uv run examples/features/basic_flow/first_working_flow.py`
 2. `uv run examples/features/basic_flow/flow_with_logging.py`
-3. `uv run examples/features/basic_flow/flow_with_artifacts.py`
-4. `uv run examples/features/execution_management/client_execution_management.py`
-5. `uv run examples/features/execution_management/wait_and_resume.py`
-6. `uv run examples/features/replay/replay_with_overrides.py`
-7. `uv run examples/features/llm/flow_with_llm.py`
-8. `uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
-9. `uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py`
-10. `uv run examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
-11. `uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
-12. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
-13. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-14. `cd examples/end_to_end/news_scout && python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
-15. `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
-16. `uv run examples/features/mcp/mcp_query_tools.py`
+3. `uv run examples/features/checkpoint_streaming/checkpoint_streaming.py`
+4. `uv run examples/features/basic_flow/flow_with_artifacts.py`
+5. `uv run examples/features/execution_management/client_execution_management.py`
+6. `uv run examples/features/execution_management/wait_and_resume.py`
+7. `uv run examples/features/replay/replay_with_overrides.py`
+8. `uv run examples/features/llm/flow_with_llm.py`
+9. `uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
+10. `uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py`
+11. `uv run examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
+12. `uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
+13. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
+14. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+15. `cd examples/end_to_end/news_scout && python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
+16. `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
+17. `uv run examples/features/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://kitaru.ai/docs/getting-started/examples).

@@ -8,6 +8,7 @@
     "containerization",
     "execution-management",
     "execution-logs",
+    "checkpoint-streaming",
     "replay-and-overrides",
     "wait-and-resume",
     "artifacts",

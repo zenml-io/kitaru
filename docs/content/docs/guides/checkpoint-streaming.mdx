@@ -1,0 +1,145 @@
+---
+title: Checkpoint Live Events
+description: Publish best-effort live progress and custom events from running checkpoints
+---
+
+Kitaru checkpoints can publish **live events** while their function body is
+running. Think of them as postcards from a checkpoint: useful for a dashboard,
+log tail, or custom monitor, but not the durable record of the run.
+
+The durable record is still the checkpoint result and artifacts. Live events are
+best-effort observability.
+
+## Quick start
+
+Use `kitaru.progress(...)` for human-readable progress updates:
+
+```python
+import kitaru
+from kitaru import checkpoint, flow
+
+
+@checkpoint
+def build_report(topic: str) -> str:
+    kitaru.progress("Collecting notes", percent=0.25, topic=topic)
+    notes = f"Notes about {topic}"
+
+    kitaru.progress("Writing draft", percent=0.75)
+    return f"Report: {notes}"
+
+
+@flow
+def report_flow(topic: str) -> str:
+    return build_report(topic)
+```
+
+Use `kitaru.events.publish(...)` when you want your own event kind:
+
+```python
+@checkpoint
+def train_model(rows: int) -> str:
+    kitaru.events.publish(
+        "training.batch.completed",
+        {"batch": 1, "rows": rows},
+        message="First batch finished",
+    )
+    return "model-ready"
+```
+
+Each event is sent with Kitaru metadata under `payload["kitaru"]`, including the
+checkpoint name and a `correlation_id` shared by all live events from that one
+checkpoint execution.
+
+## Event ordering inside one checkpoint
+
+For one checkpoint execution, Kitaru publishes lifecycle events automatically:
+
+1. `kitaru.checkpoint.started`
+2. your `kitaru.progress(...)` or `kitaru.events.publish(...)` calls
+3. `kitaru.checkpoint.completed` or `kitaru.checkpoint.failed`
+
+Those events share one correlation ID and one increasing `index` counter. A
+simple run might look like this:
+
+```text
+index 0 → kitaru.checkpoint.started
+index 1 → kitaru.checkpoint.progress      # your call
+index 2 → kitaru.checkpoint.completed
+```
+
+If the same checkpoint is fanned out with `.map()` or `.product()`, each actual
+checkpoint execution gets its own correlation ID. That way a UI can draw one
+ordered event lane per checkpoint execution rather than mixing all fan-out items
+together.
+
+## Backend requirements
+
+Live-event publishing uses the active Kitaru backend's streaming support. If the
+backend has streaming enabled, events can be consumed by backend-side tooling or
+future Kitaru watcher APIs.
+
+If streaming is unavailable, publishing degrades safely: the checkpoint keeps
+running, and event delivery is skipped. That is deliberate. A broken live-event
+lane should not break your training job, tool call, or agent step.
+
+Kitaru does not yet ship a public Python watcher or CLI watcher in this PR. This
+page covers publishing only.
+
+## Replay and cache behavior
+
+Live events describe what happened while code was running **this time**.
+
+That has two important consequences:
+
+- **Replay may publish events again.** If a checkpoint body re-executes during
+  replay, its progress postcards can be sent again too.
+- **Cache hits may publish no events.** If Kitaru reuses a cached checkpoint
+  result, the checkpoint body does not run, so there may be no started/progress/
+  completed events for that checkpoint.
+
+Use checkpoint outputs and artifacts when you need durable state. Use live
+events when you want to watch work in progress.
+
+## API reference
+
+```python
+kitaru.progress(
+    message: str,
+    *,
+    percent: float | None = None,
+    correlation_id: str | None = None,
+    flush: bool = False,
+    **fields,
+)
+```
+
+`percent` is a number from `0` to `1`. Extra keyword fields are placed under the
+event payload's `data` key.
+
+```python
+kitaru.events.publish(
+    kind: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    message: str | None = None,
+    correlation_id: str | None = None,
+    index: int | None = None,
+    flush: bool = False,
+)
+```
+
+`kind` is your event type. It cannot use server control names such as `cursor`,
+`end`, `gap`, `error`, or `system`.
+
+```python
+kitaru.events.flush(timeout=2.0) -> bool
+```
+
+`flush(...)` asks the process-local publisher to drain queued events. It does
+not require checkpoint scope and returns `False` if flushing fails or times out.
+
+## Related pages
+
+- [Checkpoints](/concepts/checkpoints)
+- [Execution Runtime Logs](/guides/execution-logs)
+- [Logging and Metadata](/concepts/logging)

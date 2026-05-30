@@ -1,0 +1,370 @@
+"""Tests for checkpoint-level live event publishing."""
+
+from __future__ import annotations
+
+from typing import Any, cast
+from uuid import uuid4
+
+import pytest
+
+import kitaru
+from kitaru import events
+from kitaru.checkpoint import _wrap_entrypoint
+from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.runtime import (
+    _checkpoint_scope,
+    _flow_scope,
+    _get_current_checkpoint_event_correlation_id,
+    _next_checkpoint_event_index,
+)
+
+
+class FakeZenMLStreaming:
+    """Small fake for ZenML's ``zenml.streaming`` module."""
+
+    def __init__(self, *, fail_publish: bool = False, fail_flush: bool = False) -> None:
+        self.fail_publish = fail_publish
+        self.fail_flush = fail_flush
+        self.published: list[dict[str, Any]] = []
+        self.flushes: list[float] = []
+
+    def publish(
+        self,
+        payload: dict[str, Any],
+        *,
+        kind: str,
+        correlation_id: str | None,
+        index: int | None,
+    ) -> None:
+        if self.fail_publish:
+            raise RuntimeError("publisher offline")
+        self.published.append(
+            {
+                "kind": kind,
+                "payload": payload,
+                "correlation_id": correlation_id,
+                "index": index,
+            }
+        )
+
+    def flush(self, timeout: float = 2.0) -> bool:
+        if self.fail_flush:
+            raise RuntimeError("flush offline")
+        self.flushes.append(timeout)
+        return True
+
+
+def _scope_ids() -> tuple[str, str]:
+    return str(uuid4()), str(uuid4())
+
+
+def _patch_streaming(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_streaming: FakeZenMLStreaming | None = None,
+) -> FakeZenMLStreaming:
+    streaming = fake_streaming or FakeZenMLStreaming()
+    monkeypatch.setattr(events, "_load_zenml_streaming", lambda: streaming)
+    return streaming
+
+
+def test_runtime_checkpoint_scope_assigns_correlation_id_and_monotonic_indexes() -> (
+    None
+):
+    execution_id, checkpoint_id = _scope_ids()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="train_model",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+    ):
+        correlation_id = _get_current_checkpoint_event_correlation_id()
+        assert correlation_id is not None
+        assert correlation_id.startswith("kitaru.checkpoint:train_model:")
+        assert _next_checkpoint_event_index() == 0
+        assert _next_checkpoint_event_index() == 1
+        assert _next_checkpoint_event_index(7) == 7
+        assert _next_checkpoint_event_index() == 8
+
+
+def test_checkpoint_scopes_get_distinct_correlation_ids_for_fan_out_steps() -> None:
+    execution_id, checkpoint_id = _scope_ids()
+
+    with _checkpoint_scope(
+        name="fan_out",
+        checkpoint_type=None,
+        execution_id=execution_id,
+        checkpoint_id=checkpoint_id,
+    ):
+        first_correlation_id = _get_current_checkpoint_event_correlation_id()
+
+    with _checkpoint_scope(
+        name="fan_out",
+        checkpoint_type=None,
+        execution_id=execution_id,
+        checkpoint_id=str(uuid4()),
+    ):
+        second_correlation_id = _get_current_checkpoint_event_correlation_id()
+
+    assert first_correlation_id is not None
+    assert second_correlation_id is not None
+    assert first_correlation_id != second_correlation_id
+
+
+def test_progress_inside_checkpoint_publishes_enriched_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execution_id, checkpoint_id = _scope_ids()
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="train_model",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+    ):
+        correlation_id = _get_current_checkpoint_event_correlation_id()
+        kitaru.progress("Loading data", percent=0.2, rows=100)
+
+    assert len(fake_streaming.published) == 1
+    event = fake_streaming.published[0]
+    assert event["kind"] == events.CHECKPOINT_PROGRESS_KIND
+    assert event["index"] == 0
+    assert event["correlation_id"] == correlation_id
+    assert event["payload"]["message"] == "Loading data"
+    assert event["payload"]["data"] == {"percent": 0.2, "rows": 100}
+    assert event["payload"]["kitaru"] == {
+        "source": "kitaru",
+        "execution_id": execution_id,
+        "checkpoint_id": checkpoint_id,
+        "checkpoint_name": "train_model",
+        "checkpoint_type": "llm_call",
+        "correlation_id": correlation_id,
+    }
+
+
+def test_publish_custom_event_uses_data_payload_and_optional_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish(
+            "training.batch.completed",
+            {"batch": 1, "ok": True},
+            message="Batch done",
+        )
+
+    event = fake_streaming.published[0]
+    assert event["kind"] == "training.batch.completed"
+    assert event["payload"]["message"] == "Batch done"
+    assert event["payload"]["data"] == {"batch": 1, "ok": True}
+    assert event["payload"]["kitaru"]["checkpoint_name"] == "checkpoint_a"
+    assert "execution_id" not in event["payload"]["kitaru"]
+    assert "checkpoint_id" not in event["payload"]["kitaru"]
+    assert "checkpoint_type" not in event["payload"]["kitaru"]
+
+
+def test_public_exports_include_progress_and_events_module() -> None:
+    assert kitaru.progress is events.progress
+    assert kitaru.events.publish is events.publish
+    assert "progress" in kitaru.__all__
+    assert "events" in kitaru.__all__
+
+
+def test_publish_outside_checkpoint_raises_context_error() -> None:
+    with pytest.raises(KitaruContextError, match=r"inside a @checkpoint"):
+        events.publish("training.batch.completed", {"batch": 1})
+
+    with pytest.raises(KitaruContextError, match=r"kitaru.progress\(\)"):
+        kitaru.progress("outside")
+
+
+def test_publish_validates_kind_payload_percent_and_index() -> None:
+    with pytest.raises(KitaruUsageError, match="non-empty string"):
+        events.publish("  ")
+
+    with pytest.raises(KitaruUsageError, match="reserved"):
+        events.publish("cursor")
+
+    with pytest.raises(KitaruUsageError, match="payload must be a mapping"):
+        events.publish("custom.event", cast(Any, ["not", "a", "mapping"]))
+
+    with pytest.raises(KitaruUsageError, match="percent"):
+        kitaru.progress("bad", percent=1.5)
+
+    with (
+        _checkpoint_scope(name="checkpoint_a", checkpoint_type=None),
+        pytest.raises(KitaruUsageError, match="non-negative integer"),
+    ):
+        events.publish("custom.event", index=-1)
+
+
+def test_publish_degrades_when_zenml_streaming_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execution_id, checkpoint_id = _scope_ids()
+    monkeypatch.setattr(events, "_load_zenml_streaming", lambda: None)
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="checkpoint_a",
+            checkpoint_type=None,
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+    ):
+        events.publish("custom.event", {"ok": True})
+        kitaru.progress("still ok")
+
+
+def test_dropped_publish_still_consumes_event_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(events, "_load_zenml_streaming", lambda: None)
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish("custom.event", index=5)
+        assert _next_checkpoint_event_index() == 6
+
+
+def test_explicit_flush_true_flushes_without_checkpoint_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    assert events.flush(timeout=0.5) is True
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish("custom.event", {"ok": True}, flush=True)
+
+    assert fake_streaming.flushes == [0.5, 2.0]
+
+
+def test_flush_returns_false_when_zenml_flush_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_streaming(monkeypatch, FakeZenMLStreaming(fail_flush=True))
+
+    assert events.flush() is False
+
+
+def test_explicit_index_advances_counter_to_avoid_collisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish("custom.first", index=5)
+        events.publish("custom.second")
+
+    assert [event["index"] for event in fake_streaming.published] == [5, 6]
+
+
+def test_explicit_index_cannot_reuse_lifecycle_started_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def user_function() -> str:
+        with pytest.raises(KitaruUsageError, match="lower than the next"):
+            events.publish("custom.event", index=0)
+        return "done"
+
+    wrapped = _wrap_entrypoint(user_function, checkpoint_type=None)
+
+    assert wrapped() == "done"
+    assert [event["kind"] for event in fake_streaming.published] == [
+        events.CHECKPOINT_STARTED_KIND,
+        events.CHECKPOINT_COMPLETED_KIND,
+    ]
+    assert [event["index"] for event in fake_streaming.published] == [0, 1]
+
+
+def test_checkpoint_lifecycle_publishes_started_user_progress_completed_and_flushes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def user_function() -> str:
+        kitaru.progress("halfway")
+        return "done"
+
+    wrapped = _wrap_entrypoint(user_function, checkpoint_type="tool_call")
+
+    assert wrapped() == "done"
+
+    assert [event["kind"] for event in fake_streaming.published] == [
+        events.CHECKPOINT_STARTED_KIND,
+        events.CHECKPOINT_PROGRESS_KIND,
+        events.CHECKPOINT_COMPLETED_KIND,
+    ]
+    assert [event["index"] for event in fake_streaming.published] == [0, 1, 2]
+    assert [event["payload"].get("status") for event in fake_streaming.published] == [
+        "started",
+        None,
+        "completed",
+    ]
+    assert len({event["correlation_id"] for event in fake_streaming.published}) == 1
+    assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]
+
+
+def test_checkpoint_lifecycle_publishes_failed_and_flushes_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def user_function() -> str:
+        raise ValueError("bad data")
+
+    wrapped = _wrap_entrypoint(user_function, checkpoint_type=None)
+
+    with pytest.raises(ValueError, match="bad data"):
+        wrapped()
+
+    assert [event["kind"] for event in fake_streaming.published] == [
+        events.CHECKPOINT_STARTED_KIND,
+        events.CHECKPOINT_FAILED_KIND,
+    ]
+    failed_payload = fake_streaming.published[1]["payload"]
+    assert failed_payload["status"] == "failed"
+    assert failed_payload["error_type"] == "ValueError"
+    assert failed_payload["message"] == "bad data"
+    assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]
+
+
+def test_lifecycle_publish_failure_does_not_mask_user_result_or_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_streaming(monkeypatch, FakeZenMLStreaming(fail_publish=True))
+
+    def successful_function() -> str:
+        return "done"
+
+    assert _wrap_entrypoint(successful_function, checkpoint_type=None)() == "done"
+
+    def failing_function() -> str:
+        raise RuntimeError("real failure")
+
+    with pytest.raises(RuntimeError, match="real failure"):
+        _wrap_entrypoint(failing_function, checkpoint_type=None)()
+
+
+def test_checkpoint_lifecycle_explicit_index_advances_next_automatic_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def user_function() -> str:
+        events.publish("custom.event", index=7)
+        return "done"
+
+    assert _wrap_entrypoint(user_function, checkpoint_type=None)() == "done"
+    assert [event["index"] for event in fake_streaming.published] == [0, 7, 8]

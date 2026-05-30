@@ -1297,8 +1297,8 @@ requires-dist = [
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.89.0,<1.97.0" },
     { name = "rich", specifier = ">=12.0.0" },
     { name = "typing-extensions", marker = "extra == 'pydantic-ai'", specifier = ">=4.12" },
-    { name = "zenml", extras = ["local"], specifier = ">=0.94.4" },
-    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.4" },
+    { name = "zenml", extras = ["local"], specifier = ">=0.94.5" },
+    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.5" },
 ]
 provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "openai-agents", "langgraph", "langgraph-openai", "langgraph-anthropic", "claude-agent-sdk", "mcp"]
 
@@ -1322,7 +1322,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["server"], specifier = ">=0.94.4" },
+    { name = "zenml", extras = ["server"], specifier = ">=0.94.5" },
 ]
 
 [[package]]
@@ -3106,6 +3106,15 @@ wheels = [
 ]
 
 [[package]]
+name = "structlog"
+version = "25.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830, upload-time = "2025-10-27T08:28:23.028Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
+]
+
+[[package]]
 name = "tenacity"
 version = "9.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3934,7 +3943,7 @@ wheels = [
 
 [[package]]
 name = "zenml"
-version = "0.94.4"
+version = "0.94.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
@@ -3952,10 +3961,11 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "setuptools" },
+    { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/19/6947d4b33761475b681e59229cdc3e052b869ff673046fe64ebdae9c9f57/zenml-0.94.4.tar.gz", hash = "sha256:71e2a3b919b42235fd7746853244b3e9bf7c5b75cfdeb3ab32f7e8db15da54cb", size = 7169262, upload-time = "2026-05-12T15:01:11.174Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/c2/4b1f74c77b65d688e8b486426d29e18063fa8bf0e9bfe4960696b976153e/zenml-0.94.5.tar.gz", hash = "sha256:dba75ca72ff3649e9be25ff2cb6ba2a91608dd6d3539b8045dd2695897110544", size = 7215181, upload-time = "2026-05-29T10:08:04.227Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/e3/21a7dd71780b7581160f707e39be1ccc75ba0f5dcc72aa9b8d33ad6c8739/zenml-0.94.4-py3-none-any.whl", hash = "sha256:a660adc70205919cb41ca6344ae2a94b6c0b430257c6d8c79f8a5089a30102ef", size = 8322261, upload-time = "2026-05-12T15:01:08.748Z" },
+    { url = "https://files.pythonhosted.org/packages/24/68/9a22c4a1c3185f5929feeabd33e2c6148b320372a25266c4829cd670a755/zenml-0.94.5-py3-none-any.whl", hash = "sha256:e1ae3480c11bceb3ec4e14fb9233439cf95ec74b946f31475bee0e4f7e374ec8", size = 8385085, upload-time = "2026-05-29T10:08:01.536Z" },
 ]
 
 [package.optional-dependencies]

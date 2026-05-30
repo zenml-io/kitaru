@@ -90,7 +90,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
-      ZENML_SERVER_TAG: 0.94.4
+      ZENML_SERVER_TAG: 0.94.5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
