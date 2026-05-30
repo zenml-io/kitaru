@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       kitaru-ui-tag:
-        description: Kitaru UI release tag (e.g. v0.1.0). Defaults to latest kitaru-ui
-          release.
+        description: Kitaru UI release tag (e.g. kitaru-ui-v0.1.0). Defaults to the
+          highest stable kitaru-ui-v* release.
         required: false
         type: string
         default: ''
@@ -48,27 +48,6 @@ jobs:
             exit 1
           fi
           printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
-      - name: Set Kitaru UI tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_TAG: ${{ github.event.inputs.kitaru-ui-tag }}
-        run: |
-          set -euo pipefail
-          validate_tag() {
-            local tag="$1"
-            if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
-              echo "::error::Invalid Kitaru UI tag: $tag"
-              exit 1
-            fi
-          }
-          if [ -n "$INPUT_TAG" ]; then
-            KITARU_UI_TAG_VALUE="$INPUT_TAG"
-          else
-            KITARU_UI_TAG_VALUE=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
-            echo "Using latest Kitaru UI release: $KITARU_UI_TAG_VALUE"
-          fi
-          validate_tag "$KITARU_UI_TAG_VALUE"
-          printf 'KITARU_UI_TAG=%s\n' "$KITARU_UI_TAG_VALUE" >> "$GITHUB_ENV"
       # --- Determine checkout ref (dispatch only) ---
       # Normally checks out `develop`. If v$VERSION already exists on origin,
       # this is a partial-recovery dispatch and we must check out that tag so
@@ -126,6 +105,64 @@ jobs:
             echo "::error::Configure the secret or rerun with dry-run=true."
             exit 1
           fi
+      - name: Validate cloud-plugins tag token
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          CLOUD_PLUGINS_REPO_PAT: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUD_PLUGINS_REPO_PAT" ]; then
+            echo "::error::secrets.CLOUD_PLUGINS_REPO_PAT is required for non-dry-run releases."
+            echo "::error::This workflow uses it to create kitaru-$VERSION in zenml-io/zenml-cloud-plugins after Helm publish."
+            echo "::error::The token needs read access to zenml-cloud-plugins/main and permission to create Git tags in zenml-io/zenml-cloud-plugins."
+            echo "::error::Configure the secret or rerun with dry-run=true."
+            exit 1
+          fi
+      # Pin the downstream repo SHA before expensive publish work starts. That
+      # makes the later cloud-plugins tag deterministic, and it fails early if
+      # the token cannot read the repo or an existing tag has already diverged.
+      - name: Pin cloud-plugins release tag target
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          github-token: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
+          script: |-
+            const owner = 'zenml-io';
+            const repo = 'zenml-cloud-plugins';
+            const tagName = `kitaru-${process.env.VERSION}`;
+            const fullRef = `refs/tags/${tagName}`;
+            const getRefName = `tags/${tagName}`;
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: 'main',
+            });
+            const expectedSha = branch.commit.sha;
+            core.exportVariable('CLOUD_PLUGINS_TAG_NAME', tagName);
+            core.exportVariable('CLOUD_PLUGINS_MAIN_SHA', expectedSha);
+            try {
+              const { data: existingRef } = await github.rest.git.getRef({
+                owner,
+                repo,
+                ref: getRefName,
+              });
+              const existingSha = existingRef.object.sha;
+              if (existingSha === expectedSha) {
+                core.exportVariable('CLOUD_PLUGINS_TAG_EXISTS', 'true');
+                core.info(`${fullRef} already exists at pinned main SHA ${expectedSha} — later tag creation will skip`);
+                return;
+              }
+              throw new Error(
+                `${fullRef} exists at ${existingSha}, but pinned ${owner}/${repo}@main is ${expectedSha}. `
+                + 'Manual investigation is required before PyPI, Docker, or Helm publish.'
+              );
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+            core.exportVariable('CLOUD_PLUGINS_TAG_EXISTS', 'false');
+            core.info(`${fullRef} does not exist; later tag creation will use pinned main SHA ${expectedSha}`);
 
       # --- Install uv (needed before version bump to regenerate lockfile) ---
       - name: Install uv
@@ -220,7 +257,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@7c572958218557a3272c2d6719629443b5cc26fd  # v1.45.2
+        uses: crate-ci/typos@5374cbf686e897b15713110e233094e2874de7ef  # v1.46.1
       - name: Lint
         run: |
           uv run ruff check .
@@ -231,10 +268,32 @@ jobs:
         run: uv run pytest --ignore=tests/mcp
 
       # --- Bundle Kitaru UI ---
-      - name: Download Kitaru UI
+      - name: Download stable Kitaru UI
         run: bash scripts/download-ui.sh
         env:
-          TAG: ${{ env.KITARU_UI_TAG }}
+          TAG: ${{ github.event.inputs.kitaru-ui-tag || '' }}
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+      - name: Record Kitaru UI bundle identity
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads(Path("src/kitaru/_ui/bundle_manifest.json").read_text())
+          values = {
+              "KITARU_UI_REPO": manifest["repo"],
+              "KITARU_UI_TAG": manifest["tag"],
+              "KITARU_UI_CHECKSUM": manifest["checksum"],
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in values.items():
+                  env_file.write(f"{key}={value}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Kitaru UI bundle\n")
+              summary.write(f"Repo: `{values['KITARU_UI_REPO']}`\n\n")
+              summary.write(f"Tag: `{values['KITARU_UI_TAG']}`\n\n")
+              summary.write(f"Checksum: `{values['KITARU_UI_CHECKSUM']}`\n\n")
+          PY
 
       # --- Build ---
       - name: Build package
@@ -242,20 +301,7 @@ jobs:
       - name: Verify Kitaru UI in wheel
         run: |
           WHEEL=$(ls dist/*.whl)
-          python -c "
-          import zipfile, sys
-          names = zipfile.ZipFile('$WHEEL').namelist()
-          missing = []
-          if not any('_ui/dist/index.html' in n for n in names):
-              missing.append('kitaru/_ui/dist/index.html')
-          if not any('_ui/bundle_manifest.json' in n for n in names):
-              missing.append('kitaru/_ui/bundle_manifest.json')
-          if missing:
-              for m in missing:
-                  print(f'::error::{m} missing from wheel')
-              sys.exit(1)
-          print('Kitaru UI assets verified in $WHEEL')
-          "
+          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
       - name: List build artifacts
         run: ls -lh dist/
 
@@ -300,6 +346,60 @@ jobs:
           done
           echo "::error::kitaru==$VERSION did not appear on PyPI within 5 minutes"
           exit 1
+      - name: Verify PyPI artifacts match local build
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+          import urllib.request
+          from pathlib import Path
+          version = os.environ["VERSION"]
+          metadata_url = f"https://pypi.org/pypi/kitaru/{version}/json"
+          with urllib.request.urlopen(metadata_url, timeout=30) as response:
+              metadata = json.load(response)
+          remote_files = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in metadata.get("urls", [])
+              if "filename" in item and "digests" in item and "sha256" in item["digests"]
+          }
+          # PyPI only lists built distributions (sdist + wheels). The local
+          # dist/ directory also holds files PyPI never serves as separate
+          # downloads: uv writes a dist/.gitignore, and the publish step drops
+          # PEP 740 *.publish.attestation sidecars next to each artifact. Those
+          # must not be treated as missing from PyPI.
+          dist_artifacts = [
+              path
+              for path in sorted(Path("dist").iterdir())
+              if path.is_file() and path.name.endswith((".whl", ".tar.gz"))
+          ]
+          if not dist_artifacts:
+              print("::error::No .whl or .tar.gz artifacts found in dist/ to verify")
+              sys.exit(1)
+          failures = []
+          for artifact in dist_artifacts:
+              expected = remote_files.get(artifact.name)
+              if expected is None:
+                  failures.append(f"{artifact.name} is missing from PyPI metadata")
+                  continue
+              actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+              if actual != expected:
+                  failures.append(
+                      f"{artifact.name} hash mismatch: local={actual} pypi={expected}"
+                  )
+          if failures:
+              for failure in failures:
+                  print(f"::error::{failure}")
+              print(
+                  "::error::Local dist artifacts differ from PyPI. This prevents "
+                  "a recovery run from publishing GitHub/Docker/Helm artifacts "
+                  "built with a different UI bundle than the already-published package."
+              )
+              sys.exit(1)
+          print("PyPI artifacts match local dist/ build outputs.")
+          PY
 
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
@@ -435,20 +535,19 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
       - name: Log in to Docker Hub
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push Docker image
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
           context: .
           file: docker/Dockerfile
           target: server
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
           build-args: |
-            ZENML_SERVER_TAG=0.94.3
-            KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
+            ZENML_SERVER_TAG=0.94.4
             ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
@@ -477,14 +576,14 @@ jobs:
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v6.1.0
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885  # v6.1.1
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
       - name: Login to Amazon ECR Public (Helm)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7  # v2.1.4
+        uses: aws-actions/amazon-ecr-login@fa648b43de3d4d023bcb3f89ed6940096949c419  # v2.1.5
         with:
           mask-password: 'true'
           registry-type: public
@@ -500,6 +599,63 @@ jobs:
           helm push "${REPOSITORY}-${VERSION}.tgz" \
             "oci://${REGISTRY}/${REGISTRY_ALIAS}"
 
+      # This tag is the downstream "Kitaru release is ready for cloud-plugins"
+      # signal, so it runs after Helm publish rather than immediately after the
+      # Docker push. It uses the SHA pinned near the start of the job, so the
+      # downstream tag cannot drift if zenml-cloud-plugins/main moves while this
+      # release is publishing. Recovery follows the rest of this workflow's
+      # identity-based model: create a missing ref, accept an exact match, and
+      # fail loudly if an existing tag points somewhere else.
+      - name: Create cloud-plugins Kitaru release tag
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          github-token: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
+          script: |-
+            const owner = 'zenml-io';
+            const repo = 'zenml-cloud-plugins';
+            const tagName = process.env.CLOUD_PLUGINS_TAG_NAME;
+            const expectedSha = process.env.CLOUD_PLUGINS_MAIN_SHA;
+            const fullRef = `refs/tags/${tagName}`;
+            const getRefName = `tags/${tagName}`;
+            async function assertExistingTagMatchesPinnedSha(context) {
+              const { data: existingRef } = await github.rest.git.getRef({
+                owner,
+                repo,
+                ref: getRefName,
+              });
+              const existingSha = existingRef.object.sha;
+              if (existingSha === expectedSha) {
+                core.info(`${fullRef} already exists at pinned main SHA ${expectedSha} — skipping (${context})`);
+                return;
+              }
+              throw new Error(
+                `${fullRef} exists at ${existingSha}, but pinned ${owner}/${repo}@main is ${expectedSha}. `
+                + 'Manual investigation is required; the workflow will not move or overwrite the tag.'
+              );
+            }
+            if (process.env.CLOUD_PLUGINS_TAG_EXISTS === 'true') {
+              await assertExistingTagMatchesPinnedSha('matched during early validation');
+              return;
+            }
+            try {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: fullRef,
+                sha: expectedSha,
+              });
+              core.info(`Created ${fullRef} at pinned ${owner}/${repo}@main SHA ${expectedSha}`);
+            } catch (error) {
+              // GitHub returns 422 if another actor created the ref after the
+              // early validation step. Treat that race as safe only if the tag
+              // now points at the exact SHA we pinned before publish work began.
+              if (error.status !== 422) {
+                throw error;
+              }
+              await assertExistingTagMatchesPinnedSha('created concurrently after early validation');
+            }
+
       # --- Dry-run summary ---
       - name: Dry-run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
@@ -513,10 +669,14 @@ jobs:
             echo ""
             echo "### Docker image"
             echo "Built (not pushed): zenmldocker/kitaru:$VERSION"
-            echo "Kitaru UI tag: $KITARU_UI_TAG"
+            echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
+            echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
             echo "### Helm chart"
             echo "Built (not pushed): kitaru-${VERSION}.tgz"
+            echo ""
+            echo "### Cloud plugins trigger"
+            echo "Skipped tag creation: zenml-io/zenml-cloud-plugins refs/tags/kitaru-$VERSION"
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"

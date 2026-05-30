@@ -10,9 +10,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Checkpoint-level live event docs and a terminal-friendly example showing `kitaru.progress(...)`, `kitaru.events.publish(...)`, and `KitaruClient().executions.events(...)` for watching progress from another process.
 - OpenAI Agents adapter streaming entrypoints (`KitaruRunner.run_stream(...)` and `run_stream_sync(...)`) for `checkpoint_strategy="runner_call"`, publishing best-effort live progress events inside Kitaru flows while preserving the final `OpenAIRunResult` shape.
+- Added PydanticAI `checkpoint_strategy="calls" | "turn"` as the preferred public spelling for adapter checkpoint placement. `"calls"` remains the default and maps to the existing per-model/tool/MCP checkpoint behavior; `"turn"` maps to the existing one-checkpoint-per-agent-run behavior. Existing `granular_checkpoints=True | False` code remains supported.
+
+### Changed
+- Standardized adapter docs and examples around the shared `checkpoint_strategy` concept while keeping framework-specific boundary names such as PydanticAI `"turn"`, OpenAI Agents `"runner_call"`, LangGraph `"graph_call"`, and Claude Agent SDK `"invocation"`.
+
+## [0.13.1] - 2026-05-21
+
+### Added
+- **Agent Harness Platform** — a chapter-by-chapter flagship example at `examples/end_to_end/agent_harness_platform/` and a dedicated docs section at [`/docs/agent-harness-platform/`](https://kitaru.ai/docs/agent-harness-platform/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_harness_platform/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_harness_platform_example.py`. (#288)
+
+### Changed
+- `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Harness Platform tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
+- `docs/content/docs/guides/news-scout.mdx` removed; the `news_scout` example itself stays runnable in the repo and is now listed under "Other end-to-end examples" on the docs site. The guides section is reserved for Kitaru-feature how-tos. (#288)
+
+### Fixed
+- Fixed PydanticAI adapter compatibility with `pydantic-ai-slim>=1.95`, where upstream renamed built-in tools to native tools. The adapter no longer fails at import time on `AgentBuiltinTool` or crashes by forwarding `builtin_tools=None` into PydanticAI's deprecation shim. (#370)
+
+## [0.13.0] - 2026-05-20
+
+### Added
+- Added OpenAI Agents adapter context passthrough: `KitaruRunner.run(...)` and `run_sync(...)` now accept a `context=` argument that is forwarded to the OpenAI Agents SDK and included in runner/tool checkpoint cache keys, with an explicit `context_cache_identity=` projection hook for stable production contexts. Context-derived cache identity also covers tool calls resumed from interrupted `RunState` so approved tools after a HITL resume cannot reuse stale same-args/different-context cache entries. (#345)
+- Added OpenAI Agents tool-input guardrail observability in `checkpoint_strategy="calls"`: model-requested tool calls a guardrail blocks before the tool body runs are now recorded as `tool_call` events with guardrail metadata, without creating a tool checkpoint or persisting rejected arguments. `OpenAICapturePolicy.save_input=False` redacts guardrail rejection text and unexpected exception details, and `save_interruption_payloads=False` omits raw interruption argument previews. (#345)
+- Built wheels now include the `kitaru/py.typed` PEP 561 marker so downstream type checkers pick up Kitaru's public type information. (#343)
+
+### Changed
+- Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.4` so Kitaru tracks the latest upstream ZenML release. (#344)
+- `kitaru logout` now resets persisted store state and clears credentials before attempting best-effort local-daemon shutdown, so a failure to stop the daemon no longer leaves the CLI pointed at a broken remote connection. (#343)
+- `kitaru secrets list` now uses a stable backend page size before applying CLI pagination, producing deterministic ordering across runs. (#343)
+
+### Fixed
+- Fixed adapter-created granular checkpoints being treated as flow-return candidates, so `flow.run(...).wait()` / `.get()` can return the user's final checkpoint result when adapters also produced model/tool checkpoints. (#355)
+- Fixed Kitaru-owned request constructors to reject checkpoint output handles with guidance to call `.load()` instead of surfacing generic Pydantic string validation errors. (#353)
+- Fixed PydanticAI direct sync tool-body `kp.wait_for_input(...)` calls under ZenML `0.94.4` with explicit `allow_sync_tool_body_waits=True` opt-in, keeping `tool_checkpoint_config_by_name={"tool": False}` as checkpoint-only configuration. (#351)
+- Fixed Kitaru flow return compatibility with ZenML `0.94.4` dynamic-pipeline output validation by persisting plain flow returns as internal artifacts while preserving user-facing Python return values and avoiding marker-shaped user dictionaries being mistaken for hidden tuple metadata. (#344)
+- Fixed adapter result identity after checkpoint load for OpenAI Agents, Claude Agent SDK, and LangGraph runners: results restored from a synthetic checkpoint are now rebuilt as the canonical local result class, so `isinstance(result, OpenAIRunResult)` (and the Claude/LangGraph equivalents) no longer fails when the loaded payload originally came from an alternate import path. (#354)
+- Replaced local-server cleanup's PID-only `SIGKILL` fallback with a "warn and continue" path so a recycled PID cannot cause Kitaru to kill an unrelated process during `kitaru clean global/all`. Inspection failures now surface as `unknown (inspection failed: ...)` instead of being silently treated as "no local server". (#343)
+- Restored the caller process environment exactly after `kitaru login` startup attempts, even when local-daemon deployment or connection fails partway through. (#343)
+- Removed stale references to the deprecated native memory surface from the docs site, agent-native guides, and comparison pages. (#342)
+
+## [0.12.0] - 2026-05-17
+
+### Added
+- Added LangGraph `checkpoint_strategy="calls"` support via `KitaruLangGraphMiddleware`, creating true sync LangChain model/tool call checkpoints while keeping `graph_call` as the default coarse mode. The guide now explicitly documents that callbacks/event streams are trace-only, LangGraph checkpointers remain LangGraph-owned, and async calls mode is metadata-only.
+- Added a local LangGraph adapter example (`examples/integrations/langgraph_agent/`) plus a new LangGraph adapter guide (`/guides/langgraph-adapter`) covering the adapter boundary: Kitaru owns graph-call or middleware-wrapped call checkpoints, LangGraph owns thread/checkpointer semantics, and Deep Agents filesystem/sandbox behavior remains pass-through. Updated the examples indexes and smoke test to include deterministic LangGraph examples with no API keys required.
+- Claude Agent SDK adapter (`kitaru.adapters.claude_agent_sdk`) for invocation-level durability: wrap a Claude SDK query in one Kitaru checkpoint, capture the session ID, final result, usage/cost, messages/transcript artifacts when available, and a redacted run manifest. Includes a guide, integration example, and smoke-test coverage while explicitly documenting that Claude-internal Bash, MCP, custom tool, and workspace side effects are not granular replay boundaries.
+- Added `kitaru.current_execution_id()` as the public way to read the active Kitaru execution ID inside a running flow or checkpoint.
+
+### Fixed
+- LangGraph adapter event logs and run summaries are now saved as real role-first Kitaru context artifacts inside checkpoint scope, with best-effort event persistence by default and hardened config/context redaction for unusual values.
+- PydanticAI granular checkpoints now store model messages and tool arguments as structural checkpoint inputs and use the returned checkpoint output as the canonical response/result artifact, avoiding duplicate manual artifacts in new runs.
+- OpenAI Agents `checkpoint_strategy="calls"` now stores model inputs and function-tool arguments as structural checkpoint inputs, and adapter-generated artifact names now put the human-readable role first across PydanticAI, OpenAI Agents, and Claude Agent SDK captures.
+
+## [0.11.0] - 2026-05-12
+
+### Fixed
+- PydanticAI adapter run surfaces now accept and forward upstream `conversation_id` and `output_retries` kwargs and include them in turn-checkpoint cache keys, while temporarily capping `pydantic-ai-slim` to the supported 1.89–1.92 line.
+- Fixed PydanticAI MCP tool calls hanging after a successful request when an explicitly lifecycle-managed MCP server was already open. Kitaru now keeps already-running MCP calls on the active event loop inside explicit flows, and fails fast when auto-flow would otherwise move a pre-opened MCP server across event loops; auto-connected MCP servers still use granular MCP checkpoints by default.
+- Added a compatibility shim for the `pydantic_ai.mcp` import path used by current PydanticAI releases when Kitaru is installed with the MCP SDK version still compatible with ZenML server dependencies.
+
+### Removed
+- Removed the native memory surface from Kitaru: `kitaru.memory`, `KitaruClient.memories`, the `kitaru memory` CLI group, MCP `kitaru_memory_*` tools, and the corresponding memory docs/examples. Use your own storage for durable application state and pass values into flows explicitly.
 
 ### Security
-- Bumped transitive dependencies flagged by `pip-audit`: `gitpython` 3.1.47 → 3.1.49 (CVE-2026-44244), `mako` 1.3.11 → 1.3.12 (CVE-2026-44307), and `python-multipart` 0.0.26 → 0.0.27 (CVE-2026-42561). Lockfile-only change; no API surface affected.
+- Bumped transitive dependencies flagged by `pip-audit`: `gitpython` 3.1.47 → 3.1.49 (CVE-2026-44244), `mako` 1.3.11 → 1.3.12 (CVE-2026-44307), `python-multipart` 0.0.26 → 0.0.27 (CVE-2026-42561), and `urllib3` 2.6.3 → 2.7.0. Lockfile-only change; no API surface affected.
 
 ## [0.10.0] - 2026-05-08
 
@@ -43,7 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only. (#230)
-- Synthetic memory operations now register as `StepType.MEMORY_CALL` checkpoints (instead of generic `tool_call`), so memory reads/writes surface distinctly in execution graphs and `@checkpoint(type="memory_call")` is supported. (#239)
 
 ### Changed
 - Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#270)

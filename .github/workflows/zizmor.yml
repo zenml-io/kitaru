@@ -8,6 +8,12 @@ on:
       - .github/zizmor.yml
       - .github/dependabot.yml
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
     paths:
       - .github/workflows/**
       - .github/zizmor.yml
@@ -22,7 +28,7 @@ jobs:
     name: Scan workflows with zizmor
     runs-on: ubuntu-latest
     # Only run on the main repo, not forks (scheduled runs would fail on forks).
-    if: github.repository == 'zenml-io/kitaru'
+    if: ${{ github.repository == 'zenml-io/kitaru' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     permissions:
       contents: read
       actions: read

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `memory`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
@@ -30,11 +30,14 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
 site/                 # Astro landing page + Cloudflare runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (/api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts
+  download-ui.sh             # Bundles stable/prerelease Kitaru UI releases into the package tree
   generate_cli_docs.py       # Generates CLI reference MDX from cyclopts introspection
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
   smoke-test.sh              # Pre-release end-to-end sanity check (CLI, flows, MCP, LLM)
+FRONTEND-TESTING.md   # Read first for Kitaru UI bundle/frontend testing,
+                       # stable/prerelease release validation, and token boundaries
 docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
   Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
   Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
@@ -98,10 +101,11 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
 - `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. Describe `kitaru model list` as listing aliases available in the current environment, not just aliases stored locally.
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
+- In docs MDX and generated docs, link to other docs pages with docs-app-root paths like `/cli/executions/` or `/concepts/checkpoints/`, not `/docs/...`; the Next `basePath` adds `/docs` for public HTML. From the Astro site or other public surfaces, use public `/docs/...` links. Public `.md` copies are rewritten during export and checked by `just site-build`.
+- Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. Treat them as coordination scratchpads, not product docs.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
 - Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
-- Memory docs should distinguish the shipped surfaces accurately: module-level `kitaru.memory.*` uses the active configured typed scope and does not take per-call `scope=` arguments; `KitaruClient.memories`, CLI memory commands, and MCP memory tools use explicit typed scopes (`scope` + `scope_type`) on scoped operations. Memory stays forbidden inside `@checkpoint`.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 - Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
@@ -121,7 +125,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 3. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
 4. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
 5. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-6. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes.
+6. The workflow bundles the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo` into the Python package, bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes. Docker copies the UI from the installed Kitaru package; it does not download UI assets itself.
 7. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
 
 ## Development commands
@@ -181,12 +185,20 @@ just site                             # Preview landing page dev server (localho
 just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
 
+# Kitaru UI bundle testing
+# Read FRONTEND-TESTING.md before changing UI bundle, frontend smoke, Docker dashboard, or release UI workflows.
+just ui-bundle                                # Download latest stable/full kitaru-ui-v* bundle
+just UI_TAG=kitaru-ui-v0.2.0 ui-bundle        # Download a specific stable UI bundle
+just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease  # Explicit prerelease opt-in
+just ui-login                                 # Start local Kitaru with prepared bundle
+just ui-smoke                                 # Smoke test prepared bundle and keep server running
+
 # Docker
-just server-image                              # Build production server image (zenmldocker/kitaru:latest)
-just DOCKER_TAG=v0.2.0 server-image            # Build with specific tag
-just UI_TAG=v0.1.0 server-image                # Build with specific Kitaru UI release
-just server-image-push               # Build + push to Docker Hub
-just server-dev-image                # Build dev server image (requires docker/kitaru-ui-dist/)
+just server-image                              # Build production server image (bundles latest stable UI first)
+just DOCKER_TAG=v0.2.0 server-image            # Build with specific image tag
+just UI_TAG=kitaru-ui-v0.2.0 server-image      # Build with specific stable Kitaru UI release
+just server-image-push                         # Build + push to Docker Hub
+just server-dev-image                          # Build dev server image (requires docker/kitaru-ui-dist/)
 
 # Manual deploy to Cloudflare
 unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)
@@ -199,7 +211,8 @@ just site-build && npx wrangler deploy   # Build + deploy
 |---|---|---|
 | `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, Docker server smoke, wheel packaging, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
 | `site.yml` | Manual dispatch; push to `main`; selected docs/site/script PR paths | Build + deploy unified site; PR preview Workers for same-repo PRs; preview cleanup on PR close |
-| `release.yml` | Workflow dispatch or `v*` tag | Version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release |
+| `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release |
+| `ui-prerelease-smoke.yml` | Manual dispatch | Tests an explicit prerelease Kitaru UI bundle against a Kitaru ref without publishing PyPI, Docker, Helm, tags, or releases |
 | `spellcheck.yml` | Manual/reusable runs, push to `develop`, non-draft PRs | Separate typo/spell checking |
 | `image-optimiser.yml` | PRs changing JPG/JPEG/PNG/WebP files | Image compression for same-repo non-draft PRs, with `site/public/dashboard.png` ignored |
 | `zizmor.yml` | Workflow/dependabot changes, weekly schedule, manual runs | GitHub Actions security analysis |
@@ -221,7 +234,6 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
-| `kitaru.memory` | Implemented |
 | Stack lifecycle (`list_stacks` / `current_stack` / `use_stack` / `create_stack` / `delete_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |
@@ -293,10 +305,13 @@ Kitaru collects anonymous usage analytics for users who have opted in (via ZenML
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
+- **PR reviewer guidance:** Every PR description should include a "Reviewer Notes" H2 or H3 section, but it should read like a guided walkthrough rather than a file inventory. Explain the story of the change, where the risky behavior lives, what would break if the implementation is wrong, and why the named files or functions matter.
+- **PR reproduction:** Include a concrete "Reproduction" subsection inside Reviewer Notes or immediately after it. Prefer a runnable example, CLI flow, or UI path that proves the behavior end to end. Tell the reviewer exactly what to run and what to look for afterward, such as a named `examples/...` script, a UI artifact/checkpoint name, or a `kitaru executions list` / `kitaru executions logs` result.
+- **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
 - **Update the smoke test** (`scripts/smoke-test.sh`) when adding new CLI commands, MCP tools, or SDK features that can be exercised non-interactively. New commands should have at least a `--dry-run` or `--help` invocation in the smoke script so pre-release validation catches regressions. Use `--dry-run` where available to keep the smoke test non-destructive.
 - **Review analytics coverage** when expanding the CLI, MCP, or SDK surface. Check whether the new feature needs a tracking event in `AnalyticsEvent` and whether the event is wired into the appropriate surface (CLI handler, `@tracked_mcp_tool`, or SDK lifecycle point). See the [Analytics instrumentation](#analytics-instrumentation) section for patterns. If multi-word CLI commands are added, update `_MULTI_TOKEN_COMMANDS` in `cli.py` to avoid leaking positional arguments into analytics.
-- Never include a "[Codex] " or "feat: " prefix to PR titles. Also all PR descriptions should include a "Reviewer Notes" H2 or H3 section which explains what they should take care to check out during their reviews (i.e. code highlights) and ideally it also includes a code snippet they can run (you can assume they have both the ability to run flows locally as well as against a Kubernetes remote stack) to reproduce either the fix or the error etc.
+- Never include a "[Codex] " or "feat: " prefix to PR titles.
 
 ## CLI
 
@@ -328,4 +343,5 @@ CLI output uses [Rich](https://rich.readthedocs.io/) for styled terminal output 
 - Prefer Pydantic models for data structures
 - Return values from checkpoints must be serializable (prefer Pydantic models or JSON-compatible types)
 - Design docs live in `design/` — this folder is gitignored and must never be committed
+- Never commit RepoPrompt/orchestration scratch Markdown such as plans, reviews, investigations, handoffs, or prompt exports. Keep `docs/plans/*.md`, `docs/reviews/*.md`, `docs/investigations/*.md`, `prompt-exports/*.md`, and ad-hoc handoff files out of repo history unless the user explicitly asks for that artifact to be committed.
 - Follow Google Python style for docstrings

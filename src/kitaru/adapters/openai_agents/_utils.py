@@ -11,14 +11,17 @@ import json
 import re
 import sys
 import time
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from pydantic_core import to_jsonable_python
 from typing_extensions import TypedDict
 
-import kitaru
 from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru.checkpoint import _synthetic_checkpoint
 from kitaru.errors import KitaruUsageError
 
 CheckpointRuntime = Literal["inline", "isolated"]
@@ -35,6 +38,19 @@ class CheckpointConfig(TypedDict, total=False):
 
 ToolCheckpointOverride = CheckpointConfig | Literal[False]
 ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
+
+
+@dataclass(frozen=True)
+class AdapterCheckpointArtifactRefs:
+    """Display references for artifacts owned by a synthetic checkpoint."""
+
+    input_artifacts: Mapping[str, str]
+    output_artifacts: Mapping[str, str]
+
+
+_ADAPTER_CHECKPOINT_ARTIFACT_REFS: ContextVar[AdapterCheckpointArtifactRefs | None] = (
+    ContextVar("kitaru_openai_agents_adapter_checkpoint_artifact_refs", default=None)
+)
 
 _ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({"runtime", "retries", "type"})
 _VALID_CHECKPOINT_STRATEGIES = frozenset({"calls", "runner_call"})
@@ -146,6 +162,29 @@ def with_default_type(config: CheckpointConfig, default_type: str) -> Checkpoint
     return {**config, "type": default_type}
 
 
+@contextmanager
+def adapter_checkpoint_artifact_refs(
+    *,
+    input_artifacts: Mapping[str, str] | None = None,
+    output_artifacts: Mapping[str, str] | None = None,
+) -> Iterator[AdapterCheckpointArtifactRefs]:
+    """Expose structural/canonical artifact slot names inside a checkpoint."""
+    refs = AdapterCheckpointArtifactRefs(
+        input_artifacts=input_artifacts or {},
+        output_artifacts=output_artifacts or {},
+    )
+    token = _ADAPTER_CHECKPOINT_ARTIFACT_REFS.set(refs)
+    try:
+        yield refs
+    finally:
+        _ADAPTER_CHECKPOINT_ARTIFACT_REFS.reset(token)
+
+
+def get_adapter_checkpoint_artifact_refs() -> AdapterCheckpointArtifactRefs | None:
+    """Return granular checkpoint artifact slot references, if any."""
+    return _ADAPTER_CHECKPOINT_ARTIFACT_REFS.get()
+
+
 def resolve_tool_checkpoint_config(
     tool_name: str,
     *,
@@ -192,18 +231,50 @@ def safe_step_name(value: str) -> str:
 
 
 def _build_checkpoint_step(
-    *, config: CheckpointConfig, step_name: str, body: Callable[[], Any]
+    *,
+    config: CheckpointConfig,
+    step_name: str,
+    body: Callable[[], Any],
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Callable[..., Any]:
     reject_isolated_runtime(config)
 
-    def _call(_cache_key: str | None = None) -> Any:
-        return body()
+    input_names = frozenset(checkpoint_inputs or {})
+    if input_names == frozenset():
 
-    _call.__name__ = safe_step_name(step_name)
-    checkpoint_def = kitaru.checkpoint(**config)(_call)
+        def _call_without_inputs(_cache_key: str | None = None) -> Any:
+            return body()
+
+        call = _call_without_inputs
+    elif input_names == {"input"}:
+
+        def _call_with_input(input: Any, _cache_key: str | None = None) -> Any:
+            return body()
+
+        call = _call_with_input
+    elif input_names == {"tool_args"}:
+
+        def _call_with_tool_args(
+            tool_args: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        call = _call_with_tool_args
+    else:
+        unsupported = ", ".join(sorted(input_names))
+        raise KitaruUsageError(
+            f"Unsupported synthetic checkpoint inputs: {unsupported}."
+        )
+
+    call.__name__ = safe_step_name(step_name)
+    checkpoint_def = _synthetic_checkpoint(
+        **config,
+        flow_result_candidate=False,
+    )(call)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
-        alias = build_checkpoint_source_alias(_call.__name__)
+        alias = build_checkpoint_source_alias(call.__name__)
         for module_name in {__name__, f"src.{__name__}"}:
             module = sys.modules.get(module_name)
             if module is not None:
@@ -217,14 +288,18 @@ def run_sync_in_checkpoint(
     step_name: str,
     body: Callable[[], Any],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run a sync body inside a synthetic ``@kitaru.checkpoint``."""
     checkpoint_def = _build_checkpoint_step(
         config=config,
         step_name=step_name,
         body=body,
+        checkpoint_inputs=checkpoint_inputs,
     )
-    return materialize_step_output(checkpoint_def(cache_key))
+    return materialize_step_output(
+        checkpoint_def(**(checkpoint_inputs or {}), _cache_key=cache_key)
+    )
 
 
 async def run_async_in_checkpoint(
@@ -233,6 +308,7 @@ async def run_async_in_checkpoint(
     step_name: str,
     body: Callable[[], Coroutine[Any, Any, Any]],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run an async body inside a synthetic ``@kitaru.checkpoint``.
 
@@ -244,6 +320,11 @@ async def run_async_in_checkpoint(
         config=config,
         step_name=step_name,
         body=lambda: asyncio.run(body()),
+        checkpoint_inputs=checkpoint_inputs,
     )
-    step_output = await asyncio.to_thread(checkpoint_def, cache_key)
+    step_output = await asyncio.to_thread(
+        checkpoint_def,
+        **(checkpoint_inputs or {}),
+        _cache_key=cache_key,
+    )
     return materialize_step_output(step_output)

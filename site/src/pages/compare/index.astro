@@ -11,7 +11,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
 
 <Base
   title="Compare Kitaru — Durable execution for Python agents"
-  description="See how Kitaru compares to agent SDKs and durable execution runtimes. Keep your SDK; add Kitaru for durability, memory, and cloud-native deployment."
+  description="See how Kitaru compares to agent SDKs and durable execution runtimes. Keep your SDK; add Kitaru for durability, artifact lineage, and cloud-native deployment."
 >
   <Nav />
   <main class="compare-index" id="main-content">
@@ -35,7 +35,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
           <ul class="compare-grid">
             {comparisons.map((entry, index) => (
               <li>
-                <a href={`/compare/${entry.id}`} class="compare-card" data-reveal="scale-up" data-reveal-delay={String(3 + index)}>
+                <a href={`/compare/${entry.id}/`} class="compare-card" data-reveal="scale-up" data-reveal-delay={String(3 + index)}>
                   <div class="compare-card-head">
                     <span class="compare-card-vs">Kitaru <em>vs</em></span>
                     <h2>{entry.data.competitor}</h2>

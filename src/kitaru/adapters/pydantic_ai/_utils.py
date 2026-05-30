@@ -8,15 +8,20 @@ import asyncio
 import hashlib
 import json
 import sys
-from collections.abc import Coroutine, Mapping
+from collections.abc import Coroutine, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, TypedDict, cast
 
-import kitaru
 from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru.checkpoint import _synthetic_checkpoint
 from kitaru.errors import KitaruUsageError
 from pydantic_core import to_jsonable_python
 
 CheckpointRuntime = Literal["inline", "isolated"]
+CheckpointStrategy = Literal["calls", "turn"]
+_ALLOWED_CHECKPOINT_STRATEGIES = ("calls", "turn")
 
 
 class CheckpointConfig(TypedDict, total=False):
@@ -32,6 +37,25 @@ ToolCheckpointOverride = CheckpointConfig | Literal[False]
 ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
 _ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({"cache", "runtime", "retries", "type"})
 
+
+@dataclass(frozen=True)
+class AdapterCheckpointArtifactRefs:
+    """Display references for artifacts owned by a synthetic checkpoint.
+
+    In granular adapter checkpoints, some event payloads now live in structural
+    step slots rather than manual artifacts. These mappings let the event log
+    say "prompt -> messages" or "result -> output" without creating duplicate
+    manual artifacts inside the step.
+    """
+
+    input_artifacts: Mapping[str, str]
+    output_artifacts: Mapping[str, str]
+
+
+_ADAPTER_CHECKPOINT_ARTIFACT_REFS: ContextVar[AdapterCheckpointArtifactRefs | None] = (
+    ContextVar("kitaru_adapter_checkpoint_artifact_refs", default=None)
+)
+
 if f"src.{__name__}" not in sys.modules:
     sys.modules[f"src.{__name__}"] = sys.modules[__name__]
 
@@ -41,6 +65,29 @@ def with_default_type(config: CheckpointConfig, default_type: str) -> Checkpoint
     if "type" in config:
         return config
     return {**config, "type": default_type}
+
+
+@contextmanager
+def adapter_checkpoint_artifact_refs(
+    *,
+    input_artifacts: Mapping[str, str] | None = None,
+    output_artifacts: Mapping[str, str] | None = None,
+) -> Iterator[AdapterCheckpointArtifactRefs]:
+    """Expose structural/canonical artifact slot names inside a checkpoint."""
+    refs = AdapterCheckpointArtifactRefs(
+        input_artifacts=input_artifacts or {},
+        output_artifacts=output_artifacts or {},
+    )
+    token = _ADAPTER_CHECKPOINT_ARTIFACT_REFS.set(refs)
+    try:
+        yield refs
+    finally:
+        _ADAPTER_CHECKPOINT_ARTIFACT_REFS.reset(token)
+
+
+def get_adapter_checkpoint_artifact_refs() -> AdapterCheckpointArtifactRefs | None:
+    """Return granular checkpoint artifact slot references, if any."""
+    return _ADAPTER_CHECKPOINT_ARTIFACT_REFS.get()
 
 
 def resolve_tool_checkpoint_config(
@@ -81,6 +128,17 @@ def checkpoint_cache_key(payload: Any) -> str:
         normalized, sort_keys=True, separators=(",", ":"), default=repr
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_checkpoint_strategy(value: str) -> CheckpointStrategy:
+    """Return a supported PydanticAI checkpoint strategy."""
+    if value in _ALLOWED_CHECKPOINT_STRATEGIES:
+        return cast(CheckpointStrategy, value)
+    accepted = ", ".join(repr(strategy) for strategy in _ALLOWED_CHECKPOINT_STRATEGIES)
+    raise KitaruUsageError(
+        f"Unsupported PydanticAI checkpoint_strategy {value!r}. "
+        f"Accepted values are: {accepted}."
+    )
 
 
 def validate_checkpoint_config(
@@ -187,6 +245,24 @@ def _build_checkpoint_step(
             return body()
 
         turn = _turn_with_prompt_and_history
+    elif input_names == {"tool_args"}:
+
+        def _turn_with_tool_args(
+            tool_args: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        turn = _turn_with_tool_args
+    elif input_names == {"messages"}:
+
+        def _turn_with_messages(
+            messages: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        turn = _turn_with_messages
     else:
         unsupported = ", ".join(sorted(input_names))
         raise KitaruUsageError(
@@ -194,7 +270,10 @@ def _build_checkpoint_step(
         )
 
     turn.__name__ = step_name
-    checkpoint_def = kitaru.checkpoint(**config)(turn)
+    checkpoint_def = _synthetic_checkpoint(
+        **config,
+        flow_result_candidate=False,
+    )(turn)
     step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
         alias = build_checkpoint_source_alias(turn.__name__)
@@ -269,6 +348,8 @@ def turn_cache_key(
     toolsets: Any,
     builtin_tools: Any,
     event_stream_handler: Any,
+    conversation_id: Any,
+    output_retries: Any,
     capabilities: Any,
     spec: Any,
 ) -> str:
@@ -298,6 +379,8 @@ def turn_cache_key(
             "toolsets": toolsets,
             "builtin_tools": builtin_tools,
             "event_stream_handler": event_stream_handler,
+            "conversation_id": conversation_id,
+            "output_retries": output_retries,
             "capabilities": capabilities,
             "spec": spec,
         }

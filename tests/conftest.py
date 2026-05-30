@@ -39,6 +39,7 @@ _EARLY_TEST_ENV_VARS = (
     "KITARU_CONFIG_PATH",
     "KITARU_DEBUG",
     "KITARU_ANALYTICS_OPT_IN",
+    "KITARU_UI_DIST_PATH",
     "ZENML_CONFIG_PATH",
     "ZENML_ACTIVE_PROJECT_ID",
     "ZENML_DEBUG",
@@ -79,7 +80,6 @@ from kitaru.config import (
     KITARU_STACK_ENV,
     _reset_runtime_configuration,
 )
-from kitaru.memory import _scope as _memory_scope_module
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +135,7 @@ def isolated_zenml_global_config(
         KITARU_CONFIG_PATH_ENV,
         KITARU_DEBUG_ENV,
         KITARU_ANALYTICS_OPT_IN_ENV,
+        "KITARU_UI_DIST_PATH",
     ):
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
@@ -160,19 +161,6 @@ def isolated_zenml_global_config(
     set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
-
-
-@pytest.fixture(autouse=True)
-def _reset_memory_scope_configuration() -> Generator[None]:
-    """Reset process-local and flow-local memory scope state between tests."""
-    original_default = _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT
-    token = _memory_scope_module._CURRENT_MEMORY_SCOPE.set(None)
-    _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = None
-    try:
-        yield
-    finally:
-        _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
-        _memory_scope_module._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 @pytest.fixture()

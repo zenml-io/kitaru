@@ -7,7 +7,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -43,7 +42,6 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     KitaruDeploymentInputValuesError,
-    KitaruMemoryArtifactUnavailableError,
     KitaruStackNotRemoteExecutableUsageError,
     KitaruStateError,
     KitaruUsageError,
@@ -262,42 +260,6 @@ def _auth_management_client_stub(
     )
 
 
-def _memory_payload(
-    *,
-    key: str = "prefs",
-    scope: str = "repo_scope",
-    scope_type: str = "namespace",
-    version: int = 2,
-    value_type: str = "dict",
-    is_deleted: bool = False,
-    execution_id: str | None = None,
-    flow_id: str | None = None,
-    flow_name: str | None = None,
-    artifact_id: str | None = None,
-    value: Any | None = None,
-    value_format: str | None = None,
-) -> dict[str, Any]:
-    """Build a serialized memory payload for CLI tests."""
-    payload: dict[str, Any] = {
-        "key": key,
-        "value_type": value_type,
-        "version": version,
-        "scope": scope,
-        "scope_type": scope_type,
-        "created_at": "2026-04-02T10:00:00+00:00",
-        "is_deleted": is_deleted,
-        "artifact_id": artifact_id or f"artifact-{key}-{version}",
-        "execution_id": execution_id,
-        "flow_id": flow_id,
-        "flow_name": flow_name,
-    }
-    if value_format is not None:
-        payload["value_format"] = value_format
-    if value is not None or value_format is not None:
-        payload["value"] = value
-    return payload
-
-
 def _write_stack_create_file(tmp_path: Path, content: str) -> Path:
     """Write a temporary stack-create YAML file for CLI tests."""
     path = tmp_path / "stack.yaml"
@@ -383,7 +345,6 @@ def test_help_flag_lists_available_commands(
         "secrets",
         "model",
         "executions",
-        "memory",
         "build",
         "deploy",
         "invoke",
@@ -523,18 +484,6 @@ def test_executions_help_lists_all_supported_subcommands(
         "retry",
         "cancel",
     ):
-        assert command in output
-
-
-def test_memory_help_lists_all_supported_subcommands(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru memory --help` should show the full memory command surface."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["memory", "--help"])
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out.lower()
-    for command in ("list", "get", "set", "delete", "history", "scopes", "reindex"):
         assert command in output
 
 
@@ -2552,41 +2501,6 @@ def test_executions_list_note_has_no_more_items_suffix_on_short_later_page(
     assert "there may be more items" not in output
 
 
-def test_memory_list_reports_empty_page_distinct_from_empty_scope(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Paging past the end shows a page-specific empty message, not the scope hint."""
-    entries = [
-        _memory_payload(key="first", scope="my_repo", version=1),
-        _memory_payload(key="second", scope="my_repo", version=2),
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.list_memory_payload", return_value=entries),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "list",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "--page",
-                "5",
-                "--size",
-                "1",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "no items on page 5" in output
-    assert "kitaru memory scopes" not in output
-
-
 def test_secrets_list_past_end_does_not_claim_none_found(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -3732,6 +3646,39 @@ def test_logout_resets_remote_connection() -> None:
     )
 
 
+def test_logout_resets_remote_connection_when_daemon_stop_fails() -> None:
+    """Remote logout should reset persisted state even if daemon stop fails."""
+    fake_gc = Mock()
+    fake_gc.uses_local_store = False
+    fake_gc.store_configuration = SimpleNamespace(url="https://example.com/")
+    fake_credentials_store = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.cli._get_connected_server_url", return_value="https://example.com"
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            side_effect=RuntimeError("daemon stop failed"),
+        ),
+        patch(
+            "kitaru.cli.get_credentials_store",
+            return_value=fake_credentials_store,
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    fake_credentials_store.clear_credentials.assert_called_once_with(
+        "https://example.com"
+    )
+    assert result.mode == "remote_server"
+    assert result.local_server_stopped is False
+    assert str(result) == "Logged out from Kitaru server: https://example.com"
+
+
 def test_logout_returns_local_server_mode_for_local_connection() -> None:
     """Local logout should report local-server mode and stop the daemon."""
     fake_gc = Mock()
@@ -3753,7 +3700,45 @@ def test_logout_returns_local_server_mode_for_local_connection() -> None:
     ):
         result = _logout_current_connection()
 
+    fake_gc.set_default_store.assert_called_once_with()
     assert result.mode == "local_server"
+    assert result.local_fallback_available is True
+    assert result.local_server_stopped is True
+    assert str(result) == "Logged out from the local Kitaru server."
+
+
+def test_logout_local_server_branch_clears_store_on_missing_fallback() -> None:
+    """Local-server logout should clear persisted state if local fallback is absent."""
+    fake_gc = Mock()
+    fake_gc.set_default_store.side_effect = ImportError("sqlalchemy missing")
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=True),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://127.0.0.1:8383",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    assert fake_gc.store is None
+    assert fake_gc._zen_store is None
+    assert fake_gc.active_stack_id is None
+    assert fake_gc.active_project_id is None
+    assert fake_gc._active_stack is None
+    assert fake_gc._active_project is None
+    fake_gc._write_config.assert_called_once_with()
+    assert result.mode == "local_server"
+    assert result.local_fallback_available is False
     assert result.local_server_stopped is True
     assert str(result) == "Logged out from the local Kitaru server."
 
@@ -4263,1168 +4248,6 @@ def test_model_list_reads_transported_registry(
     assert "fast: openai/gpt-4o-mini (secret=openai-creds) [default]" in output
 
 
-@pytest.mark.parametrize(
-    ("args", "expected_flag"),
-    [
-        (["memory", "list"], "--scope"),
-        (["memory", "list", "--scope", "demo"], "--scope-type"),
-        (["memory", "get", "some_key"], "--scope"),
-        (["memory", "get", "some_key", "--scope", "demo"], "--scope-type"),
-        (["memory", "set", "some_key", "value"], "--scope"),
-        (["memory", "set", "some_key", "value", "--scope", "demo"], "--scope-type"),
-        (["memory", "delete", "some_key"], "--scope"),
-        (["memory", "delete", "some_key", "--scope", "demo"], "--scope-type"),
-        (["memory", "history", "some_key"], "--scope"),
-        (["memory", "history", "some_key", "--scope", "demo"], "--scope-type"),
-    ],
-    ids=[
-        "list-missing-scope",
-        "list-missing-scope-type",
-        "get-missing-scope",
-        "get-missing-scope-type",
-        "set-missing-scope",
-        "set-missing-scope-type",
-        "delete-missing-scope",
-        "delete-missing-scope-type",
-        "history-missing-scope",
-        "history-missing-scope-type",
-    ],
-)
-def test_memory_missing_scope_shows_helpful_error(
-    capsys: pytest.CaptureFixture[str],
-    args: list[str],
-    expected_flag: str,
-) -> None:
-    """Omitting `--scope` should suggest `kitaru memory scopes`."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(args)
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "kitaru memory scopes" in err
-    assert expected_flag in err
-
-
-def test_memory_list_renders_entries(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory list` should render active entries for the requested scope."""
-    fake_client = Mock()
-    entries = [
-        _memory_payload(
-            key="repo_conventions",
-            scope="my_repo",
-            version=3,
-            execution_id="kr-123",
-        ),
-        _memory_payload(
-            key="style_guide",
-            scope="my_repo",
-            value_type="str",
-            version=1,
-        ),
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client) as client_cls,
-        patch(
-            "kitaru.cli.list_memory_payload",
-            return_value=entries,
-        ) as mock_list_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["memory", "list", "--scope", "my_repo", "--scope-type", "namespace"])
-
-    assert exc_info.value.code == 0
-    client_cls.assert_called_once_with()
-    mock_list_memory.assert_called_once_with(
-        fake_client,
-        scope="my_repo",
-        scope_type="namespace",
-    )
-    output = capsys.readouterr().out
-    assert "Kitaru memory (my_repo (namespace))" in output
-    assert "repo_conventions" in output
-    assert "style_guide" in output
-    assert "kr-123" in output
-
-
-def test_memory_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory list --output json` should emit serialized entries."""
-    entries = [_memory_payload(key="repo_conventions", scope="my_repo", version=3)]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch(
-            "kitaru.cli.list_memory_payload",
-            return_value=entries,
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "list",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "--output",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["command"] == "memory.list"
-    assert payload["count"] == 1
-    assert payload["items"][0]["key"] == "repo_conventions"
-
-
-def test_memory_list_json_paginates_entries(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`memory list --output json` should emit only the requested page."""
-    entries = [
-        _memory_payload(key="first", scope="my_repo", version=1),
-        _memory_payload(key="second", scope="my_repo", version=2),
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.list_memory_payload", return_value=entries),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "list",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "--page",
-                "2",
-                "--size",
-                "1",
-                "--output",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert set(payload) == {"command", "items", "count"}
-    assert payload["count"] == 1
-    assert payload["items"][0]["key"] == "second"
-
-
-def test_memory_list_empty_scope_suggests_scopes_command(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """An empty scope result should hint the user to `kitaru memory scopes`."""
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.list_memory_payload", return_value=[]),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "list",
-                "--scope",
-                "unknown_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "kitaru memory scopes" in output
-
-
-def test_memory_scopes_renders_table(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory scopes` should render discovered scopes."""
-    fake_client = Mock()
-    scopes = [
-        {"scope": "code_review", "scope_type": "flow", "entry_count": 2},
-        {"scope": "my_repo", "scope_type": "namespace", "entry_count": 4},
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.scopes_memory_payload",
-            return_value=scopes,
-        ) as mock_scopes,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["memory", "scopes"])
-
-    assert exc_info.value.code == 0
-    mock_scopes.assert_called_once_with(fake_client)
-    output = capsys.readouterr().out
-    assert "Kitaru memory scopes" in output
-    assert "my_repo" in output
-    assert "code_review" in output
-    assert "namespace" in output
-
-
-def test_memory_scopes_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory scopes --output json` should emit scope entries."""
-    scopes = [
-        {"scope": "my_repo", "scope_type": "namespace", "entry_count": 3},
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.scopes_memory_payload", return_value=scopes),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["memory", "scopes", "--output", "json"])
-
-    assert exc_info.value.code == 0
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["command"] == "memory.scopes"
-    assert envelope["count"] == 1
-    assert envelope["items"][0]["scope"] == "my_repo"
-
-
-def test_memory_scopes_empty(capsys: pytest.CaptureFixture[str]) -> None:
-    """No scopes should show the empty-state message."""
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.scopes_memory_payload", return_value=[]),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["memory", "scopes"])
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "no memory scopes found" in output
-
-
-def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory get` should show metadata and the loaded value."""
-    fake_client = Mock()
-    payload = _memory_payload(
-        key="repo_conventions",
-        scope="my_repo",
-        scope_type="flow",
-        version=4,
-        execution_id="kr-222",
-        value={"test_framework": "pytest", "style": "ruff"},
-        value_format="json",
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.get_memory_payload",
-            return_value=payload,
-        ) as mock_get_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "repo_conventions",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "flow",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    mock_get_memory.assert_called_once_with(
-        fake_client,
-        key="repo_conventions",
-        scope="my_repo",
-        scope_type="flow",
-        strict=False,
-    )
-    output = capsys.readouterr().out
-    assert "Kitaru memory" in output
-    assert "Metadata" in output
-    assert '"test_framework": "pytest"' in output
-    assert "kr-222" in output
-
-
-def test_memory_get_execution_scope_shows_flow_context(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Execution-scope detail view should surface logical flow context."""
-    payload = _memory_payload(
-        key="scratch",
-        scope="exec-123",
-        scope_type="execution",
-        version=2,
-        flow_id="flow-456",
-        flow_name="repo_memory_demo",
-        value={"draft": True},
-        value_format="json",
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.get_memory_payload", return_value=payload),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "scratch",
-                "--scope",
-                "exec-123",
-                "--scope-type",
-                "execution",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "Flow ID" in output
-    assert "flow-456" in output
-    assert "Flow Name" in output
-    assert "repo_memory_demo" in output
-
-
-def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> None:
-    """Missing memory keys should produce a clear non-zero CLI error."""
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.get_memory_payload", return_value=None),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 1
-    assert (
-        "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
-        in capsys.readouterr().err
-    )
-
-
-def _memory_unavailable_payload(
-    *,
-    key: str = "prefs",
-    scope: str = "my_repo",
-    scope_type: str = "namespace",
-    version: int = 3,
-) -> dict[str, Any]:
-    """Build a lenient-mode payload representing an unreachable value."""
-    payload = _memory_payload(
-        key=key,
-        scope=scope,
-        scope_type=scope_type,
-        version=version,
-    )
-    payload["value_available"] = False
-    payload["value_unavailable"] = {
-        "error_type": KitaruMemoryArtifactUnavailableError.__name__,
-        "cause_type": FileNotFoundError.__name__,
-        "message": (
-            f"Memory key '{key}' in scope '{scope}' ({scope_type}) points "
-            f"to artifact 'artifact-{key}-{version}', but the artifact "
-            "value could not be loaded from this environment: "
-            "FileNotFoundError: /local/path does not exist."
-        ),
-    }
-    return payload
-
-
-def test_memory_get_renders_unavailable_value_with_warning(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Lenient text mode warns and still renders metadata for unreachable values."""
-    payload = _memory_unavailable_payload()
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.get_memory_payload", return_value=payload),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    captured = capsys.readouterr()
-    # Warning surfaces to stderr on non-TTY (default in tests).
-    assert "Memory value is unavailable" in captured.err
-    assert "could not be loaded from this environment" in captured.err
-    # Metadata and structured unavailable diagnostics show up on stdout.
-    assert "Metadata" in captured.out
-    assert "unavailable" in captured.out
-    assert "KitaruMemoryArtifactUnavailableError" in captured.out
-    assert "FileNotFoundError" in captured.out
-
-
-def test_memory_get_json_output_preserves_unavailable_shape(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """JSON stdout must stay parseable; warning goes to stderr."""
-    payload = _memory_unavailable_payload()
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.get_memory_payload", return_value=payload),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "-o",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    captured = capsys.readouterr()
-    envelope = json.loads(captured.out)
-    assert envelope["command"] == "memory.get"
-    item = envelope["item"]
-    assert item["value_available"] is False
-    assert item["value_unavailable"]["cause_type"] == "FileNotFoundError"
-    # Warning must not pollute stdout JSON.
-    assert "Warning" not in captured.out
-    assert "Warning" in captured.err
-
-
-def test_memory_get_strict_propagates_typed_error(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`--strict` must forward and surface the typed error as a non-zero exit."""
-    fake_client = Mock()
-    strict_error = KitaruMemoryArtifactUnavailableError(
-        "Memory key 'prefs' in scope 'my_repo' (namespace) points to artifact "
-        "'artifact-prefs-3', but the artifact value could not be loaded from "
-        "this environment: FileNotFoundError: /local/path does not exist."
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.get_memory_payload",
-            side_effect=strict_error,
-        ) as mock_get_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "--strict",
-            ]
-        )
-
-    assert exc_info.value.code != 0
-    mock_get_memory.assert_called_once_with(
-        fake_client,
-        key="prefs",
-        scope="my_repo",
-        scope_type="namespace",
-        strict=True,
-    )
-    assert "could not be loaded from this environment" in capsys.readouterr().err
-
-
-def test_memory_set_parses_json_value_and_reports_success(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru memory set` should parse JSON-like values before delegating."""
-    fake_client = Mock()
-    payload = _memory_payload(
-        key="repo_conventions",
-        scope="my_repo",
-        scope_type="namespace",
-        version=5,
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.set_memory_payload",
-            return_value=payload,
-        ) as mock_set_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "set",
-                "repo_conventions",
-                '{"test_framework": "pytest"}',
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    mock_set_memory.assert_called_once_with(
-        fake_client,
-        key="repo_conventions",
-        value={"test_framework": "pytest"},
-        scope="my_repo",
-        scope_type="namespace",
-    )
-    output = capsys.readouterr().out
-    assert "Saved memory: repo_conventions" in output
-    assert "Version: 5" in output
-
-
-def test_memory_set_json_output_supports_scope_type(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """JSON mode should pass through optional scope classification metadata."""
-    fake_client = Mock()
-    payload = _memory_payload(
-        key="scratch",
-        scope="exec-123",
-        scope_type="execution",
-        version=1,
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.set_memory_payload",
-            return_value=payload,
-        ) as mock_set_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "set",
-                "scratch",
-                "true",
-                "--scope",
-                "exec-123",
-                "--scope-type",
-                "execution",
-                "--output",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    mock_set_memory.assert_called_once_with(
-        fake_client,
-        key="scratch",
-        value=True,
-        scope="exec-123",
-        scope_type="execution",
-    )
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["command"] == "memory.set"
-    assert envelope["item"]["scope_type"] == "execution"
-
-
-def test_memory_get_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory get --output json` should emit the full payload envelope."""
-    payload = _memory_payload(
-        key="repo_conventions",
-        scope="my_repo",
-        version=4,
-        value={"style": "ruff"},
-        value_format="json",
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.get_memory_payload", return_value=payload),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "get",
-                "repo_conventions",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "-o",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["command"] == "memory.get"
-    assert envelope["item"]["key"] == "repo_conventions"
-    assert envelope["item"]["value"]["style"] == "ruff"
-
-
-def test_memory_delete_renders_success(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory delete` should confirm soft-deletion on success."""
-    fake_client = Mock()
-    payload = _memory_payload(
-        key="obsolete_prefs",
-        scope="my_repo",
-        version=3,
-        is_deleted=True,
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.delete_memory_payload",
-            return_value=payload,
-        ) as mock_delete_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "delete",
-                "obsolete_prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    mock_delete_memory.assert_called_once_with(
-        fake_client,
-        key="obsolete_prefs",
-        scope="my_repo",
-        scope_type="namespace",
-    )
-    output = capsys.readouterr().out
-    assert "Deleted memory: obsolete_prefs" in output
-    assert "Tombstone version: 3" in output
-
-
-def test_memory_delete_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> None:
-    """Deleting a missing memory key should fail cleanly."""
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.delete_memory_payload", return_value=None),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "delete",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 1
-    assert (
-        "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
-        in capsys.readouterr().err
-    )
-
-
-def test_memory_delete_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory delete --output json` should emit the tombstone envelope."""
-    payload = _memory_payload(
-        key="obsolete_prefs",
-        scope="my_repo",
-        version=3,
-        is_deleted=True,
-    )
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.delete_memory_payload", return_value=payload),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "delete",
-                "obsolete_prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "-o",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["command"] == "memory.delete"
-    assert envelope["item"]["key"] == "obsolete_prefs"
-    assert envelope["item"]["is_deleted"] is True
-
-
-def test_memory_history_renders_versions(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory history` should render the full version timeline."""
-    fake_client = Mock()
-    history = [
-        _memory_payload(
-            key="repo_conventions",
-            scope="my_repo",
-            version=3,
-            is_deleted=True,
-            execution_id="kr-333",
-        ),
-        _memory_payload(
-            key="repo_conventions",
-            scope="my_repo",
-            version=2,
-            execution_id="kr-222",
-        ),
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        patch(
-            "kitaru.cli.history_memory_payload",
-            return_value=history,
-        ) as mock_history_memory,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "history",
-                "repo_conventions",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    mock_history_memory.assert_called_once_with(
-        fake_client,
-        key="repo_conventions",
-        scope="my_repo",
-        scope_type="namespace",
-    )
-    output = capsys.readouterr().out
-    assert "Kitaru memory history (my_repo (namespace)/repo_conventions)" in output
-    assert "kr-333" in output
-    assert "yes" in output.lower()
-
-
-def test_memory_history_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru memory history --output json` should emit version entries."""
-    history = [
-        _memory_payload(key="prefs", scope="my_repo", version=2, is_deleted=True),
-        _memory_payload(key="prefs", scope="my_repo", version=1),
-    ]
-
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.history_memory_payload", return_value=history),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "history",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-                "-o",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["command"] == "memory.history"
-    assert envelope["count"] == 2
-    assert envelope["items"][0]["version"] == 2
-
-
-def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) -> None:
-    """Empty history for a key should produce a clear non-zero CLI error."""
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=Mock()),
-        patch("kitaru.cli.history_memory_payload", return_value=[]),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "memory",
-                "history",
-                "prefs",
-                "--scope",
-                "my_repo",
-                "--scope-type",
-                "namespace",
-            ]
-        )
-
-    assert exc_info.value.code == 1
-    assert (
-        "No memory history found for key `prefs` in scope `my_repo (namespace)`."
-        in capsys.readouterr().err
-    )
-
-
-class TestMemoryMaintenance:
-    """CLI smoke tests for memory maintenance commands."""
-
-    def test_reindex_dry_run_exits_zero(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`kitaru memory reindex` should render a dry-run summary."""
-        reindex_payload = {
-            "dry_run": True,
-            "versions_scanned": 4,
-            "execution_scope_versions_scanned": 2,
-            "already_indexed": 1,
-            "versions_needing_updates": 3,
-            "versions_updated": 0,
-            "scope_type_tags_identified": 3,
-            "flow_tags_identified": 2,
-            "scope_type_tags_added": 0,
-            "flow_tags_added": 0,
-            "issues_count": 1,
-            "issue_samples": [
-                {
-                    "artifact_id": "artifact-1",
-                    "artifact_name": "kitaru_mem:exec-123:scratch",
-                    "scope": "exec-123",
-                    "key": "scratch",
-                    "reason": "execution scope 'exec-123': lookup failed",
-                }
-            ],
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.reindex_memory_payload",
-                return_value=reindex_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(["memory", "reindex"])
-
-        assert exc_info.value.code == 0
-        output = capsys.readouterr().out
-        assert "Kitaru memory reindex" in output
-        assert "dry-run" in output
-        assert "--apply" in output
-        assert "exec-123/scratch" in output
-
-    def test_reindex_apply_json_output(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`kitaru memory reindex --apply --output json` should emit a JSON item."""
-        reindex_payload = {
-            "dry_run": False,
-            "versions_scanned": 4,
-            "execution_scope_versions_scanned": 2,
-            "already_indexed": 1,
-            "versions_needing_updates": 3,
-            "versions_updated": 3,
-            "scope_type_tags_identified": 3,
-            "flow_tags_identified": 2,
-            "scope_type_tags_added": 3,
-            "flow_tags_added": 2,
-            "issues_count": 0,
-            "issue_samples": [],
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.reindex_memory_payload",
-                return_value=reindex_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(["memory", "reindex", "--apply", "--output", "json"])
-
-        assert exc_info.value.code == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["command"] == "memory.reindex"
-        assert payload["item"]["dry_run"] is False
-        assert payload["item"]["versions_updated"] == 3
-
-    def test_compact_single_key_exits_zero(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`kitaru memory compact --key k` should delegate and exit zero."""
-        compact_payload = {
-            "entry": {
-                "key": "conventions/test_runner",
-                "scope": "repo_docs",
-                "scope_type": "namespace",
-                "version": 3,
-            },
-            "sources_read": 1,
-            "scope": "repo_docs",
-            "scope_type": "namespace",
-            "compaction_record": {
-                "source_mode": "current",
-                "source_keys": ["conventions/test_runner"],
-            },
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.compact_memory_payload",
-                return_value=compact_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "compact",
-                    "--scope",
-                    "repo_docs",
-                    "--scope-type",
-                    "namespace",
-                    "--key",
-                    "conventions/test_runner",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        output = capsys.readouterr().out
-        assert "conventions/test_runner" in output
-
-    def test_compact_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`kitaru memory compact --output json` should emit a JSON item."""
-        compact_payload = {
-            "entry": {
-                "key": "k",
-                "scope": "s",
-                "scope_type": "namespace",
-                "version": 1,
-            },
-            "sources_read": 1,
-            "scope": "s",
-            "scope_type": "namespace",
-            "compaction_record": {"source_mode": "current"},
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.compact_memory_payload",
-                return_value=compact_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "compact",
-                    "--scope",
-                    "s",
-                    "--scope-type",
-                    "namespace",
-                    "--key",
-                    "k",
-                    "--output",
-                    "json",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["command"] == "memory.compact"
-        assert payload["item"]["sources_read"] == 1
-
-    def test_purge_exits_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`kitaru memory purge` should delegate and exit zero."""
-        purge_payload = {
-            "scope": "repo_docs",
-            "scope_type": "namespace",
-            "versions_deleted": 2,
-            "keys_affected": 1,
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.purge_memory_payload",
-                return_value=purge_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "purge",
-                    "conventions/test_runner",
-                    "--scope",
-                    "repo_docs",
-                    "--scope-type",
-                    "namespace",
-                    "--keep",
-                    "1",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        output = capsys.readouterr().out
-        assert "conventions/test_runner" in output
-
-    def test_purge_scope_exits_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`kitaru memory purge-scope` should delegate and exit zero."""
-        purge_scope_payload = {
-            "scope": "repo_docs",
-            "versions_deleted": 5,
-            "keys_affected": 3,
-        }
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.purge_scope_memory_payload",
-                return_value=purge_scope_payload,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "purge-scope",
-                    "--scope",
-                    "repo_docs",
-                    "--scope-type",
-                    "namespace",
-                    "--keep",
-                    "1",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        output = capsys.readouterr().out
-        assert "repo_docs" in output
-
-    def test_compaction_log_exits_zero(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`kitaru memory compaction-log` should delegate and exit zero."""
-        log_records = [
-            {
-                "operation": "compact",
-                "scope": "repo_docs",
-                "scope_type": "namespace",
-                "target_key": "summaries/conventions",
-                "target_version": 1,
-                "source_keys": [
-                    "conventions/test_runner",
-                    "conventions/python",
-                ],
-                "sources_read": 2,
-                "source_mode": "current",
-                "timestamp": "2026-04-03T12:00:00+00:00",
-                "versions_deleted": None,
-                "keep": None,
-                "keys_affected": None,
-                "include_deleted": None,
-            },
-        ]
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.compaction_log_memory_payload",
-                return_value=log_records,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "compaction-log",
-                    "--scope",
-                    "repo_docs",
-                    "--scope-type",
-                    "namespace",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        output = capsys.readouterr().out
-        assert "compact" in output
-
-    def test_compaction_log_json_output(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`kitaru memory compaction-log --output json` should emit JSON items."""
-        log_records = [
-            {
-                "operation": "purge",
-                "scope": "repo_docs",
-                "scope_type": "namespace",
-                "versions_deleted": 3,
-                "keep": 1,
-                "timestamp": "2026-04-03T13:00:00+00:00",
-            },
-        ]
-        with (
-            patch("kitaru.cli.KitaruClient", return_value=Mock()),
-            patch(
-                "kitaru.cli.compaction_log_memory_payload",
-                return_value=log_records,
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            app(
-                [
-                    "memory",
-                    "compaction-log",
-                    "--scope",
-                    "repo_docs",
-                    "--scope-type",
-                    "namespace",
-                    "--output",
-                    "json",
-                ]
-            )
-
-        assert exc_info.value.code == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["command"] == "memory.compaction-log"
-        assert payload["count"] == 1
-        assert payload["items"][0]["operation"] == "purge"
-
-
 def test_secrets_set_creates_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -5699,12 +4522,13 @@ def test_secrets_list_renders_all_pages_sorted(
         app(["secrets", "list"])
 
     assert exc_info.value.code == 0
-    fake_client.list_secrets.assert_has_calls(
-        [
-            call(page=1),
-            call(page=2, size=1),
-        ]
-    )
+    calls = fake_client.list_secrets.call_args_list
+    assert len(calls) == 2
+    backend_scan_size = calls[0].kwargs["size"]
+    assert calls == [
+        call(page=1, size=backend_scan_size),
+        call(page=2, size=backend_scan_size),
+    ]
     output = capsys.readouterr().out
     assert "Kitaru secrets" in output
     assert "alpha: secret-a (private)" in output
@@ -5712,6 +4536,45 @@ def test_secrets_list_renders_all_pages_sorted(
     assert output.index("alpha: secret-a (private)") < output.index(
         "zeta: secret-z (public)"
     )
+
+
+def test_secrets_list_uses_stable_backend_page_size(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Backend scan pagination should not switch sizes after the first page."""
+    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
+    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
+    observed_sizes: list[int] = []
+
+    def list_secrets(*, page: int, size: int | None = None) -> SimpleNamespace:
+        if size is None:
+            raise AssertionError("backend scan calls must pass an explicit size")
+        observed_sizes.append(size)
+        if page == 1:
+            return SimpleNamespace(
+                items=[secret_z],
+                total_pages=2,
+                max_size=size + 100,
+            )
+        if page == 2 and size == observed_sizes[0]:
+            return SimpleNamespace(items=[secret_a], total_pages=2, max_size=size + 100)
+        return SimpleNamespace(items=[], total_pages=2, max_size=size + 100)
+
+    fake_client = Mock()
+    fake_client.list_secrets.side_effect = list_secrets
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list"])
+
+    assert exc_info.value.code == 0
+    assert len(observed_sizes) == 2
+    assert observed_sizes[0] == observed_sizes[1]
+    output = capsys.readouterr().out
+    assert "alpha: secret-a (private)" in output
+    assert "zeta: secret-z (public)" in output
 
 
 def test_secrets_list_paginates_after_sorting(
@@ -8497,7 +7360,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -8529,7 +7392,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -8564,7 +7427,7 @@ class TestCleanGlobal:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -8572,6 +7435,44 @@ class TestCleanGlobal:
         assert exc_info.value.code == 0
         output = capsys.readouterr().out
         assert "Backup" in output or "backup" in output
+
+    def test_dry_run_surfaces_local_server_inspection_failure(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Dry-run should warn when local-server state cannot be inspected."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "kitaru.yaml").write_text("version: 1\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=0,
+            ),
+            patch(
+                "zenml.utils.server_utils.get_local_server",
+                side_effect=RuntimeError("registry unreadable"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "global", "--dry-run", "-o", "json"])
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        item = payload["item"]
+        assert "inspection failed: registry unreadable" in item["local_server_status"]
+        assert any(
+            "Could not inspect the registered local server" in warning
+            for warning in item["warnings"]
+        )
 
 
 class TestCleanAll:
@@ -8600,7 +7501,7 @@ class TestCleanAll:
             ),
             patch(
                 "kitaru._cleanup._describe_local_server_for_cleanup",
-                return_value=("not running", False),
+                return_value=("not running", False, False),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -8670,6 +7571,113 @@ class TestExecuteCleanupPlan:
         assert Path(backup_path).read_text() == "fake database content"
         assert not config_root.exists()
         assert str(config_root) in result.deleted_paths
+
+    def test_global_cleanup_warns_when_local_server_cannot_stop_safely(
+        self, tmp_path: Path
+    ) -> None:
+        """Cleanup should warn and continue instead of killing a stored PID."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+        from kitaru._local_server import LocalServerCleanupResult
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            model_registry_alias_count=0,
+            local_server_would_stop=True,
+        )
+
+        with (
+            patch("kitaru._cleanup._reset_global_config"),
+            patch(
+                "kitaru._local_server.stop_registered_local_server_for_cleanup",
+                return_value=LocalServerCleanupResult(
+                    stopped=False,
+                    url="http://localhost:8383",
+                    force_killed_pid=None,
+                ),
+            ),
+        ):
+            result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        assert not result.aborted
+        assert result.local_server_stopped is False
+        assert result.local_server_force_killed_pid is None
+        assert str(config_root) in result.deleted_paths
+        assert any(
+            "did not kill the stored PID" in warning
+            and "PID-only evidence can be stale" in warning
+            for warning in result.warnings
+        )
+
+    def test_global_cleanup_inspection_failure_warning_uses_explicit_state(
+        self, tmp_path: Path
+    ) -> None:
+        """Inspection-failure warnings should not depend on status text."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+        from kitaru._local_server import LocalServerCleanupResult
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            model_registry_alias_count=0,
+            local_server_status="local server state could not be read",
+            local_server_would_stop=True,
+            local_server_inspection_failed=True,
+        )
+
+        with (
+            patch("kitaru._cleanup._reset_global_config"),
+            patch(
+                "kitaru._local_server.stop_registered_local_server_for_cleanup",
+                return_value=LocalServerCleanupResult(
+                    stopped=True,
+                    url=None,
+                    force_killed_pid=None,
+                ),
+            ) as mock_stop,
+        ):
+            result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        mock_stop.assert_called_once_with(timeout=10)
+        assert result.local_server_inspection_failed is True
+        assert any(
+            "Could not inspect the registered local server" in warning
+            and "local server state could not be read" in warning
+            for warning in result.warnings
+        )
+
+    def test_preview_warning_does_not_parse_unknown_status_prefix(self) -> None:
+        """Display text alone should not create an inspection-failure warning."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            build_cleanup_preview_result,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            local_server_status="unknown (inspection failed: display text only)",
+            local_server_inspection_failed=False,
+        )
+
+        result = build_cleanup_preview_result(plan)
+
+        assert result.local_server_inspection_failed is False
+        assert result.warnings == ()
 
     def test_reinit_failure_produces_warning(self, tmp_path: Path) -> None:
         """Failed re-initialization should add a warning."""
@@ -8849,117 +7857,6 @@ class TestExecuteCleanupPlan:
             execute_cleanup_plan(plan, yes=True, force=True)
 
 
-class TestForceKillServerProcess:
-    """Tests for _force_kill_server_process."""
-
-    def test_kill_succeeds_returns_pid(self) -> None:
-        """Successful kill returns the PID."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result == 12345
-        # Signal 0 probe + SIGKILL
-        assert mock_kill.call_count == 2
-
-    def test_pid_from_config_fallback(self) -> None:
-        """PID should be resolved from config when status.pid is missing."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=None),
-            config=SimpleNamespace(pid=99999),
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result == 99999
-        assert mock_kill.call_count == 2
-
-    def test_no_pid_returns_none(self) -> None:
-        """When no PID is available, should return None without killing."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(status=None, config=None)
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_pid_zero_returns_none(self) -> None:
-        """PID <= 0 should be rejected to prevent os.kill(0, SIGKILL)."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=0),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_negative_pid_returns_none(self) -> None:
-        """Negative PIDs should be rejected."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=-1),
-            config=None,
-        )
-
-        with patch("os.kill") as mock_kill:
-            result = _force_kill_server_process(server)
-
-        assert result is None
-        mock_kill.assert_not_called()
-
-    def test_process_already_exited_returns_none(self) -> None:
-        """ProcessLookupError on probe means process is gone."""
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        with patch("os.kill", side_effect=ProcessLookupError):
-            result = _force_kill_server_process(server)
-
-        assert result is None
-
-    def test_permission_error_returns_none(self) -> None:
-        """OSError (e.g. EPERM) on kill returns None."""
-        import signal
-
-        from kitaru._local_server import _force_kill_server_process
-
-        server = SimpleNamespace(
-            status=SimpleNamespace(pid=12345),
-            config=None,
-        )
-
-        def selective_kill(pid: int, sig: int) -> None:
-            if sig == signal.SIGKILL:
-                raise PermissionError("Operation not permitted")
-
-        with patch("os.kill", side_effect=selective_kill):
-            result = _force_kill_server_process(server)
-
-        assert result is None
-
-
 class TestStopRegisteredLocalServerForCleanup:
     """Tests for stop_registered_local_server_for_cleanup."""
 
@@ -8981,9 +7878,10 @@ class TestStopRegisteredLocalServerForCleanup:
 
         assert result.stopped is True
         assert result.force_killed_pid is None
+        mock_deployer.return_value.remove_server.assert_called_once_with(timeout=5)
 
-    def test_graceful_fails_force_kill_succeeds(self) -> None:
-        """When graceful fails but force-kill works, stopped=True with PID."""
+    def test_graceful_fails_does_not_kill_stored_pid(self) -> None:
+        """When graceful shutdown fails, cleanup does not kill by PID only."""
         from kitaru._local_server import stop_registered_local_server_for_cleanup
 
         mock_deployer_cls = MagicMock()
@@ -8998,32 +7896,15 @@ class TestStopRegisteredLocalServerForCleanup:
                 "kitaru._local_server._load_local_server_runtime",
                 return_value=(mock_deployer_cls, None, None, lambda: mock_server),
             ),
-            patch("os.kill"),
-        ):
-            result = stop_registered_local_server_for_cleanup(timeout=5)
-
-        assert result.stopped is True
-        assert result.force_killed_pid == 42
-
-    def test_graceful_fails_force_kill_fails_stopped_false(self) -> None:
-        """When both graceful and force-kill fail, stopped=False."""
-        from kitaru._local_server import stop_registered_local_server_for_cleanup
-
-        mock_deployer_cls = MagicMock()
-        mock_deployer_cls.return_value.remove_server.side_effect = RuntimeError("fail")
-        mock_server = SimpleNamespace(
-            status=SimpleNamespace(url="http://localhost:8383", pid=None),
-            config=None,
-        )
-
-        with patch(
-            "kitaru._local_server._load_local_server_runtime",
-            return_value=(mock_deployer_cls, None, None, lambda: mock_server),
+            patch("os.kill") as mock_kill,
         ):
             result = stop_registered_local_server_for_cleanup(timeout=5)
 
         assert result.stopped is False
+        assert result.url == "http://localhost:8383"
         assert result.force_killed_pid is None
+        mock_deployer_cls.return_value.remove_server.assert_called_once_with(timeout=5)
+        mock_kill.assert_not_called()
 
     def test_import_error_returns_not_stopped(self) -> None:
         """ImportError from loading runtime should return stopped=False."""
@@ -9050,6 +7931,28 @@ class TestStopRegisteredLocalServerForCleanup:
             result = stop_registered_local_server_for_cleanup(timeout=5)
 
         assert result.stopped is False
+
+    def test_inspection_error_returns_not_stopped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Failures while inspecting the registered server should not raise."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        def raise_inspection_error() -> None:
+            raise RuntimeError("corrupt daemon registration")
+
+        mock_deployer = MagicMock()
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            return_value=(mock_deployer, None, None, raise_inspection_error),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is False
+        assert result.url is None
+        assert "Could not inspect registered local server" in caplog.text
+        mock_deployer.return_value.remove_server.assert_not_called()
 
 
 class TestPathSafety:

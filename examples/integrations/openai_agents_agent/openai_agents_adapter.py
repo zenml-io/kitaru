@@ -142,13 +142,28 @@ def _extract_final_output_from_envelope_text(text: str) -> str:
     return str(parsed)
 
 
-def _normalize_wait_output(value: Any) -> str:
+def _coerce_run_result(value: Any) -> OpenAIRunResult:
     if isinstance(value, OpenAIRunResult):
-        if value.status != "completed":
-            raise RuntimeError(f"Expected completed run, got status={value.status!r}.")
-        return str(value.final_output)
+        return value
+    if isinstance(value, dict):
+        return OpenAIRunResult.model_validate(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return OpenAIRunResult.model_validate(model_dump(mode="python"))
+    raise TypeError(f"Expected OpenAIRunResult, got {type(value).__name__}.")
+
+
+def _normalize_wait_output(value: Any) -> str:
     if isinstance(value, ModelResponse):
         return _extract_model_response_text(value)
+    try:
+        result = _coerce_run_result(value)
+    except (TypeError, ValueError):
+        pass
+    else:
+        if result.status != "completed":
+            raise RuntimeError(f"Expected completed run, got status={result.status!r}.")
+        return str(result.final_output)
     text = str(value)
     return _extract_final_output_from_envelope_text(text)
 

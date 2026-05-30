@@ -11,38 +11,116 @@
   </div>
 
   <div class="hero-content">
-    <div class="hero-badges" data-reveal>
-      <span class="pill-badge">
-        <span class="pulse-dot"></span>
-        From the makers of ZenML
-      </span>
-      <span class="pill-badge">
-        Open source · Apache 2.0
-      </span>
+    <div class="hero-copy">
+      <div class="hero-badges" data-reveal>
+        <span class="pill-badge">
+          <span class="pulse-dot"></span>
+          Kitaru by ZenML
+        </span>
+        <span class="pill-badge">
+          Open source · Apache 2.0
+        </span>
+      </div>
+
+      <h1 class="hero-headline" data-reveal data-reveal-delay="1">
+        The open agent <span class="hero-accent">runtime</span>.
+      </h1>
+
+      <p class="hero-subtitle" data-reveal data-reveal-delay="2">
+        <span class="hero-slogan">Replay, don&rsquo;t guess.</span>
+        Rerun production runs against new models, prompts, or skills. Compare evidence. Ship the variant that wins.
+      </p>
+
+      <div class="hero-install" data-reveal data-reveal-delay="3">
+        <code class="install-cmd">pip install kitaru</code>
+        <button class="copy-btn" aria-label="Copy install command" data-copy="pip install kitaru">
+          <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+      </div>
+
+      <div class="hero-buttons" data-reveal data-reveal-delay="4">
+        <a href="/book-a-demo/" class="btn-primary">Book a demo</a>
+        <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-secondary hero-gh-btn">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View on GitHub
+        </a>
+      </div>
     </div>
 
-    <h1 class="hero-headline" data-reveal data-reveal-delay="1">
-      Agents are leaving the <span class="hero-accent">laptop</span>.
-    </h1>
+    <div class="hero-visual" data-reveal data-reveal-delay="3">
+      <div class="hv-panel" role="img" aria-label="Example: replay a frozen pack of 50 expensive production runs against a candidate variant and compare evidence">
+        <div class="hv-panel-head">
+          <span class="hv-panel-dots">
+            <span class="hv-dot"></span>
+            <span class="hv-dot"></span>
+            <span class="hv-dot"></span>
+          </span>
+          <span class="hv-panel-title">replay · legal-research-prod</span>
+          <span class="hv-panel-badge">compare</span>
+        </div>
 
-    <p class="hero-subtitle" data-reveal data-reveal-delay="2">
-      Kitaru is the open-source runtime for long-running Python agents: checkpoints, replay, <code>wait()</code>, isolated execution, and versioned deployments on your own cloud.
-    </p>
+        <div class="hv-incident">
+          <div class="hv-incident-row">
+            <span class="hv-incident-label">Pack</span>
+            <span class="hv-incident-value"><span class="hv-step">high-cost-contracts</span> &middot; 50 production runs &middot; last 7d</span>
+          </div>
+          <div class="hv-incident-row">
+            <span class="hv-incident-label">Baseline</span>
+            <span class="hv-incident-value">legal-research-prod <span class="hv-mono">v2.3</span></span>
+          </div>
+          <div class="hv-incident-row">
+            <span class="hv-incident-label">Candidate</span>
+            <span class="hv-incident-value">branch-cache <span class="hv-mono">+caching wrapper on clause extraction</span></span>
+          </div>
+        </div>
 
-    <div class="hero-install" data-reveal data-reveal-delay="3">
-      <code class="install-cmd">pip install kitaru</code>
-      <button class="copy-btn" aria-label="Copy install command" data-copy="pip install kitaru">
-        <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-      </button>
-    </div>
+        <div class="hv-code">
+          <div class="hv-code-line hv-code-comment"># replay both against the same frozen pack</div>
+          <div class="hv-code-line"><span class="hv-code-fn">kitaru.compare</span>(</div>
+          <div class="hv-code-line">&nbsp;&nbsp;baseline=<span class="hv-code-str">"legal-research-prod"</span>,</div>
+          <div class="hv-code-line">&nbsp;&nbsp;candidate=<span class="hv-code-str">"branch-cache"</span>,</div>
+          <div class="hv-code-line">&nbsp;&nbsp;pack=<span class="hv-code-str">"high-cost-contracts"</span>,</div>
+          <div class="hv-code-line">)</div>
+        </div>
 
-    <div class="hero-buttons" data-reveal data-reveal-delay="4">
-      <a href="/book-a-demo" class="btn-primary">Book a demo</a>
-      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-secondary hero-gh-btn">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        View on GitHub
-      </a>
+        <div class="hv-compare">
+          <div class="hv-compare-row hv-compare-head">
+            <span>Metric</span>
+            <span>Baseline</span>
+            <span>Candidate</span>
+            <span>Delta</span>
+          </div>
+          <div class="hv-compare-row">
+            <span class="hv-compare-label">Median cost</span>
+            <span class="hv-mono-cell">&euro;0.34</span>
+            <span class="hv-mono-cell">&euro;0.19</span>
+            <span class="hv-compare-delta hv-compare-delta-win">&minus;44%</span>
+          </div>
+          <div class="hv-compare-row">
+            <span class="hv-compare-label">Avg LLM calls</span>
+            <span class="hv-mono-cell">14.2</span>
+            <span class="hv-mono-cell">6.8</span>
+            <span class="hv-compare-delta hv-compare-delta-win">&minus;52%</span>
+          </div>
+          <div class="hv-compare-row">
+            <span class="hv-compare-label">Evaluator pass rate <span class="hv-compare-tag">user-supplied</span></span>
+            <span class="hv-mono-cell">84%</span>
+            <span class="hv-mono-cell">82%</span>
+            <span class="hv-compare-delta hv-compare-delta-soft">&minus;2pp</span>
+          </div>
+          <div class="hv-compare-row hv-compare-row-trust">
+            <span class="hv-compare-label">Changed outputs</span>
+            <span class="hv-mono-cell">&mdash;</span>
+            <span class="hv-mono-cell">2 / 50</span>
+            <span class="hv-compare-delta hv-compare-delta-neutral">review</span>
+          </div>
+        </div>
+
+        <div class="hv-caption">
+          Same cohort, different variant. Outputs hold.
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -134,19 +212,27 @@
   .hero-content {
     position: relative;
     z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: clamp(40px, 6vw, 80px);
+    align-items: center;
+    max-width: 1200px;
+    width: 100%;
+    text-align: left;
+  }
+
+  .hero-copy {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
-    max-width: 800px;
-    width: 100%;
+    align-items: flex-start;
+    min-width: 0;
   }
 
   .hero-badges {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    justify-content: center;
+    justify-content: flex-start;
     margin-bottom: 32px;
   }
 
@@ -181,6 +267,14 @@
     color: var(--color-secondary);
     max-width: 560px;
     margin: 0 0 40px;
+  }
+
+  .hero-slogan {
+    display: block;
+    color: var(--color-primary);
+    font-weight: 500;
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
   }
 
   .hero-buttons {
@@ -268,6 +362,296 @@
     0% { transform: scale(0); opacity: 0; }
     60% { transform: scale(1.2); }
     100% { transform: scale(1); opacity: 1; }
+  }
+
+  /* ─── Hero visual: replay-with-variants demo panel ─── */
+  .hero-visual {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .hv-panel {
+    width: 100%;
+    max-width: 540px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    box-shadow:
+      0 0 0 1px oklch(0.65 0.16 45 / 0.06),
+      0 30px 80px -40px oklch(0.65 0.16 45 / 0.35),
+      0 12px 32px -16px oklch(0 0 0 / 0.15);
+  }
+
+  .hv-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+  }
+
+  .hv-panel-dots {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .hv-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: oklch(0.13 0.015 60 / 0.15);
+  }
+
+  .hv-panel-dots .hv-dot:nth-child(1) { background: oklch(0.72 0.16 25 / 0.45); }
+  .hv-panel-dots .hv-dot:nth-child(2) { background: oklch(0.82 0.15 75 / 0.5); }
+  .hv-panel-dots .hv-dot:nth-child(3) { background: oklch(0.74 0.12 145 / 0.45); }
+
+  .hv-panel-title {
+    flex: 1;
+    font-size: 0.74rem;
+    color: var(--color-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .hv-panel-badge {
+    font-size: 0.66rem;
+    color: var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.08);
+    border: 1px solid oklch(0.65 0.16 45 / 0.28);
+    border-radius: 100px;
+    padding: 3px 10px;
+    text-transform: lowercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  .hv-code {
+    padding: 11px 18px 12px;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    color: var(--color-primary);
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .hv-code-line { white-space: pre; }
+  .hv-code-comment { color: var(--color-muted); font-style: italic; }
+  .hv-code-fn { color: var(--color-accent); font-weight: 500; }
+  .hv-code-str { color: oklch(0.5 0.13 155); }
+
+  .hv-incident {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 11px 18px;
+    background: var(--color-surface-warm);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .hv-incident-row {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
+
+  .hv-incident-label {
+    color: var(--color-muted);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .hv-incident-value {
+    color: var(--color-secondary);
+  }
+
+  .hv-step {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-primary);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  .hv-mono {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-muted);
+  }
+
+  .hv-compare {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hv-compare-row {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 0.85fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 18px;
+    font-size: 0.78rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .hv-compare-row:last-child {
+    border-bottom: none;
+  }
+
+  .hv-compare-head {
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    font-weight: 600;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    background: var(--color-surface-warm);
+  }
+
+  .hv-compare-label {
+    color: var(--color-secondary);
+  }
+
+  .hv-mono-cell {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-primary);
+  }
+
+  .hv-compare-delta {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: right;
+    font-size: 0.78rem;
+  }
+
+  .hv-compare-delta-win {
+    color: var(--color-accent);
+    animation: hv-pulse 2.8s ease-in-out infinite;
+  }
+
+  .hv-compare-delta-neutral {
+    color: var(--color-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    animation: none;
+  }
+
+  .hv-compare-delta-soft {
+    color: var(--color-secondary);
+    font-weight: 500;
+    animation: none;
+  }
+
+  .hv-compare-tag {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    border-radius: 100px;
+    padding: 1px 7px;
+    margin-left: 8px;
+    vertical-align: middle;
+    font-weight: 500;
+  }
+
+  .hv-compare-row-trust {
+    background: oklch(0.65 0.16 45 / 0.04);
+  }
+
+  .hv-caption-em {
+    color: var(--color-accent);
+    font-weight: 500;
+  }
+
+  @keyframes hv-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.72; }
+  }
+
+  .hv-caption {
+    padding: 9px 16px;
+    font-size: 0.7rem;
+    color: var(--color-muted);
+    text-align: center;
+    letter-spacing: 0.01em;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+  }
+
+  /* ─── Collapse to single column on narrower screens ─── */
+  @media (max-width: 1024px) {
+    .hero-content {
+      grid-template-columns: 1fr;
+      max-width: 720px;
+      text-align: center;
+    }
+
+    .hero-copy {
+      align-items: center;
+    }
+
+    .hero-badges {
+      justify-content: center;
+    }
+
+    .hero-headline,
+    .hero-subtitle {
+      text-align: center;
+    }
+
+    .hero-subtitle {
+      max-width: 560px;
+    }
+
+    .hero-buttons {
+      justify-content: center;
+    }
+
+    .hero-visual {
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .hv-panel {
+      max-width: 480px;
+    }
+  }
+
+  @media (max-width: 540px) {
+    .hv-compare-row {
+      grid-template-columns: 1.2fr 0.9fr 0.9fr 0.7fr;
+      gap: 8px;
+      padding: 8px 14px;
+      font-size: 0.72rem;
+    }
+    .hv-compare-head {
+      font-size: 0.56rem;
+    }
+    .hv-incident-row {
+      grid-template-columns: 64px 1fr;
+    }
+    .hv-code {
+      font-size: 0.72rem;
+    }
   }
 
   @media (max-width: 768px) {

@@ -12,13 +12,13 @@
     "replay-and-overrides",
     "wait-and-resume",
     "artifacts",
-    "memory",
     "error-handling",
     "llm-calls",
     "secrets-and-model-registration",
     "secrets",
     "pydantic-ai-adapter",
     "openai-agents-adapter",
-    "news-scout"
+    "claude-agent-sdk-adapter",
+    "langgraph-adapter"
   ]
 }

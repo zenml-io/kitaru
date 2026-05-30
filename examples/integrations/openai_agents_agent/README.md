@@ -108,6 +108,14 @@ In that mode you'll see the `runner_call` model output first, then a
 that names the terminal checkpoints, gives the execution ID, and points at
 the Kitaru UI / `KitaruClient` for per-checkpoint artifact retrieval.
 
+## Passing OpenAI Agents context
+
+If your OpenAI Agents SDK tools or guardrails need per-run application context,
+pass it to `runner.run_sync(..., context=...)` or `await runner.run(..., context=...)`.
+This example covers the basic checkpointing flow; for a compact context example
+and cache-identity guidance, see the main
+[OpenAI Agents adapter guide](https://kitaru.ai/docs/guides/openai-agents-adapter/).
+
 ## Why this example uses the real API
 
 Our automated tests for the adapter use stubs to stay fast and deterministic.

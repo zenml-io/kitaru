@@ -106,18 +106,6 @@ class KitaruLogRetrievalError(KitaruBackendError):
     """Raised when runtime logs cannot be retrieved from the backend."""
 
 
-class KitaruMemoryArtifactUnavailableError(KitaruBackendError):
-    """Raised when a memory entry points to a value artifact that cannot be loaded.
-
-    The memory metadata exists and was fetched successfully, but the backing
-    artifact value cannot be materialized from the current runtime (for
-    example, a memory entry written on a local stack whose artifact URI is
-    not reachable from the current Kubernetes stack). Callers opting into
-    strict mode on the memory read path can catch this specifically while
-    broader ``KitaruBackendError`` handling keeps working.
-    """
-
-
 class KitaruDivergenceError(KitaruExecutionError):
     """Raised when replay divergence is detected by the backend."""
 
@@ -172,6 +160,9 @@ _RUNTIME_HINTS: Final[tuple[str, ...]] = (
     "hydrate",
     "reconstruct",
     "materializer",
+    "kitaruruntimeerror",
+    "could not persist the flow return value",
+    "artifact save failed",
 )
 _BACKEND_HINTS: Final[tuple[str, ...]] = (
     "backend communication",
@@ -293,7 +284,6 @@ __all__ = [
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
     "KitaruLogRetrievalError",
-    "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
     "KitaruStackIntegrationDependencyError",
     "KitaruStackNotRemoteExecutableStateError",

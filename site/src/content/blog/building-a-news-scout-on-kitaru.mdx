@@ -23,7 +23,7 @@ scout_agent = KitaruAgent(
         tools=[search_news, search_twitter, investigate, fetch_url],
         system_prompt=SYSTEM_PROMPT,
     ),
-    granular_checkpoints=True,
+    checkpoint_strategy="calls",
     capture=CapturePolicy(tool_capture="full"),
 )
 ```
@@ -32,21 +32,21 @@ The inner `Agent(...)` is a regular [PydanticAI](https://ai.pydantic.dev) agent.
 
 The `capture=CapturePolicy(tool_capture="full")` flag saves tool arguments and results as artifacts on every call. That's what makes the dashboard actually useful for debugging. Click a failed `investigate` call, see which URL the agent tried, see what came back.
 
-## Granular checkpoints
+## Per-call checkpoints
 
-The `granular_checkpoints=True` flag is doing most of the work here. Every model request and every tool call inside the agent loop becomes its own Kitaru checkpoint that you can cache and replay on its own.
+The `checkpoint_strategy="calls"` setting is doing most of the work here. Every model request and every tool call inside the agent loop becomes its own Kitaru checkpoint that you can cache and replay on its own.
 
-A typical run is 8–15 tool calls. Any one of them can flake: a paywall, a rate limit, a flaky DNS resolver on one article. Without granular checkpoints, recovering from a single dead URL means rerunning the whole agent from scratch — replanning, re-searching, re-investigating. With them on, I replay from exactly the failed call:
+A typical run is 8–15 tool calls. Any one of them can flake: a paywall, a rate limit, a flaky DNS resolver on one article. Without per-call checkpoints, recovering from a single dead URL means rerunning the whole agent from scratch — replanning, re-searching, re-investigating. With them on, I replay from exactly the failed call:
 
 ```bash
 kitaru executions replay <exec_id> --from investigate_tool_5
 ```
 
-Granular is right for *this* agent because the work is exploratory. The agent decides what to do at runtime. For a coding agent that runs a fixed set of phases (analyze, explore, plan, edit, test), I'd checkpoint at the phase, not the individual tool call. The shape of the work should decide where you draw the checkpoint.
+The calls strategy is right for *this* agent because the work is exploratory. The agent decides what to do at runtime. For a coding agent that runs a fixed set of phases (analyze, explore, plan, edit, test), I'd checkpoint at the phase, not the individual tool call. The shape of the work should decide where you draw the checkpoint.
 
 ## A named final artifact
 
-Granular has a downside I hit immediately. A 12-call run produces 12 checkpoints, plus the model requests in between. When I open a run in the dashboard to read the brief, I don't want to scroll past every tool call to find it.
+Per-call checkpointing has a downside I hit immediately. A 12-call run produces 12 checkpoints, plus the model requests in between. When I open a run in the dashboard to read the brief, I don't want to scroll past every tool call to find it.
 
 So the flow ends with one extra checkpoint that promotes the agent's text into a named artifact:
 
@@ -69,24 +69,22 @@ The `Annotated[str, "final_report"]` part is the trick. It gives the artifact a 
 
 `UsageLimits(request_limit=50)` is the boring half. Agents that loop forever are an old footgun. I'm not above admitting I've hit it.
 
-## Memory belongs outside the flow
+## Interests are plain inputs
 
-The scout's interests are the kind of state that should outlive a run. They change rarely, they're personal, and I don't want to retype them every time. Kitaru's namespace memory is the right place for them — but *where* you read them matters.
+The scout needs to know what I care about before it starts searching. That does not need a separate state API. The current example keeps the rule boring and explicit: pass interests on the command line when you want to steer a run, or omit them and let the example use its built-in defaults.
 
 ```python
 def main():
-    memory.configure(scope=NAMESPACE, scope_type="namespace")
-    interests_from_memory = memory.get("interests")
-    interests = override or interests_from_memory or DEFAULT_INTERESTS
+    interests = parse_interests_from_cli() or DEFAULT_INTERESTS
     news_scout.run(interests=interests)
 ```
 
-I read interests outside the flow, in `main()`, and pass them in as an argument. My first instinct was to call `memory.get` inside the flow body. That doesn't work cleanly with granular-mode agents: they run at flow scope, and flow scope wants concrete values, not DAG references. Reading once in `main()` and passing the value in keeps the flow signature clean and the replay deterministic.
+That shape is intentionally simple. The flow receives concrete values, so replay has a clear story: this run searched for exactly these interests. If I want a different brief tomorrow, I pass different interests tomorrow. No hidden profile lookup, no separate seeding step, and no surprise state that changes what a replay means.
 
-Seeding is a separate one-liner CLI command:
+Run it either way:
 
 ```bash
-python scout.py --seed-profile           # uses my defaults
+python scout.py                         # uses the example defaults
 python scout.py --interests "robotics,biotech"
 ```
 
@@ -122,11 +120,11 @@ Local runs on the default stack still read `.env` via `load_dotenv()`, so experi
 
 A few honest gaps I'd rather call out than paper over.
 
-First, deduplication. Each run sees the world fresh, so the same article can turn up in two consecutive briefs. The clean fix is to have the agent emit structured JSON with article fingerprints, then a `record_seen` checkpoint writes those into memory. I haven't done it yet.
+First, deduplication. Each run sees the world fresh, so the same article can turn up in two consecutive briefs. The clean fix is to have the agent emit structured JSON with article fingerprints, then persist those fingerprints in whatever store owns your product state. I haven't done it yet.
 
 Second, alerting. The scout currently prints to my terminal and calls it a day. A cron that runs it at 8am and posts the brief to a Discord webhook would be a much bigger win than it sounds.
 
-The last one is the one I actually want to solve: feedback. I have no way to thumbs-up or thumbs-down an article so the agent learns my taste over time. I also have the least idea how to do it well. Embedding the feedback in namespace memory is the obvious start, but "learns my taste" is doing a lot of work in that sentence.
+The last one is the one I actually want to solve: feedback. I have no way to thumbs-up or thumbs-down an article so the agent learns my taste over time. I also have the least idea how to do it well. Storing the feedback is only the first step; "learns my taste" is doing a lot of work in that sentence.
 
 Any of these is a fun starter project if you want to learn Kitaru on something real.
 
@@ -140,7 +138,7 @@ kitaru init
 
 # Drop your keys in examples/end_to_end/news_scout/.env, then:
 cd examples/end_to_end/news_scout
-python scout.py --seed-profile
+python scout.py
 python scout.py --interests "ai agents, robotics"
 ```
 
@@ -149,5 +147,6 @@ Then break it on purpose. Kill the process mid-sweep, replay from a tool call, a
 ## Continue in the docs
 
 - [PydanticAI Adapter](/docs/guides/pydantic-ai-adapter)
-- [News Scout guide](/docs/guides/news-scout)
+- [Use Memory](/docs/guides/memory)
 - [Replay and Overrides](/docs/guides/replay-and-overrides)
+- [News Scout example on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout)

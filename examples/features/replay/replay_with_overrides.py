@@ -78,7 +78,10 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, str, str]:
 
     # Load the replayed output from the publish checkpoint.
     publish_cp = next(cp for cp in execution.checkpoints if cp.name == "publish")
-    replay_output = str(publish_cp.artifacts[0].load())
+    publish_output = next(
+        artifact for artifact in publish_cp.artifacts if artifact.direction == "output"
+    )
+    replay_output = str(publish_output.load())
     print(f"Replay output:  {replay_output}")
 
     return source_handle.exec_id, replayed.exec_id, original_result, replay_output

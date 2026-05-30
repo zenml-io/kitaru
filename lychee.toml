@@ -35,6 +35,7 @@ exclude = [
 exclude_path = [
     ".venv",
     "design",
+    "prompt-exports",
 ]
 
 #############################  Checking  ############################

@@ -13,25 +13,19 @@
 #
 # Published to: zenmldocker/kitaru
 
-ARG ZENML_SERVER_TAG=0.94.3
+ARG ZENML_SERVER_TAG=0.94.4
 
 FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 
-ARG KITARU_UI_TAG=latest
-ARG KITARU_UI_REPO_URL=https://github.com/zenml-io/kitaru-ui
 ARG KITARU_VERSION=""
 
 # The base image runs as non-root user "zenml" (UID 1000).
 # Switch to root for package installation and file operations.
 USER root
 
-# Install uv (fast Python package installer) and curl (for downloading
-# release assets). uv is copied as a static binary from the distroless
-# image; curl is not in the slim base image so needs apt-get.
+# Install uv (fast Python package installer). uv is copied as a static
+# binary from the distroless image.
 COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
 
 # Install Kitaru. When KITARU_VERSION is set (release builds), install from
 # PyPI for provenance. Otherwise install from the checked-out source tree
@@ -44,29 +38,19 @@ RUN if [ -n "$KITARU_VERSION" ]; then \
     fi \
     && rm -rf /tmp/kitaru
 
-# Replace the ZenML dashboard with the Kitaru UI.
-# Downloads the released archive, verifies its checksum, and extracts
-# into the installed ZenML package's dashboard directory.
-# When KITARU_UI_TAG is "latest", uses GitHub's latest-release URL shortcut.
+# Replace the ZenML dashboard with the Kitaru UI already bundled inside the
+# installed Kitaru package. The release workflow is responsible for downloading
+# the stable UI before building the wheel; Docker must not download a second UI.
 RUN set -eux \
+    && KITARU_UI_DIST="$(python -c 'from pathlib import Path; import kitaru; print(Path(kitaru.__file__).parent / "_ui" / "dist")')" \
+    && test -f "$KITARU_UI_DIST/index.html" \
+       || { echo "Kitaru package UI assets missing: index.html not found in $KITARU_UI_DIST" >&2; exit 1; } \
     && DASHBOARD_DIR="$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard" \
     && rm -rf "$DASHBOARD_DIR" \
     && mkdir -p "$DASHBOARD_DIR" \
-    && if [ "$KITARU_UI_TAG" = "latest" ]; then \
-         BASE_URL="$KITARU_UI_REPO_URL/releases/latest/download"; \
-       else \
-         BASE_URL="$KITARU_UI_REPO_URL/releases/download/$KITARU_UI_TAG"; \
-       fi \
-    && curl -fSsL "$BASE_URL/kitaru-ui.tar.gz" -o /tmp/kitaru-ui.tar.gz \
-    && curl -fSsL "$BASE_URL/kitaru-ui.tar.gz.sha256" -o /tmp/kitaru-ui.tar.gz.sha256 \
-    && cd /tmp && sha256sum -c kitaru-ui.tar.gz.sha256 \
-    && tar xzf /tmp/kitaru-ui.tar.gz -C "$DASHBOARD_DIR" \
-    && rm -f /tmp/kitaru-ui.tar.gz /tmp/kitaru-ui.tar.gz.sha256
-
-# Verify the dashboard sentinel file exists (separate RUN so download/checksum
-# failures above surface their own error messages via set -e).
-RUN test -f "$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard/index.html" \
-    || { echo "Kitaru UI assets missing: index.html not found in dashboard directory" >&2; exit 1; }
+    && cp -a "$KITARU_UI_DIST/." "$DASHBOARD_DIR/" \
+    && { test -f "$DASHBOARD_DIR/index.html" \
+         || { echo "Kitaru UI assets missing: index.html not found in dashboard directory" >&2; exit 1; }; }
 
 # Switch back to non-root user (matches base image).
 USER zenml

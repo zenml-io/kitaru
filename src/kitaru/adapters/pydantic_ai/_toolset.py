@@ -22,7 +22,14 @@ from pydantic_ai.toolsets import (
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.wait import _WAIT_INSIDE_CHECKPOINT_ERROR
 
-from ._constants import ADAPTER_ID, ADAPTER_METADATA_KEY
+from ._constants import (
+    ADAPTER_ID,
+    ADAPTER_METADATA_KEY,
+    ARTIFACT_ROLE_ARGS,
+    ARTIFACT_ROLE_RESULT,
+    ARTIFACT_SLOT_OUTPUT,
+    ARTIFACT_SLOT_TOOL_ARGS,
+)
 from ._events import DeferredKind, ToolsetKind
 from ._hitl import HitlConfig, hitl_config_from_tool_metadata, resolve_hitl_question
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
@@ -33,7 +40,10 @@ from ._tracking import EventTracker, get_current_tracker
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
+    adapter_checkpoint_artifact_refs,
     checkpoint_cache_key,
+    checkpoint_input_value,
+    get_adapter_checkpoint_artifact_refs,
     resolve_tool_checkpoint_config,
     run_async_in_checkpoint,
     with_default_type,
@@ -64,10 +74,13 @@ def _raise_checkpoint_wait_not_supported(tool_name: str, kind: DeferredKind) -> 
         f"PydanticAI tool {tool_name!r} requested {kind!r} human input while "
         "running inside a checkpoint. Kitaru waits must be created at flow "
         "scope, not from checkpoint scope. Use `@hitl_tool` for pure wait "
-        "tools, disable checkpointing for this tool with "
-        '`tool_checkpoint_config_by_name={"tool_name": False}` while running '
-        "the agent in granular mode, or move the wait before/after the agent "
-        "call in flow code."
+        "tools. For ordinary tool bodies, disable checkpointing for this tool "
+        'with `tool_checkpoint_config_by_name={"tool_name": False}` while '
+        "running the agent in granular mode. If the ordinary sync tool body "
+        "calls `kp.wait_for_input(...)` directly, also pass "
+        "`allow_sync_tool_body_waits=True` so supported sync tool bodies run "
+        "on the workflow thread for the whole agent run. Or move the wait "
+        "before/after the agent call in flow code."
     )
 
 
@@ -117,6 +130,22 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             return self
         return replace(self, wrapped=new_wrapped)
 
+    def _should_use_tool_checkpoint(
+        self,
+        *,
+        name: str,
+        ctx: RunContext[AgentDepsT],
+        tool: ToolsetTool[AgentDepsT],
+        checkpoint_config: CheckpointConfig | None,
+    ) -> bool:
+        """Return whether this tool call should open an adapter checkpoint."""
+        del name, ctx, tool
+        return (
+            checkpoint_config is not None
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        )
+
     async def call_tool(
         self,
         name: str,
@@ -135,16 +164,38 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             default=self.tool_checkpoint_config,
             by_name=self.tool_checkpoint_config_by_name,
         )
-        if (
-            checkpoint_config is not None
-            and is_inside_flow()
-            and not is_inside_checkpoint()
+        if self._should_use_tool_checkpoint(
+            name=name,
+            ctx=ctx,
+            tool=tool,
+            checkpoint_config=checkpoint_config,
         ):
+            assert checkpoint_config is not None
+            capture_mode = self.capture.capture_mode_for_tool(name)
+            input_artifacts: dict[str, str] = {}
+            output_artifacts: dict[str, str] = {}
+            checkpoint_inputs: dict[str, Any] = {}
+            safe_args = _json_safe(tool_args) if capture_mode == "full" else None
+            if capture_mode == "full":
+                input_artifacts[ARTIFACT_ROLE_ARGS] = ARTIFACT_SLOT_TOOL_ARGS
+                output_artifacts[ARTIFACT_ROLE_RESULT] = ARTIFACT_SLOT_OUTPUT
+                checkpoint_inputs[ARTIFACT_SLOT_TOOL_ARGS] = checkpoint_input_value(
+                    safe_args
+                )
 
             async def _in_checkpoint() -> Any:
-                return await self._call_tool_tracked(
-                    name, tool_args, ctx, tool, hitl_config
-                )
+                with adapter_checkpoint_artifact_refs(
+                    input_artifacts=input_artifacts,
+                    output_artifacts=output_artifacts,
+                ):
+                    return await self._call_tool_tracked(
+                        name,
+                        tool_args,
+                        ctx,
+                        tool,
+                        hitl_config,
+                        safe_args=safe_args,
+                    )
 
             return await run_async_in_checkpoint(
                 config=with_default_type(
@@ -155,11 +206,14 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 cache_key=checkpoint_cache_key(
                     {
                         "tool_name": name,
-                        "tool_args": tool_args,
+                        ARTIFACT_SLOT_TOOL_ARGS: safe_args
+                        if capture_mode == "full"
+                        else tool_args,
                         "tool_call_id": ctx.tool_call_id,
                         "retry": ctx.retry,
                     }
                 ),
+                checkpoint_inputs=checkpoint_inputs,
             )
         return await self._call_tool_tracked(name, tool_args, ctx, tool, hitl_config)
 
@@ -170,6 +224,8 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
         hitl_config: HitlConfig | None,
+        *,
+        safe_args: Any | None = None,
     ) -> Any:
         capture_mode = self.capture.capture_mode_for_tool(name)
         tracker = get_current_tracker()
@@ -191,13 +247,25 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         if self.capture.correlate_otel_spans:
             attach_tool_correlation(event_id, event_context)
 
-        safe_args = _json_safe(tool_args) if capture_mode == "full" else None
+        if capture_mode != "full":
+            safe_args = None
+        elif safe_args is None:
+            safe_args = _json_safe(tool_args)
 
         artifacts: dict[str, str] = {}
+        adapter_refs = get_adapter_checkpoint_artifact_refs()
         if capture_mode == "full" and is_inside_checkpoint():
-            args_key = tracker.artifact_name(event_id, "args")
-            kitaru.save(args_key, safe_args, type="input")
-            artifacts["args"] = args_key
+            if (
+                adapter_refs is not None
+                and ARTIFACT_ROLE_ARGS in adapter_refs.input_artifacts
+            ):
+                artifacts[ARTIFACT_ROLE_ARGS] = adapter_refs.input_artifacts[
+                    ARTIFACT_ROLE_ARGS
+                ]
+            else:
+                args_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_ARGS)
+                kitaru.save(args_key, safe_args, type="input")
+                artifacts[ARTIFACT_ROLE_ARGS] = args_key
 
         started_at = time.perf_counter()
         try:
@@ -228,9 +296,17 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
 
         duration_ms = _elapsed_ms(started_at)
         if capture_mode == "full" and is_inside_checkpoint():
-            result_key = tracker.artifact_name(event_id, "result")
-            kitaru.save(result_key, _json_safe(result), type="output")
-            artifacts["result"] = result_key
+            if (
+                adapter_refs is not None
+                and ARTIFACT_ROLE_RESULT in adapter_refs.output_artifacts
+            ):
+                artifacts[ARTIFACT_ROLE_RESULT] = adapter_refs.output_artifacts[
+                    ARTIFACT_ROLE_RESULT
+                ]
+            else:
+                result_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESULT)
+                kitaru.save(result_key, _json_safe(result), type="output")
+                artifacts[ARTIFACT_ROLE_RESULT] = result_key
 
         tracker.record_tool_event(
             event_id,
@@ -476,6 +552,9 @@ def kitaruify_toolset(
         )
 
     try:
+        from ._mcp_compat import ensure_pydantic_ai_mcp_import_compat
+
+        ensure_pydantic_ai_mcp_import_compat()
         from pydantic_ai.mcp import MCPServer
     except ImportError:  # pragma: no cover
         MCPServer = None

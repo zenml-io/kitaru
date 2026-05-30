@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.10.0"
+version = "0.13.1"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.3",
+    "zenml[local]>=0.94.4",
 ]
 
 [project.optional-dependencies]
@@ -57,14 +57,26 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.3",
+    "zenml[server]>=0.94.4",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.86.0,<2",
+    "pydantic-ai-slim>=1.89.0,<1.97.0",
     "typing_extensions>=4.12",
 ]
 openai-agents = [
-    "openai-agents>=0.15.0,<0.16.0",
+    "openai-agents>=0.15.0,<0.18.0",
+]
+langgraph = [
+    "langchain>=1.0,<2",
+    "langgraph>=1.1,<2",
+]
+langgraph-openai = [
+    "kitaru[langgraph]",
+    "langchain-openai>=1.0,<2",
+]
+langgraph-anthropic = [
+    "kitaru[langgraph]",
+    "langchain-anthropic>=1.0,<2",
 ]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
@@ -106,15 +118,18 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.3",
+    "zenml[server]>=0.94.4",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.86.0,<2",
-    "openai-agents>=0.15.0,<0.16.0",
+    "pydantic-ai-slim>=1.89.0,<1.97.0",
+    "openai-agents>=0.15.0,<0.18.0",
+    "langchain>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langgraph>=1.1,<2",
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
@@ -179,6 +194,16 @@ unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
 include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime
+# via the `_example_on_syspath` autouse fixture (in the test file); static
+# analysis can't see those packages because `examples/**` is excluded from
+# ty's first-party search root.
+include = ["tests/test_agent_factory_example.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

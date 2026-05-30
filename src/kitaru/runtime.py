@@ -288,6 +288,16 @@ def _get_current_execution_id() -> str | None:
     return None
 
 
+def current_execution_id() -> str | None:
+    """Return the active Kitaru execution ID, or None outside a Kitaru scope.
+
+    Example:
+        execution_id = kitaru.current_execution_id() or "local"
+        resource_name = f"worker_{execution_id}"
+    """
+    return _get_current_execution_id()
+
+
 def _get_current_checkpoint_id() -> str | None:
     """Get the current checkpoint invocation ID from active Kitaru scope."""
     if (

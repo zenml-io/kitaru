@@ -60,11 +60,6 @@ class AnalyticsEvent(StrEnum):
     LLM_CALLED = "Kitaru LLM called"
     ARTIFACT_SAVED = "Kitaru artifact saved"
     ARTIFACT_LOADED = "Kitaru artifact loaded"
-    MEMORY_WRITTEN = "Kitaru memory written"
-    MEMORY_DELETED = "Kitaru memory deleted"
-    MEMORY_PURGED = "Kitaru memory purged"
-    MEMORY_COMPACTED = "Kitaru memory compacted"
-    MEMORY_REINDEX_RUN = "Kitaru memory reindex run"
     SECRET_UPSERTED = "Kitaru secret upserted"
     SECRET_READ = "Kitaru secret read"
     STACK_CREATED = "Kitaru stack created"
@@ -91,6 +86,11 @@ class AnalyticsEvent(StrEnum):
     OPENAI_AGENTS_WRAPPED = "Kitaru OpenAI Agents wrapped"
     OPENAI_AGENTS_RUN_COMPLETED = "Kitaru OpenAI Agents run completed"
     OPENAI_AGENTS_CALL_CHECKPOINTED = "Kitaru OpenAI Agents call checkpointed"
+    CLAUDE_AGENT_SDK_WRAPPED = "Kitaru Claude Agent SDK wrapped"
+    CLAUDE_AGENT_SDK_RUN_COMPLETED = "Kitaru Claude Agent SDK run completed"
+    LANGGRAPH_WRAPPED = "Kitaru LangGraph wrapped"
+    LANGGRAPH_RUN_COMPLETED = "Kitaru LangGraph run completed"
+    LANGGRAPH_INTERRUPTED = "Kitaru LangGraph interrupted"
 
 
 def set_source(suffix_or_source: str) -> None:

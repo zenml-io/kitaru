@@ -1,10 +1,12 @@
 ---
 import '../styles/global.css';
+import { canonicalSiteUrl } from '../lib/canonical';
 
 interface Props {
   title?: string;
   description?: string;
   ogImage?: string;
+  ogType?: 'website' | 'article';
 }
 
 const DEFAULT_OG_IMAGE = 'https://assets.kitaru.ai/content/site/dee725d9/kitaru-og.png';
@@ -13,7 +15,10 @@ const {
   title = 'Kitaru | Runtime for Long-Running Python Agents',
   description = 'Open-source runtime for long-running Python agents. Add checkpoints, replay, wait/resume, isolated execution, artifacts, and versioned deployments on your own cloud.',
   ogImage = DEFAULT_OG_IMAGE,
+  ogType = 'website',
 } = Astro.props;
+
+const canonicalUrl = canonicalSiteUrl(Astro.url.pathname, Astro.site);
 ---
 
 <!DOCTYPE html>
@@ -23,14 +28,14 @@ const {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="theme-color" content="#f8f6f3" />
-  <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />
+  <link rel="canonical" href={canonicalUrl} />
   <title>{title}</title>
   <meta name="description" content={description} />
 
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href} />
+  <meta property="og:type" content={ogType} />
+  <meta property="og:url" content={canonicalUrl} />
   <meta property="og:image" content={ogImage} />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />

@@ -24,7 +24,7 @@ type PageEntry = {
 };
 
 const PRODUCT_DESCRIPTION =
-  "Kitaru is the runtime layer underneath your agent stack: it gives Python AI workflows durable checkpoints, replay, resumable waits, memory, deployment, and operational tooling.";
+  "Kitaru is the runtime layer underneath your agent stack: it gives Python AI workflows durable checkpoints, replay, resumable waits, tracked LLM calls, artifact lineage, deployment, and operational tooling.";
 
 const SECTIONS: Section[] = [
   {
@@ -101,7 +101,9 @@ const PAGE_ORDER = new Map([
   ["/guides/authentication", 20],
   ["/guides/deployments", 30],
   ["/guides/llm-calls", 40],
-  ["/guides/memory", 50],
+  ["/guides/artifacts", 50],
+  ["/guides/wait-and-resume", 60],
+  ["/guides/execution-management", 70],
   ["/cli", 10],
   ["/reference/python", 20],
 ]);

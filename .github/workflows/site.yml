@@ -5,12 +5,18 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
     paths:
       - site/**
       - docs/**
       - scripts/generate_*.py
       - scripts/merge_site.sh
+      - scripts/validate_seo_build.mjs
       - CHANGELOG.md
       - wrangler.toml
   pull_request_target:
@@ -22,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-deploy:
-    if: github.event_name != 'pull_request_target'
+    if: ${{ github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,7 +49,7 @@ jobs:
       - run: uv run python scripts/generate_changelog_docs.py
 
       # --- Build docs (Node) ---
-      - uses: pnpm/action-setup@903f9c1a6ebcba6cf41d87230be49611ac97822e  # v6.0.3
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093  # v6.0.8
         with:
           version: 10.33.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
@@ -70,11 +76,15 @@ jobs:
       # --- Merge docs into site ---
       - run: bash scripts/merge_site.sh
 
+      # --- Validate SEO invariants in merged output ---
+      - name: Validate SEO output
+        run: node scripts/validate_seo_build.mjs
+
       # --- Check internal links in built output ---
       - name: Check internal links
         # Keep this SHA in sync with .github/workflows/ci.yml — see the
         # comment there for why we pin a post-v2.8.0 master commit.
-        uses: lycheeverse/lychee-action@b40e218fdac9481d3c13098d4e1ee56f3b589356  # master @ 2026-05-03
+        uses: lycheeverse/lychee-action@6da1d14f3a43098a294b7696d93d938aa8d20fc0  # master @ 2026-05-03
         with:
           args: --offline --root-dir site/dist --no-progress --verbose --index-files
             index.html 'site/dist/**/*.html'
@@ -85,7 +95,7 @@ jobs:
       - name: Deploy production
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
           == 'workflow_dispatch'
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -98,7 +108,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository && env.HAS_CF_SECRETS == 'true'
         id: preview
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -131,7 +141,7 @@ jobs:
       - name: Delete preview Worker
         if: env.HAS_CF_SECRETS == 'true'
         continue-on-error: true
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

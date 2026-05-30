@@ -17,12 +17,33 @@ from ._tracking import artifact_name, get_current_tracker
 from ._usage import normalize_usage
 from ._utils import (
     CheckpointConfig,
+    adapter_checkpoint_artifact_refs,
     checkpoint_cache_key,
     elapsed_ms,
+    get_adapter_checkpoint_artifact_refs,
     run_async_in_checkpoint,
     safe_step_name,
     with_default_type,
 )
+
+
+def _model_input_envelope(
+    *,
+    system_instructions: str | None,
+    input: Any,
+    model_settings: Any,
+    previous_response_id: str | None,
+    conversation_id: str | None,
+    prompt: Any,
+) -> dict[str, Any]:
+    return {
+        "system_instructions": system_instructions,
+        "input": to_json_safe(input),
+        "model_settings": to_json_safe(model_settings),
+        "previous_response_id": previous_response_id,
+        "conversation_id": conversation_id,
+        "prompt": to_json_safe(prompt),
+    }
 
 
 class KitaruOpenAIModel(Model):
@@ -69,20 +90,44 @@ class KitaruOpenAIModel(Model):
             and is_inside_flow()
             and not is_inside_checkpoint()
         ):
-
-            async def _in_checkpoint() -> Any:
-                return await self._tracked_get_response(
-                    system_instructions,
-                    input,
-                    model_settings,
-                    tools,
-                    output_schema,
-                    handoffs,
-                    tracing,
+            input_envelope = (
+                _model_input_envelope(
+                    system_instructions=system_instructions,
+                    input=input,
+                    model_settings=model_settings,
                     previous_response_id=previous_response_id,
                     conversation_id=conversation_id,
                     prompt=prompt,
                 )
+                if self._capture.save_input
+                else None
+            )
+            checkpoint_inputs = (
+                {"input": input_envelope} if input_envelope is not None else None
+            )
+            input_artifacts = {"input": "input"} if self._capture.save_input else {}
+            output_artifacts = (
+                {"response": "output"} if self._capture.save_final_output else {}
+            )
+
+            async def _in_checkpoint() -> Any:
+                with adapter_checkpoint_artifact_refs(
+                    input_artifacts=input_artifacts,
+                    output_artifacts=output_artifacts,
+                ):
+                    return await self._tracked_get_response(
+                        system_instructions,
+                        input,
+                        model_settings,
+                        tools,
+                        output_schema,
+                        handoffs,
+                        tracing,
+                        previous_response_id=previous_response_id,
+                        conversation_id=conversation_id,
+                        prompt=prompt,
+                        input_envelope=input_envelope,
+                    )
 
             response = await run_async_in_checkpoint(
                 config=with_default_type(self._checkpoint_config, "llm_call"),
@@ -102,6 +147,7 @@ class KitaruOpenAIModel(Model):
                         "prompt": to_cache_identity(prompt),
                     }
                 ),
+                checkpoint_inputs=checkpoint_inputs,
             )
             self._reserve_tool_call_order(response, tools)
             return response
@@ -133,6 +179,7 @@ class KitaruOpenAIModel(Model):
         previous_response_id: str | None,
         conversation_id: str | None,
         prompt: Any,
+        input_envelope: Mapping[str, Any] | None = None,
     ) -> Any:
         tracker = get_current_tracker()
         should_track = (
@@ -157,21 +204,22 @@ class KitaruOpenAIModel(Model):
         assert tracker is not None
         event_id, event_context = tracker.start_llm_event()
         artifacts: dict[str, str] = {}
+        adapter_refs = get_adapter_checkpoint_artifact_refs()
         if self._capture.save_input:
-            input_key = artifact_name(event_id, "input")
-            kitaru.save(
-                input_key,
-                {
-                    "system_instructions": system_instructions,
-                    "input": to_json_safe(input),
-                    "model_settings": to_json_safe(model_settings),
-                    "previous_response_id": previous_response_id,
-                    "conversation_id": conversation_id,
-                    "prompt": to_json_safe(prompt),
-                },
-                type="input",
-            )
-            artifacts["input"] = input_key
+            if adapter_refs is not None and "input" in adapter_refs.input_artifacts:
+                artifacts["input"] = adapter_refs.input_artifacts["input"]
+            else:
+                input_envelope = input_envelope or _model_input_envelope(
+                    system_instructions=system_instructions,
+                    input=input,
+                    model_settings=model_settings,
+                    previous_response_id=previous_response_id,
+                    conversation_id=conversation_id,
+                    prompt=prompt,
+                )
+                input_key = artifact_name(event_id, "input")
+                kitaru.save(input_key, input_envelope, type="input")
+                artifacts["input"] = input_key
 
         started_at = time.perf_counter()
         try:
@@ -208,9 +256,12 @@ class KitaruOpenAIModel(Model):
         if self._capture.save_response_items:
             metadata["response_item_count"] = len(getattr(response, "output", []) or [])
         if self._capture.save_final_output:
-            response_key = artifact_name(event_id, "response")
-            kitaru.save(response_key, to_json_safe(response), type="response")
-            artifacts["response"] = response_key
+            if adapter_refs is not None and "response" in adapter_refs.output_artifacts:
+                artifacts["response"] = adapter_refs.output_artifacts["response"]
+            else:
+                response_key = artifact_name(event_id, "response")
+                kitaru.save(response_key, to_json_safe(response), type="response")
+                artifacts["response"] = response_key
         if self._capture.save_usage:
             usage_key = artifact_name(event_id, "usage")
             kitaru.save(usage_key, usage.model_dump(mode="json"), type="context")

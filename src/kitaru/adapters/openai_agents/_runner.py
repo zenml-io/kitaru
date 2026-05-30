@@ -31,6 +31,7 @@ async def run_openai_agent(
     input: Any,
     max_turns: int,
     run_config: Any,
+    context: Any | None = None,
 ) -> Any:
     from agents import Runner
 
@@ -39,6 +40,7 @@ async def run_openai_agent(
         input,
         max_turns=max_turns,
         run_config=run_config,
+        context=context,
     )
 
 
@@ -48,6 +50,7 @@ async def run_openai_agent_streamed(
     input: Any,
     max_turns: int,
     run_config: Any,
+    context: Any | None = None,
 ) -> Any:
     from agents import Runner
 
@@ -56,6 +59,7 @@ async def run_openai_agent_streamed(
         input,
         max_turns=max_turns,
         run_config=run_config,
+        context=context,
     )
 
 
@@ -65,6 +69,7 @@ def run_openai_agent_sync(
     input: Any,
     max_turns: int,
     run_config: Any,
+    context: Any | None = None,
 ) -> Any:
     from agents import Runner
 
@@ -73,6 +78,7 @@ def run_openai_agent_sync(
         input,
         max_turns=max_turns,
         run_config=run_config,
+        context=context,
     )
 
 
@@ -199,6 +205,7 @@ def build_run_result(
     context_serializer: Any | None = None,
     strict_context: bool = False,
     warnings: list[str] | None = None,
+    save_interruption_payloads: bool = True,
 ) -> OpenAIRunResult:
     """Convert an OpenAI SDK ``RunResult`` into Kitaru's serializable result."""
     interruptions = list(getattr(sdk_result, "interruptions", []) or [])
@@ -220,7 +227,11 @@ def build_run_result(
             status="interrupted",
             pending_state=envelope,
             interruptions=[
-                _summarize_interruption(index, interruption)
+                _summarize_interruption(
+                    index,
+                    interruption,
+                    save_payloads=save_interruption_payloads,
+                )
                 for index, interruption in enumerate(interruptions)
             ],
             last_response_id=getattr(sdk_result, "last_response_id", None),
@@ -277,7 +288,12 @@ def _usage_from_result(sdk_result: Any) -> dict[str, Any] | None:
     return normalize_usage(to_json_safe(raw_usage)).model_dump(mode="json")
 
 
-def _summarize_interruption(index: int, interruption: Any) -> OpenAIInterruptionSummary:
+def _summarize_interruption(
+    index: int,
+    interruption: Any,
+    *,
+    save_payloads: bool,
+) -> OpenAIInterruptionSummary:
     raw = to_json_safe(interruption)
     tool_name = getattr(interruption, "tool_name", None)
     call_id = getattr(interruption, "call_id", None)
@@ -285,20 +301,31 @@ def _summarize_interruption(index: int, interruption: Any) -> OpenAIInterruption
     raw_item = getattr(interruption, "raw_item", None)
     raw_arguments = getattr(raw_item, "arguments", None)
     if tool_name is None:
-        tool_name = _find_nested(raw, "tool_name") or _find_nested(raw, "name")
+        if save_payloads:
+            tool_name = _find_nested(raw, "tool_name") or _find_nested(raw, "name")
+        elif isinstance(raw, dict):
+            tool_name = raw.get("tool_name") or raw.get("name")
     if call_id is None:
-        call_id = _find_nested(raw, "call_id")
+        if save_payloads:
+            call_id = _find_nested(raw, "call_id")
+        elif isinstance(raw, dict):
+            call_id = raw.get("call_id")
     if message is None:
-        message = _find_nested(raw, "message") or _find_nested(raw, "reason")
+        if save_payloads:
+            message = _find_nested(raw, "message") or _find_nested(raw, "reason")
+        elif isinstance(raw, dict):
+            message = raw.get("message") or raw.get("reason")
     return OpenAIInterruptionSummary(
         index=index,
         kind=type(interruption).__name__,
         tool_name=tool_name if isinstance(tool_name, str) else None,
         call_id=call_id if isinstance(call_id, str) else None,
         message=message if isinstance(message, str) else None,
-        arguments=raw if isinstance(raw, dict) else None,
+        arguments=raw if save_payloads and isinstance(raw, dict) else None,
         arguments_preview=(
-            raw_arguments[:500] if isinstance(raw_arguments, str) else repr(raw)[:500]
+            (raw_arguments[:500] if isinstance(raw_arguments, str) else repr(raw)[:500])
+            if save_payloads
+            else None
         ),
     )
 

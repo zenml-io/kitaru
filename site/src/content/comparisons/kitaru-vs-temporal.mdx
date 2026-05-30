@@ -2,8 +2,8 @@
 competitor: "Temporal"
 competitorLogo: "/compare/temporal.svg"
 title: "Kitaru vs Temporal: Durable execution, built for AI agents"
-description: "Temporal is a general-purpose durable execution platform with seven official SDKs. Kitaru is an open-source runtime for durable Python agents, with built-in primitives for LLM calls, wait/resume, replay, memory, and artifact handling."
-cardSubtitle: "Durable execution for Python agents, with agent-native primitives such as llm(), wait(), save()/load(), and memory."
+description: "Temporal is a general-purpose durable execution platform with seven official SDKs. Kitaru is an open-source runtime for durable Python agents, with built-in primitives for LLM calls, wait/resume, replay, artifact handling, and cloud deployment."
+cardSubtitle: "Durable execution for Python agents, with agent-native primitives such as llm(), wait(), save()/load(), and cloud stacks."
 ctaHeading: "The runtime layer underneath your Python agents"
 order: 20
 ogImage: "https://assets.kitaru.ai/compare/f26cf06e/og-card.avif"
@@ -17,18 +17,17 @@ import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
 import DurableExecution from '../../components/compare/graphics/temporal/DurableExecution.astro';
 import LLMCheckpoints from '../../components/compare/graphics/temporal/LLMCheckpoints.astro';
-import DurableMemory from '../../components/compare/graphics/temporal/DurableMemory.astro';
 import ArtifactLineage from '../../components/compare/graphics/temporal/ArtifactLineage.astro';
 
 Temporal is a general-purpose durable execution platform with seven official SDKs (Go, Java, Python, TypeScript, Ruby, PHP, and .NET). It has been in production for a decade and has the battle scars to show for it. If your durability problem is polyglot or mission-critical and not agent-shaped, Temporal's track record is the pragmatic choice.
 
-Kitaru is the runtime layer shaped for Python agents — the same durable execution story, narrower in scope, with agent primitives in the box. The glue code every agent team ends up writing on top of a general-purpose workflow engine (a durable `llm()` call, a versioned memory store, an artifact graph, an opinionated stack abstraction for Kubernetes, AWS, GCP, and Azure), we ship as first-class primitives.
+Kitaru is the runtime layer shaped for Python agents — the same durable execution story, narrower in scope, with agent primitives in the box. The glue code every agent team ends up writing on top of a general-purpose workflow engine (a durable `llm()` call, an artifact graph, an opinionated stack abstraction for Kubernetes, AWS, GCP, and Azure), we ship as first-class primitives.
 
 <WhenToUseEach
   kitaru={{
     title: "Use Kitaru if you are",
     items: [
-      "Running Python agents and want LLM calls, memory, and artifact lineage as primitives instead of glue code",
+      "Running Python agents and want LLM calls, wait/resume, and artifact lineage as primitives instead of glue code",
       "Replaying a run from a specific checkpoint without paying for the LLM calls above it again",
       "Deploying into your own cloud (Kubernetes, SageMaker, Vertex AI, AzureML) and want one runtime that targets all of them",
       "Designing around dynamic agent loops (tool calls, conditional branches, hours-long waits for humans)",
@@ -72,18 +71,6 @@ Kitaru is the runtime layer shaped for Python agents — the same durable execut
   </Fragment>
 </FeatureWithGraphic>
 
-<FeatureWithGraphic title="Versioned durable memory, not workflow variables">
-  <DurableMemory slot="graphic" />
-
-  Temporal is a general-purpose workflow engine, so cross-run memory is an application concern — you bring your own store and plumb it through workflows. Kitaru is agent-shaped, so it ships a scoped memory primitive in the runtime. Same problem, different shape.
-
-  <Fragment slot="bullets">
-    - **Scope:** Temporal durable state lives inside a workflow execution. In Kitaru, `kitaru.memory` is persisted with explicit `namespace`, `flow`, or `execution` scopes, so some memory can outlive a single run.
-    - **Escape hatch:** Anything that doesn't fit a KV shape goes through `kitaru.save()` / `kitaru.load()`, backed by the same artifact store.
-    - **Inspection:** Kitaru's Python surface exposes `set`, `get`, `list`, `history`, and `delete` on `kitaru.memory`, plus a `kitaru memory scope list` CLI command — so "what did I know last Tuesday?" is a documented call, not a workflow-variable archaeology job.
-  </Fragment>
-</FeatureWithGraphic>
-
 <FeatureWithGraphic title="Artifact lineage across runs, not just event history">
   <ArtifactLineage slot="graphic" />
 
@@ -103,7 +90,6 @@ Kitaru is the runtime layer shaped for Python agents — the same durable execut
     { feature: "Durable execution / recover after failure", kitaru: true, competitor: true },
     { feature: "Recovery/replay avoids re-executing completed work after failure", kitaru: true, competitor: true },
     { feature: "Prompt and token logging per `kitaru.llm()` call", kitaru: true, competitor: false },
-    { feature: "Versioned durable memory across runs", kitaru: true, competitor: false },
     { feature: "Artifact lineage and run tracking across executions", kitaru: true, competitor: false },
     { feature: "Opinionated stack abstraction for Kubernetes, AWS, GCP, Azure (configure once, every flow uses it)", kitaru: true, competitor: false },
     { feature: "Durable human-in-the-loop waiting with no active compute", kitaru: true, competitor: true },
@@ -122,7 +108,7 @@ Kitaru is the runtime layer shaped for Python agents — the same durable execut
 | Determinism requirement | Workflow must be deterministic | No determinism requirement on flow body |
 | Pause / resume | `wait_condition` + signal | `kitaru.wait()` |
 | Invocation | Workflow ID + start via client | `flow.run()`, `kitaru invoke`, CLI, SDK, MCP, curl |
-| Cross-run state | Bring your own store | `kitaru.memory` with scopes |
+| Cross-run state | Bring your own store | Bring your own store; use artifacts for replayable run outputs |
 | Artifacts | Thread through Activity returns | Automatic per-checkpoint artifact capture |
 <CodeCompare
   kitaruLabel="Kitaru"
@@ -195,5 +181,5 @@ class ReviewFlow:
 />
 
 <ComparisonCta headline={frontmatter.ctaHeading}>
-If your durability problem spans Go services, Java backends, and cron-scheduled ETL, Temporal is the tool. If it's shaped like a Python agent (LLM calls, memory, tool outputs, humans in the loop), Kitaru removes the glue layer you'd otherwise write on top.
+If your durability problem spans Go services, Java backends, and cron-scheduled ETL, Temporal is the tool. If it's shaped like a Python agent (LLM calls, tool outputs, humans in the loop), Kitaru removes the glue layer you'd otherwise write on top.
 </ComparisonCta>
