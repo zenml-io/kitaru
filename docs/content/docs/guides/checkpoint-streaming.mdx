@@ -75,7 +75,8 @@ together.
 ## Watch events from Python
 
 Use `KitaruClient().executions.events(...)` to watch live events for one
-execution:
+execution. The first argument must be the exact execution ID; name or ID prefixes
+are not accepted for live event watching:
 
 ```python
 from kitaru import KitaruClient
@@ -83,7 +84,7 @@ from kitaru import KitaruClient
 client = KitaruClient()
 
 for event in client.executions.events(
-    "exec-id-or-prefix",
+    "execution-id",
     kinds=["kitaru.checkpoint.progress"],
     checkpoint="build_report",
 ):
@@ -106,7 +107,7 @@ cursor:
 
 ```python
 client.executions.events(
-    "exec-id-or-prefix",
+    "execution-id",
     kinds=["kitaru.checkpoint.started", "kitaru.checkpoint.completed"],
     checkpoint="train_model",
     correlation_ids=["kitaru.checkpoint:train_model:..."],
@@ -115,9 +116,10 @@ client.executions.events(
 )
 ```
 
-Checkpoint filtering is guaranteed client-side. Kitaru also sends known step
-names to the backend when they are already visible, which can reduce traffic,
-but a live execution may create steps after the watcher starts.
+Checkpoint filtering is guaranteed client-side. For completed executions,
+Kitaru may also send known step names to the backend to reduce traffic. For live
+executions, Kitaru deliberately avoids that server-side step-name filter because
+the matching checkpoint step may not exist yet when the watcher starts.
 
 There is no CLI watcher yet. Use the Python watcher for now.
 

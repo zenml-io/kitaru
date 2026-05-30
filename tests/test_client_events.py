@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import call, patch
 from uuid import uuid4
 
 import pytest
@@ -37,11 +37,31 @@ class _FakeResponse:
         *,
         status_code: int = 200,
         text: str = "",
+        content_chunks: list[bytes | str] | None = None,
     ) -> None:
         self._lines = lines or []
+        self._content_chunks = content_chunks
         self.status_code = status_code
         self.text = text
         self.closed = False
+        self.iter_content_chunks_read = 0
+
+    def iter_content(
+        self,
+        chunk_size: int = 1,
+        decode_unicode: bool = False,
+    ) -> Iterable[bytes | str]:
+        chunks = self._content_chunks
+        if chunks is None:
+            chunks = [self.text.encode("utf-8")]
+        for raw_chunk in chunks:
+            chunk = (
+                raw_chunk.encode("utf-8") if isinstance(raw_chunk, str) else raw_chunk
+            )
+            for offset in range(0, len(chunk), chunk_size):
+                self.iter_content_chunks_read += 1
+                part = chunk[offset : offset + chunk_size]
+                yield part.decode("utf-8") if decode_unicode else part
 
     def iter_lines(self, *, decode_unicode: bool = False) -> Iterable[str | bytes]:
         del decode_unicode
@@ -100,10 +120,14 @@ def _resolved_connection(project: str | None = "default") -> ResolvedConnectionC
     )
 
 
-def _run(*, steps: dict[str, Any] | None = None) -> SimpleNamespace:
+def _run(
+    *,
+    steps: dict[str, Any] | None = None,
+    status: ZenMLExecutionStatus = ZenMLExecutionStatus.RUNNING,
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
-        status=ZenMLExecutionStatus.RUNNING,
+        status=status,
         steps=steps or {},
     )
 
@@ -236,7 +260,7 @@ def test_stream_event_mapper_falls_back_to_step_fields() -> None:
     assert event.checkpoint_name == "fetch_data"
 
 
-def test_events_api_streams_with_repeated_filters_and_best_effort_step_names() -> None:
+def test_events_api_does_not_send_step_names_for_live_checkpoint_watch() -> None:
     research_step = _step("research")
     write_step = _step("write")
     run = _run(steps={"research": research_step, "write": write_step})
@@ -275,7 +299,7 @@ def test_events_api_streams_with_repeated_filters_and_best_effort_step_names() -
         name_id_or_prefix=str(run.id),
         allow_name_prefix_match=False,
         project="default",
-        hydrate=True,
+        hydrate=False,
     )
     assert fake_store.session.calls[0]["url"] == (
         f"https://kitaru.example.test/api/v1/runs/{run.id}/events/stream"
@@ -289,8 +313,62 @@ def test_events_api_streams_with_repeated_filters_and_best_effort_step_names() -
         ("kinds", "custom.kind"),
         ("correlation_ids", "corr-1"),
         ("correlation_ids", "corr-2"),
-        ("step_names", "research"),
     ]
+
+
+def test_events_api_sends_step_names_for_terminal_checkpoint_watch() -> None:
+    research_step = _step("research")
+    write_step = _step("write")
+    run = _run(status=ZenMLExecutionStatus.COMPLETED)
+    hydrated_run = _run(
+        steps={"research": research_step, "write": write_step},
+        status=ZenMLExecutionStatus.COMPLETED,
+    )
+    hydrated_run.id = run.id
+    fake_store = _FakeStore(
+        [
+            _FakeResponse(
+                [*_event_frame(cursor="cursor-1"), "event: end", "data: {}", ""]
+            )
+        ]
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._ExecutionsAPI._event_rest_store", return_value=fake_store
+        ),
+    ):
+        client_cls.return_value.get_pipeline_run.side_effect = [run, hydrated_run]
+        events = list(
+            KitaruClient().executions.events(
+                str(run.id),
+                checkpoint="research",
+                reconnect=False,
+            )
+        )
+
+    assert [event.checkpoint_name for event in events] == ["research"]
+    assert client_cls.return_value.get_pipeline_run.call_args_list == [
+        call(
+            name_id_or_prefix=str(run.id),
+            allow_name_prefix_match=False,
+            project="default",
+            hydrate=False,
+        ),
+        call(
+            name_id_or_prefix=str(run.id),
+            allow_name_prefix_match=False,
+            project="default",
+            hydrate=True,
+        ),
+    ]
+    assert ("step_names", "research") in fake_store.session.calls[0]["params"]
+    assert ("step_names", "write") not in fake_store.session.calls[0]["params"]
 
 
 def test_events_api_uses_unhydrated_run_when_checkpoint_filter_is_absent() -> None:
@@ -376,6 +454,10 @@ def test_events_api_validates_filters() -> None:
         client.executions.events("run-1", kinds=[" "])
     with pytest.raises(KitaruUsageError, match="kinds"):
         client.executions.events("run-1", kinds=cast(Any, "custom.kind"))
+    with pytest.raises(KitaruUsageError, match="newline"):
+        client.executions.events("run-1", kinds=["custom\nevent"])
+    with pytest.raises(KitaruUsageError, match="newline"):
+        client.executions.events("run-1", kinds=["custom\revent"])
     with pytest.raises(KitaruUsageError, match="correlation_ids"):
         client.executions.events("run-1", correlation_ids=cast(Any, "corr-1"))
     with pytest.raises(KitaruUsageError, match="correlation_ids"):
@@ -442,6 +524,62 @@ def test_streaming_http_errors_map_to_clear_kitaru_errors() -> None:
         )
     with pytest.raises(KitaruBackendError, match="temporarily unavailable"):
         ensure_stream_response_supported(_FakeResponse(status_code=503, text="busy"))
+
+
+def test_streaming_http_errors_expose_only_safe_json_detail() -> None:
+    detail = "token expired\nplease log in again"
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        ensure_stream_response_supported(
+            _FakeResponse(status_code=401, text=json.dumps({"detail": detail}))
+        )
+
+    message = str(exc_info.value)
+    assert "Server response detail: token expired please log in again" in message
+
+
+def test_streaming_http_errors_omit_raw_html_body() -> None:
+    body = "<html><body>proxy.internal.example stack trace</body></html>"
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        ensure_stream_response_supported(_FakeResponse(status_code=401, text=body))
+
+    message = str(exc_info.value)
+    assert "not authorized" in message
+    assert "proxy.internal.example" not in message
+    assert "<html>" not in message
+
+
+def test_streaming_http_error_json_detail_is_truncated() -> None:
+    long_detail = "x" * 400
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        ensure_stream_response_supported(
+            _FakeResponse(status_code=503, text=json.dumps({"detail": long_detail}))
+        )
+
+    message = str(exc_info.value)
+    assert message.endswith("...")
+    assert "x" * 300 not in message
+
+
+def test_streaming_http_error_reads_only_bounded_body_prefix() -> None:
+    response = _FakeResponse(
+        status_code=401,
+        text="this fallback text should not be used",
+        content_chunks=[
+            b"<html>proxy.internal.example",
+            *[b"x" * 1024 for _ in range(20)],
+        ],
+    )
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        ensure_stream_response_supported(response)
+
+    message = str(exc_info.value)
+    assert "not authorized" in message
+    assert "proxy.internal.example" not in message
+    assert response.iter_content_chunks_read < 20
 
 
 def test_http_503_reconnects_when_reconnect_is_enabled(

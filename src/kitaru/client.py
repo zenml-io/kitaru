@@ -779,6 +779,17 @@ def _validate_event_filter_values(
     return normalized
 
 
+def _validate_event_kind_filter_values(
+    values: Sequence[str] | None,
+) -> builtins.list[str]:
+    """Validate event-kind filters for execution event watching."""
+    normalized = _validate_event_filter_values(values, name="kinds")
+    for kind in normalized:
+        if "\n" in kind or "\r" in kind:
+            raise ValueError("`kinds` values cannot contain newline characters.")
+    return normalized
+
+
 def _validate_optional_event_filter_value(
     value: str | None,
     *,
@@ -793,6 +804,11 @@ def _validate_optional_event_filter_value(
     if not normalized:
         raise ValueError(f"`{name}` must be non-empty when provided.")
     return normalized
+
+
+def _run_has_complete_step_list(run: Any) -> bool:
+    """Return whether run steps are stable enough for server-side filters."""
+    return _to_public_status(run.status).is_finished
 
 
 class _ExecutionsAPI:
@@ -992,7 +1008,7 @@ class _ExecutionsAPI:
         as network resume positions.
         """
         try:
-            normalized_kinds = _validate_event_filter_values(kinds, name="kinds")
+            normalized_kinds = _validate_event_kind_filter_values(kinds)
             normalized_correlation_ids = _validate_event_filter_values(
                 correlation_ids,
                 name="correlation_ids",
@@ -1008,10 +1024,7 @@ class _ExecutionsAPI:
             raise KitaruUsageError(str(exc)) from exc
 
         store = self._event_rest_store()
-        run = self._client_ref._get_pipeline_run(
-            exec_id,
-            hydrate=normalized_checkpoint is not None,
-        )
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=False)
 
         params: list[tuple[str, str]] = []
         if normalized_since is not None:
@@ -1022,10 +1035,11 @@ class _ExecutionsAPI:
             for correlation_id in normalized_correlation_ids
         )
 
-        if normalized_checkpoint is not None:
+        if normalized_checkpoint is not None and _run_has_complete_step_list(run):
+            hydrated_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
             step_names = [
                 step.name
-                for step in run.steps.values()
+                for step in hydrated_run.steps.values()
                 if _normalize_checkpoint_name(step.name) == normalized_checkpoint
             ]
             params.extend(("step_names", step_name) for step_name in step_names)

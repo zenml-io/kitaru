@@ -84,6 +84,8 @@ def _normalize_kind(kind: str) -> str:
     """Validate and normalize a public event kind."""
     if not isinstance(kind, str):
         raise KitaruUsageError("Event kind must be a non-empty string.")
+    if "\n" in kind or "\r" in kind:
+        raise KitaruUsageError("Event kind cannot contain newline characters.")
     normalized = kind.strip()
     if not normalized:
         raise KitaruUsageError("Event kind must be a non-empty string.")
@@ -317,6 +319,15 @@ def progress(
     )
 
 
+def _safe_exception_message(error: BaseException) -> str:
+    """Return an exception message without trusting ``error.__str__``."""
+    try:
+        message = str(error)
+    except BaseException:
+        return f"<{type(error).__name__} message unavailable>"
+    return message or type(error).__name__
+
+
 def _publish_checkpoint_lifecycle(
     event: _CheckpointLifecycleEvent,
     *,
@@ -327,7 +338,7 @@ def _publish_checkpoint_lifecycle(
     fields: dict[str, Any] = {"status": event.status}
     if error is not None:
         fields["error_type"] = type(error).__name__
-        fields["message"] = str(error)
+        fields["message"] = _safe_exception_message(error)
 
     _publish_envelope(
         event.kind,
@@ -353,11 +364,19 @@ def _publish_checkpoint_completed() -> None:
 
 def _publish_checkpoint_failed(error: BaseException) -> None:
     """Publish the automatic checkpoint-failed lifecycle event."""
-    _publish_checkpoint_lifecycle(
-        _CHECKPOINT_FAILED_EVENT,
-        error=error,
-        flush_after_publish=True,
-    )
+    # WHY: This path renders a user-controlled exception object. Failure-event
+    # publishing must never replace the original checkpoint exception.
+    try:
+        _publish_checkpoint_lifecycle(
+            _CHECKPOINT_FAILED_EVENT,
+            error=error,
+            flush_after_publish=True,
+        )
+    except BaseException:  # pragma: no cover - defensive best-effort boundary
+        logger.warning(
+            "Failed to publish Kitaru checkpoint failure lifecycle event.",
+            exc_info=True,
+        )
 
 
 __all__ = [

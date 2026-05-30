@@ -20,6 +20,8 @@ from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RECONNECT_BACKOFF_SECONDS = (0.1, 0.5, 1.0)
+_MAX_STREAM_ERROR_BODY_BYTES = 4096
+_MAX_STREAM_ERROR_DETAIL_CHARS = 240
 
 QueryParams = list[tuple[str, str]]
 OpenStream = Callable[[str | None], "_StreamingResponse"]
@@ -31,6 +33,13 @@ class _StreamingResponse(Protocol):
 
     status_code: int
     text: str
+
+    def iter_content(
+        self,
+        chunk_size: int = 1,
+        decode_unicode: bool = False,
+    ) -> Iterable[bytes | str]:
+        """Yield response body chunks."""
 
     def iter_lines(self, *, decode_unicode: bool = False) -> Iterable[str | bytes]:
         """Yield response lines."""
@@ -189,14 +198,57 @@ def _open_rest_sse_stream_once(
     )
 
 
+def _read_stream_error_body_prefix(response: _StreamingResponse) -> str:
+    """Read a small response-body prefix for error detail extraction."""
+    chunks: list[bytes] = []
+    remaining = _MAX_STREAM_ERROR_BODY_BYTES
+    for raw_chunk in response.iter_content(chunk_size=min(1024, remaining)):
+        if not raw_chunk:
+            continue
+        chunk = (
+            raw_chunk.encode("utf-8", errors="replace")
+            if isinstance(raw_chunk, str)
+            else bytes(raw_chunk)
+        )
+        chunks.append(chunk[:remaining])
+        remaining -= min(len(chunk), remaining)
+        if remaining <= 0:
+            break
+    return b"".join(chunks).decode("utf-8", errors="replace").strip()
+
+
+def _safe_stream_response_suffix(response: _StreamingResponse) -> str:
+    """Return a sanitized, bounded error suffix for stream HTTP failures."""
+    body_prefix = _read_stream_error_body_prefix(response)
+    if not body_prefix:
+        return ""
+
+    try:
+        payload = json.loads(body_prefix)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    detail = payload.get("detail")
+    if not isinstance(detail, str):
+        return ""
+
+    sanitized = " ".join(detail.split()).strip()
+    if not sanitized:
+        return ""
+    if len(sanitized) > _MAX_STREAM_ERROR_DETAIL_CHARS:
+        sanitized = sanitized[: _MAX_STREAM_ERROR_DETAIL_CHARS - 3].rstrip() + "..."
+    return f" Server response detail: {sanitized}"
+
+
 def ensure_stream_response_supported(response: _StreamingResponse) -> None:
     """Map streaming HTTP status codes into public Kitaru errors."""
     status_code = response.status_code
     if 200 <= status_code < 300:
         return
 
-    body = response.text.strip()
-    suffix = f" Server response: {body}" if body else ""
+    suffix = _safe_stream_response_suffix(response)
     if status_code == 501:
         raise KitaruFeatureNotAvailableError(
             "Execution event watching requires server streaming support, but "

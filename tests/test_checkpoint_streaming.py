@@ -19,6 +19,13 @@ from kitaru.runtime import (
 )
 
 
+class BrokenStrError(Exception):
+    """Exception whose message rendering fails."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("broken __str__")
+
+
 class FakeZenMLStreaming:
     """Small fake for ZenML's ``zenml.streaming`` module."""
 
@@ -193,6 +200,12 @@ def test_publish_validates_kind_payload_percent_and_index() -> None:
     with pytest.raises(KitaruUsageError, match="reserved"):
         events.publish("cursor")
 
+    with pytest.raises(KitaruUsageError, match="newline"):
+        events.publish("custom\nevent")
+
+    with pytest.raises(KitaruUsageError, match="newline"):
+        events.publish("custom\revent")
+
     with pytest.raises(KitaruUsageError, match="payload must be a mapping"):
         events.publish("custom.event", cast(Any, ["not", "a", "mapping"]))
 
@@ -354,6 +367,47 @@ def test_lifecycle_publish_failure_does_not_mask_user_result_or_exception(
         raise RuntimeError("real failure")
 
     with pytest.raises(RuntimeError, match="real failure"):
+        _wrap_entrypoint(failing_function, checkpoint_type=None)()
+
+
+def test_failed_lifecycle_does_not_stringify_user_exception_unsafely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def failing_function() -> str:
+        raise BrokenStrError()
+
+    with pytest.raises(BrokenStrError):
+        _wrap_entrypoint(failing_function, checkpoint_type=None)()
+
+    assert [event["kind"] for event in fake_streaming.published] == [
+        events.CHECKPOINT_STARTED_KIND,
+        events.CHECKPOINT_FAILED_KIND,
+    ]
+    failed_payload = fake_streaming.published[1]["payload"]
+    assert failed_payload["error_type"] == "BrokenStrError"
+    assert failed_payload["message"] == "<BrokenStrError message unavailable>"
+
+
+def test_failed_lifecycle_publish_boundary_does_not_mask_user_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_failed_publish(
+        kind: str,
+        envelope_fields: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        del kind, kwargs
+        if envelope_fields and envelope_fields.get("status") == "failed":
+            raise RuntimeError("lifecycle broke")
+
+    monkeypatch.setattr(events, "_publish_envelope", broken_failed_publish)
+
+    def failing_function() -> str:
+        raise ValueError("real failure")
+
+    with pytest.raises(ValueError, match="real failure"):
         _wrap_entrypoint(failing_function, checkpoint_type=None)()
 
 
