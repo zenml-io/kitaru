@@ -134,7 +134,11 @@ def _build_create_kwargs(request: GeminiInteractionRequest) -> dict[str, Any]:
     if request.response_format is not None:
         kwargs["response_format"] = request.response_format
     if request.environment is not None:
-        kwargs["agent_config"] = {"environment": request.environment}
+        # The Interactions API exposes `environment` as a top-level request
+        # field, but the current google-genai SDK does not expose it as a
+        # first-class keyword yet. Keep it out of `agent_config`, which is for
+        # typed agent configuration such as Deep Research settings.
+        kwargs["extra_body"] = {"environment": request.environment}
     if request.timeout_s is not None:
         kwargs["timeout"] = request.timeout_s
     return kwargs

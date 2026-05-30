@@ -119,6 +119,26 @@ def test_run_sync_creates_one_synthetic_interaction_checkpoint(
     assert "agent" not in create_kwargs
 
 
+def test_antigravity_environment_uses_top_level_extra_body(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient([_completed_interaction(agent="antigravity-preview-05-2026")])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.antigravity("summarize repo")
+
+    runner.run_sync(request)
+
+    create_kwargs = client.interactions.create_calls[0]
+    assert create_kwargs["agent"] == "antigravity-preview-05-2026"
+    assert create_kwargs["extra_body"] == {"environment": "remote"}
+    assert "agent_config" not in create_kwargs
+
+
 def test_requires_action_normalizes_function_call(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
