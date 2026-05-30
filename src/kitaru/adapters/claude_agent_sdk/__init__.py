@@ -16,6 +16,14 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
 from ._agent import KitaruClaudeRunner
 from ._events import ClaudeAdapterEvent, ClaudeEventError, ClaudeRunEvent
 from ._policy import ClaudeCapturePolicy
+from ._streaming import (
+    CLAUDE_STREAM_COMPLETED,
+    CLAUDE_STREAM_EVENT,
+    CLAUDE_STREAM_EVENT_KINDS,
+    CLAUDE_STREAM_FAILED,
+    CLAUDE_STREAM_STARTED,
+    CLAUDE_STREAM_TERMINAL_EVENT_KINDS,
+)
 from ._types import ClaudeRunRequest, ClaudeRunResult
 from ._utils import (
     CheckpointConfig,
@@ -24,6 +32,12 @@ from ._utils import (
 )
 
 __all__ = [
+    "CLAUDE_STREAM_COMPLETED",
+    "CLAUDE_STREAM_EVENT",
+    "CLAUDE_STREAM_EVENT_KINDS",
+    "CLAUDE_STREAM_FAILED",
+    "CLAUDE_STREAM_STARTED",
+    "CLAUDE_STREAM_TERMINAL_EVENT_KINDS",
     "CheckpointConfig",
     "CheckpointRuntime",
     "ClaudeAdapterEvent",

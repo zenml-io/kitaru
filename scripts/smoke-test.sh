@@ -240,6 +240,8 @@ run_test "checkpoint live-event API imports" \
     $UV_RUN python -c 'import kitaru; assert callable(kitaru.progress); assert callable(kitaru.events.publish); assert isinstance(kitaru.events.flush(), bool)'
 run_test "execution event watcher API imports" \
     $UV_RUN python -c 'from kitaru import ExecutionEvent, KitaruClient; fields = ExecutionEvent.__dataclass_fields__; assert callable(KitaruClient); assert "cursor" in fields and "correlation_id" in fields and "stream_id" not in fields and "timestamp" not in fields'
+run_test "Claude Agent SDK stream API imports" \
+    $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_EVENT_KINDS, CLAUDE_STREAM_FAILED, CLAUDE_STREAM_STARTED, CLAUDE_STREAM_TERMINAL_EVENT_KINDS, KitaruClaudeRunner; assert hasattr(KitaruClaudeRunner, "run_stream"); assert hasattr(KitaruClaudeRunner, "run_stream_sync"); assert CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"; assert CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"; assert CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"; assert CLAUDE_STREAM_FAILED == "claude_agent_sdk.stream.failed"; assert CLAUDE_STREAM_EVENT_KINDS == (CLAUDE_STREAM_STARTED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED); assert CLAUDE_STREAM_TERMINAL_EVENT_KINDS == (CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED)'
 
 # ---------------------------------------------------------------------------
 # Clear state

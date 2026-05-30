@@ -1,7 +1,7 @@
 """Small bridge around Claude Agent SDK query calls."""
 
 import inspect
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
@@ -19,6 +19,11 @@ try:
     from claude_agent_sdk import ResultMessage as _SDK_RESULT_MESSAGE_TYPE
 except (ImportError, AttributeError):
     _SDK_RESULT_MESSAGE_TYPE: type[Any] | None = None
+
+try:
+    from claude_agent_sdk import StreamEvent as _SDK_STREAM_EVENT_TYPE
+except (ImportError, AttributeError):
+    _SDK_STREAM_EVENT_TYPE: type[Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,40 @@ async def run_claude_invocation(
     save_transcript_file: bool,
 ) -> ClaudeInvocationPayload:
     """Execute ``claude_agent_sdk.query(...)`` and extract boundary fields."""
+    return await _run_claude_invocation(
+        request=request,
+        options=options,
+        save_transcript_file=save_transcript_file,
+        on_event=None,
+        store_stream_events=True,
+    )
+
+
+async def run_claude_invocation_streamed(
+    *,
+    request: ClaudeRunRequest,
+    options: Any | None,
+    save_transcript_file: bool,
+    on_event: Callable[[Any], Any] | None = None,
+) -> ClaudeInvocationPayload:
+    """Execute ``query(...)`` while forwarding yielded SDK messages live."""
+    return await _run_claude_invocation(
+        request=request,
+        options=options,
+        save_transcript_file=save_transcript_file,
+        on_event=on_event,
+        store_stream_events=False,
+    )
+
+
+async def _run_claude_invocation(
+    *,
+    request: ClaudeRunRequest,
+    options: Any | None,
+    save_transcript_file: bool,
+    on_event: Callable[[Any], Any] | None,
+    store_stream_events: bool,
+) -> ClaudeInvocationPayload:
     import time
 
     from claude_agent_sdk import query
@@ -70,14 +109,17 @@ async def run_claude_invocation(
     messages_iterable = cast(AsyncIterable[Any], query_result)
 
     async for message in messages_iterable:
-        messages.append(to_json_safe(message))
+        if on_event is not None:
+            await _notify_stream_callback(on_event, message)
+        if store_stream_events or not is_stream_event(message):
+            messages.append(to_json_safe(message))
         if is_result_message(message):
             final_message = message
 
     if final_message is None:
         raise RuntimeError("Claude Agent SDK did not return a final ResultMessage.")
     if bool(getattr(final_message, "is_error", False)):
-        raise RuntimeError(format_result_error(final_message))
+        raise ClaudeResultMessageError(final_message)
 
     session_id = _string_or_none(getattr(final_message, "session_id", None))
     transcript_path: str | None = None
@@ -112,6 +154,15 @@ async def run_claude_invocation(
     )
 
 
+async def _notify_stream_callback(on_event: Callable[[Any], Any], message: Any) -> None:
+    try:
+        callback_result = on_event(message)
+        if inspect.isawaitable(callback_result):
+            await callback_result
+    except Exception:
+        return
+
+
 def is_result_message(message: Any) -> bool:
     """Return whether ``message`` looks like Claude's final ``ResultMessage``."""
     if _SDK_RESULT_MESSAGE_TYPE is not None and isinstance(
@@ -121,14 +172,33 @@ def is_result_message(message: Any) -> bool:
     return type(message).__name__ == "ResultMessage"
 
 
-def format_result_error(final_message: Any) -> str:
+def is_stream_event(message: Any) -> bool:
+    """Return whether ``message`` looks like Claude's raw partial stream event."""
+    if _SDK_STREAM_EVENT_TYPE is not None and isinstance(
+        message, _SDK_STREAM_EVENT_TYPE
+    ):
+        return True
+    return type(message).__name__ == "StreamEvent"
+
+
+class ClaudeResultMessageError(RuntimeError):
+    """Claude SDK final error that separates raised and live-event messages."""
+
+    def __init__(self, final_message: Any) -> None:
+        self.safe_live_message = format_result_error(
+            final_message, include_result=False
+        )
+        super().__init__(format_result_error(final_message, include_result=True))
+
+
+def format_result_error(final_message: Any, *, include_result: bool = True) -> str:
     """Format a Claude final error message without assuming SDK details."""
     subtype = getattr(final_message, "subtype", None)
     result = getattr(final_message, "result", None)
     parts = ["Claude Agent SDK returned an error ResultMessage"]
     if subtype:
         parts.append(f"subtype={subtype!r}")
-    if result:
+    if include_result and result:
         parts.append(f"result={result!r}")
     return "; ".join(parts)
 

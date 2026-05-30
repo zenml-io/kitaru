@@ -79,6 +79,8 @@ The adapter gives existing Claude Agent SDK users:
 
 - one durable Kitaru checkpoint around each completed Claude invocation
 - replay-skip for completed Claude invocations inside larger Kitaru flows
+- optional live stream events from `run_stream(...)` / `run_stream_sync(...)`
+  while that invocation checkpoint is running
 - a typed `ClaudeRunResult` with final text, session ID, stop reason, turn count,
   usage, model usage, and cost fields when the SDK reports them
 - captured SDK message records
@@ -281,6 +283,159 @@ Failed Claude invocations raise an exception instead of returning a
 checkpoint, the adapter still records best-effort failure metadata before the
 exception propagates.
 
+## Live streaming with Kitaru durability
+
+Use `run_stream(...)` / `run_stream_sync(...)` when you want to watch a Claude
+invocation while the Kitaru checkpoint is still running. The durable boundary is
+unchanged: Kitaru still saves one final `ClaudeRunResult` for one Claude SDK
+query.
+
+The concrete story is:
+
+```text
+Kitaru opens claude_summary_claude_invocation
+  -> Claude SDK sends stream updates while it works
+  -> Kitaru publishes best-effort claude_agent_sdk.stream.* live events
+  -> Claude finishes with a ResultMessage
+  -> Kitaru saves the final ClaudeRunResult as the checkpoint output
+```
+
+Async flow:
+
+```python
+from kitaru import flow
+from kitaru.adapters.claude_agent_sdk import ClaudeRunRequest, KitaruClaudeRunner
+
+runner = KitaruClaudeRunner(name="claude_summary")
+
+@flow
+async def summarize(prompt: str) -> str:
+    result = await runner.run_stream(ClaudeRunRequest.start(prompt, max_turns=1))
+    return result.final_text or ""
+```
+
+Sync flow:
+
+```python
+from kitaru import flow
+from kitaru.adapters.claude_agent_sdk import ClaudeRunRequest, KitaruClaudeRunner
+
+runner = KitaruClaudeRunner(name="claude_summary")
+
+@flow
+def summarize(prompt: str) -> str:
+    result = runner.run_stream_sync(ClaudeRunRequest.start(prompt, max_turns=1))
+    return result.final_text or ""
+```
+
+The Claude stream event kinds are:
+
+- `claude_agent_sdk.stream.started`
+- `claude_agent_sdk.stream.event`
+- `claude_agent_sdk.stream.completed`
+- `claude_agent_sdk.stream.failed`
+
+You can import the constants instead of typing the strings yourself:
+
+```python
+from kitaru.adapters.claude_agent_sdk import (
+    CLAUDE_STREAM_EVENT_KINDS,
+    CLAUDE_STREAM_TERMINAL_EVENT_KINDS,
+)
+```
+
+To watch the live events, submit the flow and read execution events from the
+client while `.wait()` is still pending:
+
+```python
+import threading
+
+from kitaru.adapters.claude_agent_sdk import (
+    CLAUDE_STREAM_EVENT_KINDS,
+    CLAUDE_STREAM_TERMINAL_EVENT_KINDS,
+)
+from kitaru.client import KitaruClient
+
+
+def watch_claude_stream(exec_id: str, stop_event: threading.Event) -> None:
+    try:
+        for event in KitaruClient().executions.events(
+            exec_id,
+            kinds=list(CLAUDE_STREAM_EVENT_KINDS),
+        ):
+            if stop_event.is_set():
+                return
+            data = event.payload.get("data", {})
+            data = data if isinstance(data, dict) else {}
+            print(data.get("display", event.kind))
+            if event.kind in CLAUDE_STREAM_TERMINAL_EVENT_KINDS:
+                return
+    except Exception as exc:
+        print(f"Live event watching unavailable; reading saved result instead: {exc}")
+
+
+handle = summarize.run("Explain the project in one paragraph.", cache=False)
+stop_watching = threading.Event()
+watcher = threading.Thread(
+    target=watch_claude_stream,
+    args=(handle.exec_id, stop_watching),
+    daemon=True,
+)
+watcher.start()
+
+try:
+    result = handle.wait()
+finally:
+    stop_watching.set()
+    watcher.join(timeout=1.0)
+
+if watcher.is_alive():
+    print("Live watcher is still open; showing the durable result now.")
+```
+
+The important shape is: start the optional watcher in the background, keep
+`.wait()` on the main path, and stop the watcher after the durable result is
+available. If the active backend cannot publish or watch live events, or if the
+watcher misses a terminal event, the Claude invocation can still finish and
+`.wait()` can still return the saved `ClaudeRunResult`.
+
+The live payloads are intentionally smaller than the durable artifacts. They may
+include text deltas because live output is the point of streaming. They do not
+include the raw prompt, full SDK options, raw SDK stream events, full tool input
+JSON, full assistant messages, final result text, or structured output by
+default. If you need the durable conversation record, inspect the final
+`ClaudeRunResult` and captured artifacts after the checkpoint completes.
+
+A few gotchas matter:
+
+- Live events are best effort. Missing stream events do **not** mean Claude
+  failed; check the final `ClaudeRunResult`.
+- Replay may emit stream events again if the stream checkpoint body re-executes.
+  For example, if a later checkpoint crashes, replay may call Claude again and
+  send new live events for the retried invocation.
+- Stream calls use a separate cache surface from non-stream calls, so a cached
+  `run_sync(...)` result does not silently satisfy `run_stream_sync(...)`. A
+  repeated stream call can still hit the stream cache, though. When that happens,
+  Kitaru reuses the saved final `ClaudeRunResult`, the checkpoint body is
+  skipped, and no fresh Claude stream events may appear.
+- `checkpoint_strategy="invocation"` is still the only Claude strategy. The
+  stream updates are progress reports from inside that one invocation boundary;
+  they are not per-tool or per-token replay checkpoints.
+- If you set `allow_direct_execution_inside_checkpoint=True`, stream events are
+  published on the outer checkpoint's live-event lane. The replay warning still
+  applies: replaying that outer checkpoint can call Claude again and duplicate
+  tool actions, file edits, or API cost.
+- Claude's own file checkpointing remains separate from Kitaru checkpoints. A
+  Claude file checkpoint can help Claude rewind supported file edits inside a
+  session; it is not the Kitaru checkpoint output and it is not a workspace
+  snapshot.
+
+The runnable version lives at
+[`examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py).
+It uses `allowed_tools=[]`, `max_turns=1`, disables checkpoint caching for the
+demo, watches `CLAUDE_STREAM_EVENT_KINDS`, and then prints the final durable
+`ClaudeRunResult`.
+
 ## Capture policy
 
 By default, the adapter captures the boundary data that is useful for replay
@@ -324,6 +479,12 @@ later Kitaru save/log call fails, the adapter does not fail the completed Claude
 call just because observability capture had a problem. Instead, the returned
 `ClaudeRunResult.warnings` and `ClaudeRunResult.metadata` describe what failed,
 and failed artifact-name fields are left empty.
+
+`ClaudeCapturePolicy.emit_events` controls this durable adapter event log and run
+summary capture. It is not the switch for live `claude_agent_sdk.stream.*`
+publishing. Live stream publishing happens only when you call
+`run_stream(...)` / `run_stream_sync(...)`, and it remains best-effort progress
+rather than durable transcript state.
 
 If you want observability persistence to be fail-fast, opt in explicitly:
 
@@ -527,9 +688,9 @@ flow body asks Claude
 If a later checkpoint fails, Kitaru can reuse the completed Claude invocation
 result instead of calling Claude again.
 
-## Runnable example
+## Runnable examples
 
-Run the educational integration example:
+Run the educational non-streaming integration example:
 
 ```bash
 uv sync --extra local --extra claude-agent-sdk
@@ -547,6 +708,17 @@ uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adap
 The example prints the final text, session ID, usage/cost details when reported,
 and Kitaru artifact names. It uses `allowed_tools=[]` and `max_turns=1` so the
 first run teaches the adapter boundary without introducing tool side effects.
+
+Run the live streaming example when you have a REST-backed stream-event backend:
+
+```bash
+uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py
+```
+
+That script submits the flow, starts a watcher for `claude_agent_sdk.stream.*`
+events, and then prints the final durable `ClaudeRunResult`. If live watching is
+not available on your backend, the `.wait()` path still demonstrates the saved
+result.
 
 ## Larger Claude example
 
@@ -603,11 +775,13 @@ result and records the persistence problem in `result.warnings` and
 Use `fail_on_artifact_capture_error=True` or
 `fail_on_event_persistence_error=True` when you want strict behavior.
 
-### “Can I use live streaming output?”
+### “Why did my stream watcher show no events?”
 
-Not in this adapter version. Kitaru/ZenML streaming support is planned
-separately. The current adapter waits for the completed Claude result and stores
-that completed boundary output.
+First check the final `ClaudeRunResult`. Live events are progress only, not the
+durable source of truth. Common causes are: the active backend does not support
+live event watching, the checkpoint hit the stream cache and skipped the body, or
+Claude produced only coarse SDK messages instead of partial text deltas. For a
+repeatable demo, the streaming example sets `checkpoint_config={"cache": False}`.
 
 ### “Can this resume a half-finished Claude invocation?”
 

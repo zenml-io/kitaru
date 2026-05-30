@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib
 import sys
 import types
@@ -33,6 +34,10 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     class AssistantMessage:
         def __init__(self, text: str) -> None:
             self.text = text
+
+    class StreamEvent:
+        def __init__(self, event: dict[str, object]) -> None:
+            self.event = event
 
     class ClaudeAgentOptions:
         def __init__(
@@ -72,6 +77,7 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             yield message
 
     sdk.__dict__["AssistantMessage"] = AssistantMessage
+    sdk.__dict__["StreamEvent"] = StreamEvent
     sdk.__dict__["ClaudeAgentOptions"] = ClaudeAgentOptions
     sdk.__dict__["ResultMessage"] = ResultMessage
     sdk.__dict__["query"] = query
@@ -224,6 +230,131 @@ def test_nested_checkpoint_explicit_opt_in_runs_directly_with_warning(
     )
 
 
+def test_non_stream_sync_does_not_publish_claude_stream_events(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[str] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append(kind),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert published == []
+
+
+def test_non_stream_async_does_not_publish_claude_stream_events(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[str] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append(kind),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    async def call_run() -> object:
+        return await runner.run(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    result = asyncio.run(call_run())
+
+    assert cast(Any, result).final_text == "done"
+    assert published == []
+
+
+def test_stream_sync_runs_one_invocation_and_filters_raw_stream_events(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    saved_payloads: list[object] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_artifact=lambda name, value, *, type: saved_payloads.append(value),
+        save_event=lambda name, value, *, type: None,
+    )
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[tuple[str, dict[str, object], bool]] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append((kind, payload, flush)),
+    )
+
+    @dataclasses.dataclass
+    class StaticOptions:
+        include_partial_messages: bool = False
+
+    original_options = StaticOptions()
+    fake_sdk.__dict__["messages"][:] = [
+        fake_sdk.StreamEvent(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "hello"},
+            }
+        ),
+        fake_sdk.AssistantMessage("thinking"),
+        fake_sdk.ResultMessage(),
+    ]
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options=original_options,
+    )
+
+    result = runner.run_stream_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert original_options.include_partial_messages is False
+    assert len(fake_sdk.__dict__["calls"]) == 1
+    sdk_options = fake_sdk.__dict__["calls"][0]["options"]
+    assert sdk_options is not original_options
+    assert sdk_options.include_partial_messages is True
+    assert [kind for kind, _, _ in published] == [
+        claude_adapter.CLAUDE_STREAM_STARTED,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_COMPLETED,
+    ]
+    assert published[1][1]["text_delta"] == "hello"
+    message_payload = cast(
+        dict[str, object],
+        next(payload for payload in saved_payloads if isinstance(payload, dict)),
+    )
+    messages_value = message_payload["messages"]
+    assert isinstance(messages_value, list)
+    messages = cast(list[dict[str, object]], messages_value)
+    assert all("event" not in message for message in messages)
+
+
 def test_cache_identity_is_deterministic_for_live_option_objects(
     claude_adapter: types.ModuleType,
 ) -> None:
@@ -245,9 +376,15 @@ def test_cache_identity_is_deterministic_for_live_option_objects(
     changed_key = runner._invocation_cache_key(
         request, options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read", "Grep"])
     )
+    stream_key = runner._invocation_cache_key(
+        request,
+        options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read"]),
+        surface="stream",
+    )
 
     assert first_key == second_key
     assert changed_key != first_key
+    assert stream_key != first_key
 
 
 def test_options_manifest_redacts_sequence_pairs(
