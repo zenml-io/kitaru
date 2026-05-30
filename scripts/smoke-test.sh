@@ -206,6 +206,10 @@ HAS_CLAUDE_AGENT_SDK=false
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] || [[ "${CLAUDE_CODE_USE_VERTEX:-}" == "1" ]]; then
     HAS_CLAUDE_AGENT_SDK=true
 fi
+HAS_GEMINI=false
+if [[ -n "${GEMINI_API_KEY:-}" ]] || [[ -n "${GOOGLE_API_KEY:-}" ]]; then
+    HAS_GEMINI=true
+fi
 
 # ---------------------------------------------------------------------------
 # Install from source
@@ -222,6 +226,7 @@ else
         --extra pydantic-ai
         --extra openai-agents
         --extra claude-agent-sdk
+        --extra gemini
         --extra langgraph
     )
     if [[ "$HAS_OPENAI" == true ]]; then
@@ -401,6 +406,33 @@ if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
             --max-turns 1
 else
     skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+fi
+
+section_header "Gemini Interactions adapter"
+
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
+
+if [[ "$HAS_GEMINI" == true ]]; then
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
+        timed 120 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode model \
+            --prompt "Explain one Kitaru checkpoint in one short sentence."
+else
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set"
+fi
+
+if [[ "$HAS_GEMINI" != true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "GEMINI_API_KEY or GOOGLE_API_KEY not set"
+elif [[ "${KITARU_SMOKE_GEMINI_ANTIGRAVITY:-}" != "1" ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run the real Antigravity smoke test"
+else
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
+        timed 180 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode antigravity \
+            --prompt "Explain what you would inspect first in this repository. Do not edit files."
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then

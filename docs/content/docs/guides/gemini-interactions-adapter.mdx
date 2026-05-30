@@ -1,0 +1,284 @@
+---
+title: Gemini Interactions Adapter
+description: Wrap Google Gemini Interactions API turns in Kitaru checkpoints, including the Antigravity managed-agent preset
+---
+
+The `kitaru.adapters.gemini` adapter is for Google's Gemini Interactions API.
+It is not a plain `kitaru.llm()` text-call provider. The useful unit here is an
+**interaction turn**: you send input to Gemini or a Google-managed agent, Google
+runs that interaction, and Kitaru stores the stable response as one checkpoint.
+
+The replay boundary is deliberately honest:
+
+```text
+one stable Gemini interaction response = one Kitaru checkpoint
+```
+
+A stable response is usually `completed`, meaning Gemini produced a final answer.
+It can also be `requires_action`, meaning Gemini has reached a durable handoff
+point and needs something else before it can continue, such as a matching
+function result or a human approval in your flow.
+
+## The mental model
+
+Think of Google as the hosted agent runtime and Kitaru as the outer workflow
+recorder.
+
+Google owns the inside of the interaction:
+
+```text
+Gemini interaction
+  ├─ Gemini model or hosted agent planning
+  ├─ interaction.steps
+  ├─ built-in tools, web, code execution, or hosted MCP work
+  ├─ Antigravity sandbox files and environment reuse
+  └─ final completed / requires_action response
+```
+
+Kitaru owns the outside:
+
+```text
+@kitaru.flow
+  └─ gemini_task_gemini_interaction checkpoint
+      └─ one call to client.interactions.create(...) or .get(...)
+```
+
+That distinction matters. Imagine Antigravity edits files in a Google-managed
+sandbox. The interaction finishes and Kitaru stores a `GeminiInteractionResult`.
+A later Kitaru checkpoint fails. On replay, Kitaru can reuse the already-recorded
+Gemini result instead of calling Google again. Kitaru does **not** recreate or
+snapshot Google's remote sandbox filesystem. If a file, report, or decision must
+be durable in your own workflow, return it from the interaction or write it in a
+later Kitaru-owned checkpoint.
+
+## Install
+
+Add the Gemini extra. Include `local` if you want the local Kitaru server and
+dashboard:
+
+```bash
+uv add "kitaru[gemini,local]"
+```
+
+Initialize the project once:
+
+```bash
+kitaru init
+kitaru login        # local server; add a URL for a deployed one
+kitaru status
+```
+
+For real Google calls, configure a Gemini API key:
+
+```bash
+export GEMINI_API_KEY='<your-gemini-api-key>'
+# GOOGLE_API_KEY is also accepted by the example wrapper.
+```
+
+Google currently describes the Interactions API as preview/Beta. Treat schemas,
+agent names, and hosted-agent behavior as more likely to change than the stable
+`generateContent` API.
+
+## Minimal model interaction
+
+Use `GeminiInteractionRequest.start(...)` for a fresh interaction. Exactly one of
+`model=` or `agent=` must be set.
+
+```python
+from kitaru import flow
+from kitaru.adapters.gemini import (
+    GeminiInteractionRequest,
+    GeminiInteractionResult,
+    KitaruGeminiInteractionsRunner,
+)
+
+runner = KitaruGeminiInteractionsRunner(
+    name="gemini_summary",
+    checkpoint_config={"cache": False},
+)
+
+@flow
+def summarize(topic: str) -> GeminiInteractionResult:
+    request = GeminiInteractionRequest.start(
+        f"Explain {topic} in three plain sentences.",
+        model="gemini-3.5-flash",
+        metadata={"example": "minimal_gemini_interaction"},
+    )
+    return runner.run_sync(request)
+
+result = summarize.run("Kitaru checkpoints").wait()
+print(result.output_text)
+print(result.interaction_id)
+```
+
+When this runs inside a flow, the adapter opens one synthetic checkpoint named
+from the runner, such as:
+
+```text
+gemini_summary_gemini_interaction
+```
+
+On replay, if that checkpoint is already complete and cache/replay rules allow
+reuse, Kitaru returns the saved `GeminiInteractionResult` instead of making the
+same Google call again.
+
+## Antigravity preset
+
+`GeminiInteractionRequest.antigravity(...)` is the convenience path for the
+Google Antigravity managed-agent preview. It uses the adapter's centralized
+Antigravity agent ID, defaults `environment="remote"`, forces `store=True`, and
+adds non-sensitive preview metadata.
+
+```python
+request = GeminiInteractionRequest.antigravity(
+    "Inspect this repository and summarize the main test strategy. Do not edit files."
+)
+result = runner.run_sync(request)
+```
+
+This is still one coarse interaction checkpoint. Kitaru records the stable
+Antigravity response and captured audit envelope. Google still owns the hosted
+agent loop, the sandbox, any web/code/tool execution, and environment reuse.
+
+## Continuing an interaction
+
+Google's Interactions API can continue server-side history with
+`previous_interaction_id`. When you continue an interaction, re-specify the
+model or agent and any tools, system instruction, generation config, or response
+format that should apply to the new turn.
+
+```python
+follow_up = GeminiInteractionRequest.resume(
+    "Now give me the same answer as a five-item checklist.",
+    previous_interaction_id=result.interaction_id,
+    model="gemini-3.5-flash",
+)
+follow_up_result = runner.run_sync(follow_up)
+```
+
+Set `store=True` when you need continuation. If `store=False`, Google should not
+be expected to keep enough state for a later `previous_interaction_id` turn.
+
+## `requires_action` and function results
+
+A Gemini interaction can return `status="requires_action"`. That is not a final
+answer; it is a stable handoff point. The result's `steps` list summarizes the
+interaction steps so your flow can find a function call ID or other action cue
+without putting raw prompt/tool payloads into top-level metadata.
+
+When your code has performed the requested action, answer with
+`GeminiInteractionRequest.function_result(...)`:
+
+```python
+if result.status == "requires_action":
+    call = next(step for step in result.steps if step.call_id)
+    answer = GeminiInteractionRequest.function_result(
+        previous_interaction_id=result.interaction_id,
+        function_call_id=call.call_id,
+        function_name=call.tool_name,
+        function_result={"approved": True},
+        model="gemini-3.5-flash",
+    )
+    result = runner.run_sync(answer)
+```
+
+Keep human-in-the-loop waits at flow scope. For example, let the flow inspect the
+`requires_action` result, call `kitaru.wait()` if a person must decide, then send
+the later `function_result` interaction after the wait resumes.
+
+## Polling background interactions
+
+For background interactions, avoid accidentally starting duplicate remote jobs.
+If an interaction is already created and you need to check it later, use
+`GeminiInteractionRequest.poll(interaction_id=...)`. Poll requests call
+`client.interactions.get(...)`; they do not call `client.interactions.create(...)`.
+
+```python
+poll_request = GeminiInteractionRequest.poll(
+    interaction_id="interaction_123",
+    timeout_s=30,
+)
+result = runner.run_sync(poll_request)
+```
+
+The adapter may warn when a background interaction has not reached `completed` or
+`requires_action`. Continue polling the same `interaction_id`; do not retry by
+creating a fresh background request unless you intentionally want another remote
+job.
+
+## What the result contains
+
+`GeminiInteractionResult` is metadata-first. It includes:
+
+- `status`, `interaction_id`, and `previous_interaction_id`
+- `output_text` when Gemini exposes text
+- `model` or `agent`
+- `environment_id` when Google reports one
+- `steps`, a list of `GeminiInteractionStepSummary` records derived primarily
+  from `interaction.steps`
+- `usage` when reported by the SDK
+- `poll_count`, `duration_ms`, `sdk_version`, and non-sensitive `metadata`
+- artifact names for captured input, request manifest, raw interaction, steps,
+  output, usage, event log, and run summary
+- `warnings` for best-effort capture or SDK-shape compatibility issues
+
+The adapter treats `interaction.steps` as the primary response shape. If an older
+SDK exposes `outputs` instead, Kitaru can summarize those for compatibility and
+adds a warning.
+
+## Capture policy
+
+Use `GeminiInteractionCapturePolicy` to control what the adapter stores around
+one interaction boundary:
+
+```python
+from kitaru.adapters.gemini import GeminiInteractionCapturePolicy
+
+runner = KitaruGeminiInteractionsRunner(
+    name="gemini_summary",
+    capture=GeminiInteractionCapturePolicy(
+        save_raw_interaction=False,
+        save_steps=True,
+        save_usage=True,
+        redact_request_manifest=True,
+    ),
+)
+```
+
+Capture failures are non-fatal by default because Google may already have
+succeeded by the time Kitaru tries to save artifacts. Retrying after a strict
+capture failure can duplicate provider-side work, so only enable
+`fail_on_artifact_capture_error=True` or `fail_on_event_persistence_error=True`
+when you understand that trade-off.
+
+The redacted request manifest removes common secret-like keys such as API keys,
+authorization headers, tokens, credentials, cookies, and passwords.
+
+## What Kitaru does not promise
+
+The v1 public checkpoint strategy is:
+
+```python
+KitaruGeminiInteractionsRunner(
+    name="gemini_task",
+    checkpoint_strategy="interaction",
+)
+```
+
+Kitaru does not expose a public fine-grained strategy for Antigravity internals,
+Google-owned tools, hosted MCP calls, web/code execution, or sandbox file
+mutations. A future client-tool mode may be possible for tools that your Python
+process executes itself: Gemini reaches `requires_action`, Kitaru runs the local
+tool body, and a later interaction sends the matching function result. That
+would only cover the local tool body Kitaru actually runs. It would still not
+make Google-owned managed-agent internals replayable.
+
+## Full example
+
+See `examples/integrations/gemini_interactions_agent/` for a credential-gated
+real example. It has:
+
+- `--help` for smoke tests
+- `--dry-run` for a no-network preview
+- `--mode model` using `gemini-3.5-flash`
+- `--mode antigravity` as an explicit slower/costlier managed-agent demo
