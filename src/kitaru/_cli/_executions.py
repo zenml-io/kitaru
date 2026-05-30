@@ -10,12 +10,24 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
+from kitaru._client._statistics import validate_statistics_max_groups
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.client import Execution, ExecutionStatus, LogEntry, PendingWait
-from kitaru.errors import build_recovery_command, format_recovery_hint
+from kitaru.client import (
+    Execution,
+    ExecutionStatistics,
+    ExecutionStatus,
+    LogEntry,
+    PendingWait,
+)
+from kitaru.errors import (
+    KitaruUsageError,
+    build_recovery_command,
+    format_recovery_hint,
+)
 from kitaru.inspection import (
     serialize_execution,
+    serialize_execution_statistics,
     serialize_execution_summary,
     serialize_log_entry,
 )
@@ -203,6 +215,47 @@ def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
         ]
         for execution in executions
     ]
+
+
+def _statistics_column_label(key: str) -> str:
+    """Render a statistics key as a readable table column label."""
+    if key == "flow_id":
+        return "Flow ID"
+    if key == "stack_id":
+        return "Stack ID"
+    words = key.replace("_", " ").replace("-", " ").split()
+    return " ".join(
+        word.upper() if word.lower() == "id" else word.capitalize() for word in words
+    )
+
+
+def _execution_statistics_columns(statistics: ExecutionStatistics) -> list[str]:
+    """Return dynamic grouping columns in first-seen response order."""
+    columns: list[str] = []
+    for group in statistics.groups:
+        for key in group.keys:
+            if key not in columns:
+                columns.append(key)
+    return columns
+
+
+def _execution_statistics_table(
+    statistics: ExecutionStatistics,
+) -> tuple[list[str], list[list[str]]]:
+    """Build dynamic table headers and rows for execution statistics."""
+    group_columns = _execution_statistics_columns(statistics)
+    columns = [
+        *[_statistics_column_label(column) for column in group_columns],
+        "Executions",
+    ]
+    rows = [
+        [
+            *[str(group.keys.get(column, "")) for column in group_columns],
+            str(group.execution_count),
+        ]
+        for group in statistics.groups
+    ]
+    return columns, rows
 
 
 def _format_log_timestamp(value: str | None) -> str:
@@ -561,6 +614,90 @@ def list____(
             size=resolved_size,
             returned_count=len(executions),
             output=output_format,
+        )
+
+
+@executions_app.command
+def statistics(
+    *,
+    group_by: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--group-by"],
+            help=(
+                "Grouping to apply. Repeat for multiple groupings. Supported "
+                "values: status, flow, stack, tag, time:hour, time:day, "
+                "time:week, time:month, metadata:<key>."
+            ),
+        ),
+    ] = None,
+    flow: Annotated[
+        str | None,
+        Parameter(help="Optional flow-name or flow-ID filter."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        Parameter(
+            help="Optional status filter (running/waiting/completed/failed/cancelled)."
+        ),
+    ] = None,
+    stack: Annotated[
+        str | None,
+        Parameter(help="Optional stack-name or stack-ID filter."),
+    ] = None,
+    tag: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--tag"],
+            help="Tag filter. Repeat to require multiple tags.",
+        ),
+    ] = None,
+    max_groups: Annotated[
+        int,
+        Parameter(help="Maximum number of public statistics groups to return."),
+    ] = 1000,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Show grouped execution count statistics."""
+    command = "executions.statistics"
+    output_format = _resolve_output_format(output)
+    try:
+        validate_statistics_max_groups(max_groups, label="--max-groups")
+    except KitaruUsageError as exc:
+        _exit_with_error(command, str(exc), output=output_format)
+
+    statistics_result = run_with_cli_error_boundary(
+        lambda: (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.statistics(
+                group_by=group_by or [],
+                flow=flow,
+                status=status,
+                stack=stack,
+                tags=tag,
+                max_groups=max_groups,
+            )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_execution_statistics(statistics_result),
+            output=output_format,
+        )
+        return
+
+    columns, rows = _execution_statistics_table(statistics_result)
+    _emit_table("Kitaru execution statistics", columns, rows)
+    if statistics_result.truncated:
+        print(
+            f"Results truncated at --max-groups {max_groups}. "
+            "Narrow filters or increase --max-groups."
         )
 
 

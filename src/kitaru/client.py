@@ -21,7 +21,7 @@ import logging
 import sys
 import threading
 import warnings
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -95,6 +95,11 @@ from kitaru._client._models import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsDimension,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -102,6 +107,10 @@ from kitaru._client._models import (
 )
 from kitaru._client._models import (
     Deployment as DeploymentRecord,
+)
+from kitaru._client._statistics import (
+    get_execution_statistics,
+    normalize_execution_statistics_groupings,
 )
 from kitaru._interface_deployments import (
     Deployment,
@@ -1235,6 +1244,62 @@ class _ExecutionsAPI:
 
         return results
 
+    def statistics(
+        self,
+        *,
+        group_by: Sequence[ExecutionStatisticsGrouping | str] = (),
+        flow: str | None = None,
+        status: ExecutionStatus | str | None = None,
+        stack: str | None = None,
+        tags: Sequence[str] | None = None,
+        max_groups: int = 1000,
+    ) -> ExecutionStatistics:
+        """Return grouped execution count statistics."""
+        statistics = get_execution_statistics(
+            client=self._client_ref,
+            group_by=group_by,
+            flow=flow,
+            status=status,
+            stack=stack,
+            tags=tags,
+            max_groups=max_groups,
+        )
+
+        normalized_groupings = normalize_execution_statistics_groupings(group_by)
+        grouping_dimensions = {grouping.dimension for grouping in normalized_groupings}
+        track(
+            AnalyticsEvent.EXECUTION_STATISTICS_QUERIED,
+            {
+                "grouping_count": len(normalized_groupings),
+                "has_status_grouping": (
+                    ExecutionStatisticsDimension.STATUS in grouping_dimensions
+                ),
+                "has_flow_grouping": (
+                    ExecutionStatisticsDimension.FLOW in grouping_dimensions
+                ),
+                "has_stack_grouping": (
+                    ExecutionStatisticsDimension.STACK in grouping_dimensions
+                ),
+                "has_tag_grouping": (
+                    ExecutionStatisticsDimension.TAG in grouping_dimensions
+                ),
+                "has_time_grouping": (
+                    ExecutionStatisticsDimension.TIME in grouping_dimensions
+                ),
+                "has_metadata_grouping": (
+                    ExecutionStatisticsDimension.METADATA in grouping_dimensions
+                ),
+                "has_flow_filter": flow is not None,
+                "has_status_filter": status is not None,
+                "has_stack_filter": stack is not None,
+                "tag_filter_count": len(tags or ()),
+                "max_groups": max_groups,
+                "result_group_count": len(statistics.groups),
+                "truncated": statistics.truncated,
+            },
+        )
+        return statistics
+
     def latest(
         self,
         *,
@@ -2338,6 +2403,11 @@ __all__ = [
     "CheckpointCall",
     "Deployment",
     "Execution",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
     "KitaruClient",

@@ -456,6 +456,10 @@ section_header "CLI inspection of executions"
 
 run_test "executions list"         $UV_RUN kitaru executions list
 run_test "executions list -o json" $UV_RUN kitaru executions list -o json
+run_test "SDK execution statistics" \
+    $UV_RUN python -c 'from kitaru import KitaruClient; stats = KitaruClient().executions.statistics(group_by=["status"], max_groups=5); assert hasattr(stats, "groups")'
+run_test "executions statistics -o json" \
+    $UV_RUN kitaru executions statistics --group-by status -o json
 
 # Capture JSON output first, then parse — keeps diagnostics visible on failure.
 EXEC_LIST_OUT=$($UV_RUN kitaru executions list -o json 2>&1) || true
@@ -515,6 +519,10 @@ run_test "MCP: kitaru_stacks_list" \
 run_test "MCP: kitaru_executions_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_executions_list \
         --input-json '{"limit": 3}' --json
+
+run_test "MCP: kitaru_executions_statistics" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_executions_statistics \
+        --input-json '{"group_by": ["status"]}' --json
 
 run_test "MCP query snapshot (example)" \
     timed 30 $UV_RUN examples/features/mcp/mcp_query_tools.py

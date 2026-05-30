@@ -20,6 +20,8 @@ from kitaru.client import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -52,6 +54,8 @@ from kitaru.inspection import (
     serialize_checkpoint_attempt,
     serialize_checkpoint_call,
     serialize_execution,
+    serialize_execution_statistics,
+    serialize_execution_statistics_group,
     serialize_execution_summary,
     serialize_failure,
     serialize_log_entry,
@@ -528,6 +532,38 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "metadata": {"source": "notes"},
             }
         ],
+    }
+
+
+def test_serialize_execution_statistics_contract() -> None:
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed", "day": "2026-03-14"},
+                execution_count=12,
+            ),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+        ],
+        truncated=True,
+    )
+
+    assert serialize_execution_statistics_group(statistics.groups[0]) == {
+        "keys": {"status": "completed", "day": "2026-03-14"},
+        "execution_count": 12,
+    }
+    assert serialize_execution_statistics(statistics) == {
+        "groups": [
+            {
+                "keys": {"status": "completed", "day": "2026-03-14"},
+                "execution_count": 12,
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+            },
+        ],
+        "truncated": True,
+        "group_count": 2,
     }
 
 

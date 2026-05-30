@@ -13,7 +13,7 @@ import pytest
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
 from kitaru._flow_loading import _load_flow_target as _load_shared_flow_target
-from kitaru.client import ExecutionStatus
+from kitaru.client import ExecutionStatistics, ExecutionStatisticsGroup, ExecutionStatus
 from kitaru.config import (
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
@@ -48,6 +48,7 @@ from kitaru.mcp.server import (
     kitaru_executions_replay,
     kitaru_executions_retry,
     kitaru_executions_run,
+    kitaru_executions_statistics,
     kitaru_info,
     kitaru_secrets_create,
     kitaru_stacks_list,
@@ -217,6 +218,100 @@ def test_executions_list_delegates_filtering_to_shared_interface(
         limit=5,
     )
     assert payload[0]["exec_id"] == sample_execution.exec_id
+
+
+def test_executions_statistics_calls_client_and_serializes(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should delegate to the SDK and return serialized counts."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=12),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+        ],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_statistics(
+            group_by=["status"],
+            flow="content_pipeline",
+            status="completed",
+            stack="prod",
+            tags=["nightly", "customer-facing"],
+            max_groups=25,
+        )
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=["status"],
+        flow="content_pipeline",
+        status="completed",
+        stack="prod",
+        tags=["nightly", "customer-facing"],
+        max_groups=25,
+    )
+    assert payload == {
+        "groups": [
+            {"keys": {"status": "completed"}, "execution_count": 12},
+            {"keys": {"status": "failed"}, "execution_count": 2},
+        ],
+        "truncated": False,
+        "group_count": 2,
+    }
+
+
+def test_executions_statistics_delegates_to_inspection_serializer(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should share the same serializer as CLI/SDK transports."""
+    statistics = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution_statistics",
+            return_value={"source": "inspection"},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_statistics()
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=[],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+    mock_serialize.assert_called_once_with(statistics)
+    assert payload == {"source": "inspection"}
+
+
+@pytest.mark.parametrize("max_groups", [0, 10_001])
+def test_executions_statistics_rejects_invalid_max_groups(max_groups: int) -> None:
+    """MCP statistics should reject max_groups outside the public range."""
+    with pytest.raises(ValueError, match="`max_groups` must be between 1 and 10000"):
+        kitaru_executions_statistics(max_groups=max_groups)
+
+
+def test_executions_statistics_preserves_error_boundary_behavior(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics errors should pass through the shared MCP error boundary."""
+    mock_kitaru_client.executions.statistics.side_effect = KitaruUsageError(
+        "bad grouping"
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(KitaruUsageError, match="bad grouping"),
+    ):
+        kitaru_executions_statistics(group_by=["nope"])
 
 
 def test_executions_list_stack_filter_happens_after_fetch(

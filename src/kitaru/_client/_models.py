@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from kitaru.config import FrozenExecutionSpec
-from kitaru.errors import FailureOrigin
+from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
@@ -36,6 +36,141 @@ class ExecutionStatus(StrEnum):
     def is_successful(self) -> bool:
         """Whether the execution finished successfully."""
         return self is ExecutionStatus.COMPLETED
+
+
+class ExecutionStatisticsDimension(StrEnum):
+    """Public dimensions that execution statistics can group by."""
+
+    STATUS = "status"
+    FLOW = "flow"
+    STACK = "stack"
+    TAG = "tag"
+    TIME = "time"
+    METADATA = "metadata"
+
+
+class ExecutionStatisticsTimeGranularity(StrEnum):
+    """Supported time bucket sizes for execution statistics."""
+
+    HOUR = "hour"
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
+@dataclass(frozen=True)
+class ExecutionStatisticsGrouping:
+    """One public grouping dimension for execution statistics.
+
+    Simple dimensions such as ``status`` and ``tag`` only need ``dimension``.
+    Time groupings must provide ``time_granularity``. Metadata groupings must
+    provide ``metadata_key``. ``name`` optionally overrides the output key.
+    """
+
+    dimension: ExecutionStatisticsDimension | str
+    name: str | None = None
+    time_granularity: ExecutionStatisticsTimeGranularity | str | None = None
+    metadata_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize enum inputs and validate dimension-specific fields."""
+        try:
+            dimension = ExecutionStatisticsDimension(
+                str(self.dimension).strip().lower()
+            )
+        except ValueError as exc:
+            expected = ", ".join(item.value for item in ExecutionStatisticsDimension)
+            raise KitaruUsageError(
+                f"Unsupported execution statistics dimension {self.dimension!r}. "
+                f"Expected one of: {expected}."
+            ) from exc
+
+        name = self.name
+        if name is not None:
+            name = name.strip()
+            if not name:
+                raise KitaruUsageError(
+                    "Execution statistics grouping name cannot be empty."
+                )
+
+        time_granularity: ExecutionStatisticsTimeGranularity | None = None
+        if self.time_granularity is not None:
+            try:
+                time_granularity = ExecutionStatisticsTimeGranularity(
+                    str(self.time_granularity).strip().lower()
+                )
+            except ValueError as exc:
+                expected = ", ".join(
+                    item.value for item in ExecutionStatisticsTimeGranularity
+                )
+                raise KitaruUsageError(
+                    "Unsupported execution statistics time granularity "
+                    f"{self.time_granularity!r}. Expected one of: {expected}."
+                ) from exc
+
+        metadata_key = self.metadata_key
+        if metadata_key is not None:
+            metadata_key = metadata_key.strip()
+            if not metadata_key:
+                raise KitaruUsageError("Metadata grouping key cannot be empty.")
+
+        if dimension is ExecutionStatisticsDimension.TIME:
+            if time_granularity is None:
+                raise KitaruUsageError(
+                    "Time statistics groupings require time_granularity."
+                )
+            if metadata_key is not None:
+                raise KitaruUsageError(
+                    "Time statistics groupings cannot use metadata_key."
+                )
+            default_name = time_granularity.value
+        elif dimension is ExecutionStatisticsDimension.METADATA:
+            if metadata_key is None:
+                raise KitaruUsageError(
+                    "Metadata statistics groupings require metadata_key."
+                )
+            if time_granularity is not None:
+                raise KitaruUsageError(
+                    "Metadata statistics groupings cannot use time_granularity."
+                )
+            default_name = metadata_key
+        else:
+            if time_granularity is not None:
+                raise KitaruUsageError(
+                    f"{dimension.value!r} statistics groupings cannot use "
+                    "time_granularity."
+                )
+            if metadata_key is not None:
+                raise KitaruUsageError(
+                    f"{dimension.value!r} statistics groupings cannot use metadata_key."
+                )
+            default_name = {
+                ExecutionStatisticsDimension.STATUS: "status",
+                ExecutionStatisticsDimension.FLOW: "flow_id",
+                ExecutionStatisticsDimension.STACK: "stack_id",
+                ExecutionStatisticsDimension.TAG: "tag",
+            }[dimension]
+
+        object.__setattr__(self, "dimension", dimension)
+        object.__setattr__(self, "name", name or default_name)
+        object.__setattr__(self, "time_granularity", time_granularity)
+        object.__setattr__(self, "metadata_key", metadata_key)
+
+
+@dataclass(frozen=True)
+class ExecutionStatisticsGroup:
+    """One aggregate execution-statistics row."""
+
+    keys: dict[str, str | int | float | bool | None]
+    execution_count: int
+
+
+@dataclass(frozen=True)
+class ExecutionStatistics:
+    """Grouped execution count statistics."""
+
+    groups: list[ExecutionStatisticsGroup]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -259,6 +394,11 @@ __all__ = [
     "CheckpointCall",
     "Deployment",
     "Execution",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
     "LogEntry",

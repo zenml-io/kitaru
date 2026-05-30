@@ -58,7 +58,16 @@ _default_analytics_source = os.environ.get(
 )
 set_source(_default_analytics_source)
 
-from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._models import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionStatistics,
+    ExecutionStatisticsDimension,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsTimeGranularity,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -110,6 +119,11 @@ __all__ = [
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsTimeGranularity",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",

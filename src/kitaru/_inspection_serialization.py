@@ -16,6 +16,8 @@ from kitaru._client._models import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
     FailureInfo,
     LogEntry,
     PendingWait,
@@ -216,6 +218,30 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
         "artifacts": [
             serialize_artifact_ref(artifact) for artifact in execution.artifacts
         ],
+    }
+
+
+def serialize_execution_statistics_group(
+    group: ExecutionStatisticsGroup,
+) -> dict[str, Any]:
+    """Serialize one execution-statistics group."""
+    return {
+        "keys": to_jsonable(group.keys, fallback_repr=True),
+        "execution_count": group.execution_count,
+    }
+
+
+def serialize_execution_statistics(
+    statistics: ExecutionStatistics,
+) -> dict[str, Any]:
+    """Serialize grouped execution statistics."""
+    groups = [
+        serialize_execution_statistics_group(group) for group in statistics.groups
+    ]
+    return {
+        "groups": groups,
+        "truncated": statistics.truncated,
+        "group_count": len(groups),
     }
 
 
