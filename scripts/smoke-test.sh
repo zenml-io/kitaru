@@ -238,6 +238,8 @@ section_header "SDK API surface"
 
 run_test "checkpoint live-event API imports" \
     $UV_RUN python -c 'import kitaru; assert callable(kitaru.progress); assert callable(kitaru.events.publish); assert isinstance(kitaru.events.flush(), bool)'
+run_test "execution event watcher API imports" \
+    $UV_RUN python -c 'from kitaru import ExecutionEvent, KitaruClient; fields = ExecutionEvent.__dataclass_fields__; assert callable(KitaruClient); assert "cursor" in fields and "correlation_id" in fields and "stream_id" not in fields and "timestamp" not in fields'
 
 # ---------------------------------------------------------------------------
 # Clear state

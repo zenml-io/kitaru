@@ -76,6 +76,7 @@ class TestPublicExports:
             "AuthAPIKeyWithValue",
             "AuthServiceAccount",
             "Deployment",
+            "ExecutionEvent",
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",

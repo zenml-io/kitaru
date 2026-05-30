@@ -21,7 +21,7 @@ import logging
 import sys
 import threading
 import warnings
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +50,11 @@ from kitaru._client._deployments import (
     validate_deployment_flow,
     validate_deployment_tag,
     validate_deployment_version,
+)
+from kitaru._client._events import (
+    StreamingStore,
+    open_rest_sse_stream,
+    watch_execution_events,
 )
 from kitaru._client._logs import (
     _coerce_log_level,
@@ -95,6 +100,7 @@ from kitaru._client._models import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionEvent,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -751,21 +757,74 @@ def _restart_run_from_snapshot(
         ) from exc
 
 
+def _validate_event_filter_values(
+    values: Sequence[str] | None,
+    *,
+    name: str,
+) -> builtins.list[str]:
+    """Validate repeated string filters for execution event watching."""
+    if values is None:
+        return []
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"`{name}` must be a list of non-empty strings.")
+
+    normalized: builtins.list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError(f"`{name}` values must be strings.")
+        text = value.strip()
+        if not text:
+            raise ValueError(f"`{name}` values must be non-empty strings.")
+        normalized.append(text)
+    return normalized
+
+
+def _validate_optional_event_filter_value(
+    value: str | None,
+    *,
+    name: str,
+) -> str | None:
+    """Validate an optional single string filter for execution events."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"`{name}` must be a string when provided.")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"`{name}` must be non-empty when provided.")
+    return normalized
+
+
 class _ExecutionsAPI:
     """Namespace for execution lifecycle and inspection operations."""
 
     def __init__(self, client: KitaruClient) -> None:
         self._client_ref = client
 
-    def _rest_store(self) -> RestZenStore:
-        """Return a REST-backed zen store required for runtime log retrieval."""
+    def _require_rest_store(self, unavailable_error: Exception) -> RestZenStore:
+        """Return the active REST store or raise the caller-specific error."""
         zen_store = self._client_ref._client().zen_store
         if isinstance(zen_store, RestZenStore):
             return zen_store
+        raise unavailable_error
 
-        raise KitaruLogRetrievalError(
-            "Runtime log retrieval requires a server-backed connection. "
-            "Local database mode does not expose execution log endpoints."
+    def _rest_store(self) -> RestZenStore:
+        """Return a REST-backed zen store required for runtime log retrieval."""
+        return self._require_rest_store(
+            KitaruLogRetrievalError(
+                "Runtime log retrieval requires a server-backed connection. "
+                "Local database mode does not expose execution log endpoints."
+            )
+        )
+
+    def _event_rest_store(self) -> RestZenStore:
+        """Return a REST-backed zen store required for event watching."""
+        return self._require_rest_store(
+            KitaruFeatureNotAvailableError(
+                "Execution event watching requires a server-backed Kitaru "
+                "connection. Local database mode does not expose live event "
+                "streams."
+            )
         )
 
     def _resolve_log_endpoint_hint(self) -> str | None:
@@ -915,6 +974,78 @@ class _ExecutionsAPI:
         if limit is not None:
             return sorted_entries[:limit]
         return sorted_entries
+
+    def events(
+        self,
+        exec_id: str,
+        *,
+        kinds: builtins.list[str] | None = None,
+        checkpoint: str | None = None,
+        correlation_ids: builtins.list[str] | None = None,
+        since: str | None = None,
+        reconnect: bool = True,
+    ) -> Iterator[ExecutionEvent]:
+        """Watch live events for an execution.
+
+        The stream uses the backend SSE cursor for reconnects. Event indexes and
+        correlation IDs describe event identity/order, but they are never used
+        as network resume positions.
+        """
+        try:
+            normalized_kinds = _validate_event_filter_values(kinds, name="kinds")
+            normalized_correlation_ids = _validate_event_filter_values(
+                correlation_ids,
+                name="correlation_ids",
+            )
+            normalized_checkpoint = _validate_optional_event_filter_value(
+                checkpoint,
+                name="checkpoint",
+            )
+            normalized_since = _validate_optional_event_filter_value(
+                since, name="since"
+            )
+        except ValueError as exc:
+            raise KitaruUsageError(str(exc)) from exc
+
+        store = self._event_rest_store()
+        run = self._client_ref._get_pipeline_run(
+            exec_id,
+            hydrate=normalized_checkpoint is not None,
+        )
+
+        params: list[tuple[str, str]] = []
+        if normalized_since is not None:
+            params.append(("since", normalized_since))
+        params.extend(("kinds", kind) for kind in normalized_kinds)
+        params.extend(
+            ("correlation_ids", correlation_id)
+            for correlation_id in normalized_correlation_ids
+        )
+
+        if normalized_checkpoint is not None:
+            step_names = [
+                step.name
+                for step in run.steps.values()
+                if _normalize_checkpoint_name(step.name) == normalized_checkpoint
+            ]
+            params.extend(("step_names", step_name) for step_name in step_names)
+
+        path = f"/runs/{run.id}/events/stream"
+
+        def _open_stream(last_event_id: str | None) -> Any:
+            return open_rest_sse_stream(
+                cast(StreamingStore, store),
+                path=path,
+                params=params,
+                last_event_id=last_event_id,
+            )
+
+        return watch_execution_events(
+            open_stream=_open_stream,
+            fallback_exec_id=str(run.id),
+            checkpoint=normalized_checkpoint,
+            reconnect=reconnect,
+        )
 
     def pending_waits(self, exec_id: str) -> builtins.list[PendingWait]:
         """List all pending wait conditions for an execution."""
@@ -2338,6 +2469,7 @@ __all__ = [
     "CheckpointCall",
     "Deployment",
     "Execution",
+    "ExecutionEvent",
     "ExecutionStatus",
     "FailureInfo",
     "KitaruClient",

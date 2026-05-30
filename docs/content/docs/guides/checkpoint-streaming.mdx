@@ -1,6 +1,6 @@
 ---
 title: Checkpoint Live Events
-description: Publish best-effort live progress and custom events from running checkpoints
+description: Publish and watch best-effort live progress and custom events from running checkpoints
 ---
 
 Kitaru checkpoints can publish **live events** while their function body is
@@ -72,18 +72,68 @@ checkpoint execution gets its own correlation ID. That way a UI can draw one
 ordered event lane per checkpoint execution rather than mixing all fan-out items
 together.
 
+## Watch events from Python
+
+Use `KitaruClient().executions.events(...)` to watch live events for one
+execution:
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+for event in client.executions.events(
+    "exec-id-or-prefix",
+    kinds=["kitaru.checkpoint.progress"],
+    checkpoint="build_report",
+):
+    print(event.kind, event.checkpoint_name, event.payload.get("message"))
+```
+
+The event object has four identity/order fields that do different jobs:
+
+- `kind` is what happened, for example `kitaru.checkpoint.progress`.
+- `correlation_id` groups events from one checkpoint execution.
+- `index` orders events inside that correlation group.
+- `cursor` is the backend stream position used for reconnecting.
+
+That last point matters. If the network drops, Kitaru reconnects with the SSE
+`cursor`. It does **not** use `index` or `correlation_id` as a resume marker.
+Those fields are useful for your UI; the cursor is for the wire.
+
+You can filter by event kinds, checkpoint name, correlation IDs, or an existing
+cursor:
+
+```python
+client.executions.events(
+    "exec-id-or-prefix",
+    kinds=["kitaru.checkpoint.started", "kitaru.checkpoint.completed"],
+    checkpoint="train_model",
+    correlation_ids=["kitaru.checkpoint:train_model:..."],
+    since="last-seen-cursor",
+    reconnect=True,
+)
+```
+
+Checkpoint filtering is guaranteed client-side. Kitaru also sends known step
+names to the backend when they are already visible, which can reduce traffic,
+but a live execution may create steps after the watcher starts.
+
+There is no CLI watcher yet. Use the Python watcher for now.
+
 ## Backend requirements
 
-Live-event publishing uses the active Kitaru backend's streaming support. If the
-backend has streaming enabled, events can be consumed by backend-side tooling or
-future Kitaru watcher APIs.
+Live-event publishing and watching use the active Kitaru backend's streaming
+support.
 
-If streaming is unavailable, publishing degrades safely: the checkpoint keeps
-running, and event delivery is skipped. That is deliberate. A broken live-event
-lane should not break your training job, tool call, or agent step.
+If streaming is unavailable while publishing, publishing degrades safely: the
+checkpoint keeps running, and event delivery is skipped. That is deliberate. A
+broken live-event lane should not break your training job, tool call, or agent
+step.
 
-Kitaru does not yet ship a public Python watcher or CLI watcher in this PR. This
-page covers publishing only.
+Watching is stricter. If you ask Kitaru to watch events while using local
+database mode, or while connected to a server where streaming is disabled,
+Kitaru raises `KitaruFeatureNotAvailableError` with a clear explanation.
 
 ## Replay and cache behavior
 
@@ -101,6 +151,22 @@ Use checkpoint outputs and artifacts when you need durable state. Use live
 events when you want to watch work in progress.
 
 ## API reference
+
+```python
+KitaruClient().executions.events(
+    exec_id: str,
+    *,
+    kinds: list[str] | None = None,
+    checkpoint: str | None = None,
+    correlation_ids: list[str] | None = None,
+    since: str | None = None,
+    reconnect: bool = True,
+) -> Iterator[ExecutionEvent]
+```
+
+Yields live `ExecutionEvent` objects with `exec_id`, `kind`, `payload`,
+`correlation_id`, `index`, `cursor`, `checkpoint_id`, `checkpoint_name`, and
+`step_name`.
 
 ```python
 kitaru.progress(

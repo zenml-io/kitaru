@@ -32,7 +32,8 @@ Current status:
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and
   a typed Kitaru exception hierarchy with failure journaling
-  (`Execution.failure`, `CheckpointCall.attempts`).
+  (``Execution.failure``, ``CheckpointCall.attempts``) and live-event watching
+  (``KitaruClient.executions.events(...)``).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
@@ -59,7 +60,12 @@ _default_analytics_source = os.environ.get(
 )
 set_source(_default_analytics_source)
 
-from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._models import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionEvent,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -114,6 +120,7 @@ __all__ = [
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionEvent",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
