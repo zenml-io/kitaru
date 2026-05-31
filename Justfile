@@ -63,11 +63,13 @@ zizmor:
 audit:
     awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
-# Check links in markdown files — offline only (requires lychee: brew install lychee)
+# Check raw Markdown links — offline only (requires lychee: brew install lychee).
+# Source MDX uses docs-app-root routes such as /guides/...; site-build validates
+# those after materializing public /docs/... links, where lychee can resolve them.
 links:
     lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 
-# Check links including external URLs (slow, used in CI)
+# Check raw Markdown links including external URLs (slow, used in CI)
 links-external:
     lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 

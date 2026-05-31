@@ -936,7 +936,14 @@ class KitaruGraphRunner:
                 "version": options.version,
             }
         )
-        return self._filter_kwargs_for_graph_method(method_name, kwargs)
+        required_kwargs = {"stream_mode", "version"}
+        if options.subgraphs:
+            required_kwargs.add("subgraphs")
+        return self._filter_stream_kwargs_for_graph_method(
+            method_name,
+            kwargs,
+            required_kwargs=required_kwargs,
+        )
 
     def _filter_kwargs_for_graph_method(
         self, method_name: str, kwargs: dict[str, Any]
@@ -944,6 +951,30 @@ class KitaruGraphRunner:
         allowed_kwargs = self._allowed_kwargs_for_graph_method(method_name)
         if allowed_kwargs is None:
             return kwargs
+        return {key: value for key, value in kwargs.items() if key in allowed_kwargs}
+
+    def _filter_stream_kwargs_for_graph_method(
+        self,
+        method_name: str,
+        kwargs: dict[str, Any],
+        *,
+        required_kwargs: set[str],
+    ) -> dict[str, Any]:
+        allowed_kwargs = self._allowed_kwargs_for_graph_method(method_name)
+        if allowed_kwargs is None:
+            return kwargs
+        missing_required = sorted(required_kwargs - allowed_kwargs)
+        if missing_required:
+            arguments = ", ".join(f"`{name}`" for name in missing_required)
+            raise KitaruUsageError(
+                f"Wrapped LangGraph object cannot be streamed because "
+                f"`{method_name}(...)` does not accept required streaming "
+                f"keyword argument(s): {arguments}. Kitaru needs these "
+                f"arguments before graph execution so it can request "
+                f"LangGraph's v2 stream format and reconstruct the durable "
+                f"result from root `values` events. Upgrade or wrap the graph "
+                f"method so it accepts those keywords, or exposes `**kwargs`."
+            )
         return {key: value for key, value in kwargs.items() if key in allowed_kwargs}
 
     def _allowed_kwargs_for_graph_method(self, method_name: str) -> set[str] | None:
@@ -1346,6 +1377,7 @@ class KitaruGraphRunner:
                 include={
                     "default_modes",
                     "include_raw_payloads",
+                    "include_message_text_deltas",
                     "include_custom_payload",
                     "allow_debug",
                     "max_display_chars",

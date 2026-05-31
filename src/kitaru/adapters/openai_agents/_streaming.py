@@ -3,6 +3,12 @@
 from typing import Any
 
 import kitaru.events as kitaru_events
+from kitaru.adapters._streaming_utils import (
+    BaseStreamPublisher,
+    clip_stream_text,
+    first_string,
+    safe_string,
+)
 
 OPENAI_STREAM_STARTED = "openai_agents.stream.started"
 OPENAI_STREAM_EVENT = "openai_agents.stream.event"
@@ -36,7 +42,7 @@ _RUN_ITEM_LABELS = {
 }
 
 
-class OpenAIStreamPublisher:
+class OpenAIStreamPublisher(BaseStreamPublisher):
     """Normalize OpenAI stream events and publish Kitaru live events.
 
     Live events are observability only. Every publishing operation is best
@@ -44,58 +50,34 @@ class OpenAIStreamPublisher:
     OpenAI run result.
     """
 
-    def __init__(self, *, agent_name: str) -> None:
-        self._agent_name = agent_name
+    _started_kind = OPENAI_STREAM_STARTED
+    _completed_kind = OPENAI_STREAM_COMPLETED
+    _failed_kind = OPENAI_STREAM_FAILED
+    _normalization_failed_kind = OPENAI_STREAM_EVENT
+    _started_display = "OpenAI Agents stream started"
+    _completed_display_prefix = "OpenAI Agents stream completed"
+    _failed_display_prefix = "OpenAI Agents stream failed"
+    _normalization_failed_display = "OpenAI stream event"
+    _error_message_limit = _MAX_ERROR_CHARS
 
-    def started(self) -> None:
-        self._publish(
-            OPENAI_STREAM_STARTED,
-            {
-                "adapter": "openai_agents",
-                "agent_name": self._agent_name,
-                "category": "lifecycle",
-                "display": "OpenAI Agents stream started",
-            },
+    def __init__(self, *, agent_name: str, include_text_deltas: bool = False) -> None:
+        super().__init__(
+            publish=lambda *args, **kwargs: kitaru_events.publish(*args, **kwargs)
         )
+        self._agent_name = agent_name
+        self._include_text_deltas = include_text_deltas
 
     def event(self, event: Any) -> None:
-        try:
-            payload = self.normalize_event(event)
-        except Exception:
-            payload = self._base_payload(
-                category="stream_event_normalization_failed",
-                display="OpenAI stream event",
-                event_type=type(event).__name__,
-            )
-        self._publish(OPENAI_STREAM_EVENT, payload)
+        self._publish_stream_item(event)
 
     def completed(self, *, status: str) -> None:
-        self._publish(
-            OPENAI_STREAM_COMPLETED,
-            {
-                "adapter": "openai_agents",
-                "agent_name": self._agent_name,
-                "category": "lifecycle",
-                "display": f"OpenAI Agents stream completed: {status}",
-                "status": status,
-            },
-            flush=True,
-        )
+        self._publish_completed(status=status)
 
     def failed(self, error: BaseException) -> None:
-        message = _safe_exception_message(error)
-        self._publish(
-            OPENAI_STREAM_FAILED,
-            {
-                "adapter": "openai_agents",
-                "agent_name": self._agent_name,
-                "category": "lifecycle",
-                "display": f"OpenAI Agents stream failed: {message}",
-                "error_type": type(error).__name__,
-                "message": message,
-            },
-            flush=True,
-        )
+        self._publish_failed(error)
+
+    def _normalize_publishable(self, item: Any) -> tuple[str, dict[str, Any]]:
+        return OPENAI_STREAM_EVENT, self.normalize_event(item)
 
     def normalize_event(self, event: Any) -> dict[str, Any]:
         category = _event_category(event)
@@ -105,7 +87,7 @@ class OpenAIStreamPublisher:
             return self._normalize_run_item_stream_event(event)
         if category == "agent_updated_stream_event":
             return self._normalize_agent_updated_stream_event(event)
-        event_type = _safe_string(getattr(event, "type", None)) or type(event).__name__
+        event_type = safe_string(getattr(event, "type", None)) or type(event).__name__
         return self._base_payload(
             category=category,
             display=event_type,
@@ -114,27 +96,31 @@ class OpenAIStreamPublisher:
 
     def _normalize_raw_response_event(self, event: Any) -> dict[str, Any]:
         data = getattr(event, "data", None)
-        event_type = _safe_string(getattr(data, "type", None)) or type(data).__name__
-        text_delta = _safe_string(getattr(data, "delta", None))
+        event_type = safe_string(getattr(data, "type", None)) or type(data).__name__
+        text_delta = safe_string(getattr(data, "delta", None))
         payload = self._base_payload(
             category="raw_response_event",
-            display=_clip(text_delta, _MAX_DISPLAY_CHARS) if text_delta else event_type,
+            display=(
+                clip_stream_text(text_delta, _MAX_DISPLAY_CHARS)
+                if self._include_text_deltas and text_delta
+                else event_type
+            ),
             event_type=event_type,
         )
-        if text_delta is not None:
-            payload["text_delta"] = _clip(text_delta, _MAX_TEXT_DELTA_CHARS)
+        if self._include_text_deltas and text_delta is not None:
+            payload["text_delta"] = clip_stream_text(text_delta, _MAX_TEXT_DELTA_CHARS)
         return payload
 
     def _normalize_run_item_stream_event(self, event: Any) -> dict[str, Any]:
-        name = _safe_string(getattr(event, "name", None)) or "run_item"
+        name = safe_string(getattr(event, "name", None)) or "run_item"
         item = getattr(event, "item", None)
-        item_type = _safe_string(getattr(item, "type", None)) or type(item).__name__
-        item_name = _first_string(
+        item_type = safe_string(getattr(item, "type", None)) or type(item).__name__
+        item_name = first_string(
             getattr(item, "name", None),
             getattr(item, "tool_name", None),
             getattr(getattr(item, "raw_item", None), "name", None),
         )
-        call_id = _first_string(
+        call_id = first_string(
             getattr(item, "call_id", None),
             getattr(getattr(item, "raw_item", None), "call_id", None),
         )
@@ -152,7 +138,7 @@ class OpenAIStreamPublisher:
 
     def _normalize_agent_updated_stream_event(self, event: Any) -> dict[str, Any]:
         new_agent = getattr(event, "new_agent", None)
-        new_agent_name = _safe_string(getattr(new_agent, "name", None))
+        new_agent_name = safe_string(getattr(new_agent, "name", None))
         display = (
             f"Agent updated: {new_agent_name}" if new_agent_name else "Agent updated"
         )
@@ -175,19 +161,12 @@ class OpenAIStreamPublisher:
             **fields,
         }
 
-    @staticmethod
-    def _publish(kind: str, payload: dict[str, Any], *, flush: bool = False) -> None:
-        try:
-            kitaru_events.publish(kind, payload, flush=flush)
-        except Exception:
-            return
-
 
 def _event_category(event: Any) -> str:
-    value = _safe_string(getattr(event, "type", None))
+    value = safe_string(getattr(event, "type", None))
     if value:
         return value
-    value = _safe_string(getattr(event, "name", None))
+    value = safe_string(getattr(event, "name", None))
     if value in {
         "raw_response_event",
         "run_item_stream_event",
@@ -201,32 +180,3 @@ def _run_item_display(name: str, item_name: str | None, call_id: str | None) -> 
     label = _RUN_ITEM_LABELS.get(name, name.replace("_", " ").strip().capitalize())
     detail = item_name or call_id
     return f"{label}: {detail}" if detail else label
-
-
-def _first_string(*values: Any) -> str | None:
-    for value in values:
-        text = _safe_string(value)
-        if text is not None:
-            return text
-    return None
-
-
-def _safe_string(value: Any) -> str | None:
-    if isinstance(value, str):
-        return value
-    return None
-
-
-def _safe_exception_message(error: BaseException) -> str:
-    try:
-        message = str(error)
-    except Exception:
-        message = ""
-    return _clip(message, _MAX_ERROR_CHARS) or type(error).__name__
-
-
-def _clip(value: str, limit: int) -> str:
-    collapsed = " ".join(value.split())
-    if len(collapsed) <= limit:
-        return collapsed
-    return collapsed[: limit - 3].rstrip() + "..."

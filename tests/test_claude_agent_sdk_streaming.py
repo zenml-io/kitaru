@@ -312,6 +312,26 @@ def test_stream_cache_key_differs_from_non_stream_cache_key(
     assert stream_key != run_key
 
 
+def test_stream_cache_key_varies_by_text_delta_policy(
+    claude_adapter: types.ModuleType,
+) -> None:
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+    default_runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    text_runner = claude_adapter.KitaruClaudeRunner(
+        name="claude",
+        capture=claude_adapter.ClaudeCapturePolicy(include_stream_text_deltas=True),
+    )
+
+    default_key = default_runner._invocation_cache_key(
+        request, options=None, surface="stream"
+    )
+    text_key = text_runner._invocation_cache_key(
+        request, options=None, surface="stream"
+    )
+
+    assert default_key != text_key
+
+
 def test_successful_fake_sdk_stream_event_order_and_safe_payloads(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,
@@ -375,9 +395,9 @@ def test_successful_fake_sdk_stream_event_order_and_safe_payloads(
     text_payload = next(
         payload for payload in payloads if payload["category"] == "text_delta"
     )
-    assert text_payload["text_delta"].startswith("hello")
-    assert len(text_payload["text_delta"]) <= 240
-    assert text_payload["text_delta"].endswith("...")
+    assert "text_delta" not in text_payload
+    assert text_payload["display"] == "Claude text delta"
+    assert long_text not in repr(text_payload)
 
     tool_payload = next(
         payload for payload in payloads if payload["category"] == "tool_input_delta"
@@ -404,6 +424,36 @@ def test_successful_fake_sdk_stream_event_order_and_safe_payloads(
     assert secret not in all_payloads
     assert "FINAL RESULT SHOULD NOT BE IN LIVE PAYLOAD" not in all_payloads
     assert "STRUCTURED_OUTPUT_SECRET" not in all_payloads
+
+
+def test_stream_text_delta_payload_requires_explicit_opt_in(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    fake_sdk.__dict__["messages"][:] = [
+        fake_sdk.StreamEvent(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "visible when opted in"},
+            }
+        ),
+        fake_sdk.ResultMessage(result="done"),
+    ]
+
+    _run_stream_direct(
+        claude_adapter,
+        monkeypatch,
+        capture=claude_adapter.ClaudeCapturePolicy(include_stream_text_deltas=True),
+    )
+
+    text_payload = next(
+        payload for _, payload, _ in published if payload["category"] == "text_delta"
+    )
+    assert text_payload["text_delta"] == "visible when opted in"
+    assert text_payload["display"] == "visible when opted in"
 
 
 def test_tool_input_delta_does_not_reuse_tool_state_after_boundaries(
@@ -571,11 +621,41 @@ def test_error_result_message_does_not_leak_result_to_live_payloads(
     failed_payload = payloads[-1]
     assert failed_payload["category"] == "lifecycle"
     assert failed_payload["error_type"] == "ClaudeResultMessageError"
-    assert failed_payload["message"].startswith(
-        "Claude Agent SDK returned an error ResultMessage"
+    assert failed_payload["message"] == (
+        "Claude Agent SDK returned an error ResultMessage; subtype='success'"
     )
-    assert "result=" not in failed_payload["message"]
-    assert "result=" not in failed_payload["display"]
+    assert failed_payload["display"] == (
+        "Claude Agent SDK stream failed: Claude Agent SDK returned an error "
+        "ResultMessage; subtype='success'"
+    )
+
+
+def test_failed_live_event_uses_safe_live_message_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[tuple[str, dict[str, Any], bool]] = []
+
+    class SafeError(RuntimeError):
+        safe_live_message = "Safe retryable provider failure"
+
+        def __str__(self) -> str:
+            return "SECRET provider payload"
+
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append((kind, payload, flush)),
+    )
+    publisher = streaming_module.ClaudeStreamPublisher(runner_name="claude")
+
+    publisher.failed(SafeError())
+
+    payload = published[0][1]
+    assert payload["message"] == "Safe retryable provider failure"
+    assert "SECRET provider payload" not in repr(payload)
 
 
 def test_normalization_failure_does_not_stop_sdk_draining(

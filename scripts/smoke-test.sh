@@ -242,6 +242,8 @@ run_test "execution event watcher API imports" \
     $UV_RUN python -c 'from kitaru import ExecutionEvent, KitaruClient; fields = ExecutionEvent.__dataclass_fields__; assert callable(KitaruClient); assert "cursor" in fields and "correlation_id" in fields and "stream_id" not in fields and "timestamp" not in fields'
 run_test "Claude Agent SDK stream API imports" \
     $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_EVENT_KINDS, CLAUDE_STREAM_FAILED, CLAUDE_STREAM_STARTED, CLAUDE_STREAM_TERMINAL_EVENT_KINDS, KitaruClaudeRunner; assert hasattr(KitaruClaudeRunner, "run_stream"); assert hasattr(KitaruClaudeRunner, "run_stream_sync"); assert CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"; assert CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"; assert CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"; assert CLAUDE_STREAM_FAILED == "claude_agent_sdk.stream.failed"; assert CLAUDE_STREAM_EVENT_KINDS == (CLAUDE_STREAM_STARTED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED); assert CLAUDE_STREAM_TERMINAL_EVENT_KINDS == (CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED)'
+run_test "OpenAI Agents stream API imports" \
+    $UV_RUN python -c 'from kitaru.adapters.openai_agents import OPENAI_STREAM_COMPLETED, OPENAI_STREAM_EVENT, OPENAI_STREAM_EVENT_KINDS, OPENAI_STREAM_FAILED, OPENAI_STREAM_STARTED, OPENAI_STREAM_TERMINAL_EVENT_KINDS, KitaruRunner; assert hasattr(KitaruRunner, "run_stream"); assert hasattr(KitaruRunner, "run_stream_sync"); assert OPENAI_STREAM_STARTED == "openai_agents.stream.started"; assert OPENAI_STREAM_EVENT == "openai_agents.stream.event"; assert OPENAI_STREAM_COMPLETED == "openai_agents.stream.completed"; assert OPENAI_STREAM_FAILED == "openai_agents.stream.failed"; assert OPENAI_STREAM_EVENT_KINDS == (OPENAI_STREAM_STARTED, OPENAI_STREAM_EVENT, OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED); assert OPENAI_STREAM_TERMINAL_EVENT_KINDS == (OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED)'
 
 # ---------------------------------------------------------------------------
 # Clear state
@@ -406,8 +408,11 @@ run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
         $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+    run_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 else
     skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" "OPENAI_API_KEY not set; provider credentials required for OpenAI Agents streaming example"
 fi
 
 section_header "Claude Agent SDK adapter"
@@ -420,8 +425,13 @@ if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
         timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py \
             --prompt "Explain one Kitaru checkpoint in one short sentence. Do not use tools, Bash, or files." \
             --max-turns 1
+    run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py \
+            --prompt "Explain one Kitaru streamed checkpoint in one short sentence. Do not use tools, Bash, or files." \
+            --max-turns 1
 else
     skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then

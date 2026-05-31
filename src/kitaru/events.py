@@ -193,8 +193,23 @@ def _build_event_envelope(
         "kitaru": _checkpoint_metadata(scope, correlation_id=correlation_id)
     }
     if fields:
-        envelope.update(dict(fields))
+        envelope.update(
+            {key: value for key, value in dict(fields).items() if key != "kitaru"}
+        )
     return envelope
+
+
+def _serialize_live_event_envelope(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Serialize a live event without letting user fields erase metadata."""
+    serialized: dict[str, Any] = {}
+    if "kitaru" in envelope:
+        serialized["kitaru"] = to_json_safe(envelope["kitaru"], include_repr=False)
+
+    for key, value in envelope.items():
+        if key == "kitaru":
+            continue
+        serialized[key] = to_json_safe(value, include_repr=False)
+    return serialized
 
 
 def _publish_to_zenml_streaming(
@@ -210,7 +225,7 @@ def _publish_to_zenml_streaming(
         return
 
     streaming.publish(
-        to_json_safe(envelope),
+        _serialize_live_event_envelope(envelope),
         kind=kind,
         correlation_id=correlation_id,
         index=index,

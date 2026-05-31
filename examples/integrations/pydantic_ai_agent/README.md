@@ -7,14 +7,14 @@ durability and observability around it — no rewrite needed.
 
 ```bash
 cd examples/integrations/pydantic_ai_agent
-uv pip install 'kitaru[local,pydantic-ai,openai]'   # Install Kitaru with local runtime + PydanticAI + OpenAI
-kitaru init                                  # Initialize a Kitaru project
+uv sync --extra local --extra pydantic-ai --extra openai
+uv run kitaru init
 ```
 
 Then run the no-key adapter example:
 
 ```bash
-python pydantic_ai_adapter.py       # wrap an agent, keep replay boundary
+uv run python pydantic_ai_adapter.py       # wrap an agent, keep replay boundary
 ```
 
 To watch real PydanticAI stream events, set provider credentials and run the
@@ -22,7 +22,7 @@ streaming example:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python pydantic_ai_streaming.py
+uv run python pydantic_ai_streaming.py
 ```
 
 You can override the streaming model with `PYDANTIC_AI_MODEL`; it defaults to

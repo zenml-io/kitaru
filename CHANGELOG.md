@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added OpenAI Agents live streaming via `KitaruRunner.run_stream(...)` and `run_stream_sync(...)`, publishing best-effort `openai_agents.stream.*` events while preserving `OpenAIRunResult` as the durable checkpoint output, plus a provider-key-gated runnable example at `examples/integrations/openai_agents_agent/openai_agents_streaming.py`.
 - Added LangGraph graph-call streaming via `KitaruGraphRunner.stream(...)` and `astream(...)`, publishing best-effort `langgraph.stream.*` events while preserving `LangGraphRunResult` as the durable checkpoint output, plus a provider-neutral runnable example at `examples/integrations/langgraph_agent/langgraph_streaming.py`.
 - Added Claude Agent SDK live streaming via `KitaruClaudeRunner.run_stream(...)` and `run_stream_sync(...)`, publishing best-effort `claude_agent_sdk.stream.*` events while preserving `ClaudeRunResult` as the durable checkpoint output.
 - Added PydanticAI live stream events for `KitaruAgent` runs: the adapter now emits `pydantic_ai.stream.started`, `.event`, `.completed`, and `.failed` updates for watched PydanticAI streams, plus a provider-key-gated runnable example at `examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py`.

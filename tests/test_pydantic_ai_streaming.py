@@ -98,6 +98,12 @@ def test_public_adapter_exports_pydantic_ai_stream_constants() -> None:
     assert kp.PYDANTIC_AI_STREAM_FAILED in kp.PYDANTIC_AI_STREAM_TERMINAL_EVENT_KINDS
 
 
+def test_capture_policy_defaults_to_no_stream_transcripts() -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+
+    assert CapturePolicy().save_stream_transcripts is False
+
+
 def test_publisher_normalizes_agent_name() -> None:
     from kitaru.adapters.pydantic_ai._streaming import PydanticAIStreamPublisher
 
@@ -288,6 +294,33 @@ def test_normalizer_omits_private_content_and_clips_text() -> None:
     assert "tool result should not leak" not in str(payload)
 
 
+def test_stream_transcripts_serialization_fallback_omits_raw_repr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _model as model_module
+
+    class SecretEvent:
+        def __repr__(self) -> str:
+            return "RAW SECRET STREAM EVENT"
+
+    def fail_dump(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("cannot serialize")
+
+    monkeypatch.setattr(
+        model_module,
+        "_MODEL_STREAM_EVENT_ADAPTER",
+        SimpleNamespace(dump_python=fail_dump),
+    )
+
+    serialized = model_module._serialize_stream_event(SecretEvent())
+
+    assert serialized == {
+        "event_type": "SecretEvent",
+        "serialization_error": "stream_event_serialization_failed",
+    }
+    assert "RAW SECRET STREAM EVENT" not in repr(serialized)
+
+
 def test_save_stream_transcripts_false_omits_text_delta() -> None:
     from kitaru.adapters.pydantic_ai._streaming import PydanticAIStreamPublisher
 
@@ -468,7 +501,11 @@ async def test_model_request_stream_publishes_events_and_keeps_transcript(
     )
     model = KitaruModel(
         TestModel(),
-        capture=CapturePolicy(save_prompts=False, save_responses=False),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
         agent_name="streamer",
     )
     monkeypatch.setattr(model, "_should_track", lambda: True)

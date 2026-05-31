@@ -374,6 +374,7 @@ class KitaruRunner:
             agent=prepared_agent,
             run_config=run_config,
             context_cache_identity=context_cache_identity,
+            surface="run",
             body=_body,
         )
 
@@ -404,6 +405,7 @@ class KitaruRunner:
             agent=prepared_agent,
             run_config=run_config,
             context_cache_identity=context_cache_identity,
+            surface="run",
             body=_body,
         )
 
@@ -434,6 +436,8 @@ class KitaruRunner:
             agent=prepared_agent,
             run_config=run_config,
             context_cache_identity=context_cache_identity,
+            surface="stream",
+            stream_identity=self._stream_cache_identity(),
             body=_body,
         )
 
@@ -464,6 +468,8 @@ class KitaruRunner:
             agent=prepared_agent,
             run_config=run_config,
             context_cache_identity=context_cache_identity,
+            surface="stream",
+            stream_identity=self._stream_cache_identity(),
             body=_body,
         )
 
@@ -474,7 +480,9 @@ class KitaruRunner:
         agent: Any,
         run_config: Any,
         context_cache_identity: Any,
+        surface: str,
         body: Callable[[], Coroutine[Any, Any, OpenAIRunResult]],
+        stream_identity: dict[str, Any] | None = None,
     ) -> OpenAIRunResult:
         if is_inside_flow() and not is_inside_checkpoint():
             return await run_async_in_checkpoint(
@@ -486,6 +494,8 @@ class KitaruRunner:
                     agent=agent,
                     run_config=run_config,
                     context_cache_identity=context_cache_identity,
+                    surface=surface,
+                    stream_identity=stream_identity,
                 ),
             )
         return await body()
@@ -497,7 +507,9 @@ class KitaruRunner:
         agent: Any,
         run_config: Any,
         context_cache_identity: Any,
+        surface: str,
         body: Callable[[], OpenAIRunResult],
+        stream_identity: dict[str, Any] | None = None,
     ) -> OpenAIRunResult:
         if is_inside_flow() and not is_inside_checkpoint():
             return run_sync_in_checkpoint(
@@ -509,6 +521,8 @@ class KitaruRunner:
                     agent=agent,
                     run_config=run_config,
                     context_cache_identity=context_cache_identity,
+                    surface=surface,
+                    stream_identity=stream_identity,
                 ),
             )
         return body()
@@ -560,7 +574,10 @@ class KitaruRunner:
         context: Any | None,
     ) -> OpenAIRunResult:
         sdk_input = await self._sdk_input_async(request, agent=agent)
-        publisher = OpenAIStreamPublisher(agent_name=self._name)
+        publisher = OpenAIStreamPublisher(
+            agent_name=self._name,
+            include_text_deltas=self._capture.include_stream_text_deltas,
+        )
         with tracker_scope(self._name) as tracker:
             publisher.started()
             try:
@@ -591,7 +608,10 @@ class KitaruRunner:
         context: Any | None,
     ) -> OpenAIRunResult:
         sdk_input = self._sdk_input_sync(request, agent=agent)
-        publisher = OpenAIStreamPublisher(agent_name=self._name)
+        publisher = OpenAIStreamPublisher(
+            agent_name=self._name,
+            include_text_deltas=self._capture.include_stream_text_deltas,
+        )
         with tracker_scope(self._name) as tracker:
             publisher.started()
             try:
@@ -689,18 +709,34 @@ class KitaruRunner:
         agent: Any,
         run_config: Any,
         context_cache_identity: Any,
+        surface: str,
+        stream_identity: dict[str, Any] | None = None,
     ) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "adapter": "openai_agents",
             "checkpoint_strategy": "runner_call",
+            "surface": surface,
             "agents_sdk_version": agents_sdk_version(),
             "agent": self._agent_cache_identity(agent),
             "run_config": stable_cache_identity(run_config),
             "request": request.model_dump(mode="json"),
+            "capture": {
+                "save_interruption_payloads": self._capture.save_interruption_payloads,
+                "save_run_state": self._capture.save_run_state,
+                "save_final_output": self._capture.save_final_output,
+            },
         }
+        if stream_identity is not None:
+            payload["stream"] = stream_identity
         if context_cache_identity is not None:
             payload["context"] = context_cache_identity
         return checkpoint_cache_key(payload)
+
+    def _stream_cache_identity(self) -> dict[str, Any]:
+        return {
+            "sdk_surface": "Runner.run_streamed",
+            "include_stream_text_deltas": self._capture.include_stream_text_deltas,
+        }
 
     def _context_cache_identity(self, context: Any | None) -> Any:
         if context is None:

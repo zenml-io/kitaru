@@ -344,7 +344,9 @@ def test_stream_sync_runs_one_invocation_and_filters_raw_stream_events(
         claude_adapter.CLAUDE_STREAM_EVENT,
         claude_adapter.CLAUDE_STREAM_COMPLETED,
     ]
-    assert published[1][1]["text_delta"] == "hello"
+    assert "text_delta" not in published[1][1]
+    assert published[1][1]["display"] == "Claude text delta"
+    assert "hello" not in repr(published[1][1])
     message_payload = cast(
         dict[str, object],
         next(payload for payload in saved_payloads if isinstance(payload, dict)),

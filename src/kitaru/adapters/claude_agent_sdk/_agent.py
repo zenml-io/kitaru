@@ -349,7 +349,10 @@ class KitaruClaudeRunner:
         return _InvocationPlan(
             options=options,
             stream_warnings=stream_warnings,
-            stream_publisher=ClaudeStreamPublisher(runner_name=self._name),
+            stream_publisher=ClaudeStreamPublisher(
+                runner_name=self._name,
+                include_text_deltas=self._capture.include_stream_text_deltas,
+            ),
             cache_surface="stream",
         )
 
@@ -907,6 +910,10 @@ class KitaruClaudeRunner:
         }
         if surface != "run":
             payload["surface"] = surface
+        if surface == "stream":
+            payload["stream"] = {
+                "include_stream_text_deltas": self._capture.include_stream_text_deltas,
+            }
         return checkpoint_cache_key(payload)
 
     def _require_invocation_scope(self, api_name: str) -> None:

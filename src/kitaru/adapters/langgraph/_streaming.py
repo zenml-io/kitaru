@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any, cast, get_args
 
 import kitaru.events as kitaru_events
+from kitaru.adapters._streaming_utils import (
+    BaseStreamPublisher,
+    clip_stream_text,
+    safe_string,
+)
 from kitaru.errors import KitaruUsageError
 
 from ._policy import LangGraphStreamPolicy
@@ -113,12 +118,23 @@ class LangGraphStreamStats:
         }
 
 
-class LangGraphStreamPublisher:
+class LangGraphStreamPublisher(BaseStreamPublisher):
     """Normalize LangGraph v2 stream parts and publish Kitaru live events.
 
     Live events are observation-only. Publishing is best effort: if the runtime
     cannot publish from the current context, graph execution still continues.
     """
+
+    _started_kind = LANGGRAPH_STREAM_STARTED
+    _completed_kind = LANGGRAPH_STREAM_COMPLETED
+    _failed_kind = LANGGRAPH_STREAM_FAILED
+    _normalization_failed_kind = LANGGRAPH_STREAM_DEBUG
+    _started_display = "LangGraph stream started"
+    _completed_display_prefix = "LangGraph stream completed"
+    _failed_display_prefix = "LangGraph stream failed"
+    _normalization_failed_category = "stream_part_normalization_failed"
+    _normalization_failed_display = "LangGraph stream part"
+    _error_message_limit = _MAX_ERROR_CHARS
 
     def __init__(
         self,
@@ -128,61 +144,32 @@ class LangGraphStreamPublisher:
         policy: LangGraphStreamPolicy,
         options: LangGraphStreamOptions,
     ) -> None:
+        super().__init__(
+            publish=lambda *args, **kwargs: kitaru_events.publish(*args, **kwargs)
+        )
         self._graph_name = graph_name
         self._thread_id = thread_id
         self._policy = policy
         self._options = options
 
-    def started(self) -> None:
-        self._publish(
-            LANGGRAPH_STREAM_STARTED,
-            self._base_payload(
-                category="lifecycle",
-                display="LangGraph stream started",
-            ),
-        )
-
     def part(self, part: Any) -> None:
-        try:
-            kind, payload = self.normalize_part(part)
-        except Exception:
-            kind = LANGGRAPH_STREAM_DEBUG
-            payload = self._base_payload(
-                category="stream_part_normalization_failed",
-                mode="debug",
-                display="LangGraph stream part",
-                event_type=type(part).__name__,
-            )
-        self._publish(kind, payload)
+        self._publish_stream_item(part)
 
     def completed(self, *, status: str, stats: LangGraphStreamStats) -> None:
-        self._publish(
-            LANGGRAPH_STREAM_COMPLETED,
-            {
-                **self._base_payload(
-                    category="lifecycle",
-                    display=f"LangGraph stream completed: {status}",
-                ),
-                "status": status,
-                **stats.metadata(),
-            },
-            flush=True,
-        )
+        self._publish_completed(status=status, **stats.metadata())
 
     def failed(self, error: BaseException, *, stats: LangGraphStreamStats) -> None:
-        message = _safe_exception_message(error)
-        self._publish(
-            LANGGRAPH_STREAM_FAILED,
-            {
-                **self._base_payload(
-                    category="lifecycle",
-                    display=f"LangGraph stream failed: {message}",
-                ),
-                "error_type": type(error).__name__,
-                "message": message,
-                **stats.metadata(),
-            },
-            flush=True,
+        self._publish_failed(error, **stats.metadata())
+
+    def _normalize_publishable(self, item: Any) -> tuple[str, dict[str, Any]]:
+        return self.normalize_part(item)
+
+    def _normalization_failed_payload(self, item: Any) -> dict[str, Any]:
+        return self._base_payload(
+            category="stream_part_normalization_failed",
+            mode="debug",
+            display="LangGraph stream part",
+            event_type=type(item).__name__,
         )
 
     def normalize_part(self, part: Any) -> tuple[str, dict[str, Any]]:
@@ -196,7 +183,7 @@ class LangGraphStreamPublisher:
                     event_type=type(part).__name__,
                 ),
             )
-        mode = _safe_string(part.get("type"))
+        mode = safe_string(part.get("type"))
         if mode not in _MODE_EVENT_KINDS:
             return (
                 LANGGRAPH_STREAM_DEBUG,
@@ -233,7 +220,7 @@ class LangGraphStreamPublisher:
             chunk,
             limit=self._policy.max_display_chars,
         )
-        message_type = _safe_string(getattr(chunk, "type", None)) or _safe_string(
+        message_type = safe_string(getattr(chunk, "type", None)) or safe_string(
             _mapping_get(chunk, "type")
         )
         safe_metadata = _safe_metadata(
@@ -243,14 +230,18 @@ class LangGraphStreamPublisher:
         payload = self._base_payload(
             category="stream_part",
             mode="messages",
-            display=_clip(
-                text_delta or message_type or "Message chunk",
+            display=clip_stream_text(
+                text_delta
+                if self._policy.include_message_text_deltas and text_delta
+                else message_type or "Message chunk",
                 self._policy.max_display_chars,
             ),
             namespace=_namespace(part),
         )
-        if text_delta is not None:
-            payload["text_delta"] = _clip(text_delta, self._policy.max_display_chars)
+        if self._policy.include_message_text_deltas and text_delta is not None:
+            payload["text_delta"] = clip_stream_text(
+                text_delta, self._policy.max_display_chars
+            )
         if message_type is not None:
             payload["message_type"] = message_type
         if safe_metadata:
@@ -284,7 +275,9 @@ class LangGraphStreamPublisher:
         payload = self._base_payload(
             category="stream_part",
             mode="updates",
-            display=_clip(_updates_display(node_names), self._policy.max_display_chars),
+            display=clip_stream_text(
+                _updates_display(node_names), self._policy.max_display_chars
+            ),
             namespace=_namespace(part),
             node_count=node_count,
             node_names=node_names,
@@ -298,18 +291,27 @@ class LangGraphStreamPublisher:
         return payload
 
     def _normalize_custom(self, part: Mapping[str, Any], data: Any) -> dict[str, Any]:
-        safe_data = redact_config(
-            _bounded_json_safe(data, string_limit=self._policy.max_display_chars)
-        )
-        payload = self._base_payload(
+        if self._policy.include_custom_payload:
+            safe_data = redact_config(
+                _bounded_json_safe(data, string_limit=self._policy.max_display_chars)
+            )
+            payload = self._base_payload(
+                category="stream_part",
+                mode="custom",
+                display=_display_text(safe_data, limit=self._policy.max_display_chars),
+                namespace=_namespace(part),
+                custom_summary=_structural_summary(safe_data),
+                custom=safe_data,
+            )
+            return payload
+
+        return self._base_payload(
             category="stream_part",
             mode="custom",
-            display=_display_text(safe_data, limit=self._policy.max_display_chars),
+            display="Custom stream payload",
             namespace=_namespace(part),
+            custom_summary=_structural_summary(data, include_keys=False),
         )
-        if self._policy.include_custom_payload:
-            payload["custom"] = safe_data
-        return payload
 
     def _normalize_structural(
         self,
@@ -321,7 +323,7 @@ class LangGraphStreamPublisher:
         payload = self._base_payload(
             category="stream_part",
             mode=mode,
-            display=_clip(
+            display=clip_stream_text(
                 f"LangGraph {mode}: {summary['summary']}",
                 self._policy.max_display_chars,
             ),
@@ -366,13 +368,6 @@ class LangGraphStreamPublisher:
         if mode is not None:
             payload["mode"] = mode
         return payload
-
-    @staticmethod
-    def _publish(kind: str, payload: dict[str, Any], *, flush: bool = False) -> None:
-        try:
-            kitaru_events.publish(kind, payload, flush=flush)
-        except Exception:
-            return
 
 
 def resolve_stream_options(
@@ -474,7 +469,7 @@ def _message_content_text(chunk: Any, *, limit: int) -> str | None:
     if content is None:
         return None
     if isinstance(content, str):
-        return _clip(content, limit)
+        return clip_stream_text(content, limit)
     if isinstance(content, list | tuple):
         pieces: list[str] = []
         current_length = 0
@@ -495,8 +490,8 @@ def _message_content_text(chunk: Any, *, limit: int) -> str | None:
             current_length += len(pieces[-1])
             if current_length > limit:
                 break
-        return _clip("".join(pieces), limit) if pieces else None
-    return _clip(str(content), limit)
+        return clip_stream_text("".join(pieces), limit) if pieces else None
+    return clip_stream_text(str(content), limit)
 
 
 def _safe_metadata(metadata: Any, *, string_limit: int) -> dict[str, Any]:
@@ -509,12 +504,6 @@ def _safe_metadata(metadata: Any, *, string_limit: int) -> dict[str, Any]:
     return safe
 
 
-def _safe_string(value: Any) -> str | None:
-    if isinstance(value, str):
-        return value
-    return None
-
-
 def _updates_display(node_names: list[str]) -> str:
     if not node_names:
         return "Graph update"
@@ -523,17 +512,19 @@ def _updates_display(node_names: list[str]) -> str:
     return f"Graph updates: {', '.join(node_names)}"
 
 
-def _structural_summary(value: Any) -> dict[str, Any]:
+def _structural_summary(value: Any, *, include_keys: bool = True) -> dict[str, Any]:
     if isinstance(value, Mapping):
         key_count = _safe_len(value)
-        keys = _first_string_labels(value)
-        return {
+        summary: dict[str, Any] = {
             "python_type": type(value).__qualname__,
             "key_count": key_count,
-            "keys": keys,
-            "keys_truncated": max(key_count - len(keys), 0),
             "summary": f"mapping with {key_count} keys",
         }
+        if include_keys:
+            keys = _first_string_labels(value)
+            summary["keys"] = keys
+            summary["keys_truncated"] = max(key_count - len(keys), 0)
+        return summary
     if isinstance(value, list | tuple):
         return {
             "python_type": type(value).__qualname__,
@@ -551,10 +542,10 @@ def _display_text(value: Any, *, limit: int) -> str:
         for key in ("message", "event", "status", "type"):
             nested = value.get(key)
             if isinstance(nested, str):
-                return _clip(nested, limit)
+                return clip_stream_text(nested, limit)
     if isinstance(value, str):
-        return _clip(value, limit)
-    return _clip(repr(value), limit)
+        return clip_stream_text(value, limit)
+    return clip_stream_text(repr(value), limit)
 
 
 def _first_mapping_items(value: Mapping[Any, Any]) -> list[tuple[Any, Any]]:
@@ -599,7 +590,7 @@ def _bounded_json_safe(
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
-        return _clip(value, string_limit)
+        return clip_stream_text(value, string_limit)
     if isinstance(value, Mapping):
         item_count = _safe_len(value)
         bounded: dict[str, Any] = {}
@@ -628,7 +619,7 @@ def _bounded_json_safe(
         return bounded_items
     return {
         "python_type": type(value).__qualname__,
-        "repr": _clip(repr(value), string_limit),
+        "repr": clip_stream_text(repr(value), string_limit),
     }
 
 
@@ -637,20 +628,3 @@ def _safe_len(value: Any) -> int:
         return len(value)
     except TypeError:
         return 1
-
-
-def _safe_exception_message(error: BaseException) -> str:
-    try:
-        message = str(error)
-    except Exception:
-        message = ""
-    return _clip(message, _MAX_ERROR_CHARS) or type(error).__name__
-
-
-def _clip(value: str, limit: int) -> str:
-    collapsed = " ".join(value.split())
-    if len(collapsed) <= limit:
-        return collapsed
-    if limit <= 3:
-        return collapsed[:limit]
-    return collapsed[: limit - 3].rstrip() + "..."

@@ -171,7 +171,8 @@ class LangGraphStreamPolicy(BaseModel):
     )
     include_raw_payloads: bool = False
     allow_debug: bool = False
-    include_custom_payload: bool = True
+    include_message_text_deltas: bool = False
+    include_custom_payload: bool = False
     max_display_chars: int = Field(default=240, ge=1, le=4000)
 
     @field_validator("default_modes")

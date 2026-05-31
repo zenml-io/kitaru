@@ -191,14 +191,15 @@ def _serialize_stream_event(event: Any) -> dict[str, Any]:
         return cast(
             dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode="json")
         )
-    except (TypeError, ValueError, PydanticSerializationError):
+    except (TypeError, ValueError, PydanticSerializationError) as error:
         logger.warning(
-            "Failed to serialize PydanticAI stream event; falling back to repr.",
-            exc_info=True,
+            "Failed to serialize PydanticAI stream event; storing safe metadata only. "
+            "event_type=%s error_type=%s",
+            type(event).__name__,
+            type(error).__name__,
         )
         return {
             "event_type": type(event).__name__,
-            "repr": repr(event),
             "serialization_error": "stream_event_serialization_failed",
         }
 

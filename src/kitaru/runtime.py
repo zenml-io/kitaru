@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any, NoReturn, cast
 from uuid import uuid4
 
@@ -49,9 +50,38 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     default=None,
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
-_CHECKPOINT_EVENT_COUNTER: ContextVar[int] = ContextVar(
+
+
+class _CheckpointEventCounterState:
+    """Shared checkpoint-local state for live event index reservation."""
+
+    def __init__(self) -> None:
+        self._next_index = 0
+        self._lock = Lock()
+
+    def reserve(self, index: int | None = None) -> int:
+        """Reserve one event index while holding the shared state lock."""
+        with self._lock:
+            next_index = self._next_index
+            if index is None:
+                self._next_index = next_index + 1
+                return next_index
+
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                raise KitaruUsageError("Event index must be a non-negative integer.")
+            if index < next_index:
+                raise KitaruUsageError(
+                    f"Event index {index} is lower than the next available checkpoint "
+                    f"event index {next_index}."
+                )
+
+            self._next_index = index + 1
+            return index
+
+
+_CHECKPOINT_EVENT_COUNTER: ContextVar[_CheckpointEventCounterState | None] = ContextVar(
     "kitaru_checkpoint_event_counter",
-    default=0,
+    default=None,
 )
 
 
@@ -180,7 +210,7 @@ def _checkpoint_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
-    event_counter_token = _CHECKPOINT_EVENT_COUNTER.set(0)
+    event_counter_token = _CHECKPOINT_EVENT_COUNTER.set(_CheckpointEventCounterState())
     try:
         yield
     finally:
@@ -326,21 +356,11 @@ def _next_checkpoint_event_index(index: int | None = None) -> int:
     automatic index. When accepted, they advance the counter so the next
     automatic event cannot collide with the caller-provided index.
     """
-    next_index = _CHECKPOINT_EVENT_COUNTER.get()
-    if index is None:
-        _CHECKPOINT_EVENT_COUNTER.set(next_index + 1)
-        return next_index
-
-    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
-        raise KitaruUsageError("Event index must be a non-negative integer.")
-    if index < next_index:
-        raise KitaruUsageError(
-            f"Event index {index} is lower than the next available checkpoint "
-            f"event index {next_index}."
-        )
-
-    _CHECKPOINT_EVENT_COUNTER.set(index + 1)
-    return index
+    state = _CHECKPOINT_EVENT_COUNTER.get()
+    if state is None:
+        state = _CheckpointEventCounterState()
+        _CHECKPOINT_EVENT_COUNTER.set(state)
+    return state.reserve(index)
 
 
 def _next_llm_call_name(prefix: str = "llm") -> str:

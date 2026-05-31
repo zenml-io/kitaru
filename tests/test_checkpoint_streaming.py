@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any, cast
 from uuid import uuid4
 
@@ -9,6 +12,7 @@ import pytest
 
 import kitaru
 from kitaru import events
+from kitaru._serialization import to_json_safe
 from kitaru.checkpoint import _wrap_entrypoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
@@ -24,6 +28,13 @@ class BrokenStrError(Exception):
 
     def __str__(self) -> str:
         raise RuntimeError("broken __str__")
+
+
+class SensitiveRepr:
+    """Object whose repr should not leak through live-event safe fallback."""
+
+    def __repr__(self) -> str:
+        return "secret-token-from-repr"
 
 
 class FakeZenMLStreaming:
@@ -121,6 +132,51 @@ def test_checkpoint_scopes_get_distinct_correlation_ids_for_fan_out_steps() -> N
     assert first_correlation_id != second_correlation_id
 
 
+def test_async_child_tasks_share_checkpoint_event_index_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    async def publish_from_child_task(task_index: int) -> None:
+        await asyncio.sleep(0)
+        events.publish("fanout.child", {"task": task_index})
+
+    async def publish_all() -> None:
+        await asyncio.gather(
+            *(publish_from_child_task(task_index) for task_index in range(8))
+        )
+
+    with _checkpoint_scope(name="fanout", checkpoint_type=None):
+        asyncio.run(publish_all())
+
+    indexes = [event["index"] for event in fake_streaming.published]
+    assert len(indexes) == 8
+    assert sorted(indexes) == list(range(8))
+
+
+def test_copied_thread_contexts_share_checkpoint_event_index_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    def publish_in_context(context_index: int) -> None:
+        events.publish("fanout.thread", {"context": context_index})
+
+    with _checkpoint_scope(name="fanout", checkpoint_type=None):
+        contexts = [copy_context() for _ in range(8)]
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(
+                executor.map(
+                    lambda item: item[0].run(publish_in_context, item[1]),
+                    zip(contexts, range(8), strict=True),
+                )
+            )
+
+    indexes = [event["index"] for event in fake_streaming.published]
+    assert len(indexes) == 8
+    assert sorted(indexes) == list(range(8))
+
+
 def test_progress_inside_checkpoint_publishes_enriched_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -176,6 +232,41 @@ def test_publish_custom_event_uses_data_payload_and_optional_message(
     assert "execution_id" not in event["payload"]["kitaru"]
     assert "checkpoint_id" not in event["payload"]["kitaru"]
     assert "checkpoint_type" not in event["payload"]["kitaru"]
+
+
+def test_live_event_serialization_preserves_metadata_when_data_is_bad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+    circular_payload: dict[str, Any] = {}
+    circular_payload["self"] = circular_payload
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish("custom.circular", circular_payload)
+
+    payload = fake_streaming.published[0]["payload"]
+    assert payload["kitaru"]["checkpoint_name"] == "checkpoint_a"
+    assert payload["data"] == {
+        "python_type": "dict",
+        "serialization_error": "Circular reference detected (id repeated)",
+    }
+
+
+def test_live_event_serialization_omits_repr_but_default_helper_keeps_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+
+    with _checkpoint_scope(name="checkpoint_a", checkpoint_type=None):
+        events.publish("custom.sensitive", {"secret": SensitiveRepr()})
+
+    assert "secret-token-from-repr" in to_json_safe(SensitiveRepr())
+    assert fake_streaming.published[0]["payload"]["data"] == {
+        "secret": {
+            "python_type": "SensitiveRepr",
+            "serialization_error": "Value is not JSON serializable.",
+        }
+    }
 
 
 def test_public_exports_include_progress_and_events_module() -> None:

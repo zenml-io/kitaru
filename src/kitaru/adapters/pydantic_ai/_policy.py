@@ -17,7 +17,7 @@ class CapturePolicy:
     emit_child_events: bool = True
     save_prompts: bool = True
     save_responses: bool = True
-    save_stream_transcripts: bool = True
+    save_stream_transcripts: bool = False
     tool_capture: CaptureMode | None = 'full'
     tool_capture_overrides: Mapping[str, CaptureMode | None] = field(default_factory=dict)
     correlate_otel_spans: bool = True

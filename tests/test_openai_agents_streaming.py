@@ -19,6 +19,7 @@ from kitaru.adapters.openai_agents import (
     OPENAI_STREAM_STARTED,
     KitaruRunner,
     OpenAIApprovalDecision,
+    OpenAICapturePolicy,
     OpenAIRunRequest,
     OpenAIRunStateEnvelope,
 )
@@ -145,8 +146,9 @@ def test_stream_publisher_normalizes_safe_payloads_and_flushes_terminal_events(
         OPENAI_STREAM_EVENT,
         OPENAI_STREAM_COMPLETED,
     ]
-    assert published[1][1]["text_delta"] == "hello"
-    assert published[1][1]["display"] == "hello"
+    assert "text_delta" not in published[1][1]
+    assert published[1][1]["display"] == "response.output_text.delta"
+    assert "hello" not in repr(published[1][1])
     assert published[2][1]["display"] == "Tool called: lookup_order"
     assert "arguments" not in published[2][1]
     assert "SECRET_DO_NOT_LOG" not in repr(published[2][1])
@@ -154,7 +156,9 @@ def test_stream_publisher_normalizes_safe_payloads_and_flushes_terminal_events(
 
 
 def test_stream_publisher_caps_text_delta_payload() -> None:
-    publisher = openai_streaming.OpenAIStreamPublisher(agent_name="support")
+    publisher = openai_streaming.OpenAIStreamPublisher(
+        agent_name="support", include_text_deltas=True
+    )
     long_delta = "x" * 500
 
     payload = publisher.normalize_event(
@@ -186,6 +190,24 @@ def test_stream_publisher_tolerates_unknown_events_and_publish_failures(
     publisher.failed(RuntimeError("boom"))
 
     assert calls == 2
+
+
+def test_stream_publisher_includes_text_delta_only_when_opted_in() -> None:
+    publisher = openai_streaming.OpenAIStreamPublisher(
+        agent_name="support", include_text_deltas=True
+    )
+
+    payload = publisher.normalize_event(
+        SimpleNamespace(
+            type="raw_response_event",
+            data=SimpleNamespace(
+                type="response.output_text.delta", delta="explicit text"
+            ),
+        )
+    )
+
+    assert payload["text_delta"] == "explicit text"
+    assert payload["display"] == "explicit text"
 
 
 def test_stream_publisher_failed_tolerates_broken_exception_str(
@@ -293,6 +315,144 @@ def test_stream_publisher_handles_agent_updates() -> None:
     assert payload["category"] == "agent_updated_stream_event"
     assert payload["new_agent_name"] == "triage_agent"
     assert payload["display"] == "Agent updated: triage_agent"
+
+
+def test_runner_call_stream_cache_identity_is_separate_from_run() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    runner = KitaruRunner(
+        SimpleNamespace(name="cache-identity-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    stream_text_runner = KitaruRunner(
+        SimpleNamespace(name="cache-identity-agent"),
+        checkpoint_strategy="runner_call",
+        capture=OpenAICapturePolicy(include_stream_text_deltas=True),
+        run_config_factory=lambda: run_config,
+    )
+    redacted_payload_runner = KitaruRunner(
+        SimpleNamespace(name="cache-identity-agent"),
+        checkpoint_strategy="runner_call",
+        capture=OpenAICapturePolicy(save_interruption_payloads=False),
+        run_config_factory=lambda: run_config,
+    )
+
+    run_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    stream_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="stream",
+        stream_identity=runner._stream_cache_identity(),
+    )
+    stream_sync_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="stream",
+        stream_identity=runner._stream_cache_identity(),
+    )
+    content_stream_key = stream_text_runner._runner_call_cache_key(
+        request,
+        agent=stream_text_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="stream",
+        stream_identity=stream_text_runner._stream_cache_identity(),
+    )
+    redacted_payload_run_key = redacted_payload_runner._runner_call_cache_key(
+        request,
+        agent=redacted_payload_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+
+    assert run_key != stream_key
+    assert stream_key == stream_sync_key
+    assert stream_key != content_stream_key
+    assert run_key != redacted_payload_run_key
+
+
+def test_runner_call_non_stream_and_stream_cache_entries_do_not_collide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._agent as agent_module
+
+    cache: dict[str | None, Any] = {}
+    cache_keys: list[str | None] = []
+    sync_calls = 0
+    streamed_calls = 0
+
+    def fake_run_sync_in_checkpoint(**kwargs: Any) -> Any:
+        cache_key = kwargs["cache_key"]
+        cache_keys.append(cache_key)
+        if cache_key not in cache:
+            cache[cache_key] = kwargs["body"]()
+        return cache[cache_key]
+
+    def fake_run_sync(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal sync_calls
+        sync_calls += 1
+        return SimpleNamespace(final_output="non-stream durable result")
+
+    def fake_streamed_sync(**kwargs: Any) -> SimpleNamespace:
+        nonlocal streamed_calls
+        streamed_calls += 1
+        kwargs["on_event"](SimpleNamespace(type="agent_updated_stream_event"))
+        return SimpleNamespace(final_output="stream durable result")
+
+    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setitem(
+        KitaruRunner._run_runner_call_checkpoint_sync.__globals__,
+        "run_sync_in_checkpoint",
+        fake_run_sync_in_checkpoint,
+    )
+    runner = KitaruRunner(
+        SimpleNamespace(name="cache-collision-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_sync.__globals__, "tracker_scope", fake_tracker_scope
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_sync.__globals__, "run_openai_agent_sync", fake_run_sync
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_sync.__globals__, "tracker_scope", fake_tracker_scope
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_sync.__globals__,
+        "run_openai_agent_streamed_sync",
+        fake_streamed_sync,
+    )
+
+    request = OpenAIRunRequest.start("hello")
+    non_stream_first = runner.run_sync(request)
+    stream_after_non_stream = runner.run_stream_sync(request)
+    stream_first_again = runner.run_stream_sync(request)
+    non_stream_after_stream = runner.run_sync(request)
+
+    assert non_stream_first.final_output == "non-stream durable result"
+    assert non_stream_after_stream.final_output == "non-stream durable result"
+    assert stream_after_non_stream.final_output == "stream durable result"
+    assert stream_first_again.final_output == "stream durable result"
+    assert cache_keys == [cache_keys[0], cache_keys[1], cache_keys[1], cache_keys[0]]
+    assert cache_keys[0] != cache_keys[1]
+    assert sync_calls == 1
+    assert streamed_calls == 1
+    assert len(cache) == 2
 
 
 def test_run_stream_sync_checkpoint_cache_hit_returns_result_without_streaming(

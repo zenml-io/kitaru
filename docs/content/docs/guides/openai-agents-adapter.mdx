@@ -216,35 +216,46 @@ To watch the live events, submit the flow and read execution events from the
 client:
 
 ```python
+import threading
+
+from kitaru.adapters.openai_agents import (
+    OPENAI_STREAM_EVENT_KINDS,
+    OPENAI_STREAM_TERMINAL_EVENT_KINDS,
+)
 from kitaru.client import KitaruClient
 
 handle = research.run("summarize the incident", cache=False)
+stop_watching = threading.Event()
 
-try:
-    for event in KitaruClient().executions.events(
-        handle.exec_id,
-        kinds=[
-            "openai_agents.stream.started",
-            "openai_agents.stream.event",
-            "openai_agents.stream.completed",
-            "openai_agents.stream.failed",
-        ],
-    ):
-        data = event.payload.get("data", {})
-        print(data.get("display", event.kind))
-        if event.kind in {
-            "openai_agents.stream.completed",
-            "openai_agents.stream.failed",
-        }:
-            break
-except Exception as exc:
-    print(f"Live event watching unavailable; reading saved result instead: {exc}")
+
+def watch_openai_events() -> None:
+    try:
+        for event in KitaruClient().executions.events(
+            handle.exec_id,
+            kinds=list(OPENAI_STREAM_EVENT_KINDS),
+        ):
+            if stop_watching.is_set():
+                return
+            data = event.payload.get("data", {})
+            print(data.get("display", event.kind))
+            if event.kind in OPENAI_STREAM_TERMINAL_EVENT_KINDS:
+                return
+    except Exception as exc:
+        print(f"Live event watching unavailable; reading saved result instead: {exc}")
+
+
+watcher = threading.Thread(target=watch_openai_events, daemon=True)
+watcher.start()
 
 result = handle.wait()
+stop_watching.set()
+watcher.join(timeout=1.0)
 ```
 
-The watcher is optional. If event streaming is unavailable on the active backend,
-`handle.wait()` still reads the saved result after the flow finishes.
+The watcher is optional and runs in the background so it cannot block the durable
+result path. If event streaming is unavailable on the active backend, or if the
+watcher sees no live events before it is stopped, `handle.wait()` still reads the
+saved result after the flow finishes.
 
 The runnable version lives at
 [`examples/integrations/openai_agents_agent/openai_agents_streaming.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/integrations/openai_agents_agent/openai_agents_streaming.py).

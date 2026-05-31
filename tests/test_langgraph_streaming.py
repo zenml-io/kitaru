@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -353,10 +353,9 @@ def test_stream_publishes_real_langgraph_custom_writer_event(
     ]
     assert result.output == {"count": 2}
     assert custom_payloads
-    assert custom_payloads[0]["custom"] == {
-        "step": "add_one",
-        "message": "incrementing",
-    }
+    assert "custom" not in custom_payloads[0]
+    assert custom_payloads[0]["display"] == "Custom stream payload"
+    assert "incrementing" not in repr(custom_payloads[0])
 
 
 def test_stream_publisher_normalizes_safe_payloads_and_best_effort_publish(
@@ -410,11 +409,22 @@ def test_stream_publisher_normalizes_safe_payloads_and_best_effort_publish(
         LANGGRAPH_STREAM_CUSTOM,
         LANGGRAPH_STREAM_COMPLETED,
     ]
-    assert published[1][1]["text_delta"] == "hello str..."
+    assert "text_delta" not in published[1][1]
+    assert published[1][1]["display"] == "AIMessage..."
     assert published[1][1]["metadata"] == {"langgraph_node": "model"}
+    assert "hello streaming world" not in repr(published[1][1])
     assert "SECRET" not in repr(published[1][1])
     assert published[2][1]["node_names"] == ["node"]
-    assert published[3][1]["custom"]["api_key"] == "[REDACTED]"
+    assert "custom" not in published[3][1]
+    assert published[3][1]["display"] == "Custom stream payload"
+    assert published[3][1]["custom_summary"] == {
+        "python_type": "dict",
+        "key_count": 2,
+        "summary": "mapping with 2 keys",
+    }
+    assert "api_key" not in repr(published[3][1])
+    assert "status" not in repr(published[3][1])
+    assert "SECRET" not in repr(published[3][1])
     assert published[-1][2] is True
 
     calls = 0
@@ -432,8 +442,12 @@ def test_stream_publisher_normalizes_safe_payloads_and_best_effort_publish(
     assert calls == 2
 
 
-def test_stream_publisher_caps_large_default_metadata() -> None:
-    policy = LangGraphStreamPolicy(max_display_chars=16)
+def test_stream_publisher_includes_message_and_custom_content_when_opted_in() -> None:
+    policy = LangGraphStreamPolicy(
+        max_display_chars=16,
+        include_message_text_deltas=True,
+        include_custom_payload=True,
+    )
     options = langgraph_streaming.resolve_stream_options(
         ["messages", "updates", "custom", "values"],
         policy=policy,
@@ -571,6 +585,142 @@ class FakeStreamGraph:
         return SimpleNamespace(
             config={"configurable": {"checkpoint_id": "cp-1"}}, next=(), tasks=()
         )
+
+
+class StreamWithoutRequiredKwargsGraph:
+    name = "stream_without_required_kwargs_graph"
+    checkpointer = object()
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def stream(
+        self, _input: object, *, config: dict[str, Any]
+    ) -> Iterator[dict[str, object]]:
+        self.calls += 1
+        yield {"type": "values", "ns": (), "data": {"answer": 42}}
+
+    def get_state(self, _config: object) -> object:
+        return SimpleNamespace(config={"configurable": {}}, next=(), tasks=())
+
+
+class AsyncStreamWithoutRequiredKwargsGraph:
+    name = "async_stream_without_required_kwargs_graph"
+    checkpointer = object()
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def astream(
+        self, _input: object, *, config: dict[str, Any]
+    ) -> AsyncIterator[dict[str, object]]:
+        self.calls += 1
+        yield {"type": "values", "ns": (), "data": {"answer": 43}}
+
+    def get_state(self, _config: object) -> object:
+        return SimpleNamespace(config={"configurable": {}}, next=(), tasks=())
+
+
+class StreamWithoutSubgraphsKwargGraph:
+    name = "stream_without_subgraphs_kwarg_graph"
+    checkpointer = object()
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def stream(
+        self,
+        _input: object,
+        *,
+        config: dict[str, Any],
+        stream_mode: list[str],
+        version: str,
+    ) -> Iterator[dict[str, object]]:
+        self.calls.append((stream_mode, version))
+        yield {"type": "values", "ns": (), "data": {"answer": 42}}
+
+    def get_state(self, _config: object) -> object:
+        return SimpleNamespace(config={"configurable": {}}, next=(), tasks=())
+
+
+def test_stream_rejects_missing_required_kwargs_before_graph_execution() -> None:
+    graph = StreamWithoutRequiredKwargsGraph()
+    runner = KitaruGraphRunner(graph)
+
+    with pytest.raises(KitaruUsageError, match=r"stream_mode.*version"):
+        runner.stream(
+            LangGraphRunRequest.start({"prompt": "hi"}, thread_id="missing-thread"),
+            stream_mode="updates",
+        )
+
+    assert graph.calls == 0
+
+
+@pytest.mark.anyio
+async def test_astream_rejects_missing_required_kwargs_before_graph_execution() -> None:
+    graph = AsyncStreamWithoutRequiredKwargsGraph()
+    runner = KitaruGraphRunner(graph)
+
+    with pytest.raises(KitaruUsageError, match=r"stream_mode.*version"):
+        await runner.astream(
+            LangGraphRunRequest.start(
+                {"prompt": "hi"}, thread_id="missing-async-thread"
+            ),
+            stream_mode="updates",
+        )
+
+    assert graph.calls == 0
+
+
+def test_stream_requires_subgraphs_kwarg_only_when_requested() -> None:
+    graph = StreamWithoutSubgraphsKwargGraph()
+    runner = KitaruGraphRunner(graph)
+
+    result = runner.stream(
+        LangGraphRunRequest.start({"prompt": "hi"}, thread_id="no-subgraphs-thread"),
+        stream_mode="updates",
+    )
+
+    assert result.output == {"answer": 42}
+    assert graph.calls == [(["updates", "values"], "v2")]
+
+    requested_subgraphs_graph = StreamWithoutSubgraphsKwargGraph()
+    requested_subgraphs_runner = KitaruGraphRunner(requested_subgraphs_graph)
+    with pytest.raises(KitaruUsageError, match="subgraphs"):
+        requested_subgraphs_runner.stream(
+            LangGraphRunRequest.start({"prompt": "hi"}, thread_id="subgraphs-thread"),
+            stream_mode="updates",
+            subgraphs=True,
+        )
+
+    assert requested_subgraphs_graph.calls == []
+
+
+def test_stream_passes_required_kwargs_when_signature_uninspectable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    original_signature = agent_module.inspect.signature
+
+    def uninspectable_stream(method: Callable[..., Any]) -> object:
+        if getattr(method, "__name__", "") == "stream":
+            raise ValueError("cannot inspect stream")
+        return original_signature(method)
+
+    graph = FakeStreamGraph()
+    monkeypatch.setattr(agent_module.inspect, "signature", uninspectable_stream)
+
+    result = KitaruGraphRunner(graph).stream(
+        LangGraphRunRequest.start({"prompt": "hi"}, thread_id="uninspectable-thread"),
+        stream_mode="updates",
+        subgraphs=True,
+    )
+
+    assert result.output == {"answer": 42}
+    kwargs_seen = graph.calls[0][2]
+    assert kwargs_seen["stream_mode"] == ["updates", "values"]
+    assert kwargs_seen["version"] == "v2"
+    assert kwargs_seen["subgraphs"] is True
 
 
 def test_stream_publishes_debug_for_reachable_unknown_and_malformed_parts(
