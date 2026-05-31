@@ -1,6 +1,13 @@
 export const DOCS_PREFIX = "/docs";
 export const ZENML_BASE_URL = "https://www.zenml.io";
 
+export const RETIRED_DOCS_REDIRECT_STATUS = 308;
+
+export const RETIRED_DOCS_REDIRECTS = [
+  [`${DOCS_PREFIX}/concepts/memory`, `${DOCS_PREFIX}/concepts/checkpoints/`],
+  [`${DOCS_PREFIX}/guides/memory`, `${DOCS_PREFIX}/guides/artifacts/`],
+];
+
 export const ROOT_DOCS_ASSET_PATHS = [
   "/favicon.svg",
   "/kitaru-logo.svg",

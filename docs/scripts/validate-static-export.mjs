@@ -2,7 +2,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DOCS_PREFIX, ROOT_DOCS_ASSET_PATHS } from "../worker/docs-routing.mjs";
+import {
+  DOCS_PREFIX,
+  RETIRED_DOCS_REDIRECT_STATUS,
+  RETIRED_DOCS_REDIRECTS,
+  ROOT_DOCS_ASSET_PATHS,
+} from "../worker/docs-routing.mjs";
+import worker from "../worker/handler.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const docsRoot = resolve(scriptDir, "..");
@@ -92,6 +98,50 @@ function isExternalOrSpecialReference(reference) {
   );
 }
 
+async function validateRetiredDocsRedirects() {
+  for (const [sourcePath, targetPath] of RETIRED_DOCS_REDIRECTS) {
+    if (!resolvesPublicPath(targetPath)) {
+      fail(`Retired docs redirect target does not resolve: ${targetPath}`);
+    }
+
+    const variants = [sourcePath, `${sourcePath}/`];
+    for (const variant of variants) {
+      const assetFetchCalls = [];
+      const env = {
+        ASSETS: {
+          fetch: async (assetRequest) => {
+            assetFetchCalls.push(new URL(assetRequest.url).pathname);
+            return new Response("asset 404", { status: 404 });
+          },
+        },
+      };
+      const requestUrl = new URL(variant, "https://kitaru.ai");
+      requestUrl.search = "?utm_source=validator";
+      const response = await worker.fetch(new Request(requestUrl), env);
+      const expectedLocation = new URL(targetPath, requestUrl);
+      expectedLocation.search = requestUrl.search;
+
+      if (response.status !== RETIRED_DOCS_REDIRECT_STATUS) {
+        fail(
+          `${variant} returned ${response.status}, expected ${RETIRED_DOCS_REDIRECT_STATUS}`,
+        );
+      }
+
+      if (response.headers.get("location") !== expectedLocation.href) {
+        fail(
+          `${variant} redirected to ${response.headers.get("location")}, expected ${expectedLocation.href}`,
+        );
+      }
+
+      if (assetFetchCalls.length > 0) {
+        fail(
+          `${variant} reached docs asset serving before redirect: ${assetFetchCalls.join(", ")}`,
+        );
+      }
+    }
+  }
+}
+
 function validateReference(reference, htmlPath) {
   const normalizedReference = reference.trim().toLowerCase();
   if (normalizedReference.startsWith("javascript:")) {
@@ -138,6 +188,8 @@ if (!existsSync(outDir)) {
       fail(`Required public docs path does not resolve: ${publicPath}`);
     }
   }
+
+  await validateRetiredDocsRedirects();
 
   for (const htmlPath of walkHtmlFiles(outDir)) {
     const content = readFileSync(htmlPath, "utf8");
