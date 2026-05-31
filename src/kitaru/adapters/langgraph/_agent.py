@@ -1,7 +1,7 @@
 """Public runner wrapper for LangGraph graph-call checkpointing."""
 
 import inspect
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from importlib import metadata
@@ -16,9 +16,20 @@ from ._policy import (
     LangGraphCallCheckpointPolicy,
     LangGraphCapturePolicy,
     LangGraphDurabilityPolicy,
+    LangGraphStreamPolicy,
     resolve_summary_checkpoint_config,
 )
 from ._serialization import redact_config, to_cache_identity, to_json_safe
+from ._streaming import (
+    STREAM_VERSION,
+    SUPPORTED_STREAM_MODES,
+    LangGraphStreamOptions,
+    LangGraphStreamPublisher,
+    LangGraphStreamStats,
+    resolve_stream_options,
+    stream_part_mode,
+    stream_part_output_candidate,
+)
 from ._tracking import EventTracker, tracker_scope
 from ._types import (
     LangGraphInterruptSummary,
@@ -26,6 +37,7 @@ from ._types import (
     LangGraphRunRequest,
     LangGraphRunResult,
     LangGraphStateSummary,
+    LangGraphStreamMode,
     LangGraphUsageSummary,
 )
 from ._utils import (
@@ -66,6 +78,7 @@ class KitaruGraphRunner:
         checkpoint_strategy: GraphCheckpointStrategy = "graph_call",
         capture: LangGraphCapturePolicy | None = None,
         durability: LangGraphDurabilityPolicy | None = None,
+        stream_policy: LangGraphStreamPolicy | None = None,
         run_checkpoint_config: CheckpointConfig | None = None,
         call_checkpoint_policy: LangGraphCallCheckpointPolicy | None = None,
         config_factory: Callable[[LangGraphRunRequest], dict[str, Any]] | None = None,
@@ -88,6 +101,7 @@ class KitaruGraphRunner:
         self._capture = capture or LangGraphCapturePolicy()
         self._capture_summary = self._capture.model_dump(mode="json")
         self._durability = durability or LangGraphDurabilityPolicy()
+        self._stream_policy = stream_policy or LangGraphStreamPolicy()
         self._call_checkpoint_policy = (
             call_checkpoint_policy or LangGraphCallCheckpointPolicy()
         )
@@ -132,6 +146,10 @@ class KitaruGraphRunner:
     @property
     def durability(self) -> LangGraphDurabilityPolicy:
         return self._durability
+
+    @property
+    def stream_policy(self) -> LangGraphStreamPolicy:
+        return self._stream_policy
 
     @property
     def call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
@@ -179,6 +197,84 @@ class KitaruGraphRunner:
             result = await _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
         self._track_result("ainvoke", result, request=request)
+        return result
+
+    def stream(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult:
+        """Run the graph synchronously and forward best-effort live stream events."""
+        self._require_streaming_graph_call()
+        self._validate_request(request, required_method="stream")
+        options = resolve_stream_options(
+            stream_mode,
+            policy=self._stream_policy,
+            subgraphs=subgraphs,
+        )
+
+        def _body() -> LangGraphRunResult:
+            return self._stream_graph_sync(request, options=options)
+
+        if is_inside_flow() and not is_inside_checkpoint():
+            result = run_sync_in_checkpoint(
+                config=self._graph_call_checkpoint_config(),
+                step_name=f"{self._name}_langgraph_call",
+                body=_body,
+                cache_key=self._graph_call_cache_key(
+                    request,
+                    surface="stream",
+                    stream_identity=self._stream_cache_identity(
+                        options,
+                        method_name="stream",
+                    ),
+                ),
+            )
+        else:
+            result = _body()
+        result = canonicalize_result_model(result, LangGraphRunResult)
+        self._track_result("stream", result, request=request)
+        return result
+
+    async def astream(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult:
+        """Run the graph asynchronously and forward best-effort live stream events."""
+        self._require_streaming_graph_call()
+        self._validate_request(request, required_method="astream")
+        options = resolve_stream_options(
+            stream_mode,
+            policy=self._stream_policy,
+            subgraphs=subgraphs,
+        )
+
+        async def _body() -> LangGraphRunResult:
+            return await self._stream_graph_async(request, options=options)
+
+        if is_inside_flow() and not is_inside_checkpoint():
+            result = await run_async_in_checkpoint(
+                config=self._graph_call_checkpoint_config(),
+                step_name=f"{self._name}_langgraph_call",
+                body=_body,
+                cache_key=self._graph_call_cache_key(
+                    request,
+                    surface="stream",
+                    stream_identity=self._stream_cache_identity(
+                        options,
+                        method_name="astream",
+                    ),
+                ),
+            )
+        else:
+            result = await _body()
+        result = canonicalize_result_model(result, LangGraphRunResult)
+        self._track_result("astream", result, request=request)
         return result
 
     def _invoke_graph_sync(self, request: LangGraphRunRequest) -> LangGraphRunResult:
@@ -293,6 +389,249 @@ class KitaruGraphRunner:
                 context=context,
             )
             return result
+
+    def _stream_graph_sync(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        options: LangGraphStreamOptions,
+    ) -> LangGraphRunResult:
+        config = self._prepared_config(request)
+        context = self._prepared_context(request)
+        kwargs = self._graph_stream_kwargs(
+            request,
+            context=context,
+            method_name="stream",
+            options=options,
+        )
+        input_or_command = request.input if request.kind == "start" else request.command
+        warnings = self._checkpointer_warnings()
+        publisher, stats = self._new_stream_publisher(request, options)
+
+        with tracker_scope(self._name) as tracker:
+            self._record_stream_call_started(
+                tracker,
+                request=request,
+                config=config,
+                options=options,
+            )
+            publisher.started()
+            try:
+                output = self._drain_stream_parts(
+                    self._graph.stream(input_or_command, config=config, **kwargs),
+                    options=options,
+                    publisher=publisher,
+                    stats=stats,
+                )
+                result = self._build_result(
+                    output,
+                    request=request,
+                    config=config,
+                    tracker=tracker,
+                    warnings=warnings,
+                )
+            except Exception as exc:
+                publisher.failed(exc, stats=stats)
+                self._handle_graph_call_failure(
+                    error=exc,
+                    tracker=tracker,
+                    request=request,
+                    config=config,
+                    context=context,
+                    warnings=warnings,
+                    stream_summary=self._stream_run_summary(options, stats),
+                )
+                raise
+            try:
+                self._persist_tracker(
+                    tracker,
+                    result,
+                    request=request,
+                    config=config,
+                    context=context,
+                    stream_summary=self._stream_run_summary(options, stats),
+                )
+            except Exception as exc:
+                publisher.failed(exc, stats=stats)
+                raise
+            publisher.completed(status=result.status, stats=stats)
+            return result
+
+    async def _stream_graph_async(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        options: LangGraphStreamOptions,
+    ) -> LangGraphRunResult:
+        astream = getattr(self._graph, "astream", None)
+        if not callable(astream):
+            raise KitaruUsageError(
+                "Wrapped LangGraph object does not expose `astream(...)`. Use "
+                "`stream(...)` or wrap a graph that supports async streaming."
+            )
+
+        config = self._prepared_config(request)
+        context = self._prepared_context(request)
+        kwargs = self._graph_stream_kwargs(
+            request,
+            context=context,
+            method_name="astream",
+            options=options,
+        )
+        input_or_command = request.input if request.kind == "start" else request.command
+        warnings = self._checkpointer_warnings()
+        publisher, stats = self._new_stream_publisher(request, options)
+
+        with tracker_scope(self._name) as tracker:
+            self._record_stream_call_started(
+                tracker,
+                request=request,
+                config=config,
+                options=options,
+            )
+            publisher.started()
+            try:
+                output = await self._drain_async_stream_parts(
+                    astream(input_or_command, config=config, **kwargs),
+                    options=options,
+                    publisher=publisher,
+                    stats=stats,
+                )
+                result = self._build_result(
+                    output,
+                    request=request,
+                    config=config,
+                    tracker=tracker,
+                    warnings=warnings,
+                )
+            except Exception as exc:
+                publisher.failed(exc, stats=stats)
+                self._handle_graph_call_failure(
+                    error=exc,
+                    tracker=tracker,
+                    request=request,
+                    config=config,
+                    context=context,
+                    warnings=warnings,
+                    stream_summary=self._stream_run_summary(options, stats),
+                )
+                raise
+            try:
+                self._persist_tracker(
+                    tracker,
+                    result,
+                    request=request,
+                    config=config,
+                    context=context,
+                    stream_summary=self._stream_run_summary(options, stats),
+                )
+            except Exception as exc:
+                publisher.failed(exc, stats=stats)
+                raise
+            publisher.completed(status=result.status, stats=stats)
+            return result
+
+    def _new_stream_publisher(
+        self,
+        request: LangGraphRunRequest,
+        options: LangGraphStreamOptions,
+    ) -> tuple[LangGraphStreamPublisher, LangGraphStreamStats]:
+        return (
+            LangGraphStreamPublisher(
+                graph_name=self._name,
+                thread_id=request.thread_id,
+                policy=self._stream_policy,
+                options=options,
+            ),
+            LangGraphStreamStats(),
+        )
+
+    def _record_stream_call_started(
+        self,
+        tracker: EventTracker,
+        *,
+        request: LangGraphRunRequest,
+        config: dict[str, Any],
+        options: LangGraphStreamOptions,
+    ) -> None:
+        tracker.record(
+            "graph_call_started",
+            metadata={
+                **self._safe_event_metadata(request, config=config),
+                "surface": "stream",
+                **options.tracker_metadata(),
+            },
+        )
+
+    def _drain_stream_parts(
+        self,
+        parts: Any,
+        *,
+        options: LangGraphStreamOptions,
+        publisher: LangGraphStreamPublisher,
+        stats: LangGraphStreamStats,
+    ) -> Any:
+        has_output = False
+        output: Any = None
+        for part in parts:
+            has_candidate, candidate = self._handle_stream_part(
+                part,
+                options=options,
+                publisher=publisher,
+                stats=stats,
+            )
+            if has_candidate:
+                has_output = True
+                output = candidate
+        if not has_output:
+            raise KitaruUsageError(
+                "LangGraph stream finished without a `values` part. Kitaru "
+                'requires `.stream(..., version="v2")` values output to build '
+                "the durable LangGraphRunResult without invoking the graph twice."
+            )
+        return output
+
+    async def _drain_async_stream_parts(
+        self,
+        parts: Any,
+        *,
+        options: LangGraphStreamOptions,
+        publisher: LangGraphStreamPublisher,
+        stats: LangGraphStreamStats,
+    ) -> Any:
+        has_output = False
+        output: Any = None
+        async for part in parts:
+            has_candidate, candidate = self._handle_stream_part(
+                part,
+                options=options,
+                publisher=publisher,
+                stats=stats,
+            )
+            if has_candidate:
+                has_output = True
+                output = candidate
+        if not has_output:
+            raise KitaruUsageError(
+                "LangGraph stream finished without a `values` part. Kitaru "
+                'requires `.astream(..., version="v2")` values output to build '
+                "the durable LangGraphRunResult without invoking the graph twice."
+            )
+        return output
+
+    def _handle_stream_part(
+        self,
+        part: Any,
+        *,
+        options: LangGraphStreamOptions,
+        publisher: LangGraphStreamPublisher,
+        stats: LangGraphStreamStats,
+    ) -> tuple[bool, Any]:
+        mode = stream_part_mode(part)
+        stats.record(mode)
+        if mode in options.published_modes or mode not in SUPPORTED_STREAM_MODES:
+            publisher.part(part)
+        return stream_part_output_candidate(part)
 
     def _build_result(
         self,
@@ -577,6 +916,28 @@ class KitaruGraphRunner:
             kwargs["context"] = context
         return self._filter_kwargs_for_graph_method(method_name, kwargs)
 
+    def _graph_stream_kwargs(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        context: Any | None,
+        method_name: str,
+        options: LangGraphStreamOptions,
+    ) -> dict[str, Any]:
+        kwargs = self._graph_call_kwargs(
+            request,
+            context=context,
+            method_name=method_name,
+        )
+        kwargs.update(
+            {
+                "stream_mode": list(options.upstream_modes),
+                "subgraphs": options.subgraphs,
+                "version": options.version,
+            }
+        )
+        return self._filter_kwargs_for_graph_method(method_name, kwargs)
+
     def _filter_kwargs_for_graph_method(
         self, method_name: str, kwargs: dict[str, Any]
     ) -> dict[str, Any]:
@@ -605,6 +966,17 @@ class KitaruGraphRunner:
         allowed_kwargs = set(signature.parameters)
         self._method_allowed_kwargs[method_name] = allowed_kwargs
         return allowed_kwargs
+
+    def _require_streaming_graph_call(self) -> None:
+        if self._checkpoint_strategy == "graph_call":
+            return
+        raise KitaruUsageError(
+            "`KitaruGraphRunner.stream(...)` and `astream(...)` support only "
+            "`checkpoint_strategy='graph_call'` today. Streaming with "
+            "`checkpoint_strategy='calls'` would observe LangGraph trace chunks, "
+            "but those chunks do not own the replay-safe model/tool handler "
+            "calls, so calls-mode streaming is intentionally deferred."
+        )
 
     def _validate_strategy_config(
         self,
@@ -688,26 +1060,35 @@ class KitaruGraphRunner:
             "runtime": self._run_checkpoint_config.get("runtime", "inline"),
         }
 
-    def _graph_call_cache_key(self, request: LangGraphRunRequest) -> str:
-        return checkpoint_cache_key(
-            {
-                "adapter": "langgraph",
-                "checkpoint_strategy": "graph_call",
-                "langgraph_version": langgraph_version(),
-                "graph": self._graph_identity(),
-                "request": to_cache_identity(
-                    request.model_dump(
-                        mode="python",
-                        exclude={"command"} if request.kind == "resume" else set(),
-                    )
-                ),
-                "command": (
-                    self._command_cache_identity(request.command)
-                    if request.kind == "resume"
-                    else None
-                ),
-            }
-        )
+    def _graph_call_cache_key(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        surface: str | None = None,
+        stream_identity: Mapping[str, object] | None = None,
+    ) -> str:
+        payload: dict[str, object] = {
+            "adapter": "langgraph",
+            "checkpoint_strategy": "graph_call",
+            "langgraph_version": langgraph_version(),
+            "graph": self._graph_identity(),
+            "request": to_cache_identity(
+                request.model_dump(
+                    mode="python",
+                    exclude={"command"} if request.kind == "resume" else set(),
+                )
+            ),
+            "command": (
+                self._command_cache_identity(request.command)
+                if request.kind == "resume"
+                else None
+            ),
+        }
+        if surface is not None:
+            payload["surface"] = surface
+        if stream_identity is not None:
+            payload["stream"] = to_cache_identity(stream_identity)
+        return checkpoint_cache_key(payload)
 
     def _command_cache_identity(self, command: Any) -> Any:
         resume_payload = getattr(command, "resume", None)
@@ -776,6 +1157,7 @@ class KitaruGraphRunner:
         request: LangGraphRunRequest,
         config: dict[str, Any],
         context: Any | None,
+        stream_summary: dict[str, object] | None = None,
     ) -> None:
         self._persist_tracker_summary(
             tracker,
@@ -794,6 +1176,7 @@ class KitaruGraphRunner:
                 ),
                 "output": self._captured_output(result),
                 "warnings": result.warnings,
+                **(stream_summary or {}),
             },
         )
 
@@ -806,6 +1189,7 @@ class KitaruGraphRunner:
         config: dict[str, Any],
         context: Any | None,
         warnings: list[str],
+        stream_summary: dict[str, object] | None = None,
     ) -> None:
         self._persist_tracker_summary(
             tracker,
@@ -822,6 +1206,7 @@ class KitaruGraphRunner:
                 "warnings": warnings,
                 "error_type": type(error).__name__,
                 "error_message": str(error),
+                **(stream_summary or {}),
             },
         )
 
@@ -925,6 +1310,7 @@ class KitaruGraphRunner:
         config: dict[str, Any],
         context: Any | None,
         warnings: list[str],
+        stream_summary: dict[str, object] | None = None,
     ) -> None:
         tracker.record("graph_call_failed", status="failed", error=error)
         try:
@@ -935,6 +1321,7 @@ class KitaruGraphRunner:
                 config=config,
                 context=context,
                 warnings=warnings,
+                stream_summary=stream_summary,
             )
         except Exception as persistence_error:
             note = (
@@ -944,6 +1331,39 @@ class KitaruGraphRunner:
             add_note = getattr(error, "add_note", None)
             if callable(add_note):
                 add_note(note)
+
+    def _stream_cache_identity(
+        self,
+        options: LangGraphStreamOptions,
+        *,
+        method_name: str,
+    ) -> dict[str, object]:
+        return {
+            **options.cache_identity(),
+            "method": method_name,
+            "policy": self._stream_policy.model_dump(
+                mode="json",
+                include={
+                    "default_modes",
+                    "include_raw_payloads",
+                    "include_custom_payload",
+                    "allow_debug",
+                    "max_display_chars",
+                },
+            ),
+        }
+
+    def _stream_run_summary(
+        self,
+        options: LangGraphStreamOptions,
+        stats: LangGraphStreamStats,
+    ) -> dict[str, object]:
+        return {
+            "surface": "stream",
+            "stream_version": STREAM_VERSION,
+            **options.tracker_metadata(),
+            **stats.metadata(),
+        }
 
     def _run_summary_metadata(
         self,

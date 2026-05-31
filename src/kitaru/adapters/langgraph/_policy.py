@@ -2,8 +2,9 @@
 
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ._types import LangGraphStreamMode
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverride,
@@ -156,6 +157,39 @@ def resolve_summary_checkpoint_config(
     """Return the effective calls-mode summary checkpoint config."""
     config = cast(CheckpointConfig, policy.summary_checkpoint_config or {})
     return with_default_type(config, "langgraph_summary")
+
+
+class LangGraphStreamPolicy(BaseModel):
+    """Controls best-effort live LangGraph stream event payloads."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_modes: tuple[LangGraphStreamMode, ...] = (
+        "messages",
+        "updates",
+        "custom",
+    )
+    include_raw_payloads: bool = False
+    allow_debug: bool = False
+    include_custom_payload: bool = True
+    max_display_chars: int = Field(default=240, ge=1, le=4000)
+
+    @field_validator("default_modes")
+    @classmethod
+    def _validate_default_modes(
+        cls, value: tuple[LangGraphStreamMode, ...]
+    ) -> tuple[LangGraphStreamMode, ...]:
+        if not value:
+            raise ValueError("default_modes must include at least one stream mode.")
+        return tuple(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def _validate_debug_default(self) -> "LangGraphStreamPolicy":
+        if "debug" in self.default_modes and not self.allow_debug:
+            raise ValueError(
+                "default_modes cannot include 'debug' unless allow_debug=True."
+            )
+        return self
 
 
 class LangGraphDurabilityPolicy(BaseModel):

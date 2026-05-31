@@ -389,6 +389,8 @@ section_header "LangGraph adapter"
 
 run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \
     $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+run_test "examples/integrations/langgraph_agent/langgraph_streaming.py" \
+    timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_streaming.py
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
         $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
