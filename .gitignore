@@ -30,7 +30,6 @@ eggs/
 .eggs/
 lib/
 !docs/lib/
-!site/src/lib/
 lib64/
 parts/
 sdist/
@@ -167,9 +166,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation (disabled — site/ now holds the Astro landing page)
-# /site
-
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -222,11 +218,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Site (Astro landing page) build artifacts
-site/node_modules/
-site/dist/
-site/.astro/
-site/.wrangler/
+# Cloudflare local state
 .wrangler/
 
 # Local project markers
@@ -278,6 +270,3 @@ skills-lock.json
 
 # Local scratch — single-developer scratch flow files at repo root
 /my_flow.py
-
-# Local site screenshots that aren't part of the deployed bundle
-/site/public/screenshots/

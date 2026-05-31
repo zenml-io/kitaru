@@ -187,12 +187,6 @@ include = ["scripts/generate_sdk_docs.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-include = ["scripts/r2-upload.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
 include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 
 [tool.ty.overrides.rules]

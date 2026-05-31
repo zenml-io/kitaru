@@ -16,9 +16,8 @@ design/
 !README.md
 !CHANGELOG.md
 
-# Node / docs / site (not needed in the server image)
+# Node / docs (not needed in the server image)
 docs/
-site/
 node_modules/
 
 # Build artifacts
