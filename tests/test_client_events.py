@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import call, patch
@@ -222,6 +222,52 @@ def test_data_bearing_eventless_frame_maps_kind_from_json() -> None:
 
     assert [event.kind for event in events] == ["custom.kind"]
     assert events[0].payload["message"] == "event without SSE event field"
+
+
+def test_watch_execution_events_closes_response_when_consumer_stops_early() -> None:
+    response = _FakeResponse(_event_frame(cursor="cursor-1"))
+
+    stream = watch_execution_events(
+        open_stream=lambda last_event_id: response,
+        fallback_exec_id="run-1",
+        reconnect=False,
+    )
+
+    event = next(stream)
+
+    assert event.cursor == "cursor-1"
+    assert response.closed is False
+
+    stream_generator = cast(Generator[ExecutionEvent, None, None], stream)
+    stream_generator.close()
+
+    assert response.closed is True
+
+
+def test_watch_execution_events_closes_response_when_line_iteration_raises() -> None:
+    class _RaisingIterLinesResponse(_FakeResponse):
+        def iter_lines(self, *, decode_unicode: bool = False) -> Iterable[str | bytes]:
+            del decode_unicode
+            yield from _event_frame(cursor="cursor-1")
+            raise RuntimeError("socket broke")
+
+    response = _RaisingIterLinesResponse()
+
+    stream = watch_execution_events(
+        open_stream=lambda last_event_id: response,
+        fallback_exec_id="run-1",
+        reconnect=False,
+    )
+
+    event = next(stream)
+
+    assert event.cursor == "cursor-1"
+    assert response.closed is False
+
+    with pytest.raises(KitaruBackendError, match="socket broke"):
+        next(stream)
+
+    assert response.closed is True
 
 
 def test_stream_event_mapper_reads_kitaru_envelope_and_cursor() -> None:

@@ -37,7 +37,7 @@ def streaming_demo(topic: str) -> str:
 
 def run_workflow(topic: str = "checkpoint live events") -> str:
     """Execute the example workflow and return the final summary."""
-    return streaming_demo.run(topic).wait()
+    return streaming_demo.run(topic, cache=False).wait()
 
 
 def main() -> None:
