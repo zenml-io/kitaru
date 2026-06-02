@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-02
+
 ### Added
 - Added PydanticAI `checkpoint_strategy="calls" | "turn"` as the preferred public spelling for adapter checkpoint placement. `"calls"` remains the default and maps to the existing per-model/tool/MCP checkpoint behavior; `"turn"` maps to the existing one-checkpoint-per-agent-run behavior. Existing `granular_checkpoints=True | False` code remains supported. (#374)
 - Added a durable chatbot example at `examples/chatbot/` that models an entire conversation as a single PydanticAI agent with one human-in-the-loop tool, using `kitaru.wait()` to release compute between turns so a session can sleep for minutes or days and resume exactly where it left off. (#376)
