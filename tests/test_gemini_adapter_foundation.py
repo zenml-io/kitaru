@@ -380,3 +380,27 @@ def test_capture_policy_accepts_strict_capture_failure_knobs(
     )
 
     assert policy.fail_on_artifact_capture_error is True
+
+
+def test_to_json_safe_degrades_on_non_value_serialization_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    """Live agent steps can raise TypeError, not just ValueError, on serialize.
+
+    Antigravity steps embed SDK models whose Pydantic serializer was never built
+    ("'MockValSer' object cannot be converted to 'SchemaSerializer'"). Capture is
+    best-effort, so this must degrade to a placeholder instead of crashing the run.
+    """
+    serialization = importlib.import_module(f"{gemini_adapter.__name__}._serialization")
+
+    def _raise_mock_val_ser(_value: Any, **_kwargs: Any) -> Any:
+        raise TypeError("'MockValSer' object cannot be converted to 'SchemaSerializer'")
+
+    monkeypatch.setattr(serialization, "to_jsonable_python", _raise_mock_val_ser)
+
+    result = serialization.to_json_safe(object())
+
+    assert result["serialization_error"].startswith("TypeError")
+    assert "MockValSer" in result["serialization_error"]
+    assert result["python_type"] == "builtins.object"

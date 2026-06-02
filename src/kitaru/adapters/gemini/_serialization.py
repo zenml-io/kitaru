@@ -25,13 +25,20 @@ _PRIMITIVE_TYPES = str | int | float | bool
 
 
 def to_json_safe(value: Any) -> Any:
-    """Best-effort conversion for observability payloads."""
+    """Best-effort conversion for observability payloads.
+
+    Observability must never break a durable interaction, so any serialization
+    failure degrades to a typed placeholder. Real agent steps (e.g. Antigravity)
+    can embed SDK models whose Pydantic serializer was never built, which raises
+    a ``TypeError`` ("MockValSer object cannot be converted to SchemaSerializer")
+    rather than a ``ValueError`` -- so catch broadly here.
+    """
     try:
         return to_jsonable_python(value, serialize_unknown=True)
-    except ValueError as exc:
+    except Exception as exc:
         return {
             "python_type": f"{type(value).__module__}.{type(value).__qualname__}",
-            "serialization_error": str(exc),
+            "serialization_error": f"{type(exc).__name__}: {exc}",
         }
 
 
