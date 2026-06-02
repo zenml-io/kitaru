@@ -26,12 +26,51 @@ Google-hosted sandbox filesystem.
 cd examples/integrations/gemini_interactions_agent
 uv sync --extra local --extra gemini
 uv run kitaru init
+```
+
+Then pick **one** of the two ways to authenticate with Google.
+
+### Option A: API key (Gemini Developer API)
+
+The simplest path for individual use:
+
+```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
 ```
 
-`GOOGLE_API_KEY` is also accepted by the example. If you set only
-`GOOGLE_API_KEY`, the script copies it into `GEMINI_API_KEY` for the Google SDK
-process before making the call.
+`GOOGLE_API_KEY` is also accepted. If you set only `GOOGLE_API_KEY`, the script
+copies it into `GEMINI_API_KEY` for the Google SDK process before making the
+call.
+
+### Option B: Application Default Credentials (Vertex AI)
+
+If your organization blocks raw API keys (common in enterprise Google Cloud),
+use Application Default Credentials (ADC) through Vertex AI instead. ADC is a
+credential the Google libraries discover automatically after you log in with
+`gcloud` — you never pass a key by hand. Switch the SDK to the Vertex AI backend
+and tell it which project and region to use:
+
+```bash
+gcloud auth application-default login        # creates your ADC credentials once
+export GOOGLE_GENAI_USE_VERTEXAI=true         # use Vertex AI instead of an API key
+export GOOGLE_CLOUD_PROJECT='<your-gcp-project-id>'
+export GOOGLE_CLOUD_LOCATION=global           # the agent backend lives in 'global'
+```
+
+With `GOOGLE_GENAI_USE_VERTEXAI=true` set, the SDK ignores API keys entirely and
+authenticates with your ADC login. If you have a leftover `GEMINI_API_KEY` in
+your shell, `unset GEMINI_API_KEY` so it cannot quietly send the example down the
+API-key path instead.
+
+**What Vertex AI supports today:** the Interactions API on Vertex currently serves
+**agent** interactions (the `--mode antigravity` path), not raw **model**
+interactions — every model returns `Unsupported model interaction`. So on ADC/Vertex,
+use `--mode antigravity`. If you specifically want `--mode model`, you need an API
+key (Option A); raw model interactions are an AI Studio (Developer API) feature.
+The agent backend is only deployed to the `global` location, so set
+`GOOGLE_CLOUD_LOCATION=global`. The first agent call is slow while Google provisions
+a remote sandbox, which is why `--mode antigravity` submits a background job and
+polls (see `--timeout`).
 
 ## Check without credentials
 
@@ -50,6 +89,10 @@ uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
 
 ## Run a cheap model interaction
 
+Model interactions require an **API key** (Option A) — they run on the AI Studio
+(Developer API) backend. On ADC/Vertex this mode is rejected, so use
+`--mode antigravity` there instead.
+
 The default real path uses `gemini-3.5-flash`:
 
 ```bash
@@ -67,10 +110,19 @@ uv run python gemini_interactions_adapter.py \
 ## Run the Antigravity managed-agent demo
 
 Antigravity is a Google managed-agent preview and may be slower or costlier than
-the cheap model path. Run it explicitly:
+the cheap model path. It is the mode that works on ADC/Vertex. Run it explicitly:
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode antigravity
+```
+
+On ADC/Vertex, set `GOOGLE_CLOUD_LOCATION=global` first (the agent backend only
+runs there). The example submits the agent as a background job and polls until it
+finishes; the first call is slow while Google provisions a remote sandbox, so raise
+`--timeout` if you hit a timeout:
+
+```bash
+uv run python gemini_interactions_adapter.py --mode antigravity --timeout 300
 ```
 
 The default Antigravity prompt asks for a high-level, non-destructive inspection

@@ -43,12 +43,45 @@ def test_gemini_interactions_example_dry_run_without_credentials(
 def test_gemini_interactions_example_google_api_key_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("GOOGLE_API_KEY", "alias-key")
 
     gemini_interactions_adapter._prepare_google_credentials()
 
     assert gemini_interactions_adapter.os.environ["GEMINI_API_KEY"] == "alias-key"
+
+
+def test_gemini_interactions_example_vertex_adc_needs_no_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vertex AI mode authenticates via ADC, so the gate must not demand a key."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "demo-project")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "europe-north1")
+
+    assert gemini_interactions_adapter._vertex_mode_enabled() is True
+    # The gate must accept ADC/Vertex mode without raising for a missing key.
+    gemini_interactions_adapter._prepare_google_credentials()
+
+
+def test_gemini_interactions_example_vertex_requires_project_and_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vertex mode without project/location should fail with a clear message."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+
+    with pytest.raises(SystemExit) as exc_info:
+        gemini_interactions_adapter._prepare_google_credentials()
+
+    assert "GOOGLE_CLOUD_PROJECT" in str(exc_info.value)
+    assert "GOOGLE_CLOUD_LOCATION" in str(exc_info.value)
 
 
 def test_gemini_interactions_example_coerces_foreign_model_result() -> None:
@@ -64,6 +97,7 @@ def test_gemini_interactions_example_real_run_requires_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real run should fail early and clearly when no Google key is visible."""
+    monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 

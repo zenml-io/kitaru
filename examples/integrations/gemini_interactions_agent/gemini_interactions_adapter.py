@@ -7,17 +7,27 @@ Story:
 - `--dry-run` prints the same kind of result summary without credentials or a
   network call, so smoke tests can exercise the example safely.
 
-Run:
+Run (API key):
     uv sync --extra local --extra gemini
     uv run kitaru init
     export GEMINI_API_KEY=<your-gemini-api-key>
     uv run python \
         examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+
+Run (Application Default Credentials via Vertex AI, no API key):
+    gcloud auth application-default login
+    export GOOGLE_GENAI_USE_VERTEXAI=true
+    export GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+    export GOOGLE_CLOUD_LOCATION=global   # Vertex serves the agent backend here
+    uv run python \
+        examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+        --mode antigravity   # Vertex supports agent interactions, not raw models
 """
 
 import argparse
 import json
 import os
+import sys
 from typing import Any, Literal
 
 from kitaru import flow
@@ -31,6 +41,11 @@ from kitaru.adapters.gemini import (
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
+VERTEXAI_ENV = "GOOGLE_GENAI_USE_VERTEXAI"
+CLOUD_PROJECT_ENV = "GOOGLE_CLOUD_PROJECT"
+CLOUD_LOCATION_ENV = "GOOGLE_CLOUD_LOCATION"
+# The google-genai SDK treats these (case-insensitively) as "use Vertex AI".
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
 DEFAULT_MODEL = "gemini-3.5-flash"
 DEFAULT_MODEL_PROMPT = (
     "In three plain sentences, explain why checkpointing one AI interaction is "
@@ -43,12 +58,32 @@ DEFAULT_ANTIGRAVITY_PROMPT = (
 Mode = Literal["model", "antigravity"]
 
 
-def _has_google_credentials() -> bool:
-    return bool(os.getenv(GEMINI_API_KEY_ENV) or os.getenv(GOOGLE_API_KEY_ENV))
+def _vertex_mode_enabled() -> bool:
+    """Vertex AI mode authenticates with ADC instead of an API key."""
+    return os.getenv(VERTEXAI_ENV, "").strip().lower() in _TRUTHY_VALUES
+
+
+def _require_vertex_settings() -> None:
+    """Vertex AI supplies credentials via ADC, but still needs project + region."""
+    missing = [
+        name for name in (CLOUD_PROJECT_ENV, CLOUD_LOCATION_ENV) if not os.getenv(name)
+    ]
+    if not missing:
+        return
+    raise SystemExit(
+        f"{VERTEXAI_ENV} is enabled (Vertex AI mode), so no API key is needed, "
+        f"but {' and '.join(missing)} must also be set:\n"
+        f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
+        f"  export {CLOUD_LOCATION_ENV}='<your-region>'   # e.g. europe-north1\n"
+        "Authenticate once with: gcloud auth application-default login"
+    )
 
 
 def _prepare_google_credentials() -> None:
-    """Make either accepted key name visible to the Google SDK."""
+    """Confirm the SDK can authenticate, via Vertex AI ADC or an API key."""
+    if _vertex_mode_enabled():
+        _require_vertex_settings()
+        return
     if os.getenv(GEMINI_API_KEY_ENV):
         return
     google_api_key = os.getenv(GOOGLE_API_KEY_ENV)
@@ -57,9 +92,15 @@ def _prepare_google_credentials() -> None:
         return
     raise SystemExit(
         "Missing Google/Gemini credentials.\n"
-        "Set one of these environment variables before a real run:\n"
+        "Pick one authentication path before a real run.\n"
+        "API key (Gemini Developer API):\n"
         "  export GEMINI_API_KEY='<your-gemini-api-key>'\n"
-        "  export GOOGLE_API_KEY='<your-google-api-key>'\n"
+        "  export GOOGLE_API_KEY='<your-google-api-key>'   # alternative name\n"
+        "Application Default Credentials (Vertex AI, no API key):\n"
+        f"  export {VERTEXAI_ENV}=true\n"
+        f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
+        f"  export {CLOUD_LOCATION_ENV}='<your-region>'\n"
+        "  gcloud auth application-default login\n"
         "Use --dry-run to preview the example without credentials or network."
     )
 
@@ -90,13 +131,42 @@ def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
             model=str(args.model),
             metadata={"example": "gemini_interactions_agent", "mode": "model"},
         )
+    # Antigravity is an async managed agent. On Vertex AI the Interactions API
+    # rejects synchronous agent calls ("Chiliagon path must set background to
+    # true") and the first call is slow while Google provisions the remote
+    # sandbox, so submit as a background job and poll within `timeout_s`.
     return GeminiInteractionRequest.antigravity(
         prompt,
+        background=True,
+        timeout_s=float(args.timeout),
         metadata={
             "example": "gemini_interactions_agent",
             "mode": "antigravity",
         },
     )
+
+
+def _guard_vertex_mode(mode: Mode) -> None:
+    """Fail fast on combinations the Vertex AI Interactions API cannot serve."""
+    if not _vertex_mode_enabled():
+        return
+    if mode == "model":
+        raise SystemExit(
+            f"{VERTEXAI_ENV}=true (Vertex AI mode), but the Vertex Interactions "
+            "API does not serve raw model interactions yet: every model returns "
+            "'Unsupported model interaction'.\n"
+            "Use an agent instead, or switch to an API key for model mode:\n"
+            f"  --mode antigravity   (and export {CLOUD_LOCATION_ENV}=global)\n"
+            f"  unset {VERTEXAI_ENV}; export {GEMINI_API_KEY_ENV}='<key>'  # model"
+        )
+    location = os.getenv(CLOUD_LOCATION_ENV, "")
+    if location and location != "global":
+        print(
+            f"Note: {CLOUD_LOCATION_ENV}={location!r}. The Vertex Interactions agent "
+            f"backend is currently only available in 'global'. If this run fails, "
+            f"export {CLOUD_LOCATION_ENV}=global and retry.",
+            file=sys.stderr,
+        )
 
 
 def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
@@ -235,6 +305,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Prompt to send. Defaults depend on --mode.",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300.0,
+        help=(
+            "Seconds to wait for an antigravity background job (create + poll). "
+            "The first Vertex AI call is slow while Google provisions the sandbox. "
+            "Defaults to 300."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -257,6 +337,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     _prepare_google_credentials()
+    _guard_vertex_mode(args.mode)
     request = _build_request(args)
     handle = run_gemini_interaction.run(request)
     result = _coerce_result(handle.wait())
