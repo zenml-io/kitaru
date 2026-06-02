@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Standardized adapter docs and examples around the shared `checkpoint_strategy` concept while keeping framework-specific boundary names such as PydanticAI `"turn"`, OpenAI Agents `"runner_call"`, LangGraph `"graph_call"`, and Claude Agent SDK `"invocation"`.
+- Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.6` so Kitaru tracks the latest upstream ZenML release.
 
 ## [0.13.1] - 2026-05-21
 
