@@ -47,7 +47,7 @@ call.
 If your organization blocks raw API keys (common in enterprise Google Cloud),
 use Application Default Credentials (ADC) through Vertex AI instead. ADC is a
 credential the Google libraries discover automatically after you log in with
-`gcloud` — you never pass a key by hand. Switch the SDK to the Vertex AI backend
+`gcloud`; you never pass a key by hand. Switch the SDK to the Vertex AI backend
 and tell it which project and region to use:
 
 ```bash
@@ -64,7 +64,7 @@ API-key path instead.
 
 **What Vertex AI supports today:** the Interactions API on Vertex currently serves
 **agent** interactions (the `--mode antigravity` path), not raw **model**
-interactions — every model returns `Unsupported model interaction`. So on ADC/Vertex,
+interactions: every model returns `Unsupported model interaction`. So on ADC/Vertex,
 use `--mode antigravity`. If you specifically want `--mode model`, you need an API
 key (Option A); raw model interactions are an AI Studio (Developer API) feature.
 The agent backend is only deployed to the `global` location, so set
@@ -89,7 +89,7 @@ uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
 
 ## Run a cheap model interaction
 
-Model interactions require an **API key** (Option A) — they run on the AI Studio
+Model interactions require an **API key** (Option A); they run on the AI Studio
 (Developer API) backend. On ADC/Vertex this mode is rejected, so use
 `--mode antigravity` there instead.
 

@@ -30,8 +30,8 @@ you inspect what happened.
 The important word is **stable**. The adapter only saves a successful checkpoint
 when Gemini reaches a durable status:
 
-- `completed` — Gemini produced a final response.
-- `requires_action` — Gemini reached a handoff point and needs your code, a
+- `completed`: Gemini produced a final response.
+- `requires_action`: Gemini reached a handoff point and needs your code, a
   human, or another system to do something before the interaction can continue.
 
 In-progress background states are not saved as successful checkpoints. Poll them
@@ -126,12 +126,30 @@ kitaru login        # local server; add a URL for a deployed one
 kitaru status
 ```
 
-For real Google calls, configure a Gemini API key:
+For real Google calls, authenticate one of two ways.
+
+Most users set a Gemini API key (the AI Studio / Developer API backend):
 
 ```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
 # GOOGLE_API_KEY is also accepted by the example wrapper.
 ```
+
+If your organization blocks raw API keys, use Application Default Credentials
+(ADC) through Vertex AI instead. ADC is picked up automatically after you log in
+with `gcloud`, so you set the backend, project, and region rather than a key:
+
+```bash
+gcloud auth application-default login
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT='<your-gcp-project-id>'
+export GOOGLE_CLOUD_LOCATION=global
+```
+
+On Vertex AI the Interactions API currently serves agent interactions (`agent=`,
+such as Antigravity), not raw model interactions, and only in the `global`
+location. Use `model=` interactions with an API key, and `agent=` interactions
+on Vertex.
 
 ## Minimal flow
 
