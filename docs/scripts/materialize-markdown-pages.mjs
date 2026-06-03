@@ -7,6 +7,7 @@ const docsRoot = path.resolve(scriptDir, "..");
 const outDir = path.join(docsRoot, "out");
 const hiddenDocsDir = path.join(outDir, "llms.mdx", "docs");
 const DOCS_APP_ROOT_SEGMENTS = new Set([
+  "adapters",
   "agent-native",
   "changelog",
   "cli",
@@ -73,18 +74,30 @@ function looksLikeMarkdown(content) {
   );
 }
 
+function shouldRewriteDocsRootHref(href) {
+  const firstSegment = href.split("/", 1)[0];
+  return DOCS_APP_ROOT_SEGMENTS.has(firstSegment);
+}
+
 function rewriteMarkdownLinksOutsideCode(content) {
-  return content.replace(
-    /(!?\[[\s\S]*?\]\()\/([^\s)#][^\s)]*)/g,
-    (match, prefix, href) => {
-      const firstSegment = href.split("/", 1)[0];
-      if (!DOCS_APP_ROOT_SEGMENTS.has(firstSegment)) {
+  return content
+    .replace(
+      /(!?\[[\s\S]*?\]\()\/([^\s)#][^\s)]*)/g,
+      (match, prefix, href) => {
+        if (!shouldRewriteDocsRootHref(href)) {
+          return match;
+        }
+
+        return `${prefix}/docs/${href}`;
+      },
+    )
+    .replace(/(\bhref=["'])\/([^"'\s#][^"']*)(["'])/g, (match, prefix, href, quote) => {
+      if (!shouldRewriteDocsRootHref(href)) {
         return match;
       }
 
-      return `${prefix}/docs/${href}`;
-    },
-  );
+      return `${prefix}/docs/${href}${quote}`;
+    });
 }
 
 function rewritePublicMarkdownLinks(content) {
