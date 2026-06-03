@@ -228,6 +228,8 @@ def _build_create_kwargs(request: GeminiInteractionRequest) -> dict[str, Any]:
         kwargs["system_instruction"] = request.system_instruction
     if request.generation_config:
         kwargs["generation_config"] = request.generation_config
+    if request.agent_config is not None:
+        kwargs["agent_config"] = request.agent_config
     if request.response_format is not None:
         kwargs["response_format"] = request.response_format
     if request.response_mime_type is not None:

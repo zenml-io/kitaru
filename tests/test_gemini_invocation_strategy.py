@@ -243,6 +243,30 @@ def test_antigravity_environment_uses_top_level_extra_body(
     assert "agent_config" not in create_kwargs
 
 
+def test_agent_request_forwards_agent_config(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient([_completed_interaction(agent="deep-research")])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "research this",
+        agent="deep-research",
+        agent_config={"max_steps": 3},
+    )
+
+    runner.run_sync(request)
+
+    create_kwargs = client.interactions.create_calls[0]
+    assert create_kwargs["agent"] == "deep-research"
+    assert create_kwargs["agent_config"] == {"max_steps": 3}
+    assert "generation_config" not in create_kwargs
+
+
 def test_requires_action_normalizes_function_call(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -959,6 +983,7 @@ def test_request_manifest_redacts_secret_like_fields(
 
     assert manifest["request"]["generation_config"]["api_key"] == "[REDACTED]"
     assert manifest["request"]["generation_config"]["temperature"] == 0.2
+    assert manifest["request"]["agent_config"] is None
     assert manifest["request"]["response_format"]["authorization"] == "[REDACTED]"
     assert manifest["request"]["response_mime_type"] == "application/json"
     assert manifest["client"]["token"] == "[REDACTED]"
@@ -971,6 +996,28 @@ def test_request_manifest_redacts_secret_like_fields(
         "name": "Authorization",
         "value": "[REDACTED]",
     }
+
+    agent_request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        agent="deep-research",
+        agent_config={
+            "api_key": "secret",
+            "auth": "Bearer secret",
+            "bearer": "secret",
+            "max_steps": 3,
+            "oauth_client": "secret",
+        },
+    )
+    agent_manifest = serialization.redacted_request_manifest(
+        agent_request,
+        client=None,
+    )
+    assert agent_manifest["request"]["generation_config"] == {}
+    assert agent_manifest["request"]["agent_config"]["api_key"] == "[REDACTED]"
+    assert agent_manifest["request"]["agent_config"]["auth"] == "[REDACTED]"
+    assert agent_manifest["request"]["agent_config"]["bearer"] == "[REDACTED]"
+    assert agent_manifest["request"]["agent_config"]["max_steps"] == 3
+    assert agent_manifest["request"]["agent_config"]["oauth_client"] == "[REDACTED]"
 
 
 def test_capture_failures_are_non_fatal_by_default(

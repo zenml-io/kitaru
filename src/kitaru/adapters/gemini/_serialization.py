@@ -14,6 +14,9 @@ _SECRET_FRAGMENTS = (
     "api_key",
     "authorization",
     "x-api-key",
+    "auth",
+    "oauth",
+    "bearer",
     "cookie",
     "token",
     "secret",
@@ -76,6 +79,11 @@ def redacted_request_manifest(
                 request.generation_config,
                 redact=redact,
                 key_hint="generation_config",
+            ),
+            "agent_config": _manifest_value(
+                request.agent_config,
+                redact=redact,
+                key_hint="agent_config",
             ),
             "response_format": _manifest_value(
                 request.response_format,

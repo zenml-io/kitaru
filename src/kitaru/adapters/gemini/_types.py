@@ -32,6 +32,7 @@ class GeminiInteractionRequest(BaseModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
     system_instruction: str | None = None
     generation_config: dict[str, Any] = Field(default_factory=dict)
+    agent_config: dict[str, Any] | None = None
     response_format: dict[str, Any] | None = None
     response_mime_type: str | None = None
     background: bool = False
@@ -74,6 +75,7 @@ class GeminiInteractionRequest(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
+        agent_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         response_mime_type: str | None = None,
         background: bool = False,
@@ -91,6 +93,7 @@ class GeminiInteractionRequest(BaseModel):
             tools=tools,
             system_instruction=system_instruction,
             generation_config=generation_config,
+            agent_config=agent_config,
             response_format=response_format,
             response_mime_type=response_mime_type,
             background=background,
@@ -111,6 +114,7 @@ class GeminiInteractionRequest(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
+        agent_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         response_mime_type: str | None = None,
         background: bool = False,
@@ -129,6 +133,7 @@ class GeminiInteractionRequest(BaseModel):
             tools=tools,
             system_instruction=system_instruction,
             generation_config=generation_config,
+            agent_config=agent_config,
             response_format=response_format,
             response_mime_type=response_mime_type,
             background=background,
@@ -151,6 +156,7 @@ class GeminiInteractionRequest(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
+        agent_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         response_mime_type: str | None = None,
         background: bool = False,
@@ -179,6 +185,7 @@ class GeminiInteractionRequest(BaseModel):
             tools=tools,
             system_instruction=system_instruction,
             generation_config=generation_config,
+            agent_config=agent_config,
             response_format=response_format,
             response_mime_type=response_mime_type,
             background=background,
@@ -214,6 +221,7 @@ class GeminiInteractionRequest(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
+        agent_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         response_mime_type: str | None = None,
         background: bool = False,
@@ -245,6 +253,7 @@ class GeminiInteractionRequest(BaseModel):
                 tools=tools,
                 system_instruction=system_instruction,
                 generation_config=generation_config,
+                agent_config=agent_config,
                 response_format=response_format,
                 response_mime_type=response_mime_type,
                 background=background,
@@ -260,6 +269,7 @@ class GeminiInteractionRequest(BaseModel):
             tools=tools,
             system_instruction=system_instruction,
             generation_config=generation_config,
+            agent_config=agent_config,
             response_format=response_format,
             response_mime_type=response_mime_type,
             background=background,
@@ -283,6 +293,7 @@ class GeminiInteractionRequest(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
+        agent_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         response_mime_type: str | None = None,
         background: bool = False,
@@ -300,6 +311,7 @@ class GeminiInteractionRequest(BaseModel):
             "tools": _default_list(tools),
             "system_instruction": system_instruction,
             "generation_config": _default_dict(generation_config),
+            "agent_config": agent_config,
             "response_format": response_format,
             "response_mime_type": response_mime_type,
             "background": background,
@@ -330,6 +342,7 @@ class GeminiInteractionRequest(BaseModel):
         "tools",
         "system_instruction",
         "generation_config",
+        "agent_config",
         "response_format",
         "response_mime_type",
         "metadata",
@@ -361,6 +374,16 @@ class GeminiInteractionRequest(BaseModel):
             raise ValueError(
                 "Gemini interaction requests must set exactly one of model or agent."
             )
+        if self.agent is not None and self.generation_config:
+            raise ValueError(
+                "generation_config is only valid for model interactions; "
+                "use agent_config for agent interactions."
+            )
+        if self.model is not None and self.agent_config is not None:
+            raise ValueError(
+                "agent_config is only valid for agent interactions; "
+                "use generation_config for model interactions."
+            )
         if self.kind == "poll":
             if self.interaction_id is None:
                 raise ValueError("kind='poll' requires interaction_id.")
@@ -377,6 +400,7 @@ class GeminiInteractionRequest(BaseModel):
                     bool(self.tools),
                     self.system_instruction is not None,
                     bool(self.generation_config),
+                    self.agent_config is not None,
                     self.response_format is not None,
                     self.response_mime_type is not None,
                     self.environment is not None,
@@ -390,7 +414,8 @@ class GeminiInteractionRequest(BaseModel):
                 raise ValueError(
                     "kind='poll' fetches an existing interaction and forbids input, "
                     "model, agent, tools, environment, generation config, "
-                    "previous_interaction_id, and function-result fields."
+                    "agent config, response format, previous_interaction_id, "
+                    "and function-result fields."
                 )
             if self.background:
                 raise ValueError("kind='poll' does not create a background job.")

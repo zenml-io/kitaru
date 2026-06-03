@@ -325,6 +325,24 @@ def test_gemini_request_constructors_and_validation(
             background=True,
             store=False,
         )
+    with pytest.raises(ValidationError, match="agent_config is only valid"):
+        gemini_adapter.GeminiInteractionRequest.start(
+            "hello",
+            model="gemini-test",
+            agent_config={"max_steps": 3},
+        )
+    with pytest.raises(ValidationError, match="generation_config is only valid"):
+        gemini_adapter.GeminiInteractionRequest.start(
+            "hello",
+            agent="deep-research",
+            generation_config={"temperature": 0.2},
+        )
+    agent_request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        agent="deep-research",
+        agent_config={"max_steps": 3},
+    )
+    assert agent_request.agent_config == {"max_steps": 3}
     null_result = gemini_adapter.GeminiInteractionRequest.function_result(
         previous_interaction_id="interaction-1",
         function_call_id="call-null",
