@@ -108,13 +108,27 @@ async def run_gemini_interaction(
     interaction_resource = _validate_interactions_resource(resolved_client)
     if request.kind == "poll":
         interaction_id = cast(str, request.interaction_id)
+        deadline = None
+        get_kwargs = _build_get_kwargs(request)
+        if request.timeout_s is not None:
+            deadline = started_at + request.timeout_s
+            get_kwargs["timeout"] = _remaining_timeout_s(deadline)
         interaction = await _maybe_await(
             interaction_resource.get(
                 interaction_id,
-                **_build_get_kwargs(request),
+                **get_kwargs,
             )
         )
         poll_count = 1
+        if deadline is not None:
+            interaction, poll_count = await _poll_until_stable_or_terminal(
+                interaction_resource=interaction_resource,
+                interaction=interaction,
+                interaction_id=interaction_id,
+                deadline=deadline,
+                poll_interval_s=poll_interval_s,
+                poll_count=poll_count,
+            )
     else:
         interaction = await _maybe_await(
             interaction_resource.create(**_build_create_kwargs(request))
@@ -129,24 +143,14 @@ async def run_gemini_interaction(
             # Do not create a second server job. Keep polling the returned id.
             interaction_id = _string_or_none(_extract(interaction, "id"))
             if interaction_id is not None and request.timeout_s is not None:
-                deadline = time.perf_counter() + request.timeout_s
-                while True:
-                    remaining_s = deadline - time.perf_counter()
-                    if remaining_s <= 0:
-                        break
-                    await asyncio.sleep(min(poll_interval_s, remaining_s))
-                    if deadline - time.perf_counter() <= 0:
-                        break
-                    poll_count += 1
-                    interaction = await _maybe_await(
-                        interaction_resource.get(interaction_id)
-                    )
-                    status = _extract(interaction, "status")
-                    if (
-                        status in _STABLE_STATUSES
-                        or status in _TERMINAL_FAILURE_STATUSES
-                    ):
-                        break
+                interaction, poll_count = await _poll_until_stable_or_terminal(
+                    interaction_resource=interaction_resource,
+                    interaction=interaction,
+                    interaction_id=interaction_id,
+                    deadline=started_at + request.timeout_s,
+                    poll_interval_s=poll_interval_s,
+                    poll_count=poll_count,
+                )
     payload = normalize_interaction(
         interaction,
         duration_ms=elapsed_ms(started_at),
@@ -155,6 +159,37 @@ async def run_gemini_interaction(
     if payload.status not in _STABLE_STATUSES:
         _raise_unstable_status(payload)
     return payload
+
+
+async def _poll_until_stable_or_terminal(
+    *,
+    interaction_resource: Any,
+    interaction: Any,
+    interaction_id: str,
+    deadline: float,
+    poll_interval_s: float,
+    poll_count: int,
+) -> tuple[Any, int]:
+    while True:
+        status = _extract(interaction, "status")
+        if status in _STABLE_STATUSES or status in _TERMINAL_FAILURE_STATUSES:
+            break
+        remaining_s = _remaining_timeout_s(deadline)
+        if remaining_s <= 0:
+            break
+        await asyncio.sleep(min(poll_interval_s, remaining_s))
+        remaining_s = _remaining_timeout_s(deadline)
+        if remaining_s <= 0:
+            break
+        poll_count += 1
+        interaction = await _maybe_await(
+            interaction_resource.get(interaction_id, timeout=remaining_s)
+        )
+    return interaction, poll_count
+
+
+def _remaining_timeout_s(deadline: float) -> float:
+    return max(0.0, deadline - time.perf_counter())
 
 
 def _raise_unstable_status(payload: GeminiInteractionPayload) -> NoReturn:

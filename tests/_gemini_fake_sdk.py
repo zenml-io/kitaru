@@ -35,16 +35,19 @@ def install_fake_google_genai(
     google.__path__ = []  # type: ignore[attr-defined]
     genai = types.ModuleType("google.genai")
     google_module: Any = google
+    genai_module: Any = genai
     google_module.genai = genai
     if include_client:
-        genai.Client = object  # type: ignore[attr-defined]
+        genai_module.Client = object
     monkeypatch.setitem(sys.modules, "google", google)
     monkeypatch.setitem(sys.modules, "google.genai", genai)
     if include_types:
         interactions = types.ModuleType("google.genai._interactions")
         interactions.__path__ = []  # type: ignore[attr-defined]
         interaction_types = types.ModuleType("google.genai._interactions.types")
-        interaction_types.FunctionCallContent = type(  # type: ignore[attr-defined]
+        interactions_module: Any = interactions
+        interaction_types_module: Any = interaction_types
+        interaction_types_module.FunctionCallContent = type(
             "FunctionCallContent",
             (),
             {
@@ -53,7 +56,7 @@ def install_fake_google_genai(
                 else function_call_annotations
             },
         )
-        interaction_types.FunctionResultContent = type(  # type: ignore[attr-defined]
+        interaction_types_module.FunctionResultContent = type(
             "FunctionResultContent",
             (),
             {
@@ -62,8 +65,8 @@ def install_fake_google_genai(
                 else function_result_annotations
             },
         )
-        genai._interactions = interactions  # type: ignore[attr-defined]
-        interactions.types = interaction_types  # type: ignore[attr-defined]
+        genai_module._interactions = interactions
+        interactions_module.types = interaction_types
         monkeypatch.setitem(sys.modules, "google.genai._interactions", interactions)
         monkeypatch.setitem(
             sys.modules,

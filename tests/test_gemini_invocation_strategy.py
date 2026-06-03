@@ -68,6 +68,40 @@ def _completed_interaction(**updates: Any) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _assert_get_timeout(
+    call: tuple[str, dict[str, Any]],
+    *,
+    interaction_id: str,
+    max_timeout_s: float,
+) -> float:
+    assert call[0] == interaction_id
+    timeout = call[1].get("timeout")
+    assert isinstance(timeout, float)
+    assert 0 < timeout <= max_timeout_s
+    return timeout
+
+
+def _install_fake_runner_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sleep_overrun_s: float = 0.0,
+) -> list[float]:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    clock = {"now": 100.0}
+    sleep_durations: list[float] = []
+
+    def fake_perf_counter() -> float:
+        return clock["now"]
+
+    async def fake_sleep(duration_s: float) -> None:
+        sleep_durations.append(duration_s)
+        clock["now"] += duration_s + sleep_overrun_s
+
+    monkeypatch.setattr(runner_module.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(runner_module.asyncio, "sleep", fake_sleep)
+    return sleep_durations
+
+
 def _patch_invocation_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[types.ModuleType, list[dict[str, Any]]]:
@@ -505,6 +539,48 @@ def test_poll_fetches_existing_interaction_without_create(
     assert result.poll_count == 1
 
 
+def test_poll_request_waits_until_stable_with_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    sleep_durations = _install_fake_runner_clock(monkeypatch)
+    client = FakeClient(
+        [
+            _completed_interaction(id="background-1", status="in_progress"),
+            _completed_interaction(id="background-1", status="completed"),
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        poll_interval_s=0.001,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll(
+        "background-1",
+        timeout_s=100.0,
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.status == "completed"
+    assert client.interactions.create_calls == []
+    assert result.poll_count == 2
+    assert sleep_durations == pytest.approx([0.001])
+    first_timeout = _assert_get_timeout(
+        client.interactions.get_calls[0],
+        interaction_id="background-1",
+        max_timeout_s=100.0,
+    )
+    second_timeout = _assert_get_timeout(
+        client.interactions.get_calls[1],
+        interaction_id="background-1",
+        max_timeout_s=100.0,
+    )
+    assert first_timeout == pytest.approx(100.0)
+    assert second_timeout == pytest.approx(99.999)
+
+
 def test_background_polling_reuses_created_interaction_id(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -532,7 +608,12 @@ def test_background_polling_reuses_created_interaction_id(
 
     assert result.status == "completed"
     assert len(client.interactions.create_calls) == 1
-    assert client.interactions.get_calls == [("background-1", {})]
+    assert len(client.interactions.get_calls) == 1
+    _assert_get_timeout(
+        client.interactions.get_calls[0],
+        interaction_id="background-1",
+        max_timeout_s=0.01,
+    )
     assert result.poll_count == 1
 
 
@@ -569,19 +650,10 @@ def test_background_poll_timeout_raises_without_full_interval_oversleep(
     gemini_adapter: types.ModuleType,
 ) -> None:
     _patch_flow_checkpoint(monkeypatch, gemini_adapter)
-    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
-    clock = {"now": 100.0}
-    sleep_durations: list[float] = []
-
-    def fake_perf_counter() -> float:
-        return clock["now"]
-
-    async def fake_sleep(duration_s: float) -> None:
-        sleep_durations.append(duration_s)
-        clock["now"] += duration_s + 0.000001
-
-    monkeypatch.setattr(runner_module.time, "perf_counter", fake_perf_counter)
-    monkeypatch.setattr(runner_module.asyncio, "sleep", fake_sleep)
+    sleep_durations = _install_fake_runner_clock(
+        monkeypatch,
+        sleep_overrun_s=0.000001,
+    )
     client = FakeClient(
         [
             _completed_interaction(id="background-1", status="in_progress"),
@@ -646,19 +718,7 @@ def test_background_polling_stops_promptly_on_terminal_failure_status(
     terminal_status: str,
 ) -> None:
     _patch_flow_checkpoint(monkeypatch, gemini_adapter)
-    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
-    clock = {"now": 100.0}
-    sleep_durations: list[float] = []
-
-    def fake_perf_counter() -> float:
-        return clock["now"]
-
-    async def fake_sleep(duration_s: float) -> None:
-        sleep_durations.append(duration_s)
-        clock["now"] += duration_s
-
-    monkeypatch.setattr(runner_module.time, "perf_counter", fake_perf_counter)
-    monkeypatch.setattr(runner_module.asyncio, "sleep", fake_sleep)
+    sleep_durations = _install_fake_runner_clock(monkeypatch)
     client = FakeClient(
         [
             _completed_interaction(id="background-1", status="in_progress"),
@@ -683,7 +743,12 @@ def test_background_polling_stops_promptly_on_terminal_failure_status(
     message = str(exc_info.value)
     assert "background-1" in message
     assert f"non-stable status '{terminal_status}'" in message
-    assert client.interactions.get_calls == [("background-1", {})]
+    assert len(client.interactions.get_calls) == 1
+    _assert_get_timeout(
+        client.interactions.get_calls[0],
+        interaction_id="background-1",
+        max_timeout_s=100.0,
+    )
     assert sleep_durations == pytest.approx([0.001])
 
 
