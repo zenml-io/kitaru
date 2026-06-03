@@ -142,6 +142,52 @@ async function validateRetiredDocsRedirects() {
   }
 }
 
+async function validateMarkdownDocsNegotiation() {
+  const assetFetchCalls = [];
+  const env = {
+    ASSETS: {
+      fetch: async (assetRequest) => {
+        const pathname = new URL(assetRequest.url).pathname;
+        assetFetchCalls.push(pathname);
+        if (pathname === "/cli/executions.md") {
+          return new Response("# Markdown docs page", {
+            headers: { "content-type": "text/markdown" },
+          });
+        }
+        if (pathname === "/cli/executions") {
+          return new Response("<html>HTML docs page</html>", {
+            headers: { "content-type": "text/html" },
+          });
+        }
+        return new Response("asset 404", { status: 404 });
+      },
+    },
+  };
+  const request = new Request("https://kitaru.ai/docs/cli/executions", {
+    headers: { accept: "text/markdown" },
+  });
+  const response = await worker.fetch(request, env);
+  const body = await response.text();
+
+  if (response.headers.get("content-type") !== "text/markdown") {
+    fail(
+      `/docs/cli/executions with Accept: text/markdown returned ${response.headers.get("content-type")}`,
+    );
+  }
+
+  if (body !== "# Markdown docs page") {
+    fail(
+      "/docs/cli/executions with Accept: text/markdown did not return markdown",
+    );
+  }
+
+  if (assetFetchCalls[0] !== "/cli/executions.md") {
+    fail(
+      `/docs/cli/executions with Accept: text/markdown tried ${assetFetchCalls[0]} before /cli/executions.md`,
+    );
+  }
+}
+
 function validateReference(reference, htmlPath) {
   const normalizedReference = reference.trim().toLowerCase();
   if (normalizedReference.startsWith("javascript:")) {
@@ -190,6 +236,7 @@ if (!existsSync(outDir)) {
   }
 
   await validateRetiredDocsRedirects();
+  await validateMarkdownDocsNegotiation();
 
   for (const htmlPath of walkHtmlFiles(outDir)) {
     const content = readFileSync(htmlPath, "utf8");

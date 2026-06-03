@@ -56,11 +56,34 @@ function assetRequestForPath(request, pathname) {
   return new Request(url, request);
 }
 
+function acceptsMarkdown(request) {
+  return request.headers.get("accept")?.toLowerCase().includes("text/markdown");
+}
+
+function markdownAssetPathFor(strippedPathname) {
+  if (strippedPathname.endsWith(".md")) {
+    return strippedPathname;
+  }
+
+  const normalizedPathname = strippedPathname.replace(/\/+$/, "") || "/index";
+  return `${normalizedPathname}.md`;
+}
+
 async function fetchDocsAsset(request, env) {
   const url = new URL(request.url);
 
   if (url.pathname.startsWith(`${DOCS_PREFIX}/`)) {
     const strippedPathname = url.pathname.slice(DOCS_PREFIX.length) || "/";
+
+    if (acceptsMarkdown(request)) {
+      const markdownResponse = await env.ASSETS.fetch(
+        assetRequestForPath(request, markdownAssetPathFor(strippedPathname)),
+      );
+      if (markdownResponse.status !== 404) {
+        return markdownResponse;
+      }
+    }
+
     const strippedResponse = await env.ASSETS.fetch(
       assetRequestForPath(request, strippedPathname),
     );
