@@ -397,7 +397,11 @@ def test_to_json_safe_degrades_on_non_value_serialization_errors(
     def _raise_mock_value_serializer(_value: Any, **_kwargs: Any) -> Any:
         raise TypeError("'MockValSer' object cannot be converted to 'SchemaSerializer'")
 
-    monkeypatch.setattr(serialization, "to_jsonable_python", _raise_mock_value_serializer)
+    monkeypatch.setattr(
+        serialization,
+        "to_jsonable_python",
+        _raise_mock_value_serializer,
+    )
 
     result = serialization.to_json_safe(object())
 
