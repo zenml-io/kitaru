@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added the experimental Gemini Interactions adapter (`kitaru.adapters.gemini`) with an Interactions-first design: one stable Gemini response maps to one Kitaru checkpoint, non-stable background statuses fail instead of being cached as success, raw provider payload capture is opt-in by default, and the public API includes an Antigravity managed-agent preset plus explicit `cache_identity` disambiguation while keeping Google-owned sandbox/tool internals outside Kitaru's replay promise.
+- Added Gemini Interactions streaming surfaces (`run_stream(...)` and `run_stream_sync(...)`) plus exported stream event constants, conservative live-event privacy defaults, streamed poll support when the installed Google SDK exposes it, and example/smoke coverage for the no-network streaming path.
 
 ### Changed
 - Moved adapter docs into a first-class Adapters docs section, with redirects from the old guide URLs to the new canonical adapter pages.

@@ -99,6 +99,8 @@ The adapter gives existing Gemini Interactions users:
   handoff points without storing raw provider payloads by default. Step
   summaries keep metadata such as type, status, and call IDs; `text_preview` is
   only filled for clearly identified final assistant/model output.
+- optional streaming methods for watching a long Gemini interaction while it is
+  running, without changing the final checkpoint result Kitaru saves
 - a clear `requires_action` path for function results and human approval gates
 - explicit `cache_identity` support when the same runner/request can point at
   different Google projects, regions, credential aliases, or client setups
@@ -218,6 +220,165 @@ Kitaru flow, this is the concrete sequence:
 For poll requests, step 3 is `client.interactions.get(...)` instead. That matters
 for background jobs: polling an existing interaction checks the job you already
 started; it does not create a duplicate remote job.
+
+## Streaming
+
+Use streaming when you want to watch a Gemini interaction while Google is still
+working. The replay promise stays the same:
+
+```text
+streaming changes how you watch the run
+streaming does not change what Kitaru saves for replay
+```
+
+A streamed run looks like this:
+
+```text
+1. Your flow calls runner.run_stream_sync(request) or awaits runner.run_stream(request).
+2. Kitaru opens the same one Gemini interaction checkpoint.
+3. The adapter calls Gemini with stream=True.
+4. Live events are published while Gemini emits stream updates.
+5. Kitaru reconstructs the final interaction result from the stream.
+6. Only completed or requires_action returns normally.
+7. Kitaru saves and returns the final GeminiInteractionResult.
+```
+
+So if the flow later replays from a completed checkpoint, the saved final result
+may come back immediately. Gemini is not called again, and fresh live stream
+events should not be expected on that checkpoint cache hit. Think of the stream
+like the window in a train: useful while the train is moving, but the ticket
+Kitaru saves is still the final arrival record.
+
+### Synchronous streaming
+
+```python
+request = GeminiInteractionRequest.start(
+    "Explain why durable checkpoints help long-running AI workflows.",
+    model="gemini-3.5-flash",
+)
+result = runner.run_stream_sync(request)
+print(result.output_text)
+print(result.metadata.get("stream"))
+```
+
+### Async streaming
+
+```python
+result = await runner.run_stream(request)
+```
+
+Use `run_stream_sync(...)` from normal synchronous flow code. If you are already
+inside an event loop, use `await runner.run_stream(...)`; the sync method refuses
+to run inside an active event loop so it does not hide an `asyncio` deadlock.
+
+### Live event constants
+
+The streaming live-event names are exported from `kitaru.adapters.gemini`:
+
+```python
+from kitaru.adapters.gemini import (
+    GEMINI_STREAM_COMPLETED,
+    GEMINI_STREAM_EVENT,
+    GEMINI_STREAM_EVENT_KINDS,
+    GEMINI_STREAM_FAILED,
+    GEMINI_STREAM_STARTED,
+    GEMINI_STREAM_TERMINAL_EVENT_KINDS,
+)
+```
+
+Their values are:
+
+| Constant | Event name | Meaning |
+|---|---|---|
+| `GEMINI_STREAM_STARTED` | `gemini_interactions.stream.started` | Kitaru started draining a Gemini stream. |
+| `GEMINI_STREAM_EVENT` | `gemini_interactions.stream.event` | A safe normalized stream update, such as interaction status, step start/stop, text delta metadata, tool-argument metadata, thought metadata, media metadata, provider error, or done. |
+| `GEMINI_STREAM_COMPLETED` | `gemini_interactions.stream.completed` | Kitaru finalized, persisted, and returned a stable result. This terminal event is flushed. |
+| `GEMINI_STREAM_FAILED` | `gemini_interactions.stream.failed` | The provider stream, finalization, artifact capture, strict event persistence, or cancellation failed. This terminal event is flushed. |
+
+`GEMINI_STREAM_EVENT_KINDS` contains all four names. `GEMINI_STREAM_TERMINAL_EVENT_KINDS`
+contains the completed and failed names.
+
+### Privacy defaults
+
+Live stream events are best-effort observability. If event publishing fails, the
+Gemini provider result is still allowed to finish. By default, live events avoid
+raw content. They can include safe metadata such as:
+
+- adapter name, runner name, public surface, and `scope="interaction"`
+- event type, event ID, interaction ID, status, and category
+- step index, step ID, step type, tool name, and call ID
+- whether usage was present
+
+By default, live events do **not** include raw prompts, full assistant content,
+tool arguments, function results, thought-summary text, raw SDK objects,
+image/audio/document/video payloads, sandbox files, or secrets.
+
+If you deliberately want short streamed model-output text deltas in live events,
+opt in on the capture policy:
+
+```python
+from kitaru.adapters.gemini import GeminiInteractionCapturePolicy
+
+runner = KitaruGeminiInteractionsRunner(
+    name="gemini_summary",
+    capture=GeminiInteractionCapturePolicy(include_stream_text_deltas=True),
+)
+```
+
+The text deltas are clipped for display. Tool arguments and thought content still
+stay out of the default live payloads. This setting also changes the streaming
+cache identity, so Kitaru does not silently mix checkpoints created with different
+stream-display policies.
+
+### Stable result semantics
+
+The public return value is still `GeminiInteractionResult`. Streaming metadata is
+stored under `result.metadata["stream"]` and includes the event count, counts by
+provider event type, last event ID when reported, final status, truncation flags,
+accumulated step count, and the reconstruction policy. These are inspection
+details, not new top-level result fields.
+
+Kitaru only completes normally for:
+
+- `completed`
+- `requires_action`
+
+A streamed `requires_action` result is the same handoff point as a non-streamed
+one: save the checkpoint, run your local code or wait for a human, then send a
+matching `GeminiInteractionRequest.function_result(...)` turn.
+
+### Poll streaming
+
+`GeminiInteractionRequest.poll(...)` is also streamable when the installed
+`google-genai` SDK exposes `interactions.get(..., stream=True)`:
+
+```python
+poll_request = GeminiInteractionRequest.poll(
+    interaction_id="interaction_123",
+    timeout_s=30,
+)
+result = runner.run_stream_sync(poll_request)
+```
+
+That streamed poll still checks the existing remote interaction. It does not
+create a duplicate Gemini job. If the installed SDK does not support streamed
+`get(...)`, Kitaru raises a feature-availability error when you call the stream
+method; importing `kitaru.adapters.gemini` still works.
+
+### Antigravity streaming caveats
+
+`GeminiInteractionRequest.antigravity(...)` can be used with `run_stream_sync(...)`
+on the same Interactions streaming surface as other agent interactions. It is
+still preview-shaped and still one coarse checkpoint: Google owns the managed
+agent loop, sandbox, tool execution, environment reuse, and internal event
+schema.
+
+The adapter's Antigravity preset keeps `background=False` and `store=True`.
+Google's public Antigravity surfaces have not been consistent about background
+streaming support, so Kitaru does not promise Antigravity `background=True`
+behavior here. For long Antigravity runs, use `timeout_s` to bound the provider
+call and keep the task non-destructive unless you intentionally want the managed
+agent to edit or execute things.
 
 ## Requests and continuation
 
@@ -350,11 +511,18 @@ successful checkpoint. Continue polling the same `interaction_id`; do not retry
 by creating a fresh background request unless you intentionally want another
 remote job.
 
+You can also poll with `runner.run_stream_sync(...)` or `await runner.run_stream(...)`
+when your installed Google SDK supports streamed `interactions.get(..., stream=True)`.
+That lets you watch the existing background interaction progress without creating
+a second remote job.
+
 ## Cache identity
 
 The cache key uses the request, runner name, Kitaru strategy, installed
-`google-genai` SDK version, and optional `cache_identity`. Kitaru does not inspect
-live Google client internals such as project, region, or credentials.
+`google-genai` SDK version, and optional `cache_identity`. Streaming calls also
+include a stream-specific cache surface plus the stream-display/reconstruction
+policy. Kitaru does not inspect live Google client internals such as project,
+region, or credentials.
 
 That means this situation is risky without `cache_identity`:
 
@@ -403,6 +571,8 @@ live client object or anything whose `repr()` can change between processes.
 - artifact names for raw input, raw interaction, and raw steps only when those
   captures are explicitly enabled
 - `warnings` for best-effort capture or SDK-shape compatibility issues
+- stream inspection metadata under `metadata["stream"]` when you used
+  `run_stream(...)` or `run_stream_sync(...)`
 
 The adapter treats `interaction.steps` as the primary response shape. If an older
 SDK exposes `outputs` instead, Kitaru can summarize those for compatibility and
@@ -428,7 +598,8 @@ and audits:
   disabled for prompt, tool, sandbox, and ambiguous timeline content by default.
 
 It does **not** save raw prompts, raw interaction payloads, or raw step payloads
-unless you opt in.
+unless you opt in. It also does not save raw stream transcripts; streaming live
+events are not saved as a durable transcript by this adapter version.
 
 ```python
 from kitaru.adapters.gemini import GeminiInteractionCapturePolicy
@@ -444,6 +615,8 @@ runner = KitaruGeminiInteractionsRunner(
         save_output=True,
         save_usage=True,
         redact_request_manifest=True,
+        # Live stream text deltas are hidden by default.
+        include_stream_text_deltas=False,
     ),
 )
 ```
@@ -552,7 +725,11 @@ result instead of calling Google again.
   endpoints, or client setups, set an explicit identity.
 - **Raw provider capture is off by default.** Safe summaries and redacted
   manifests are captured by default; raw prompts/interactions/steps require an
-  explicit opt-in.
+  explicit opt-in. Streaming text deltas are also hidden by default and must be
+  enabled with `include_stream_text_deltas=True`.
+- **Streaming is observability, not replay state.** Stream events help you watch
+  a live provider call. On a checkpoint cache hit, Kitaru may return the saved
+  final result without replaying the live stream.
 - **Antigravity environment support is adapter-example level.** The adapter gives
   you a preset for the Google-managed Antigravity environment path, but Google
   still owns the remote environment lifecycle and behavior.
@@ -572,12 +749,15 @@ To inspect the example without making a Gemini API call:
 
 ```bash
 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
+uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
 ```
 
 The example includes:
 
 - `--help` for smoke tests
 - `--dry-run` for a no-network preview
+- `--stream` to use `run_stream_sync(...)` for real calls and preview stream
+  metadata in dry runs
 - `--mode model` using `gemini-3.5-flash`
 - `--mode antigravity` as an explicit slower/costlier managed-agent demo
 

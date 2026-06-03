@@ -17,8 +17,11 @@ from ._runner import (
     GeminiInteractionPayload,
     google_genai_version,
     run_gemini_interaction,
+    run_gemini_interaction_streamed,
 )
 from ._serialization import redacted_request_manifest
+from ._stream_shapes import _STREAM_RECONSTRUCTION_POLICY
+from ._streaming import GeminiStreamPublisher
 from ._tracking import (
     ArtifactKind,
     ArtifactNameByKind,
@@ -46,6 +49,7 @@ _DIRECT_EXECUTION_WARNING = (
 )
 
 ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
+InteractionSurface = Literal["run", "run_sync", "run_stream", "run_stream_sync"]
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,34 @@ def _result_descriptor(
         "step_count": len(result.steps),
         "requires_action": result.status == "requires_action",
     }
+
+
+@dataclass(frozen=True)
+class _PublicInteractionPlan:
+    surface: InteractionSurface
+
+    @property
+    def api_name(self) -> str:
+        return f"KitaruGeminiInteractionsRunner.{self.surface}()"
+
+    @property
+    def streaming(self) -> bool:
+        return self.surface in {"run_stream", "run_stream_sync"}
+
+
+@dataclass(frozen=True)
+class _InteractionPlan:
+    surface: InteractionSurface
+    stream_publisher: GeminiStreamPublisher | None = None
+    stream_cache_identity: dict[str, Any] | None = None
+
+    @property
+    def streaming(self) -> bool:
+        return self.stream_publisher is not None
+
+    @property
+    def cache_surface(self) -> str:
+        return "stream" if self.streaming else "run"
 
 
 class KitaruGeminiInteractionsRunner:
@@ -212,58 +244,111 @@ class KitaruGeminiInteractionsRunner:
         request: GeminiInteractionRequest,
     ) -> GeminiInteractionResult:
         """Run one Gemini interaction asynchronously."""
-        self._require_invocation_scope("KitaruGeminiInteractionsRunner.run()")
-        try:
-            result = await self._run_interaction_async(request)
-            result = canonicalize_result_model(result, GeminiInteractionResult)
-        except Exception:
-            self._track_completed("run", status="failed", request=request, result=None)
-            raise
-        self._track_completed("run", status="completed", request=request, result=result)
-        return result
+        return await self._run_public_async(
+            request,
+            _PublicInteractionPlan(surface="run"),
+        )
+
+    async def run_stream(
+        self,
+        request: GeminiInteractionRequest,
+    ) -> GeminiInteractionResult:
+        """Run one Gemini interaction asynchronously with live stream events."""
+        return await self._run_public_async(
+            request,
+            _PublicInteractionPlan(surface="run_stream"),
+        )
 
     def run_sync(
         self,
         request: GeminiInteractionRequest,
     ) -> GeminiInteractionResult:
         """Run one Gemini interaction synchronously."""
+        self._reject_running_event_loop(sync_method="run_sync", async_method="run")
+        return self._run_public_sync(
+            request,
+            _PublicInteractionPlan(surface="run_sync"),
+        )
+
+    def run_stream_sync(
+        self,
+        request: GeminiInteractionRequest,
+    ) -> GeminiInteractionResult:
+        """Run one Gemini interaction synchronously with live stream events."""
+        self._reject_running_event_loop(
+            sync_method="run_stream_sync",
+            async_method="run_stream",
+        )
+        return self._run_public_sync(
+            request,
+            _PublicInteractionPlan(surface="run_stream_sync"),
+        )
+
+    async def _run_public_async(
+        self,
+        request: GeminiInteractionRequest,
+        plan: _PublicInteractionPlan,
+    ) -> GeminiInteractionResult:
+        self._require_invocation_scope(plan.api_name)
         try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            raise KitaruUsageError(
-                "`KitaruGeminiInteractionsRunner.run_sync()` cannot be called "
-                "inside an already running event loop. Use "
-                "`await KitaruGeminiInteractionsRunner.run(...)` instead."
-            )
-        self._require_invocation_scope("KitaruGeminiInteractionsRunner.run_sync()")
-        try:
-            result = self._run_interaction_sync(request)
+            result = await self._run_interaction_async(request, public_plan=plan)
             result = canonicalize_result_model(result, GeminiInteractionResult)
         except Exception:
             self._track_completed(
-                "run_sync", status="failed", request=request, result=None
+                plan.surface, status="failed", request=request, result=None
             )
             raise
         self._track_completed(
-            "run_sync",
-            status="completed",
-            request=request,
-            result=result,
+            plan.surface, status="completed", request=request, result=result
         )
         return result
+
+    def _run_public_sync(
+        self,
+        request: GeminiInteractionRequest,
+        plan: _PublicInteractionPlan,
+    ) -> GeminiInteractionResult:
+        self._require_invocation_scope(plan.api_name)
+        try:
+            result = self._run_interaction_sync(request, public_plan=plan)
+            result = canonicalize_result_model(result, GeminiInteractionResult)
+        except Exception:
+            self._track_completed(
+                plan.surface, status="failed", request=request, result=None
+            )
+            raise
+        self._track_completed(
+            plan.surface, status="completed", request=request, result=result
+        )
+        return result
+
+    @staticmethod
+    def _reject_running_event_loop(*, sync_method: str, async_method: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        raise KitaruUsageError(
+            f"`KitaruGeminiInteractionsRunner.{sync_method}()` cannot be called "
+            "inside an already running event loop. Use "
+            f"`await KitaruGeminiInteractionsRunner.{async_method}(...)` instead."
+        )
 
     async def _run_interaction_async(
         self,
         request: GeminiInteractionRequest,
+        *,
+        public_plan: _PublicInteractionPlan,
     ) -> GeminiInteractionResult:
+        plan = self._interaction_plan(public_plan)
         direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         async def _body() -> GeminiInteractionResult:
             return await self._run_sdk_async(
                 request,
                 direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                stream_publisher=plan.stream_publisher,
+                allow_sync_stream=False,
             )
 
         if is_inside_flow() and not direct_execution_inside_checkpoint:
@@ -271,14 +356,17 @@ class KitaruGeminiInteractionsRunner:
                 config=self._interaction_checkpoint_config(),
                 step_name=f"{self._name}_gemini_interaction",
                 body=_body,
-                cache_key=self._interaction_cache_key(request),
+                cache_key=self._interaction_cache_key(request, plan=plan),
             )
         return await _body()
 
     def _run_interaction_sync(
         self,
         request: GeminiInteractionRequest,
+        *,
+        public_plan: _PublicInteractionPlan,
     ) -> GeminiInteractionResult:
+        plan = self._interaction_plan(public_plan)
         direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         def _body() -> GeminiInteractionResult:
@@ -286,6 +374,8 @@ class KitaruGeminiInteractionsRunner:
                 self._run_sdk_async(
                     request,
                     direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                    stream_publisher=plan.stream_publisher,
+                    allow_sync_stream=True,
                 )
             )
 
@@ -294,18 +384,40 @@ class KitaruGeminiInteractionsRunner:
                 config=self._interaction_checkpoint_config(),
                 step_name=f"{self._name}_gemini_interaction",
                 body=_body,
-                cache_key=self._interaction_cache_key(request),
+                cache_key=self._interaction_cache_key(request, plan=plan),
             )
         return _body()
+
+    def _interaction_plan(
+        self, public_plan: _PublicInteractionPlan
+    ) -> _InteractionPlan:
+        if not public_plan.streaming:
+            return _InteractionPlan(surface=public_plan.surface)
+        stream_cache_identity = {
+            "include_stream_text_deltas": self._capture.include_stream_text_deltas,
+            "final_result_reconstruction": _STREAM_RECONSTRUCTION_POLICY,
+        }
+        return _InteractionPlan(
+            surface=public_plan.surface,
+            stream_publisher=GeminiStreamPublisher(
+                runner_name=self._name,
+                surface=public_plan.surface,
+                include_text_deltas=self._capture.include_stream_text_deltas,
+            ),
+            stream_cache_identity=stream_cache_identity,
+        )
 
     async def _run_sdk_async(
         self,
         request: GeminiInteractionRequest,
         *,
         direct_execution_inside_checkpoint: bool,
+        stream_publisher: GeminiStreamPublisher | None,
+        allow_sync_stream: bool,
     ) -> GeminiInteractionResult:
         with tracker_scope(self._name, persist_on_exit=False) as tracker:
             manifest: dict[str, Any] | None = None
+            terminal_stream_event_sent = False
 
             def get_manifest() -> dict[str, Any]:
                 nonlocal manifest
@@ -317,41 +429,98 @@ class KitaruGeminiInteractionsRunner:
                     )
                 return manifest
 
+            def publish_stream_completed(result: GeminiInteractionResult) -> None:
+                nonlocal terminal_stream_event_sent
+                if stream_publisher is None or terminal_stream_event_sent:
+                    return
+                terminal_stream_event_sent = True
+                self._publish_stream_lifecycle(
+                    lambda: stream_publisher.completed(
+                        status=result.status,
+                        interaction_id=result.interaction_id,
+                    )
+                )
+
+            def publish_stream_failed(error: BaseException) -> None:
+                nonlocal terminal_stream_event_sent
+                if stream_publisher is None or terminal_stream_event_sent:
+                    return
+                terminal_stream_event_sent = True
+                self._publish_stream_lifecycle(lambda: stream_publisher.failed(error))
+
             started_at = time.perf_counter()
             try:
-                payload = await run_gemini_interaction(
+                try:
+                    payload = await self._execute_sdk_payload(
+                        request,
+                        stream_publisher=stream_publisher,
+                        allow_sync_stream=allow_sync_stream,
+                    )
+                except Exception as error:
+                    self._record_failed_interaction(
+                        tracker,
+                        error=error,
+                        manifest_factory=(
+                            get_manifest
+                            if self._capture.save_request_manifest
+                            else None
+                        ),
+                        request=request,
+                        duration_ms=elapsed_ms(started_at),
+                    )
+                    tracker.persist(fail_on_error=False)
+                    raise
+
+                result = self._finalize_run_result(
+                    payload,
+                    tracker=tracker,
+                    get_manifest=get_manifest,
                     request=request,
-                    client=self._client,
-                    client_factory=self._client_factory,
-                    poll_interval_s=self._poll_interval_s,
+                    direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
                 )
-            except Exception as error:
-                self._record_failed_interaction(
-                    tracker,
-                    error=error,
-                    manifest_factory=(
-                        get_manifest if self._capture.save_request_manifest else None
-                    ),
-                    request=request,
-                    duration_ms=elapsed_ms(started_at),
+                persistence_failures = tracker.persist(fail_on_error=False)
+                result = self._apply_event_persistence_failures(
+                    result,
+                    persistence_failures,
                 )
-                tracker.persist(fail_on_error=False)
+                if (
+                    persistence_failures
+                    and self._capture.fail_on_event_persistence_error
+                ):
+                    raise EventPersistenceFailure.as_error(persistence_failures)
+                publish_stream_completed(result)
+                return result
+            except BaseException as error:
+                publish_stream_failed(error)
                 raise
-            result = self._finalize_run_result(
-                payload,
-                tracker=tracker,
-                get_manifest=get_manifest,
+
+    async def _execute_sdk_payload(
+        self,
+        request: GeminiInteractionRequest,
+        *,
+        stream_publisher: GeminiStreamPublisher | None,
+        allow_sync_stream: bool,
+    ) -> GeminiInteractionPayload:
+        if stream_publisher is None:
+            return await run_gemini_interaction(
                 request=request,
-                direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                client=self._client,
+                client_factory=self._client_factory,
+                poll_interval_s=self._poll_interval_s,
             )
-            persistence_failures = tracker.persist(fail_on_error=False)
-            result = self._apply_event_persistence_failures(
-                result,
-                persistence_failures,
-            )
-            if persistence_failures and self._capture.fail_on_event_persistence_error:
-                raise EventPersistenceFailure.as_error(persistence_failures)
-            return result
+        self._publish_stream_lifecycle(stream_publisher.started)
+        return await run_gemini_interaction_streamed(
+            request=request,
+            client=self._client,
+            client_factory=self._client_factory,
+            on_event=stream_publisher.event,
+            allow_sync_stream=allow_sync_stream,
+        )
+
+    @staticmethod
+    def _publish_stream_lifecycle(publish: Callable[[], Any]) -> None:
+        with suppress(Exception):
+            publish()
 
     def _finalize_run_result(
         self,
@@ -375,6 +544,8 @@ class KitaruGeminiInteractionsRunner:
             "run_label": tracker.run_label,
             "direct_execution_inside_checkpoint": direct_execution_inside_checkpoint,
         }
+        if payload.stream_metadata is not None:
+            metadata["stream"] = payload.stream_metadata
         capture_failure_metadata = [
             failure.as_metadata() for failure in capture_failures
         ]
@@ -578,17 +749,29 @@ class KitaruGeminiInteractionsRunner:
             "type": self._checkpoint_config.get("type", "agent_call"),
         }
 
-    def _interaction_cache_key(self, request: GeminiInteractionRequest) -> str:
-        return checkpoint_cache_key(
-            {
-                "adapter": "gemini_interactions",
-                "checkpoint_strategy": "interaction",
-                "google_genai_version": google_genai_version(),
-                "runner_name": self._name,
-                "request": request.model_dump(mode="json"),
-                "cache_identity": self._cache_identity,
-            }
-        )
+    def _interaction_cache_key(
+        self,
+        request: GeminiInteractionRequest,
+        *,
+        plan: _InteractionPlan | None = None,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "adapter": "gemini_interactions",
+            "checkpoint_strategy": "interaction",
+            "google_genai_version": google_genai_version(),
+            "runner_name": self._name,
+            "request": request.model_dump(mode="json"),
+            "cache_identity": self._cache_identity,
+        }
+        if plan is not None and plan.streaming:
+            payload.update(
+                {
+                    "surface": plan.cache_surface,
+                    "streaming": True,
+                    "stream_cache_identity": plan.stream_cache_identity,
+                }
+            )
+        return checkpoint_cache_key(payload)
 
     def _require_invocation_scope(self, api_name: str) -> None:
         if is_inside_checkpoint():

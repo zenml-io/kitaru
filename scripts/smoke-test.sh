@@ -433,6 +433,8 @@ run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_ad
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
 run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity" \
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
 
 if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
     run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
