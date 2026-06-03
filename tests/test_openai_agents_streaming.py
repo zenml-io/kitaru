@@ -386,8 +386,6 @@ def test_runner_call_stream_cache_identity_is_separate_from_run() -> None:
 def test_runner_call_non_stream_and_stream_cache_entries_do_not_collide(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import kitaru.adapters.openai_agents._agent as agent_module
-
     cache: dict[str | None, Any] = {}
     cache_keys: list[str | None] = []
     sync_calls = 0
@@ -411,10 +409,11 @@ def test_runner_call_non_stream_and_stream_cache_entries_do_not_collide(
         kwargs["on_event"](SimpleNamespace(type="agent_updated_stream_event"))
         return SimpleNamespace(final_output="stream durable result")
 
-    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
-    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    checkpoint_globals = KitaruRunner._run_runner_call_checkpoint_sync.__globals__
+    monkeypatch.setitem(checkpoint_globals, "is_inside_flow", lambda: True)
+    monkeypatch.setitem(checkpoint_globals, "is_inside_checkpoint", lambda: False)
     monkeypatch.setitem(
-        KitaruRunner._run_runner_call_checkpoint_sync.__globals__,
+        checkpoint_globals,
         "run_sync_in_checkpoint",
         fake_run_sync_in_checkpoint,
     )
@@ -448,6 +447,7 @@ def test_runner_call_non_stream_and_stream_cache_entries_do_not_collide(
     assert non_stream_after_stream.final_output == "non-stream durable result"
     assert stream_after_non_stream.final_output == "stream durable result"
     assert stream_first_again.final_output == "stream durable result"
+    assert len(cache_keys) == 4
     assert cache_keys == [cache_keys[0], cache_keys[1], cache_keys[1], cache_keys[0]]
     assert cache_keys[0] != cache_keys[1]
     assert sync_calls == 1
@@ -458,8 +458,6 @@ def test_runner_call_non_stream_and_stream_cache_entries_do_not_collide(
 def test_run_stream_sync_checkpoint_cache_hit_returns_result_without_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import kitaru.adapters.openai_agents._agent as agent_module
-
     cache: dict[str | None, Any] = {}
     published: list[str] = []
     streamed_calls = 0
@@ -482,10 +480,11 @@ def test_run_stream_sync_checkpoint_cache_hit_returns_result_without_streaming(
         kwargs["on_event"](SimpleNamespace(type="agent_updated_stream_event"))
         return SimpleNamespace(final_output="cached durable result")
 
-    monkeypatch.setattr(agent_module, "is_inside_flow", lambda: True)
-    monkeypatch.setattr(agent_module, "is_inside_checkpoint", lambda: False)
+    checkpoint_globals = KitaruRunner._run_runner_call_checkpoint_sync.__globals__
+    monkeypatch.setitem(checkpoint_globals, "is_inside_flow", lambda: True)
+    monkeypatch.setitem(checkpoint_globals, "is_inside_checkpoint", lambda: False)
     monkeypatch.setitem(
-        KitaruRunner._run_runner_call_checkpoint_sync.__globals__,
+        checkpoint_globals,
         "run_sync_in_checkpoint",
         fake_run_sync_in_checkpoint,
     )
