@@ -131,13 +131,10 @@ def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
             model=str(args.model),
             metadata={"example": "gemini_interactions_agent", "mode": "model"},
         )
-    # Antigravity is an async managed agent. On Vertex AI the Interactions API
-    # rejects synchronous agent calls ("Chiliagon path must set background to
-    # true") and the first call is slow while Google provisions the remote
-    # sandbox, so submit as a background job and poll within `timeout_s`.
+    # Antigravity does not support background=True. Let the provider call run
+    # synchronously and bound that call with `timeout_s`.
     return GeminiInteractionRequest.antigravity(
         prompt,
-        background=True,
         timeout_s=float(args.timeout),
         metadata={
             "example": "gemini_interactions_agent",
@@ -309,8 +306,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=300.0,
         help=(
-            "Seconds to wait for an antigravity background job (create + poll). "
-            "The first Vertex AI call is slow while Google provisions the sandbox. "
+            "Seconds to let the Antigravity provider call run. The first "
+            "Vertex AI call is slow while Google provisions the sandbox. "
             "Defaults to 300."
         ),
     )

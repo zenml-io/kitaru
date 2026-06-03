@@ -69,8 +69,7 @@ use `--mode antigravity`. If you specifically want `--mode model`, you need an A
 key (Option A); raw model interactions are an AI Studio (Developer API) feature.
 The agent backend is only deployed to the `global` location, so set
 `GOOGLE_CLOUD_LOCATION=global`. The first agent call is slow while Google provisions
-a remote sandbox, which is why `--mode antigravity` submits a background job and
-polls (see `--timeout`).
+a remote sandbox, so use `--timeout` to bound how long the provider call may run.
 
 ## Check without credentials
 
@@ -117,9 +116,9 @@ uv run python gemini_interactions_adapter.py --mode antigravity
 ```
 
 On ADC/Vertex, set `GOOGLE_CLOUD_LOCATION=global` first (the agent backend only
-runs there). The example submits the agent as a background job and polls until it
-finishes; the first call is slow while Google provisions a remote sandbox, so raise
-`--timeout` if you hit a timeout:
+runs there). Antigravity does not support `background=True`, so the example keeps
+the request synchronous and uses `--timeout` to bound the provider call while Google
+provisions the remote sandbox:
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode antigravity --timeout 300

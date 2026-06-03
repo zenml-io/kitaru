@@ -451,8 +451,9 @@ elif [[ "${KITARU_SMOKE_GEMINI_ANTIGRAVITY:-}" != "1" ]]; then
     skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run; accepts Gemini API key or Vertex ADC config"
 else
     run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
-        timed 180 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+        timed 360 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
             --mode antigravity \
+            --timeout 300 \
             --prompt "Explain what you would inspect first in this repository. Do not edit files."
 fi
 

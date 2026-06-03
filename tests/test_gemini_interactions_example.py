@@ -1,5 +1,7 @@
 """No-network checks for the Gemini Interactions example."""
 
+import argparse
+
 import pytest
 from examples.integrations.gemini_interactions_agent import gemini_interactions_adapter
 from pydantic import BaseModel
@@ -65,6 +67,21 @@ def test_gemini_interactions_example_vertex_adc_needs_no_api_key(
     assert gemini_interactions_adapter._vertex_mode_enabled() is True
     # The gate must accept ADC/Vertex mode without raising for a missing key.
     gemini_interactions_adapter._prepare_google_credentials()
+
+
+def test_gemini_interactions_example_antigravity_request_is_synchronous() -> None:
+    args = argparse.Namespace(
+        mode="antigravity",
+        prompt="inspect safely",
+        timeout=123.0,
+    )
+
+    request = gemini_interactions_adapter._build_request(args)
+
+    assert request.agent == "antigravity-preview-05-2026"
+    assert request.background is False
+    assert request.store is True
+    assert request.timeout_s == 123.0
 
 
 def test_gemini_interactions_example_vertex_requires_project_and_location(
