@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Moved adapter docs into a first-class Adapters docs section, with redirects from the old guide URLs to the new canonical adapter pages.
 
+### Fixed
+- Fixed PydanticAI adapter compatibility with newer Pydantic AI releases that forward `retries=` from `run_sync()` into `run()`, while preserving Kitaru's legacy `output_retries=` keyword.
+
 ## [0.14.0] - 2026-06-02
 
 ### Added
