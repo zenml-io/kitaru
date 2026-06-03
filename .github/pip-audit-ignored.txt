@@ -11,6 +11,9 @@
 # Tracked upstream: https://github.com/zenml-io/zenml/issues/4782
 CVE-2026-32597  # pyjwt 2.7 -> 2.12 (auth library; zenml hard-pins 2.7.*)
 PYSEC-2025-183  # pyjwt 2.7 disputed weak-key advisory; blocked by the same zenml pin
+PYSEC-2026-175  # pyjwt 2.7 -> 2.13.0; blocked by the same zenml pin
+PYSEC-2026-177  # pyjwt 2.7 -> 2.13.0; blocked by the same zenml pin
+PYSEC-2026-179  # pyjwt 2.7 -> 2.13.0; blocked by the same zenml pin
 CVE-2025-66416  # mcp 1.19 -> 1.23 (transitively blocked: mcp >=1.20 needs pyjwt >=2.10.1)
 
 # --- Transitive deps in zenml's FastAPI/Starlette server stack. ------------
@@ -20,3 +23,4 @@ CVE-2025-66416  # mcp 1.19 -> 1.23 (transitively blocked: mcp >=1.20 needs pyjwt
 CVE-2025-67221  # orjson 3.10 -> 3.11
 CVE-2025-54121  # starlette 0.45 -> 0.47
 CVE-2025-62727  # starlette 0.45 -> 0.49
+PYSEC-2026-161  # starlette 0.45 -> 1.0.1 (blocked by zenml server stack)
