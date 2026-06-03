@@ -6,6 +6,11 @@ export const RETIRED_DOCS_REDIRECT_STATUS = 308;
 export const RETIRED_DOCS_REDIRECTS = [
   [`${DOCS_PREFIX}/concepts/memory`, `${DOCS_PREFIX}/concepts/checkpoints/`],
   [`${DOCS_PREFIX}/guides/memory`, `${DOCS_PREFIX}/guides/artifacts/`],
+  [`${DOCS_PREFIX}/guides/pydantic-ai-adapter`, `${DOCS_PREFIX}/adapters/pydantic-ai/`],
+  [`${DOCS_PREFIX}/guides/openai-agents-adapter`, `${DOCS_PREFIX}/adapters/openai-agents/`],
+  [`${DOCS_PREFIX}/guides/claude-agent-sdk-adapter`, `${DOCS_PREFIX}/adapters/claude-agent-sdk/`],
+  [`${DOCS_PREFIX}/guides/gemini-interactions-adapter`, `${DOCS_PREFIX}/adapters/gemini-interactions/`],
+  [`${DOCS_PREFIX}/guides/langgraph-adapter`, `${DOCS_PREFIX}/adapters/langgraph/`],
 ];
 
 export const ROOT_DOCS_ASSET_PATHS = [
