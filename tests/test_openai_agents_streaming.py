@@ -562,6 +562,99 @@ def test_run_stream_sync_publishes_lifecycle_and_stream_events(
     assert published[-1][2] is True
 
 
+def test_run_stream_sync_publishes_completed_after_tracker_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    @contextmanager
+    def ordered_tracker_scope(_agent_name: str):
+        try:
+            yield SimpleNamespace(
+                event_log_artifact_name="events",
+                run_summary_artifact_name="summary",
+            )
+        finally:
+            order.append("tracker_persisted")
+
+    def fake_publish(
+        kind: str, payload: dict[str, Any], *, flush: bool = False
+    ) -> None:
+        _ = payload, flush
+        if kind == OPENAI_STREAM_COMPLETED:
+            order.append("stream_completed")
+
+    def fake_streamed_sync(**_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(final_output="done")
+
+    runner = KitaruRunner(
+        SimpleNamespace(name="stream-order-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_sync.__globals__, "tracker_scope", ordered_tracker_scope
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_sync.__globals__,
+        "run_openai_agent_streamed_sync",
+        fake_streamed_sync,
+    )
+    monkeypatch.setattr(openai_streaming.kitaru_events, "publish", fake_publish)
+
+    result = runner.run_stream_sync(OpenAIRunRequest.start("hello"))
+
+    assert result.status == "completed"
+    assert order == ["tracker_persisted", "stream_completed"]
+
+
+@pytest.mark.anyio
+async def test_run_stream_async_publishes_completed_after_tracker_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    @contextmanager
+    def ordered_tracker_scope(_agent_name: str):
+        try:
+            yield SimpleNamespace(
+                event_log_artifact_name="events",
+                run_summary_artifact_name="summary",
+            )
+        finally:
+            order.append("tracker_persisted")
+
+    def fake_publish(
+        kind: str, payload: dict[str, Any], *, flush: bool = False
+    ) -> None:
+        _ = payload, flush
+        if kind == OPENAI_STREAM_COMPLETED:
+            order.append("stream_completed")
+
+    async def fake_streamed(**_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(final_output="async done")
+
+    runner = KitaruRunner(
+        SimpleNamespace(name="async-stream-order-agent"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_async.__globals__, "tracker_scope", ordered_tracker_scope
+    )
+    monkeypatch.setitem(
+        runner._run_sdk_stream_async.__globals__,
+        "run_openai_agent_streamed",
+        fake_streamed,
+    )
+    monkeypatch.setattr(openai_streaming.kitaru_events, "publish", fake_publish)
+
+    result = await runner.run_stream(OpenAIRunRequest.start("hello"))
+
+    assert result.status == "completed"
+    assert order == ["tracker_persisted", "stream_completed"]
+
+
 @pytest.mark.anyio
 async def test_run_stream_async_returns_completed_result_and_tracks_surface(
     monkeypatch: pytest.MonkeyPatch,

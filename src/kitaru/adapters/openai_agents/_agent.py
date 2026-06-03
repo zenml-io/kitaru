@@ -596,8 +596,8 @@ class KitaruRunner:
             except Exception as exc:
                 publisher.failed(exc)
                 raise
-            publisher.completed(status=result.status)
-            return result
+        publisher.completed(status=result.status)
+        return result
 
     def _run_sdk_stream_sync(
         self,
@@ -630,8 +630,8 @@ class KitaruRunner:
             except Exception as exc:
                 publisher.failed(exc)
                 raise
-            publisher.completed(status=result.status)
-            return result
+        publisher.completed(status=result.status)
+        return result
 
     async def _sdk_input_async(self, request: OpenAIRunRequest, *, agent: Any) -> Any:
         if request.kind == "start":
