@@ -16,7 +16,9 @@ from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
 from ._utils import elapsed_ms
 
 _STABLE_STATUSES = frozenset({"completed", "requires_action"})
-_TERMINAL_FAILURE_STATUSES = frozenset({"failed", "cancelled", "canceled"})
+_TERMINAL_FAILURE_STATUSES = frozenset(
+    {"failed", "cancelled", "canceled", "incomplete", "budget_exceeded"}
+)
 _SAFE_ROLES = frozenset({"assistant", "model"})
 _UNSAFE_ROLES = frozenset({"user", "tool", "function", "system", "developer"})
 _SAFE_STEP_TYPES = frozenset(

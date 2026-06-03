@@ -724,7 +724,10 @@ def test_background_poll_timeout_raises_without_full_interval_oversleep(
     assert sleep_durations == pytest.approx([0.001])
 
 
-@pytest.mark.parametrize("terminal_status", ["failed", "cancelled", "canceled"])
+@pytest.mark.parametrize(
+    "terminal_status",
+    ["failed", "cancelled", "canceled", "incomplete", "budget_exceeded"],
+)
 def test_background_create_terminal_failure_status_does_not_poll(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -756,7 +759,10 @@ def test_background_create_terminal_failure_status_does_not_poll(
     assert client.interactions.get_calls == []
 
 
-@pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
+@pytest.mark.parametrize(
+    "terminal_status",
+    ["failed", "cancelled", "incomplete", "budget_exceeded"],
+)
 def test_background_polling_stops_promptly_on_terminal_failure_status(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
