@@ -46,6 +46,7 @@ _UNSAFE_TYPE_FRAGMENTS = (
     "web",
     "mcp",
 )
+_CALL_ID_TYPE_FRAGMENTS = ("function_call", "tool_call")
 StepSource = Literal["steps", "outputs"]
 
 
@@ -350,9 +351,7 @@ def _summarize_step(
     raw = to_json_safe(value)
     raw_keys = sorted(str(key) for key in raw) if isinstance(raw, Mapping) else []
     type_value = _string_or_none(_extract(value, "type")) or type(value).__name__
-    call_id = _string_or_none(_extract(value, "call_id")) or _string_or_none(
-        _extract(value, "id")
-    )
+    call_id = _extract_step_call_id(value)
     return GeminiInteractionStepSummary(
         index=index,
         step_id=_string_or_none(_extract(value, "id")),
@@ -365,6 +364,18 @@ def _summarize_step(
         else None,
         raw_keys=raw_keys,
     )
+
+
+def _extract_step_call_id(value: Any) -> str | None:
+    explicit_call_id = _string_or_none(_extract(value, "call_id"))
+    if explicit_call_id is not None:
+        return explicit_call_id
+    step_type = _normalized_step_type(value)
+    if step_type is not None and any(
+        fragment in step_type for fragment in _CALL_ID_TYPE_FRAGMENTS
+    ):
+        return _string_or_none(_extract(value, "id"))
+    return None
 
 
 def _extract_output_text(
@@ -384,20 +395,31 @@ def _safe_final_output_step_index(
     text_safety: list[_StepTextSafety],
 ) -> int | None:
     for index in range(len(steps) - 1, -1, -1):
-        if not text_safety[index].safe_to_extract_text:
+        safety = text_safety[index]
+        if safety.safe_to_extract_text:
+            if _extract_safe_text(steps[index]) is not None:
+                return index
             continue
-        if _extract_safe_text(steps[index]) is not None:
-            return index
+        if _blocks_fallback_output_text(steps[index], safety=safety):
+            return None
     return None
+
+
+def _blocks_fallback_output_text(value: Any, *, safety: _StepTextSafety) -> bool:
+    status = _normalized_token(_string_or_none(_extract(value, "status")))
+    return (
+        _has_unsafe_role_or_type_marker(
+            role=safety.normalized_role,
+            step_type=safety.normalized_type,
+        )
+        or status == "requires_action"
+    )
 
 
 def _classify_step_text(value: Any, *, source: StepSource) -> _StepTextSafety:
     role = _normalized_step_role(value)
     step_type = _normalized_step_type(value)
-    unsafe = role in _UNSAFE_ROLES or (
-        step_type is not None
-        and any(fragment in step_type for fragment in _UNSAFE_TYPE_FRAGMENTS)
-    )
+    unsafe = _has_unsafe_role_or_type_marker(role=role, step_type=step_type)
     safe = role in _SAFE_ROLES or step_type in _SAFE_STEP_TYPES
     if source == "outputs" and step_type in _OUTPUTS_COMPAT_SAFE_TYPES:
         safe = True
@@ -494,8 +516,17 @@ def _extract_safe_text_candidate(
 
 
 def _has_unsafe_text_marker(value: Any) -> bool:
-    role = _normalized_step_role(value)
-    step_type = _normalized_step_type(value)
+    return _has_unsafe_role_or_type_marker(
+        role=_normalized_step_role(value),
+        step_type=_normalized_step_type(value),
+    )
+
+
+def _has_unsafe_role_or_type_marker(
+    *,
+    role: str | None,
+    step_type: str | None,
+) -> bool:
     return role in _UNSAFE_ROLES or (
         step_type is not None
         and any(fragment in step_type for fragment in _UNSAFE_TYPE_FRAGMENTS)

@@ -249,6 +249,7 @@ def test_requires_action_normalizes_function_call(
 
     assert result.status == "requires_action"
     assert result.steps[0].type == "function_call"
+    assert result.steps[0].step_id == "call-1"
     assert result.steps[0].call_id == "call-1"
     assert result.steps[0].tool_name == "lookup"
 
@@ -284,6 +285,7 @@ def test_real_steps_are_normalized_before_outputs_fallback(
 
     assert result.output_text == "from real steps"
     assert result.steps[0].step_id == "step-1"
+    assert result.steps[0].call_id is None
     assert "outputs rather than `steps`" not in " ".join(result.warnings)
 
 
@@ -360,6 +362,49 @@ def test_fallback_output_uses_only_safe_final_model_step(
     assert "secret prompt" not in result.output_text
     assert "private tool result" not in result.output_text
     assert [step.text_preview for step in result.steps] == [None, None, "final answer"]
+
+
+def test_fallback_output_does_not_use_text_before_later_function_call(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                status="requires_action",
+                output_text=None,
+                steps=[
+                    SimpleNamespace(
+                        id="message-1",
+                        type="message",
+                        role="assistant",
+                        text="draft answer before tool call",
+                    ),
+                    SimpleNamespace(
+                        id="call-1",
+                        type="function_call",
+                        name="lookup",
+                        arguments={"city": "Delft"},
+                    ),
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text is None
+    assert result.steps[0].step_id == "message-1"
+    assert result.steps[0].call_id is None
+    assert result.steps[1].step_id == "call-1"
+    assert result.steps[1].call_id == "call-1"
+    assert [step.text_preview for step in result.steps] == [None, None]
 
 
 def test_fallback_output_is_none_for_unsafe_or_ambiguous_timeline_text(

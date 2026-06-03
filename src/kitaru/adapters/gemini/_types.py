@@ -50,6 +50,18 @@ class GeminiInteractionRequest(BaseModel):
         """Return whether this request explicitly carries a function result."""
         return "function_result_payload" in self.model_fields_set
 
+    @property
+    def has_function_result_only_fields(self) -> bool:
+        """Return whether any function-result-only field was explicit."""
+        return any(
+            field_name in self.model_fields_set
+            for field_name in (
+                "function_call_id",
+                "function_name",
+                "function_result_payload",
+            )
+        )
+
     @classmethod
     def start(
         cls,
@@ -354,7 +366,7 @@ class GeminiInteractionRequest(BaseModel):
                     bool(self.generation_config),
                     self.response_format is not None,
                     self.environment is not None,
-                    self.has_function_result_payload,
+                    self.has_function_result_only_fields,
                 )
             )
             if (
@@ -370,20 +382,22 @@ class GeminiInteractionRequest(BaseModel):
                 raise ValueError("kind='poll' does not create a background job.")
             return self
         if self.kind == "start":
-            forbidden = [
-                self.previous_interaction_id,
-                self.interaction_id,
-                self.function_call_id,
-                self.function_name,
-                self.function_result_payload,
-            ]
+            forbidden = [self.previous_interaction_id, self.interaction_id]
             if any(value is not None for value in forbidden):
                 raise ValueError(
                     "kind='start' forbids previous_interaction_id, interaction_id, "
                     "and function-result fields."
                 )
-        if self.kind == "resume" and self.previous_interaction_id is None:
-            raise ValueError("kind='resume' requires previous_interaction_id.")
+            if self.has_function_result_only_fields:
+                raise ValueError(
+                    "kind='start' forbids previous_interaction_id, interaction_id, "
+                    "and function-result fields."
+                )
+        if self.kind == "resume":
+            if self.previous_interaction_id is None:
+                raise ValueError("kind='resume' requires previous_interaction_id.")
+            if self.has_function_result_only_fields:
+                raise ValueError("kind='resume' forbids function-result fields.")
         if self.kind == "function_result":
             if self.previous_interaction_id is None:
                 raise ValueError(

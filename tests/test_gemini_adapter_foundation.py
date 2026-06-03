@@ -334,6 +334,87 @@ def test_gemini_request_constructors_and_validation(
     assert null_result.function_result_payload is None
 
 
+@pytest.mark.parametrize(
+    "request_data, error",
+    [
+        (
+            {"kind": "start", "input": "hello", "model": "m", "function_result": None},
+            "kind='start'.*function-result fields",
+        ),
+        (
+            {
+                "kind": "start",
+                "input": "hello",
+                "model": "m",
+                "function_result_payload": None,
+            },
+            "kind='start'.*function-result fields",
+        ),
+        (
+            {"kind": "start", "input": "hello", "model": "m", "function_call_id": None},
+            "kind='start'.*function-result fields",
+        ),
+        (
+            {
+                "kind": "resume",
+                "input": "hello",
+                "previous_interaction_id": "interaction-1",
+                "model": "m",
+                "function_result": None,
+            },
+            "kind='resume'.*function-result fields",
+        ),
+        (
+            {
+                "kind": "resume",
+                "input": "hello",
+                "previous_interaction_id": "interaction-1",
+                "model": "m",
+                "function_call_id": None,
+            },
+            "kind='resume'.*function-result fields",
+        ),
+        (
+            {
+                "kind": "poll",
+                "interaction_id": "interaction-1",
+                "function_call_id": None,
+            },
+            "kind='poll'.*function-result fields",
+        ),
+    ],
+)
+def test_direct_gemini_request_rejects_function_result_fields_for_non_result_kinds(
+    gemini_adapter: types.ModuleType,
+    request_data: dict[str, Any],
+    error: str,
+) -> None:
+    with pytest.raises(ValidationError, match=error):
+        gemini_adapter.GeminiInteractionRequest(**request_data)
+
+
+def test_direct_function_result_request_accepts_explicit_json_null_result(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    request = gemini_adapter.GeminiInteractionRequest(
+        kind="function_result",
+        input=[
+            {
+                "type": "function_result",
+                "call_id": "call-null",
+                "result": None,
+            }
+        ],
+        previous_interaction_id="interaction-1",
+        function_call_id="call-null",
+        function_result=None,
+        model="gemini-test",
+    )
+
+    assert request.has_function_result_payload is True
+    assert request.function_result_payload is None
+
+
 def test_antigravity_preset_is_preview_labeled(
     gemini_adapter: types.ModuleType,
 ) -> None:
