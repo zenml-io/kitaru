@@ -82,6 +82,7 @@ def redacted_request_manifest(
                 redact=redact,
                 key_hint="response_format",
             ),
+            "response_mime_type": request.response_mime_type,
             "background": request.background,
             "store": request.store,
             "timeout_s": request.timeout_s,

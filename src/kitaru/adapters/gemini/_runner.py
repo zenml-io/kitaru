@@ -230,6 +230,8 @@ def _build_create_kwargs(request: GeminiInteractionRequest) -> dict[str, Any]:
         kwargs["generation_config"] = request.generation_config
     if request.response_format is not None:
         kwargs["response_format"] = request.response_format
+    if request.response_mime_type is not None:
+        kwargs["response_mime_type"] = request.response_mime_type
     if request.environment is not None:
         # The Interactions API exposes `environment` as a top-level request
         # field, but the current google-genai SDK does not expose it as a

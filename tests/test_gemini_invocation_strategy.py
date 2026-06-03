@@ -174,6 +174,35 @@ def test_run_sync_creates_one_synthetic_interaction_checkpoint(
     assert "agent" not in create_kwargs
 
 
+def test_structured_response_forwards_format_and_mime_type(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    response_format = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+        response_format=response_format,
+        response_mime_type="application/json",
+    )
+
+    runner.run_sync(request)
+
+    create_kwargs = client.interactions.create_calls[0]
+    assert create_kwargs["response_format"] == response_format
+    assert create_kwargs["response_mime_type"] == "application/json"
+
+
 def test_async_run_creates_one_synthetic_interaction_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -912,6 +941,7 @@ def test_request_manifest_redacts_secret_like_fields(
         model="m",
         generation_config={"api_key": "secret", "temperature": 0.2},
         response_format={"authorization": "Bearer secret"},
+        response_mime_type="application/json",
     )
 
     manifest = serialization.redacted_request_manifest(
@@ -930,6 +960,7 @@ def test_request_manifest_redacts_secret_like_fields(
     assert manifest["request"]["generation_config"]["api_key"] == "[REDACTED]"
     assert manifest["request"]["generation_config"]["temperature"] == 0.2
     assert manifest["request"]["response_format"]["authorization"] == "[REDACTED]"
+    assert manifest["request"]["response_mime_type"] == "application/json"
     assert manifest["client"]["token"] == "[REDACTED]"
     assert manifest["client"]["headers"] == [
         ["Authorization", "[REDACTED]"],

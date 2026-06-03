@@ -33,6 +33,7 @@ class GeminiInteractionRequest(BaseModel):
     system_instruction: str | None = None
     generation_config: dict[str, Any] = Field(default_factory=dict)
     response_format: dict[str, Any] | None = None
+    response_mime_type: str | None = None
     background: bool = False
     store: bool = True
     timeout_s: float | None = None
@@ -74,6 +75,7 @@ class GeminiInteractionRequest(BaseModel):
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        response_mime_type: str | None = None,
         background: bool = False,
         store: bool = True,
         timeout_s: float | None = None,
@@ -90,6 +92,7 @@ class GeminiInteractionRequest(BaseModel):
             system_instruction=system_instruction,
             generation_config=generation_config,
             response_format=response_format,
+            response_mime_type=response_mime_type,
             background=background,
             store=store,
             timeout_s=timeout_s,
@@ -109,6 +112,7 @@ class GeminiInteractionRequest(BaseModel):
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        response_mime_type: str | None = None,
         background: bool = False,
         store: bool = True,
         timeout_s: float | None = None,
@@ -126,6 +130,7 @@ class GeminiInteractionRequest(BaseModel):
             system_instruction=system_instruction,
             generation_config=generation_config,
             response_format=response_format,
+            response_mime_type=response_mime_type,
             background=background,
             store=store,
             timeout_s=timeout_s,
@@ -147,6 +152,7 @@ class GeminiInteractionRequest(BaseModel):
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        response_mime_type: str | None = None,
         background: bool = False,
         store: bool = True,
         timeout_s: float | None = None,
@@ -174,6 +180,7 @@ class GeminiInteractionRequest(BaseModel):
             system_instruction=system_instruction,
             generation_config=generation_config,
             response_format=response_format,
+            response_mime_type=response_mime_type,
             background=background,
             store=store,
             timeout_s=timeout_s,
@@ -208,6 +215,7 @@ class GeminiInteractionRequest(BaseModel):
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        response_mime_type: str | None = None,
         background: bool = False,
         timeout_s: float | None = None,
         metadata: dict[str, Any] | None = None,
@@ -238,6 +246,7 @@ class GeminiInteractionRequest(BaseModel):
                 system_instruction=system_instruction,
                 generation_config=generation_config,
                 response_format=response_format,
+                response_mime_type=response_mime_type,
                 background=background,
                 timeout_s=timeout_s,
                 metadata=combined_metadata,
@@ -252,6 +261,7 @@ class GeminiInteractionRequest(BaseModel):
             system_instruction=system_instruction,
             generation_config=generation_config,
             response_format=response_format,
+            response_mime_type=response_mime_type,
             background=background,
             timeout_s=timeout_s,
             metadata=combined_metadata,
@@ -274,6 +284,7 @@ class GeminiInteractionRequest(BaseModel):
         system_instruction: str | None = None,
         generation_config: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        response_mime_type: str | None = None,
         background: bool = False,
         store: bool = True,
         timeout_s: float | None = None,
@@ -290,6 +301,7 @@ class GeminiInteractionRequest(BaseModel):
             "system_instruction": system_instruction,
             "generation_config": _default_dict(generation_config),
             "response_format": response_format,
+            "response_mime_type": response_mime_type,
             "background": background,
             "store": store,
             "timeout_s": timeout_s,
@@ -319,6 +331,7 @@ class GeminiInteractionRequest(BaseModel):
         "system_instruction",
         "generation_config",
         "response_format",
+        "response_mime_type",
         "metadata",
         mode="before",
     )
@@ -365,6 +378,7 @@ class GeminiInteractionRequest(BaseModel):
                     self.system_instruction is not None,
                     bool(self.generation_config),
                     self.response_format is not None,
+                    self.response_mime_type is not None,
                     self.environment is not None,
                     self.has_function_result_only_fields,
                 )
