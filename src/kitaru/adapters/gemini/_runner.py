@@ -6,15 +6,56 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
-from typing import Any, NoReturn, cast
+from typing import Any, Literal, NoReturn, cast
 
-from kitaru.errors import KitaruRuntimeError
+from kitaru.errors import KitaruFeatureNotAvailableError, KitaruRuntimeError
 
+from ._constants import INTERACTIONS_CONTRACT_ERROR_MESSAGE
 from ._serialization import to_json_safe
 from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
 from ._utils import elapsed_ms
 
 _STABLE_STATUSES = frozenset({"completed", "requires_action"})
+_TERMINAL_FAILURE_STATUSES = frozenset({"failed", "cancelled", "canceled"})
+_SAFE_ROLES = frozenset({"assistant", "model"})
+_UNSAFE_ROLES = frozenset({"user", "tool", "function", "system", "developer"})
+_SAFE_STEP_TYPES = frozenset(
+    {
+        "model_output",
+        "model_response",
+        "assistant_message",
+        "assistant_output",
+        "output_text",
+    }
+)
+_OUTPUTS_COMPAT_SAFE_TYPES = frozenset({"text", "message", "output_text"})
+_SAFE_NESTED_TEXT_TYPES = frozenset({"text", "output_text"})
+_UNSAFE_TYPE_FRAGMENTS = (
+    "user_input",
+    "input",
+    "tool_result",
+    "tool_call",
+    "tool",
+    "function_result",
+    "function_call",
+    "function",
+    "sandbox",
+    "code",
+    "shell",
+    "terminal",
+    "web",
+    "mcp",
+)
+StepSource = Literal["steps", "outputs"]
+
+
+@dataclass(frozen=True)
+class _StepTextSafety:
+    """Cheap role/type classification for one Gemini timeline step."""
+
+    normalized_type: str | None
+    normalized_role: str | None
+    safe_to_extract_text: bool
 
 
 @dataclass(frozen=True)
@@ -64,7 +105,7 @@ async def run_gemini_interaction(
 
             resolved_client = genai.Client()
 
-    interaction_resource = resolved_client.interactions
+    interaction_resource = _validate_interactions_resource(resolved_client)
     if request.kind == "poll":
         interaction_id = cast(str, request.interaction_id)
         interaction = await _maybe_await(
@@ -98,7 +139,11 @@ async def run_gemini_interaction(
                     interaction = await _maybe_await(
                         interaction_resource.get(interaction_id)
                     )
-                    if _extract(interaction, "status") in _STABLE_STATUSES:
+                    status = _extract(interaction, "status")
+                    if (
+                        status in _STABLE_STATUSES
+                        or status in _TERMINAL_FAILURE_STATUSES
+                    ):
                         break
     payload = normalize_interaction(
         interaction,
@@ -171,21 +216,37 @@ def normalize_interaction(
 ) -> GeminiInteractionPayload:
     """Normalize a Gemini SDK interaction into adapter-local data."""
     warnings: list[str] = []
+    raw_steps_source: StepSource = "steps"
     raw_steps = _sequence_or_empty(_extract(interaction, "steps"))
     if not raw_steps:
+        raw_steps_source = "outputs"
         raw_steps = _sequence_or_empty(_extract(interaction, "outputs"))
         if raw_steps:
             warnings.append(
                 "Gemini SDK response exposed outputs rather than `steps`; "
                 "normalizing outputs as step summaries for compatibility."
             )
+    text_safety = [
+        _classify_step_text(value, source=raw_steps_source) for value in raw_steps
+    ]
+    safe_text_preview_index = _safe_final_output_step_index(
+        raw_steps,
+        text_safety=text_safety,
+    )
     summaries = [
-        _summarize_step(index=index, value=value)
+        _summarize_step(
+            index=index,
+            value=value,
+            text_preview_allowed=index == safe_text_preview_index,
+        )
         for index, value in enumerate(raw_steps)
     ]
     output_text = _string_or_none(_extract(interaction, "output_text"))
     if output_text is None:
-        output_text = _extract_output_text(raw_steps)
+        output_text = _extract_output_text(
+            raw_steps,
+            safe_index=safe_text_preview_index,
+        )
     usage = _dict_or_none(_extract(interaction, "usage"))
     return GeminiInteractionPayload(
         status=str(_extract(interaction, "status") or "unknown"),
@@ -214,6 +275,15 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _validate_interactions_resource(client: Any) -> Any:
+    interaction_resource = _extract(client, "interactions")
+    create = _extract(interaction_resource, "create")
+    get = _extract(interaction_resource, "get")
+    if interaction_resource is None or not callable(create) or not callable(get):
+        raise KitaruFeatureNotAvailableError(INTERACTIONS_CONTRACT_ERROR_MESSAGE)
+    return interaction_resource
+
+
 def _extract(value: Any, key: str) -> Any:
     if isinstance(value, Mapping):
         return value.get(key)
@@ -234,7 +304,12 @@ def _sequence_or_empty(value: Any) -> list[Any]:
     return [value]
 
 
-def _summarize_step(index: int, value: Any) -> GeminiInteractionStepSummary:
+def _summarize_step(
+    index: int,
+    value: Any,
+    *,
+    text_preview_allowed: bool,
+) -> GeminiInteractionStepSummary:
     raw = to_json_safe(value)
     raw_keys = sorted(str(key) for key in raw) if isinstance(raw, Mapping) else []
     type_value = _string_or_none(_extract(value, "type")) or type(value).__name__
@@ -248,34 +323,146 @@ def _summarize_step(index: int, value: Any) -> GeminiInteractionStepSummary:
         status=_string_or_none(_extract(value, "status")),
         call_id=call_id,
         tool_name=_string_or_none(_extract(value, "name")),
-        text_preview=_text_preview(_extract_text(value)),
+        text_preview=_text_preview(_extract_safe_text(value))
+        if text_preview_allowed
+        else None,
         raw_keys=raw_keys,
     )
 
 
-def _extract_output_text(steps: list[Any]) -> str | None:
-    parts = [_extract_text(step) for step in steps]
-    text = "\n".join(part for part in parts if part)
+def _extract_output_text(
+    steps: list[Any],
+    *,
+    safe_index: int | None,
+) -> str | None:
+    if safe_index is None:
+        return None
+    text = _extract_safe_text(steps[safe_index])
     return text or None
 
 
-def _extract_text(value: Any) -> str | None:
-    direct = _extract(value, "text")
-    if isinstance(direct, str):
-        return direct
+def _safe_final_output_step_index(
+    steps: list[Any],
+    *,
+    text_safety: list[_StepTextSafety],
+) -> int | None:
+    for index in range(len(steps) - 1, -1, -1):
+        if not text_safety[index].safe_to_extract_text:
+            continue
+        if _extract_safe_text(steps[index]) is not None:
+            return index
+    return None
+
+
+def _classify_step_text(value: Any, *, source: StepSource) -> _StepTextSafety:
+    role = _normalized_step_role(value)
+    step_type = _normalized_step_type(value)
+    unsafe = role in _UNSAFE_ROLES or (
+        step_type is not None
+        and any(fragment in step_type for fragment in _UNSAFE_TYPE_FRAGMENTS)
+    )
+    safe = role in _SAFE_ROLES or step_type in _SAFE_STEP_TYPES
+    if source == "outputs" and step_type in _OUTPUTS_COMPAT_SAFE_TYPES:
+        safe = True
+    return _StepTextSafety(
+        normalized_type=step_type,
+        normalized_role=role,
+        safe_to_extract_text=safe and not unsafe,
+    )
+
+
+def _normalized_step_type(value: Any) -> str | None:
+    step_type = _string_or_none(_extract(value, "type"))
+    return _normalized_token(step_type)
+
+
+def _normalized_step_role(value: Any) -> str | None:
+    for key in ("role", "author", "speaker"):
+        role = _extract(value, key)
+        if isinstance(role, Mapping):
+            for nested_key in ("role", "name", "type"):
+                nested_role = _normalized_token(
+                    _string_or_none(_extract(role, nested_key))
+                )
+                if nested_role:
+                    return nested_role
+        normalized_role = _normalized_token(_string_or_none(role))
+        if normalized_role:
+            return normalized_role
+    return None
+
+
+def _normalized_token(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = "_".join(value.strip().lower().replace("-", "_").split())
+    return normalized or None
+
+
+def _extract_safe_text(value: Any) -> str | None:
+    text, is_safe = _extract_safe_text_candidate(value, nested=False)
+    if not is_safe:
+        return None
+    return text
+
+
+def _extract_safe_text_candidate(
+    value: Any,
+    *,
+    nested: bool,
+) -> tuple[str | None, bool]:
+    if nested and _has_unsafe_text_marker(value):
+        return None, False
+    if nested:
+        step_type = _normalized_step_type(value)
+        if step_type not in _SAFE_NESTED_TEXT_TYPES:
+            return None, False
+
     content = _extract(value, "content")
-    if isinstance(content, str):
-        return content
+    if isinstance(content, Mapping):
+        nested_text, nested_safe = _extract_safe_text_candidate(
+            content,
+            nested=True,
+        )
+        if not nested_safe:
+            return None, False
+        if nested_text:
+            return nested_text, True
     if isinstance(content, Sequence) and not isinstance(
         content, str | bytes | bytearray
     ):
-        nested = [_extract_text(item) for item in content]
-        text = "\n".join(item for item in nested if item)
-        return text or None
+        text_parts: list[str] = []
+        for item in content:
+            nested_text, nested_safe = _extract_safe_text_candidate(
+                item,
+                nested=True,
+            )
+            if not nested_safe:
+                return None, False
+            if nested_text:
+                text_parts.append(nested_text)
+        text = "\n".join(text_parts)
+        if text:
+            return text, True
+
+    direct = _extract(value, "text")
+    if isinstance(direct, str):
+        return direct, True
+    if isinstance(content, str):
+        return content, True
     result = _extract(value, "result")
     if isinstance(result, str):
-        return result
-    return None
+        return result, True
+    return None, True
+
+
+def _has_unsafe_text_marker(value: Any) -> bool:
+    role = _normalized_step_role(value)
+    step_type = _normalized_step_type(value)
+    return role in _UNSAFE_ROLES or (
+        step_type is not None
+        and any(fragment in step_type for fragment in _UNSAFE_TYPE_FRAGMENTS)
+    )
 
 
 def _text_preview(value: str | None, *, limit: int = 160) -> str | None:

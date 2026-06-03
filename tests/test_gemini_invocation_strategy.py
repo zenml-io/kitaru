@@ -4,28 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import sys
 import types
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from kitaru.errors import (
+    KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
+    KitaruUsageError,
+)
+from tests._gemini_fake_sdk import (
+    install_fake_google_genai,
+    purge_gemini_adapter_modules,
+)
 
 
 @pytest.fixture
 def gemini_adapter(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    for cached in list(sys.modules):
-        if cached.startswith("kitaru.adapters.gemini"):
-            monkeypatch.delitem(sys.modules, cached, raising=False)
-    google = types.ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    genai = types.ModuleType("google.genai")
-    google_module: Any = google
-    google_module.genai = genai
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.genai", genai)
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(monkeypatch)
     return importlib.import_module("kitaru.adapters.gemini")
 
 
@@ -232,6 +231,7 @@ def test_real_steps_are_normalized_before_outputs_fallback(
                     SimpleNamespace(
                         id="step-1",
                         type="message",
+                        role="assistant",
                         status="completed",
                         content=[{"type": "text", "text": "from real steps"}],
                     )
@@ -265,7 +265,11 @@ def test_sdk_output_text_takes_precedence_over_timeline_step_text(
                 steps=[
                     SimpleNamespace(type="user_input", text="original user prompt"),
                     SimpleNamespace(type="tool_result", text="intermediate tool text"),
-                    SimpleNamespace(type="message", text="final answer"),
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        text="final answer",
+                    ),
                 ],
             )
         ]
@@ -284,6 +288,167 @@ def test_sdk_output_text_takes_precedence_over_timeline_step_text(
         "tool_result",
         "message",
     ]
+    assert result.steps[0].text_preview is None
+    assert result.steps[1].text_preview is None
+    assert result.steps[2].text_preview == "final answer"
+
+
+def test_fallback_output_uses_only_safe_final_model_step(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                output_text=None,
+                steps=[
+                    SimpleNamespace(type="user_input", text="secret prompt"),
+                    SimpleNamespace(type="tool_result", text="private tool result"),
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        text="final answer",
+                    ),
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text == "final answer"
+    assert "secret prompt" not in result.output_text
+    assert "private tool result" not in result.output_text
+    assert [step.text_preview for step in result.steps] == [None, None, "final answer"]
+
+
+def test_fallback_output_is_none_for_unsafe_or_ambiguous_timeline_text(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                output_text=None,
+                steps=[
+                    SimpleNamespace(type="user_input", text="secret prompt"),
+                    SimpleNamespace(type="tool_result", text="private tool result"),
+                    SimpleNamespace(type="message", text="ambiguous message text"),
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text is None
+    assert [step.text_preview for step in result.steps] == [None, None, None]
+
+
+@pytest.mark.parametrize("unsafe_type", ["tool_result", "sandbox"])
+def test_fallback_output_rejects_top_level_model_step_with_nested_unsafe_content(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+    unsafe_type: str,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                output_text=None,
+                steps=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        text="final answer plus private nested content",
+                        content=[
+                            {"type": "text", "text": "final answer"},
+                            {"type": unsafe_type, "content": "private nested content"},
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text is None
+    assert result.steps[0].text_preview is None
+
+
+@pytest.mark.parametrize("unsafe_type", ["tool_result", "sandbox"])
+def test_fallback_output_rejects_top_level_text_with_mapping_unsafe_content(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+    unsafe_type: str,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                output_text=None,
+                steps=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        text="final answer plus private nested content",
+                        content={
+                            "type": unsafe_type,
+                            "content": "private nested content",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.poll("interaction-1")
+
+    result = runner.run_sync(request)
+
+    assert result.output_text is None
+    assert result.steps[0].text_preview is None
+
+
+def test_runtime_client_without_interactions_contract_raises_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=SimpleNamespace(interactions=SimpleNamespace(create=object())),
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    with pytest.raises(KitaruFeatureNotAvailableError) as exc_info:
+        runner.run_sync(request)
+
+    message = str(exc_info.value)
+    assert "Interactions preview API" in message
+    assert "interactions.create" in message
+    assert "interactions.get" in message
 
 
 def test_function_result_request_constructs_matching_create_payload(
@@ -442,6 +607,54 @@ def test_background_poll_timeout_raises_without_full_interval_oversleep(
     assert sleep_durations == pytest.approx([0.001])
 
 
+@pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
+def test_background_polling_stops_promptly_on_terminal_failure_status(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+    terminal_status: str,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    clock = {"now": 100.0}
+    sleep_durations: list[float] = []
+
+    def fake_perf_counter() -> float:
+        return clock["now"]
+
+    async def fake_sleep(duration_s: float) -> None:
+        sleep_durations.append(duration_s)
+        clock["now"] += duration_s
+
+    monkeypatch.setattr(runner_module.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(runner_module.asyncio, "sleep", fake_sleep)
+    client = FakeClient(
+        [
+            _completed_interaction(id="background-1", status="in_progress"),
+            _completed_interaction(id="background-1", status=terminal_status),
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        poll_interval_s=0.001,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "long task",
+        agent="deep-research",
+        background=True,
+        timeout_s=100.0,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        runner.run_sync(request)
+
+    message = str(exc_info.value)
+    assert "background-1" in message
+    assert f"non-stable status '{terminal_status}'" in message
+    assert client.interactions.get_calls == [("background-1", {})]
+    assert sleep_durations == pytest.approx([0.001])
+
+
 def test_nested_checkpoint_rejected_before_sdk_invocation(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
@@ -538,13 +751,30 @@ def test_request_manifest_redacts_secret_like_fields(
 
     manifest = serialization.redacted_request_manifest(
         request,
-        client={"token": "secret"},
+        client={
+            "token": "secret",
+            "headers": [
+                ("Authorization", "Bearer secret"),
+                ["x-api-key", "secret"],
+                ["Content-Type", "application/json"],
+            ],
+            "nested": {"name": "Authorization", "value": "Bearer nested"},
+        },
     )
 
     assert manifest["request"]["generation_config"]["api_key"] == "[REDACTED]"
     assert manifest["request"]["generation_config"]["temperature"] == 0.2
     assert manifest["request"]["response_format"]["authorization"] == "[REDACTED]"
     assert manifest["client"]["token"] == "[REDACTED]"
+    assert manifest["client"]["headers"] == [
+        ["Authorization", "[REDACTED]"],
+        ["x-api-key", "[REDACTED]"],
+        ["Content-Type", "application/json"],
+    ]
+    assert manifest["client"]["nested"] == {
+        "name": "Authorization",
+        "value": "[REDACTED]",
+    }
 
 
 def test_capture_failures_are_non_fatal_by_default(

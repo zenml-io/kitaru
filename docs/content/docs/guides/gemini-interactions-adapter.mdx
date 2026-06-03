@@ -96,7 +96,9 @@ The adapter gives existing Gemini Interactions users:
 - a typed `GeminiInteractionResult` with status, interaction IDs, output text,
   model/agent, environment ID when reported, usage, timing, and warnings
 - safe step summaries from `interaction.steps` so your flow can respond to
-  handoff points without storing raw provider payloads by default
+  handoff points without storing raw provider payloads by default. Step
+  summaries keep metadata such as type, status, and call IDs; `text_preview` is
+  only filled for clearly identified final assistant/model output.
 - a clear `requires_action` path for function results and human approval gates
 - explicit `cache_identity` support when the same runner/request can point at
   different Google projects, regions, credential aliases, or client setups
@@ -401,7 +403,9 @@ live client object or anything whose `repr()` can change between processes.
 
 The adapter treats `interaction.steps` as the primary response shape. If an older
 SDK exposes `outputs` instead, Kitaru can summarize those for compatibility and
-adds a warning.
+adds a warning. If the SDK omits `output_text`, Kitaru only derives fallback
+output from a clearly identified final assistant/model step. Prompt, tool,
+sandbox, or ambiguous timeline text is not merged into `output_text`.
 
 Failed Gemini interactions raise an exception instead of returning a successful
 `GeminiInteractionResult`. If the failure happens inside a Kitaru checkpoint, the
@@ -417,7 +421,8 @@ and audits:
 - usage when reported
 - event log
 - run summary
-- safe step summaries on the returned result
+- safe step summaries on the returned result. Their `text_preview` field is
+  disabled for prompt, tool, sandbox, and ambiguous timeline content by default.
 
 It does **not** save raw prompts, raw interaction payloads, or raw step payloads
 unless you opt in.

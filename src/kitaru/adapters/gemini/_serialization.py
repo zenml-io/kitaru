@@ -96,14 +96,29 @@ def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) ->
     if callable(value):
         return _callable_manifest(value)
     if isinstance(value, Mapping):
+        redact_name_value = redact and _is_secret_name_value_mapping(value)
         return {
-            str(key): _manifest_value(nested, redact=redact, key_hint=str(key))
+            str(key): (
+                "[REDACTED]"
+                if redact_name_value and str(key).lower() == "value"
+                else _manifest_value(nested, redact=redact, key_hint=str(key))
+            )
             for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
         }
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        return [
-            _manifest_value(item, redact=redact, key_hint=key_hint) for item in value
-        ]
+        if _is_key_value_sequence(value):
+            return [
+                [
+                    str(pair[0]),
+                    _manifest_value(
+                        pair[1],
+                        redact=redact,
+                        key_hint=str(pair[0]),
+                    ),
+                ]
+                for pair in value
+            ]
+        return [_manifest_value(item, redact=redact) for item in value]
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
         try:
@@ -114,6 +129,37 @@ def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) ->
                 "model_dump_error": type(exc).__name__,
             }
     return {"python_type": _python_type(value)}
+
+
+def _is_secret_name_value_mapping(value: Mapping[Any, Any]) -> bool:
+    name_value = _case_insensitive_mapping_get(value, "name")
+    has_value = _case_insensitive_mapping_get(value, "value") is not _MISSING
+    return has_value and name_value is not _MISSING and _is_secret_key(str(name_value))
+
+
+_MISSING = object()
+
+
+def _case_insensitive_mapping_get(value: Mapping[Any, Any], key: str) -> Any:
+    lowered_key = key.lower()
+    for candidate_key, candidate_value in value.items():
+        if str(candidate_key).lower() == lowered_key:
+            return candidate_value
+    return _MISSING
+
+
+def _is_key_value_sequence(value: Sequence[Any]) -> bool:
+    if not value:
+        return False
+    return all(_is_two_item_sequence(item) for item in value)
+
+
+def _is_two_item_sequence(value: Any) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes | bytearray)
+        and len(value) == 2
+    )
 
 
 def _is_secret_key(key: str) -> bool:

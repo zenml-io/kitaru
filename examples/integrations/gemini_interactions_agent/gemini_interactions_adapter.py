@@ -188,7 +188,7 @@ def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
                 step_id="dry-run-user-input",
                 type="user_input",
                 status="completed",
-                text_preview="Dry-run prompt preview",
+                text_preview=None,
                 raw_keys=["type", "text"],
             ),
             GeminiInteractionStepSummary(

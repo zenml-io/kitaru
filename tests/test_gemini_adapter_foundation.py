@@ -18,24 +18,15 @@ from tests._checkpoint_handle_helpers import (
     assert_checkpoint_handle_error,
     checkpoint_output_handle,
 )
-
-
-def _purge_gemini_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    for cached in list(sys.modules):
-        if cached.startswith("kitaru.adapters.gemini"):
-            monkeypatch.delitem(sys.modules, cached, raising=False)
+from tests._gemini_fake_sdk import (
+    install_fake_google_genai,
+    purge_gemini_adapter_modules,
+)
 
 
 @pytest.fixture
 def fake_google_genai(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    google = types.ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    genai = types.ModuleType("google.genai")
-    google_module: Any = google
-    google_module.genai = genai
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.genai", genai)
-    return genai
+    return install_fake_google_genai(monkeypatch)
 
 
 @pytest.fixture
@@ -43,7 +34,7 @@ def gemini_adapter(
     monkeypatch: pytest.MonkeyPatch,
     fake_google_genai: types.ModuleType,
 ) -> types.ModuleType:
-    _purge_gemini_adapter_modules(monkeypatch)
+    purge_gemini_adapter_modules(monkeypatch)
     return importlib.import_module("kitaru.adapters.gemini")
 
 
@@ -72,7 +63,7 @@ def test_public_import_surface_uses_interaction_vocabulary(
 def test_import_without_google_genai_raises_feature_not_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _purge_gemini_adapter_modules(monkeypatch)
+    purge_gemini_adapter_modules(monkeypatch)
     monkeypatch.setitem(sys.modules, "google", None)
     monkeypatch.delitem(sys.modules, "google.genai", raising=False)
 
@@ -83,7 +74,7 @@ def test_import_without_google_genai_raises_feature_not_available(
 def test_transitive_google_genai_import_error_is_not_masked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _purge_gemini_adapter_modules(monkeypatch)
+    purge_gemini_adapter_modules(monkeypatch)
     for cached in list(sys.modules):
         if cached == "google" or cached.startswith("google."):
             monkeypatch.delitem(sys.modules, cached, raising=False)
@@ -98,6 +89,49 @@ def test_transitive_google_genai_import_error_is_not_masked(
     monkeypatch.setattr(sys, "meta_path", [importer, *sys.meta_path])
 
     with pytest.raises(ModuleNotFoundError, match="httpx"):
+        importlib.import_module("kitaru.adapters.gemini")
+
+
+def test_import_without_google_genai_client_raises_clear_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(monkeypatch, include_client=False)
+
+    with pytest.raises(KitaruFeatureNotAvailableError) as exc_info:
+        importlib.import_module("kitaru.adapters.gemini")
+
+    message = str(exc_info.value)
+    assert "Interactions preview API" in message
+    assert "google.genai.Client" in message
+    assert "kitaru[gemini]" in message
+
+
+def test_import_without_interaction_types_raises_clear_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(monkeypatch, include_types=False)
+
+    with pytest.raises(KitaruFeatureNotAvailableError) as exc_info:
+        importlib.import_module("kitaru.adapters.gemini")
+
+    message = str(exc_info.value)
+    assert "Interactions preview API" in message
+    assert "FunctionCallContent/FunctionResultContent" in message
+
+
+def test_import_with_incomplete_interaction_type_annotations_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(
+        monkeypatch,
+        function_call_annotations={},
+        function_result_annotations={"call_id": str},
+    )
+
+    with pytest.raises(KitaruFeatureNotAvailableError, match="preview API"):
         importlib.import_module("kitaru.adapters.gemini")
 
 
