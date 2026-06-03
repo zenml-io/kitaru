@@ -344,8 +344,19 @@ def test_antigravity_preset_is_preview_labeled(
     assert request.model is None
     assert request.environment == "remote"
     assert request.store is True
+    assert request.background is False
     assert request.metadata["adapter_preview"] is True
     assert request.metadata["agent_family"] == "antigravity"
+
+
+def test_antigravity_preset_rejects_background_mode(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(ValueError, match="does not support background=True"):
+        gemini_adapter.GeminiInteractionRequest.antigravity(
+            "inspect this",
+            background=True,
+        )
 
 
 def test_gemini_request_rejects_checkpoint_handles(

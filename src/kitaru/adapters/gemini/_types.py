@@ -205,6 +205,12 @@ class GeminiInteractionRequest(BaseModel):
         Antigravity remains one coarse Gemini interaction checkpoint. Kitaru
         does not claim to snapshot Google's hosted agent sandbox.
         """
+        if background:
+            raise ValueError(
+                "GeminiInteractionRequest.antigravity() does not support "
+                "background=True; Google's Antigravity preview requires "
+                "synchronous requests. Use timeout_s to bound the provider call."
+            )
         combined_metadata = {
             "adapter_preview": True,
             "agent_family": "antigravity",
