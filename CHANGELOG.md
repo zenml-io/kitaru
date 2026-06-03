@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Added the experimental Gemini Interactions adapter (`kitaru.adapters.gemini`) with an Interactions-first design: one stable Gemini response maps to one Kitaru checkpoint, non-stable background statuses fail instead of being cached as success, raw provider payload capture is opt-in by default, and the public API includes an Antigravity managed-agent preset plus explicit `cache_identity` disambiguation while keeping Google-owned sandbox/tool internals outside Kitaru's replay promise.
 
+### Fixed
+- Fixed PydanticAI adapter compatibility with newer Pydantic AI releases that forward `retries=` from `run_sync()` into `run()`, while preserving Kitaru's legacy `output_retries=` keyword.
+
 ## [0.14.0] - 2026-06-02
 
 ### Added

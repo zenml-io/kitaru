@@ -426,10 +426,13 @@ def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
     capabilities = [Hooks()]
     conversation_id = "conversation-phase17"
     output_retries = 2
+
+    from kitaru.adapters.pydantic_ai._agent import _UPSTREAM_RUN_RETRIES_PARAM
+
     expected_forwarded_kwargs = {
         "capabilities": capabilities,
         "conversation_id": conversation_id,
-        "output_retries": output_retries,
+        _UPSTREAM_RUN_RETRIES_PARAM: output_retries,
     }
     captured: dict[str, dict[str, object]] = {}
     run_result = object()
