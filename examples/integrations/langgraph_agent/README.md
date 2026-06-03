@@ -17,7 +17,7 @@ Think of the two modes as two different camera positions:
 
 In other words: start with `graph_call` if you want to see Kitaru wrap a LangGraph run. Try `calls` when you want to see Kitaru checkpoint the model/tool calls inside a LangChain agent.
 
-This README is enough to run the example and know what to look for. For the fuller design explanation, see the [LangGraph Adapter guide](https://kitaru.ai/docs/guides/langgraph-adapter).
+This README is enough to run the example and know what to look for. For the fuller design explanation, see the [LangGraph Adapter guide](https://kitaru.ai/docs/adapters/langgraph/).
 
 ## The two runs in this example
 
@@ -176,6 +176,6 @@ For calls mode, the script prints:
 - typical and model-dependent call checkpoint name prefixes.
 
 For the conceptual walkthrough, see the guide:
-[LangGraph Adapter](https://kitaru.ai/docs/guides/langgraph-adapter).
+[LangGraph Adapter](https://kitaru.ai/docs/adapters/langgraph/).
 
 For the full catalog, see [../../README.md](../../README.md).

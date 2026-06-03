@@ -92,6 +92,6 @@ captured audit envelope. It does not automatically replay or restore every
 internal side effect.
 
 For the concept walkthrough, see
-[Claude Agent SDK Adapter](https://kitaru.ai/docs/guides/claude-agent-sdk-adapter).
+[Claude Agent SDK Adapter](https://kitaru.ai/docs/adapters/claude-agent-sdk/).
 
 For the full catalog, see [../../README.md](../../README.md).

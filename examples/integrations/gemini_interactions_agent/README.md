@@ -170,6 +170,6 @@ output must be durable in your workflow, explicitly return it from Gemini or
 write it in a later Kitaru-owned checkpoint.
 
 For the concept walkthrough, see
-[Gemini Interactions Adapter](https://kitaru.ai/docs/guides/gemini-interactions-adapter).
+[Gemini Interactions Adapter](https://kitaru.ai/docs/adapters/gemini-interactions/).
 
 For the full catalog, see [../../README.md](../../README.md).
