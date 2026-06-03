@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable, AsyncIterator
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,6 +14,23 @@ pytest.importorskip("pydantic_ai")
 async def _async_events(events: list[Any]) -> AsyncIterator[Any]:
     for event in events:
         yield event
+
+
+def _contains_kitaru_truncation(value: Any) -> bool:
+    if isinstance(value, dict):
+        return "_kitaru_truncated" in value or any(
+            _contains_kitaru_truncation(nested) for nested in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_kitaru_truncation(item) for item in value)
+    return False
+
+
+def _nested_wide_payload(*, width: int = 8, depth: int = 4) -> dict[str, Any]:
+    payload: Any = "x" * 100
+    for level in range(depth):
+        payload = {f"level-{level}-key-{index}": payload for index in range(width)}
+    return cast(dict[str, Any], payload)
 
 
 class _FakeTracker:
@@ -98,10 +115,10 @@ def test_public_adapter_exports_pydantic_ai_stream_constants() -> None:
     assert kp.PYDANTIC_AI_STREAM_FAILED in kp.PYDANTIC_AI_STREAM_TERMINAL_EVENT_KINDS
 
 
-def test_capture_policy_defaults_to_no_stream_transcripts() -> None:
+def test_capture_policy_defaults_to_save_stream_transcripts() -> None:
     from kitaru.adapters.pydantic_ai import CapturePolicy
 
-    assert CapturePolicy().save_stream_transcripts is False
+    assert CapturePolicy().save_stream_transcripts is True
 
 
 def test_publisher_normalizes_agent_name() -> None:
@@ -321,6 +338,91 @@ def test_stream_transcripts_serialization_fallback_omits_raw_repr(
     assert "RAW SECRET STREAM EVENT" not in repr(serialized)
 
 
+def test_stream_transcripts_serialization_bounds_retained_event_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _model as model_module
+
+    def dump_large_event(*_args: object, **_kwargs: object) -> object:
+        return {
+            "event_kind": "part_delta",
+            "content": "x" * 5_000,
+            "items": list(range(25)),
+        }
+
+    monkeypatch.setattr(
+        model_module,
+        "_MODEL_STREAM_EVENT_ADAPTER",
+        SimpleNamespace(dump_python=dump_large_event),
+    )
+
+    serialized = model_module._serialize_stream_event(SimpleNamespace())
+
+    assert serialized["content"].endswith("...")
+    assert (
+        len(serialized["content"]) <= model_module._MAX_STREAM_TRANSCRIPT_STRING_CHARS
+    )
+    assert (
+        len(serialized["items"]) == model_module._MAX_STREAM_TRANSCRIPT_EVENT_ITEMS + 1
+    )
+    assert serialized["items"][-1] == {"_kitaru_omitted_items": 5}
+
+
+def test_stream_transcripts_serialization_bounds_nested_wide_retained_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _model as model_module
+
+    def dump_nested_wide_event(*_args: object, **_kwargs: object) -> object:
+        return {"event_kind": "part_delta", "payload": _nested_wide_payload()}
+
+    monkeypatch.setattr(model_module, "_MAX_STREAM_TRANSCRIPT_TOTAL_ITEMS", 24)
+    monkeypatch.setattr(
+        model_module,
+        "_MODEL_STREAM_EVENT_ADAPTER",
+        SimpleNamespace(dump_python=dump_nested_wide_event),
+    )
+
+    serialized = model_module._serialize_stream_event(SimpleNamespace())
+
+    assert _contains_kitaru_truncation(serialized)
+    assert len(repr(serialized)) < 5_000
+
+
+def test_stream_transcripts_serialization_bounds_huge_mapping_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import _model as model_module
+
+    huge_key = "x" * 100_000
+
+    class BadKey:
+        def __str__(self) -> str:
+            raise RuntimeError("key must not crash serialization")
+
+    def dump_huge_key_event(*_args: object, **_kwargs: object) -> object:
+        return {
+            "event_kind": "part_delta",
+            "payload": {
+                huge_key: "small",
+                BadKey(): "also small",
+            },
+        }
+
+    monkeypatch.setattr(model_module, "_MAX_STREAM_TRANSCRIPT_APPROX_CHARS", 80)
+    monkeypatch.setattr(
+        model_module,
+        "_MODEL_STREAM_EVENT_ADAPTER",
+        SimpleNamespace(dump_python=dump_huge_key_event),
+    )
+
+    serialized = model_module._serialize_stream_event(SimpleNamespace())
+
+    assert len(repr(serialized)) < 500
+    assert huge_key not in repr(serialized)
+    assert serialized["payload"]["_kitaru_omitted_keys"] >= 1
+
+
 def test_save_stream_transcripts_false_omits_text_delta() -> None:
     from kitaru.adapters.pydantic_ai._streaming import PydanticAIStreamPublisher
 
@@ -519,9 +621,157 @@ async def test_model_request_stream_publishes_events_and_keeps_transcript(
     assert "pydantic_ai.stream.event" in published_kinds
     assert published[-1]["kind"] == "pydantic_ai.stream.completed"
     assert published[-1]["payload"]["event_count"] == len(events)
+    transcript = saved[0]["args"][1]
     assert tracker.model_records[-1]["status"] == "completed"
     assert tracker.model_records[-1]["stream_event_count"] == len(events)
-    assert saved[0]["args"][1]["event_count"] == len(events)
+    assert transcript["event_count"] == len(events)
+    assert len(transcript["events"]) == len(events)
+    assert transcript["events_truncated"] is False
+    assert transcript["omitted_event_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_transcript_keeps_bounded_event_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    tracker = _FakeTracker()
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module, "_MAX_STREAM_TRANSCRIPT_EVENTS", 1)
+    monkeypatch.setattr(
+        model_module.kitaru,
+        "save",
+        lambda *args, **kwargs: saved.append({"args": args, "kwargs": kwargs}),
+    )
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    async with model.request_stream([], None, ModelRequestParameters()) as response:
+        events = [event async for event in response]
+
+    transcript = saved[0]["args"][1]
+    assert len(events) > 1
+    assert transcript["event_count"] == len(events)
+    assert len(transcript["events"]) == 1
+    assert transcript["events_truncated"] is True
+    assert transcript["omitted_event_count"] == len(events) - 1
+    assert tracker.model_records[-1]["stream_event_count"] == len(events)
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_transcript_bounds_final_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    tracker = _FakeTracker()
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(
+        model_module,
+        "_serialize_model_response",
+        lambda _response: {"content": "x" * 5_000, "items": list(range(25))},
+    )
+    monkeypatch.setattr(
+        model_module.kitaru,
+        "save",
+        lambda *args, **kwargs: saved.append({"args": args, "kwargs": kwargs}),
+    )
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    async with model.request_stream([], None, ModelRequestParameters()) as response:
+        async for _event in response:
+            pass
+
+    transcript = saved[0]["args"][1]
+    final_response = transcript["final_response"]
+    assert transcript["final_response_truncated"] is True
+    assert final_response["content"].endswith("...")
+    assert (
+        len(final_response["content"])
+        <= model_module._MAX_STREAM_TRANSCRIPT_STRING_CHARS
+    )
+    assert (
+        len(final_response["items"])
+        == model_module._MAX_STREAM_TRANSCRIPT_EVENT_ITEMS + 1
+    )
+    assert final_response["items"][-1] == {"_kitaru_omitted_items": 5}
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_transcript_bounds_nested_wide_final_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    tracker = _FakeTracker()
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module, "_MAX_STREAM_TRANSCRIPT_TOTAL_ITEMS", 24)
+    monkeypatch.setattr(
+        model_module,
+        "_serialize_model_response",
+        lambda _response: {"payload": _nested_wide_payload()},
+    )
+    monkeypatch.setattr(
+        model_module.kitaru,
+        "save",
+        lambda *args, **kwargs: saved.append({"args": args, "kwargs": kwargs}),
+    )
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    async with model.request_stream([], None, ModelRequestParameters()) as response:
+        async for _event in response:
+            pass
+
+    transcript = saved[0]["args"][1]
+    final_response = transcript["final_response"]
+    assert transcript["final_response_truncated"] is True
+    assert _contains_kitaru_truncation(final_response)
+    assert len(repr(final_response)) < 5_000
 
 
 @pytest.mark.anyio

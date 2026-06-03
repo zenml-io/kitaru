@@ -306,6 +306,61 @@ def test_stream_event_mapper_falls_back_to_step_fields() -> None:
     assert event.checkpoint_name == "fetch_data"
 
 
+def test_stream_event_mapper_rejects_non_string_kind() -> None:
+    payload = {
+        "pipeline_run_id": "run-1",
+        "kind": 123,
+        "payload": {},
+    }
+    frame = SSEFrame(
+        event="custom.kind",
+        data_lines=[json.dumps(payload)],
+        cursor="cursor-1",
+    )
+
+    with pytest.raises(KitaruBackendError, match="`kind` must be a string"):
+        map_stream_event(frame, fallback_exec_id="fallback-run")
+
+
+def test_stream_event_mapper_rejects_non_string_metadata_field() -> None:
+    payload = {
+        "pipeline_run_id": "run-1",
+        "kind": "custom.kind",
+        "correlation_id": 123,
+        "payload": {},
+    }
+    frame = SSEFrame(
+        event="custom.kind",
+        data_lines=[json.dumps(payload)],
+        cursor="cursor-1",
+    )
+
+    with pytest.raises(KitaruBackendError, match="`correlation_id` must be a string"):
+        map_stream_event(frame, fallback_exec_id="fallback-run")
+
+
+def test_stream_event_mapper_rejects_non_string_kitaru_metadata_field() -> None:
+    payload = {
+        "pipeline_run_id": "run-1",
+        "kind": "custom.kind",
+        "payload": {
+            "kitaru": {
+                "checkpoint_name": 123,
+            }
+        },
+    }
+    frame = SSEFrame(
+        event="custom.kind",
+        data_lines=[json.dumps(payload)],
+        cursor="cursor-1",
+    )
+
+    with pytest.raises(
+        KitaruBackendError, match=r"`kitaru\.checkpoint_name` must be a string"
+    ):
+        map_stream_event(frame, fallback_exec_id="fallback-run")
+
+
 def test_events_api_does_not_send_step_names_for_live_checkpoint_watch() -> None:
     research_step = _step("research")
     write_step = _step("write")
@@ -500,12 +555,16 @@ def test_events_api_validates_filters() -> None:
         client.executions.events("run-1", kinds=[" "])
     with pytest.raises(KitaruUsageError, match="kinds"):
         client.executions.events("run-1", kinds=cast(Any, "custom.kind"))
+    with pytest.raises(KitaruUsageError, match="kinds"):
+        client.executions.events("run-1", kinds=cast(Any, 123))
     with pytest.raises(KitaruUsageError, match="newline"):
         client.executions.events("run-1", kinds=["custom\nevent"])
     with pytest.raises(KitaruUsageError, match="newline"):
         client.executions.events("run-1", kinds=["custom\revent"])
     with pytest.raises(KitaruUsageError, match="correlation_ids"):
         client.executions.events("run-1", correlation_ids=cast(Any, "corr-1"))
+    with pytest.raises(KitaruUsageError, match="correlation_ids"):
+        client.executions.events("run-1", correlation_ids=cast(Any, object()))
     with pytest.raises(KitaruUsageError, match="correlation_ids"):
         client.executions.events("run-1", correlation_ids=cast(Any, [None]))
     with pytest.raises(KitaruUsageError, match="since"):
@@ -759,6 +818,24 @@ def test_gap_frame_surfaces_immediately_even_when_reconnect_enabled() -> None:
 
     assert type(exc_info.value) is KitaruBackendError
     assert calls == 1
+
+
+def test_gap_frame_omits_non_string_control_reason() -> None:
+    def _open(last_event_id: str | None) -> _FakeResponse:
+        return _FakeResponse(["event: gap", 'data: {"reason": 123}', ""])
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        list(
+            watch_execution_events(
+                open_stream=_open,
+                fallback_exec_id="run-1",
+                reconnect=False,
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "delivery gap" in message
+    assert "123" not in message
 
 
 def test_malformed_json_surfaces_immediately_without_skipping_cursor() -> None:

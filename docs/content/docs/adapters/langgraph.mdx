@@ -520,7 +520,7 @@ The included examples have two provider-neutral graph-call paths and one provide
 
 ```bash
 uv sync --extra local --extra langgraph
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
 ```
 
 The streaming path is also local and needs no provider API key:
@@ -529,7 +529,7 @@ The streaming path is also local and needs no provider API key:
 uv sync --extra local --extra langgraph
 uv run kitaru init
 uv run kitaru login
-uv run examples/integrations/langgraph_agent/langgraph_streaming.py
+uv run python examples/integrations/langgraph_agent/langgraph_streaming.py
 ```
 
 It builds a small `StateGraph` with `InMemorySaver`, emits custom progress from graph nodes, watches `langgraph.stream.*` events with `KitaruClient().executions.events(...)` when the backend supports live watching, and then prints the durable `LangGraphRunResult` from `handle.wait()`.
@@ -541,7 +541,7 @@ uv sync --extra local --extra langgraph-openai
 export OPENAI_API_KEY='sk-...'
 # Optional: override the default gpt-5-nano model.
 export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
 `--strategy graph_call` runs the interrupt/resume demo:

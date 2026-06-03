@@ -68,6 +68,11 @@ automatically:
 3. `kitaru.checkpoint.returned` if the Python function body returns, or
    `kitaru.checkpoint.failed` if the Python function body raises
 
+Automatic failed lifecycle events include the exception type, but intentionally
+use a generic message instead of publishing the raw exception text. That way a
+mistake like `RuntimeError("api_key=...")` still fails the checkpoint without
+broadcasting the secret through the live-event feed.
+
 `kitaru.checkpoint.returned` is intentionally named narrowly: it means the
 checkpoint function returned a value. It does **not** mean the returned value has
 already been durably stored as a checkpoint output. Use the

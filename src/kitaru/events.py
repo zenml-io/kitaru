@@ -26,7 +26,8 @@ CHECKPOINT_PROGRESS_KIND = "kitaru.checkpoint.progress"
 CHECKPOINT_RETURNED_KIND = "kitaru.checkpoint.returned"
 CHECKPOINT_FAILED_KIND = "kitaru.checkpoint.failed"
 
-_LIFECYCLE_FLUSH_TIMEOUT = 0.1
+_LIFECYCLE_FLUSH_TIMEOUT = 0.25
+_CHECKPOINT_FAILED_SAFE_MESSAGE = "Checkpoint failed. See execution logs for details."
 _RESERVED_CONTROL_KINDS = frozenset({"cursor", "end", "error", "gap", "system"})
 _PUBLISH_OUTSIDE_CHECKPOINT_ERROR = (
     "kitaru.{api_name}() can only be called inside a @checkpoint."
@@ -232,6 +233,18 @@ def _publish_to_zenml_streaming(
     )
 
 
+def _warn_if_terminal_flush_failed(kind: str, timeout: float) -> None:
+    """Log terminal lifecycle flush failures without raising into user code."""
+    if flush(timeout=timeout):
+        return
+    logger.warning(
+        "Kitaru checkpoint event %s was published but pending events did not "
+        "flush within %.2fs.",
+        kind,
+        timeout,
+    )
+
+
 def _publish_envelope(
     kind: str,
     envelope_fields: Mapping[str, Any] | None = None,
@@ -264,7 +277,7 @@ def _publish_envelope(
             index=event_index,
         )
         if flush_after_publish:
-            flush(timeout=flush_timeout)
+            _warn_if_terminal_flush_failed(normalized_kind, flush_timeout)
     except Exception as exc:  # pragma: no cover - logging-only fallback
         logger.warning("Failed to publish Kitaru checkpoint event %s: %s", kind, exc)
 
@@ -334,15 +347,6 @@ def progress(
     )
 
 
-def _safe_exception_message(error: BaseException) -> str:
-    """Return an exception message without trusting ``error.__str__``."""
-    try:
-        message = str(error)
-    except BaseException:
-        return f"<{type(error).__name__} message unavailable>"
-    return message or type(error).__name__
-
-
 def _publish_checkpoint_lifecycle(
     event: _CheckpointLifecycleEvent,
     *,
@@ -353,7 +357,7 @@ def _publish_checkpoint_lifecycle(
     fields: dict[str, Any] = {"status": event.status}
     if error is not None:
         fields["error_type"] = type(error).__name__
-        fields["message"] = _safe_exception_message(error)
+        fields["message"] = _CHECKPOINT_FAILED_SAFE_MESSAGE
 
     _publish_envelope(
         event.kind,

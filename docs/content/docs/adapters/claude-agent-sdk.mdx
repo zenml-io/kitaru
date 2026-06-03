@@ -399,12 +399,13 @@ available. If the active backend cannot publish or watch live events, or if the
 watcher misses a terminal event, the Claude invocation can still finish and
 `.wait()` can still return the saved `ClaudeRunResult`.
 
-The live payloads are intentionally smaller than the durable artifacts. They may
-include text deltas because live output is the point of streaming. They do not
-include the raw prompt, full SDK options, raw SDK stream events, full tool input
-JSON, full assistant messages, final result text, or structured output by
-default. If you need the durable conversation record, inspect the final
-`ClaudeRunResult` and captured artifacts after the checkpoint completes.
+The live payloads are intentionally smaller than the durable artifacts. By
+default, they do not include text deltas, the raw prompt, full SDK options, raw
+SDK stream events, full tool input JSON, full assistant messages, final result
+text, or structured output. If you deliberately want clipped live text deltas,
+opt in with `ClaudeCapturePolicy(include_stream_text_deltas=True)`. If you need
+the durable conversation record, inspect the final `ClaudeRunResult` and captured
+artifacts after the checkpoint completes.
 
 A few gotchas matter:
 
@@ -725,7 +726,7 @@ result.
 For a richer workflow, see the compliance-review example:
 
 ```bash
-uv run examples/end_to_end/compliance_review/stage_1_single_turn.py
+uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
 ```
 
 That example shows staged audit checkpoints, artifact persistence, and wait/resume around
@@ -780,8 +781,10 @@ Use `fail_on_artifact_capture_error=True` or
 First check the final `ClaudeRunResult`. Live events are progress only, not the
 durable source of truth. Common causes are: the active backend does not support
 live event watching, the checkpoint hit the stream cache and skipped the body, or
-Claude produced only coarse SDK messages instead of partial text deltas. For a
-repeatable demo, the streaming example sets `checkpoint_config={"cache": False}`.
+Claude text deltas were not explicitly enabled with
+`ClaudeCapturePolicy(include_stream_text_deltas=True)`, or Claude produced only
+coarse SDK messages. For a repeatable demo, the streaming example sets
+`checkpoint_config={"cache": False}`.
 
 ### “Can this resume a half-finished Claude invocation?”
 

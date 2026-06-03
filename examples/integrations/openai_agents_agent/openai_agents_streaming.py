@@ -10,7 +10,7 @@ Run:
     uv sync --extra local --extra openai-agents
     uv run kitaru init
     export OPENAI_API_KEY=sk-...
-    uv run examples/integrations/openai_agents_agent/openai_agents_streaming.py
+    uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 """
 
 import os
@@ -171,8 +171,6 @@ def main() -> None:
 
     @flow
     def support_flow(customer_message: str) -> OpenAIRunResult:
-        # The events are live progress. This final OpenAIRunResult is the value
-        # Kitaru saves durably after the OpenAI stream finishes.
         return runner.run_stream_sync(OpenAIRunRequest.start(customer_message))
 
     handle = support_flow.run(

@@ -18,7 +18,7 @@ git clone https://github.com/zenml-io/kitaru.git
 cd kitaru
 uv sync --extra local
 uv run kitaru init
-uv run examples/features/basic_flow/first_working_flow.py
+uv run python examples/features/basic_flow/first_working_flow.py
 ```
 
 <Callout type="info">
@@ -27,7 +27,7 @@ uv run examples/features/basic_flow/first_working_flow.py
   source from a saved execution.
 </Callout>
 
-Most examples can be run from the repository root with `uv run path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
+Most examples can be run from the repository root with `uv run python path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 ## Connection context
 

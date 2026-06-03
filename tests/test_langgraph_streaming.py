@@ -33,6 +33,23 @@ from kitaru.adapters.langgraph import (
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
+def _contains_kitaru_truncation(value: Any) -> bool:
+    if isinstance(value, dict):
+        return "_kitaru_truncated" in value or any(
+            _contains_kitaru_truncation(nested) for nested in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_kitaru_truncation(item) for item in value)
+    return False
+
+
+def _nested_wide_payload(*, width: int = 8, depth: int = 4) -> dict[str, Any]:
+    payload: Any = "x" * 100
+    for level in range(depth):
+        payload = {f"level-{level}-key-{index}": payload for index in range(width)}
+    return cast(dict[str, Any], payload)
+
+
 class CountState(TypedDict):
     count: int
 
@@ -545,6 +562,135 @@ def test_stream_publisher_summarizes_structural_modes_and_malformed_parts() -> N
     assert malformed_payload["category"] == "stream_part_normalization_failed"
     assert unknown_kind == langgraph_streaming.LANGGRAPH_STREAM_DEBUG
     assert unknown_payload["category"] == "stream_part_unknown_mode"
+
+
+def test_stream_publisher_bounds_opted_in_raw_payloads() -> None:
+    class DangerousRepr:
+        def __repr__(self) -> str:
+            raise AssertionError("raw payload fallback must not call repr")
+
+    policy = LangGraphStreamPolicy(
+        include_raw_payloads=True,
+        max_display_chars=16,
+    )
+    options = langgraph_streaming.resolve_stream_options(
+        ["updates", "values"],
+        policy=policy,
+        subgraphs=False,
+    )
+    publisher = langgraph_streaming.LangGraphStreamPublisher(
+        graph_name="graph",
+        thread_id="thread-1",
+        policy=policy,
+        options=options,
+    )
+    large_data = {
+        "unsupported": {"value": DangerousRepr()},
+        **{f"node-{node_index}": {"message": "x" * 100} for node_index in range(25)},
+    }
+
+    _, update_payload = publisher.normalize_part(
+        {"type": "updates", "ns": (), "data": large_data}
+    )
+    _, values_payload = publisher.normalize_part(
+        {"type": "values", "ns": (), "data": large_data}
+    )
+
+    assert update_payload["raw"]["_kitaru_omitted_keys"] == 6
+    assert values_payload["raw"]["_kitaru_omitted_keys"] == 6
+    assert len(update_payload["raw"]["node-0"]["message"]) <= policy.max_display_chars
+    assert len(values_payload["raw"]["node-0"]["message"]) <= policy.max_display_chars
+    expected_unsupported_metadata = {
+        "python_type": DangerousRepr.__qualname__,
+        "serialization_error": "unsupported_stream_value",
+    }
+    assert (
+        update_payload["raw"]["unsupported"]["value"] == expected_unsupported_metadata
+    )
+    assert (
+        values_payload["raw"]["unsupported"]["value"] == expected_unsupported_metadata
+    )
+    assert "repr" not in update_payload["raw"]["unsupported"]["value"]
+
+
+def test_stream_publisher_bounds_nested_wide_opted_in_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(langgraph_streaming, "_MAX_STREAM_TOTAL_ITEMS", 24)
+    policy = LangGraphStreamPolicy(
+        include_raw_payloads=True,
+        include_custom_payload=True,
+        max_display_chars=16,
+    )
+    options = langgraph_streaming.resolve_stream_options(
+        ["updates", "custom"],
+        policy=policy,
+        subgraphs=False,
+    )
+    publisher = langgraph_streaming.LangGraphStreamPublisher(
+        graph_name="graph",
+        thread_id="thread-1",
+        policy=policy,
+        options=options,
+    )
+    data = _nested_wide_payload()
+
+    _, update_payload = publisher.normalize_part(
+        {"type": "updates", "ns": (), "data": data}
+    )
+    _, custom_payload = publisher.normalize_part(
+        {"type": "custom", "ns": (), "data": data}
+    )
+
+    assert _contains_kitaru_truncation(update_payload["raw"])
+    assert _contains_kitaru_truncation(custom_payload["custom"])
+    assert len(repr(update_payload["raw"])) < 5_000
+    assert len(repr(custom_payload["custom"])) < 5_000
+
+
+def test_stream_publisher_bounds_huge_mapping_keys_in_opted_in_payloads() -> None:
+    huge_key = "x" * 100_000
+    policy = LangGraphStreamPolicy(
+        include_raw_payloads=True,
+        include_custom_payload=True,
+        max_display_chars=16,
+    )
+    options = langgraph_streaming.resolve_stream_options(
+        ["updates", "custom"],
+        policy=policy,
+        subgraphs=False,
+    )
+    publisher = langgraph_streaming.LangGraphStreamPublisher(
+        graph_name="graph",
+        thread_id="thread-1",
+        policy=policy,
+        options=options,
+    )
+
+    _, update_payload = publisher.normalize_part(
+        {"type": "updates", "ns": (), "data": {huge_key: {huge_key: "small"}}}
+    )
+    _, custom_payload = publisher.normalize_part(
+        {"type": "custom", "ns": (), "data": {huge_key: "small"}}
+    )
+
+    update_raw_repr = repr(update_payload["raw"])
+    custom_repr = repr(custom_payload["custom"])
+    assert len(update_raw_repr) < 500
+    assert len(custom_repr) < 500
+    assert huge_key not in update_raw_repr
+    assert huge_key not in custom_repr
+    assert all(len(key) <= policy.max_display_chars for key in custom_payload["custom"])
+    assert all(len(key) <= policy.max_display_chars for key in update_payload["raw"])
+    assert (
+        len(update_payload["node_names"][0])
+        <= langgraph_streaming._MAX_STREAM_LABEL_CHARS
+    )
+    clipped_node_label = update_payload["node_names"][0]
+    assert all(
+        len(key) <= langgraph_streaming._MAX_STREAM_LABEL_CHARS
+        for key in update_payload["updated_keys_by_node"][clipped_node_label]
+    )
 
 
 class UnknownPartGraph:

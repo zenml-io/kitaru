@@ -83,10 +83,11 @@ A few details are worth knowing before you run it:
 - The example disables checkpoint caching for the demo. In normal code, a
   repeated stream call can hit the stream cache; if that happens, Kitaru reuses
   the saved `ClaudeRunResult` and there may be no fresh live events.
-- Text deltas can appear in live event payloads because that is the point of
-  streaming. Prompts, full tool input JSON, full options, raw SDK events, final
-  result text, and structured output are not sent as live event payloads by
-  default.
+- Text deltas are hidden from live event payloads by default. If you deliberately
+  want clipped live text deltas, configure
+  `ClaudeCapturePolicy(include_stream_text_deltas=True)`. Prompts, full tool
+  input JSON, full options, raw SDK events, final result text, and structured
+  output are not sent as live event payloads by default.
 - The final `ClaudeRunResult` is the durable record. Treat live events as
   progress updates, like a radio feed while the checkpoint is running.
 

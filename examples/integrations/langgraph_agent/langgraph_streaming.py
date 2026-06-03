@@ -10,7 +10,7 @@ Run:
     uv sync --extra local --extra langgraph
     uv run kitaru init
     uv run kitaru login
-    uv run examples/integrations/langgraph_agent/langgraph_streaming.py
+    uv run python examples/integrations/langgraph_agent/langgraph_streaming.py
 """
 
 import threading

@@ -11,7 +11,7 @@ events are progress postcards for anything watching the backend stream.
 ```bash
 cd examples/features/checkpoint_streaming
 kitaru init
-uv run checkpoint_streaming.py
+uv run python checkpoint_streaming.py
 ```
 
 If your active backend has live streaming enabled, the `kitaru.progress(...)`

@@ -15,7 +15,7 @@ from kitaru.adapters._streaming_utils import (
 from kitaru.errors import KitaruUsageError
 
 from ._policy import LangGraphStreamPolicy
-from ._serialization import redact_config, to_json_safe
+from ._serialization import redact_config
 from ._types import LangGraphStreamMode
 
 LANGGRAPH_STREAM_STARTED = "langgraph.stream.started"
@@ -73,6 +73,9 @@ _SAFE_MESSAGE_METADATA_KEYS = {
 _MAX_ERROR_CHARS = 500
 _MAX_STREAM_METADATA_ITEMS = 20
 _MAX_STREAM_SUMMARY_DEPTH = 4
+_MAX_STREAM_TOTAL_ITEMS = 256
+_MAX_STREAM_APPROX_CHARS = 20_000
+_MAX_STREAM_LABEL_CHARS = 200
 
 
 @dataclass(frozen=True)
@@ -261,13 +264,15 @@ class LangGraphStreamPublisher(BaseStreamPublisher):
             for index, (node_name, update) in enumerate(data.items()):
                 if index >= _MAX_STREAM_METADATA_ITEMS:
                     break
-                node_label = str(node_name)
+                node_label = _safe_label(node_name, limit=_MAX_STREAM_LABEL_CHARS)
                 node_names.append(node_label)
                 if isinstance(update, Mapping):
                     updated_key_counts_by_node[node_label] = _safe_len(update)
                     updated_keys_by_node[node_label] = _first_string_labels(update)
                     value_types_by_node[node_label] = {
-                        str(key): type(value).__qualname__
+                        _safe_label(key, limit=_MAX_STREAM_LABEL_CHARS): type(
+                            value
+                        ).__qualname__
                         for key, value in _first_mapping_items(update)
                     }
                 else:
@@ -287,7 +292,12 @@ class LangGraphStreamPublisher(BaseStreamPublisher):
             value_types_by_node=value_types_by_node,
         )
         if self._policy.include_raw_payloads:
-            payload["raw"] = redact_config(to_json_safe(data))
+            payload["raw"] = redact_config(
+                _bounded_json_safe(
+                    data,
+                    string_limit=self._policy.max_display_chars,
+                )
+            )
         return payload
 
     def _normalize_custom(self, part: Mapping[str, Any], data: Any) -> dict[str, Any]:
@@ -339,7 +349,12 @@ class LangGraphStreamPublisher(BaseStreamPublisher):
             payload["interrupt_count"] = _safe_len(interrupts)
             payload["interrupts"] = safe_interrupts
         if self._policy.include_raw_payloads:
-            payload["raw"] = redact_config(to_json_safe(data))
+            payload["raw"] = redact_config(
+                _bounded_json_safe(
+                    data,
+                    string_limit=self._policy.max_display_chars,
+                )
+            )
         return payload
 
     def _base_payload(
@@ -453,7 +468,7 @@ def _namespace(part: Mapping[str, Any]) -> list[str]:
         return [raw]
     if isinstance(raw, Sequence):
         return _bounded_string_sequence(raw)
-    return [str(raw)]
+    return [_safe_label(raw, limit=_MAX_STREAM_LABEL_CHARS)]
 
 
 def _mapping_get(value: Any, key: str) -> Any:
@@ -557,13 +572,18 @@ def _first_mapping_items(value: Mapping[Any, Any]) -> list[tuple[Any, Any]]:
     return items
 
 
+def _safe_label(value: Any, *, limit: int) -> str:
+    try:
+        text = str(value)
+    except Exception:
+        text = f"<unprintable key {type(value).__qualname__}>"
+    return clip_stream_text(text, limit)
+
+
 def _first_string_labels(value: Mapping[Any, Any]) -> list[str]:
     labels: list[str] = []
     for key, _ in _first_mapping_items(value):
-        try:
-            labels.append(str(key))
-        except Exception:
-            labels.append(f"<unprintable key {type(key).__qualname__}>")
+        labels.append(_safe_label(key, limit=_MAX_STREAM_LABEL_CHARS))
     return labels
 
 
@@ -572,8 +592,65 @@ def _bounded_string_sequence(value: Sequence[Any]) -> list[str]:
     for index, item in enumerate(value):
         if index >= _MAX_STREAM_METADATA_ITEMS:
             break
-        labels.append(str(item))
+        labels.append(_safe_label(item, limit=_MAX_STREAM_LABEL_CHARS))
     return labels
+
+
+@dataclass
+class _JsonSafeBudget:
+    remaining_items: int
+    remaining_chars: int
+
+    def take_item(self) -> bool:
+        if self.remaining_items <= 0 or self.remaining_chars <= 0:
+            return False
+        self.remaining_items -= 1
+        return True
+
+    def take_chars(self, count: int) -> int:
+        allowed = min(count, self.remaining_chars)
+        self.remaining_chars -= allowed
+        return allowed
+
+    def exhausted(self) -> bool:
+        return self.remaining_items <= 0 or self.remaining_chars <= 0
+
+
+def _json_safe_truncated_marker(value: Any) -> dict[str, str]:
+    return {
+        "_kitaru_truncated": "stream_payload_budget_exhausted",
+        "python_type": type(value).__qualname__,
+    }
+
+
+def _bounded_json_safe_string(
+    value: str,
+    *,
+    string_limit: int,
+    budget: _JsonSafeBudget,
+) -> Any:
+    clipped = clip_stream_text(value, string_limit)
+    allowed_chars = budget.take_chars(len(clipped))
+    if allowed_chars <= 0:
+        return _json_safe_truncated_marker(value)
+    if allowed_chars >= len(clipped):
+        return clipped
+    return clip_stream_text(clipped[:allowed_chars], allowed_chars)
+
+
+def _bounded_json_safe_key(
+    key: Any,
+    *,
+    string_limit: int,
+    budget: _JsonSafeBudget,
+) -> str | None:
+    text = _safe_label(key, limit=string_limit)
+    allowed_chars = budget.take_chars(len(text))
+    if allowed_chars <= 0:
+        return None
+    if allowed_chars >= len(text):
+        return text
+    return clip_stream_text(text[:allowed_chars], allowed_chars)
 
 
 def _bounded_json_safe(
@@ -581,7 +658,14 @@ def _bounded_json_safe(
     *,
     string_limit: int,
     _depth: int = 0,
+    _budget: _JsonSafeBudget | None = None,
 ) -> Any:
+    budget = _budget or _JsonSafeBudget(
+        remaining_items=_MAX_STREAM_TOTAL_ITEMS,
+        remaining_chars=_MAX_STREAM_APPROX_CHARS,
+    )
+    if not budget.take_item():
+        return _json_safe_truncated_marker(value)
     if _depth > _MAX_STREAM_SUMMARY_DEPTH:
         return {
             "summary": "max_depth_exceeded",
@@ -590,36 +674,63 @@ def _bounded_json_safe(
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
-        return clip_stream_text(value, string_limit)
+        return _bounded_json_safe_string(
+            value,
+            string_limit=string_limit,
+            budget=budget,
+        )
     if isinstance(value, Mapping):
         item_count = _safe_len(value)
         bounded: dict[str, Any] = {}
+        retained_count = 0
         for key, nested in _first_mapping_items(value):
-            bounded[str(key)] = _bounded_json_safe(
+            if budget.exhausted():
+                bounded["_kitaru_truncated"] = "stream_payload_budget_exhausted"
+                break
+            bounded_key = _bounded_json_safe_key(
+                key,
+                string_limit=string_limit,
+                budget=budget,
+            )
+            if bounded_key is None:
+                bounded["_kitaru_truncated"] = "stream_payload_budget_exhausted"
+                break
+            bounded[bounded_key] = _bounded_json_safe(
                 nested,
                 string_limit=string_limit,
                 _depth=_depth + 1,
+                _budget=budget,
             )
-        omitted = item_count - len(bounded)
+            retained_count += 1
+        omitted = item_count - retained_count
         if omitted > 0:
             bounded["_kitaru_omitted_keys"] = omitted
         return bounded
     if isinstance(value, list | tuple):
-        bounded_items = [
-            _bounded_json_safe(
-                item,
-                string_limit=string_limit,
-                _depth=_depth + 1,
+        bounded_items: list[Any] = []
+        retained_count = 0
+        for item in value[:_MAX_STREAM_METADATA_ITEMS]:
+            if budget.exhausted():
+                bounded_items.append(
+                    {"_kitaru_truncated": "stream_payload_budget_exhausted"}
+                )
+                break
+            bounded_items.append(
+                _bounded_json_safe(
+                    item,
+                    string_limit=string_limit,
+                    _depth=_depth + 1,
+                    _budget=budget,
+                )
             )
-            for item in value[:_MAX_STREAM_METADATA_ITEMS]
-        ]
-        omitted = len(value) - len(bounded_items)
+            retained_count += 1
+        omitted = len(value) - retained_count
         if omitted > 0:
             bounded_items.append({"_kitaru_omitted_items": omitted})
         return bounded_items
     return {
         "python_type": type(value).__qualname__,
-        "repr": clip_stream_text(repr(value), string_limit),
+        "serialization_error": "unsupported_stream_value",
     }
 
 

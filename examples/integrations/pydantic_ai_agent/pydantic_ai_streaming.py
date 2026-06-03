@@ -155,8 +155,6 @@ def main() -> None:
 
     @flow
     def support_flow(customer_message: str) -> str:
-        # The live events are progress postcards. This final string is the
-        # durable value Kitaru saves after the PydanticAI run finishes.
         return support_agent.run_sync(customer_message).output
 
     handle = support_flow.run(

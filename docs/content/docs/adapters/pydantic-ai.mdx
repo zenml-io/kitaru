@@ -445,7 +445,7 @@ key:
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
+uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
 The streaming example uses a real OpenAI-backed PydanticAI model so users can
@@ -454,7 +454,7 @@ watch live provider events. Set `OPENAI_API_KEY` first:
 ```bash
 uv sync --extra local --extra pydantic-ai --extra openai
 export OPENAI_API_KEY=sk-...
-uv run examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
 ```
 
 Set `PYDANTIC_AI_MODEL` to override the default `openai:gpt-5-nano` model. The

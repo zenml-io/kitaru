@@ -35,7 +35,7 @@ For the local `graph_call` demo:
 uv sync --extra local --extra langgraph
 uv run kitaru init
 uv run kitaru login
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
 ```
 
 For the local streaming demo:
@@ -44,7 +44,7 @@ For the local streaming demo:
 uv sync --extra local --extra langgraph
 uv run kitaru init
 uv run kitaru login
-uv run examples/integrations/langgraph_agent/langgraph_streaming.py
+uv run python examples/integrations/langgraph_agent/langgraph_streaming.py
 ```
 
 For the OpenAI-backed `calls` demo:
@@ -56,7 +56,7 @@ uv run kitaru login
 export OPENAI_API_KEY='sk-...'
 # Optional: override the default gpt-5-nano model.
 export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
 From this directory, the script path is shorter.
@@ -65,21 +65,21 @@ After the local `graph_call` setup above, run:
 
 ```bash
 cd examples/integrations/langgraph_agent
-uv run langgraph_adapter.py --strategy graph_call
+uv run python langgraph_adapter.py --strategy graph_call
 ```
 
 For the local streaming setup above, run:
 
 ```bash
 cd examples/integrations/langgraph_agent
-uv run langgraph_streaming.py
+uv run python langgraph_streaming.py
 ```
 
 After the OpenAI-backed `calls` setup above, including `OPENAI_API_KEY`, run:
 
 ```bash
 cd examples/integrations/langgraph_agent
-uv run langgraph_adapter.py --strategy calls
+uv run python langgraph_adapter.py --strategy calls
 ```
 
 ## `graph_call` mode: outer graph-call checkpoints

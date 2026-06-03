@@ -766,15 +766,17 @@ def _validate_event_filter_values(
     if values is None:
         return []
     if isinstance(values, (str, bytes)):
-        raise ValueError(f"`{name}` must be a list of non-empty strings.")
+        raise KitaruUsageError(f"`{name}` must be a list of non-empty strings.")
+    if not isinstance(values, Sequence):
+        raise KitaruUsageError(f"`{name}` must be a list of non-empty strings.")
 
     normalized: builtins.list[str] = []
     for value in values:
         if not isinstance(value, str):
-            raise ValueError(f"`{name}` values must be strings.")
+            raise KitaruUsageError(f"`{name}` values must be strings.")
         text = value.strip()
         if not text:
-            raise ValueError(f"`{name}` values must be non-empty strings.")
+            raise KitaruUsageError(f"`{name}` values must be non-empty strings.")
         normalized.append(text)
     return normalized
 
@@ -786,7 +788,7 @@ def _validate_event_kind_filter_values(
     normalized = _validate_event_filter_values(values, name="kinds")
     for kind in normalized:
         if "\n" in kind or "\r" in kind:
-            raise ValueError("`kinds` values cannot contain newline characters.")
+            raise KitaruUsageError("`kinds` values cannot contain newline characters.")
     return normalized
 
 
@@ -799,10 +801,10 @@ def _validate_optional_event_filter_value(
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ValueError(f"`{name}` must be a string when provided.")
+        raise KitaruUsageError(f"`{name}` must be a string when provided.")
     normalized = value.strip()
     if not normalized:
-        raise ValueError(f"`{name}` must be non-empty when provided.")
+        raise KitaruUsageError(f"`{name}` must be non-empty when provided.")
     return normalized
 
 
@@ -1007,21 +1009,16 @@ class _ExecutionsAPI:
         correlation IDs describe event identity/order, but they are never used
         as network resume positions.
         """
-        try:
-            normalized_kinds = _validate_event_kind_filter_values(kinds)
-            normalized_correlation_ids = _validate_event_filter_values(
-                correlation_ids,
-                name="correlation_ids",
-            )
-            normalized_checkpoint = _validate_optional_event_filter_value(
-                checkpoint,
-                name="checkpoint",
-            )
-            normalized_since = _validate_optional_event_filter_value(
-                since, name="since"
-            )
-        except ValueError as exc:
-            raise KitaruUsageError(str(exc)) from exc
+        normalized_kinds = _validate_event_kind_filter_values(kinds)
+        normalized_correlation_ids = _validate_event_filter_values(
+            correlation_ids,
+            name="correlation_ids",
+        )
+        normalized_checkpoint = _validate_optional_event_filter_value(
+            checkpoint,
+            name="checkpoint",
+        )
+        normalized_since = _validate_optional_event_filter_value(since, name="since")
 
         store = self._event_rest_store()
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=False)

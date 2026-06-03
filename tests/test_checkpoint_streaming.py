@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from typing import Any, cast
@@ -40,9 +41,16 @@ class SensitiveRepr:
 class FakeZenMLStreaming:
     """Small fake for ZenML's ``zenml.streaming`` module."""
 
-    def __init__(self, *, fail_publish: bool = False, fail_flush: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_publish: bool = False,
+        fail_flush: bool = False,
+        flush_result: bool = True,
+    ) -> None:
         self.fail_publish = fail_publish
         self.fail_flush = fail_flush
+        self.flush_result = flush_result
         self.published: list[dict[str, Any]] = []
         self.flushes: list[float] = []
 
@@ -66,10 +74,10 @@ class FakeZenMLStreaming:
         )
 
     def flush(self, timeout: float = 2.0) -> bool:
+        self.flushes.append(timeout)
         if self.fail_flush:
             raise RuntimeError("flush offline")
-        self.flushes.append(timeout)
-        return True
+        return self.flush_result
 
 
 def _scope_ids() -> tuple[str, str]:
@@ -440,7 +448,8 @@ def test_checkpoint_lifecycle_publishes_failed_and_flushes_terminal_event(
     failed_payload = fake_streaming.published[1]["payload"]
     assert failed_payload["status"] == "failed"
     assert failed_payload["error_type"] == "ValueError"
-    assert failed_payload["message"] == "bad data"
+    assert failed_payload["message"] == events._CHECKPOINT_FAILED_SAFE_MESSAGE
+    assert "bad data" not in repr(failed_payload)
     assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]
 
 
@@ -461,6 +470,29 @@ def test_lifecycle_publish_failure_does_not_mask_user_result_or_exception(
         _wrap_entrypoint(failing_function, checkpoint_type=None)()
 
 
+def test_failed_lifecycle_does_not_publish_raw_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_streaming = _patch_streaming(monkeypatch)
+    secret = "api_key=sk-test-secret-123"
+
+    def failing_function() -> str:
+        raise RuntimeError(f"backend exploded with {secret}")
+
+    with pytest.raises(RuntimeError, match=secret):
+        _wrap_entrypoint(failing_function, checkpoint_type=None)()
+
+    assert [event["kind"] for event in fake_streaming.published] == [
+        events.CHECKPOINT_STARTED_KIND,
+        events.CHECKPOINT_FAILED_KIND,
+    ]
+    failed_payload = fake_streaming.published[1]["payload"]
+    assert failed_payload["status"] == "failed"
+    assert failed_payload["error_type"] == "RuntimeError"
+    assert failed_payload["message"] == events._CHECKPOINT_FAILED_SAFE_MESSAGE
+    assert secret not in repr(failed_payload)
+
+
 def test_failed_lifecycle_does_not_stringify_user_exception_unsafely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -478,7 +510,56 @@ def test_failed_lifecycle_does_not_stringify_user_exception_unsafely(
     ]
     failed_payload = fake_streaming.published[1]["payload"]
     assert failed_payload["error_type"] == "BrokenStrError"
-    assert failed_payload["message"] == "<BrokenStrError message unavailable>"
+    assert failed_payload["message"] == events._CHECKPOINT_FAILED_SAFE_MESSAGE
+
+
+def test_terminal_flush_false_is_logged_without_masking_return(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_streaming = _patch_streaming(
+        monkeypatch,
+        FakeZenMLStreaming(flush_result=False),
+    )
+
+    def user_function() -> str:
+        return "done"
+
+    wrapped = _wrap_entrypoint(user_function, checkpoint_type=None)
+
+    with caplog.at_level(logging.WARNING, logger="kitaru.events"):
+        assert wrapped() == "done"
+
+    assert pytest.approx(0.25) == events._LIFECYCLE_FLUSH_TIMEOUT
+    assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]
+    assert "pending events did not flush" in caplog.text
+    assert events.CHECKPOINT_RETURNED_KIND in caplog.text
+
+
+def test_terminal_flush_exception_is_logged_without_masking_user_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_streaming = _patch_streaming(
+        monkeypatch,
+        FakeZenMLStreaming(fail_flush=True),
+    )
+
+    def user_function() -> str:
+        raise ValueError("real failure")
+
+    wrapped = _wrap_entrypoint(user_function, checkpoint_type=None)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="kitaru.events"),
+        pytest.raises(ValueError, match="real failure"),
+    ):
+        wrapped()
+
+    assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]
+    assert "Failed to flush Kitaru checkpoint events" in caplog.text
+    assert "pending events did not flush" in caplog.text
+    assert events.CHECKPOINT_FAILED_KIND in caplog.text
 
 
 def test_failed_lifecycle_publish_boundary_does_not_mask_user_exception(

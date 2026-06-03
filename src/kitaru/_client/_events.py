@@ -12,7 +12,6 @@ from typing import Any, Protocol, runtime_checkable
 from zenml.analytics import source_context
 from zenml.constants import API, VERSION_1
 
-from kitaru._client._coercion import optional_string
 from kitaru._client._models import ExecutionEvent
 from kitaru._source_aliases import normalize_checkpoint_name
 from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
@@ -301,25 +300,44 @@ def map_stream_event(frame: SSEFrame, *, fallback_exec_id: str) -> ExecutionEven
             "Malformed execution event payload: expected `payload` to be an object."
         )
 
-    kind = optional_string(raw_payload.get("kind")) or frame.event
+    kind = (
+        _optional_protocol_string(raw_payload.get("kind"), field_name="kind")
+        or frame.event
+    )
     if kind is None:
         raise KitaruBackendError("Malformed execution event payload: missing `kind`.")
 
-    correlation_id = optional_string(raw_payload.get("correlation_id"))
+    correlation_id = _optional_protocol_string(
+        raw_payload.get("correlation_id"), field_name="correlation_id"
+    )
     index = _optional_index(raw_payload.get("index"))
-    step_name = optional_string(raw_payload.get("step_name"))
-    step_run_id = optional_string(raw_payload.get("step_run_id"))
+    step_name = _optional_protocol_string(
+        raw_payload.get("step_name"), field_name="step_name"
+    )
+    step_run_id = _optional_protocol_string(
+        raw_payload.get("step_run_id"), field_name="step_run_id"
+    )
     kitaru_payload = payload.get("kitaru")
     if not isinstance(kitaru_payload, dict):
         kitaru_payload = {}
 
-    checkpoint_id = optional_string(kitaru_payload.get("checkpoint_id")) or step_run_id
-    checkpoint_name = optional_string(kitaru_payload.get("checkpoint_name"))
+    checkpoint_id = (
+        _optional_protocol_string(
+            kitaru_payload.get("checkpoint_id"), field_name="kitaru.checkpoint_id"
+        )
+        or step_run_id
+    )
+    checkpoint_name = _optional_protocol_string(
+        kitaru_payload.get("checkpoint_name"), field_name="kitaru.checkpoint_name"
+    )
     if checkpoint_name is None and step_name is not None:
         checkpoint_name = normalize_checkpoint_name(step_name)
 
     return ExecutionEvent(
-        exec_id=optional_string(raw_payload.get("pipeline_run_id")) or fallback_exec_id,
+        exec_id=_optional_protocol_string(
+            raw_payload.get("pipeline_run_id"), field_name="pipeline_run_id"
+        )
+        or fallback_exec_id,
         kind=kind,
         payload=payload,
         correlation_id=correlation_id,
@@ -446,6 +464,18 @@ def _sleep_before_reconnect_or_raise(
     return reconnect_attempts + 1
 
 
+def _optional_protocol_string(value: Any, *, field_name: str) -> str | None:
+    """Return an optional protocol string without coercing malformed values."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise KitaruBackendError(
+            f"Malformed execution event payload: `{field_name}` must be a string."
+        )
+    normalized = value.strip()
+    return normalized or None
+
+
 def _optional_index(value: Any) -> int | None:
     if value is None:
         return None
@@ -466,7 +496,9 @@ def _control_reason(frame: SSEFrame) -> str | None:
     reason = payload.get("reason")
     if reason is None:
         reason = payload.get("unknown_type")
-    return optional_string(reason)
+    if not isinstance(reason, str):
+        return None
+    return reason.strip() or None
 
 
 __all__ = [
