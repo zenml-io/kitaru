@@ -5,4 +5,3 @@
 #   pnpm-lock.yaml    -> `pnpm install` (in the relevant subdir)
 uv.lock              merge=binary
 docs/pnpm-lock.yaml  merge=binary
-site/pnpm-lock.yaml  merge=binary

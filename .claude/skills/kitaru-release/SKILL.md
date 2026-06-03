@@ -2,8 +2,9 @@
 name: kitaru-release
 description: >-
   Guide the Kitaru release process end-to-end — diff develop against the
-  last tag, classify commits (src / docs content / site / infra),
-  filter site-only PRs out of the Python library CHANGELOG, check
+  last tag, classify commits (src / docs content / docs infra / release infra),
+  filter docs-infra-only PRs out of the Python library CHANGELOG, remember that
+  marketing-site work now lives in sibling zenml-io-v2, check
   zenml-io/zenml-frontend-monorepo for the latest stable kitaru-ui-v*
   release that will be bundled into the Python package and then copied
   into the Docker image, suggest a version bump, update CHANGELOG.md, run the
@@ -83,8 +84,8 @@ For each commit between `$LAST_TAG` and `origin/develop`, determine its scope fr
 | **Library** | `src/kitaru/**` | Yes |
 | **Docs content** | `docs/content/**.mdx` | Yes |
 | **Scripts / build** | `scripts/**`, `pyproject.toml` version-adjacent | Sometimes (judgement call) |
-| **Docs site infra** | `docs/app/**`, `docs/scripts/**`, `docs/package.json` | No (unless user-visible) |
-| **Landing site** | `site/**` | **No** — site has its own deploy cadence |
+| **Docs site infra** | `docs/app/**`, `docs/scripts/**`, `docs/package.json`, `wrangler.toml` | No (unless user-visible) |
+| **Marketing site** | Lives in sibling `zenml-io-v2`, not this repo | No — handle in that repo |
 | **CI / dependabot** | `.github/workflows/**`, dependabot bumps | No |
 | **Release infra** | `docker/**`, `helm/**` | No unless user-facing |
 
@@ -385,7 +386,7 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 
 - **Main is force-pushed.** Always diff against the last tag, never against `origin/main`. `git fetch --tags` is mandatory before every invocation.
 - **CHANGELOG PR references drift.** Draft PR numbers get renumbered at merge. Cross-check every `(#N)` against `git log`.
-- **Site vs library changelog.** `site/` changes deploy on their own cadence via `site.yml`. They do not belong in the Python library CHANGELOG even when they land on the same `develop` branch.
+- **Marketing vs library changelog.** Marketing-site changes now live in `zenml-io-v2`, not this repo. Docs infra changes usually do not belong in the Python library CHANGELOG unless they change user-visible docs behavior.
 - **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo`. Only pass `-f kitaru-ui-tag=kitaru-ui-v<X.Y.Z>` if the user explicitly wants to pin to a specific stable UI. Official releases reject prerelease UI tags. Read `FRONTEND-TESTING.md` before touching this path.
 - **Prerelease UI smoke.** To validate a prerelease UI, use Actions → `UI prerelease smoke` with a required `ui-tag` such as `kitaru-ui-v0.3.0-rc.1`. That workflow sets `KITARU_UI_ALLOW_PRERELEASE=true`, builds/verifies locally, and publishes nothing.
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.

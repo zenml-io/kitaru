@@ -65,11 +65,11 @@ audit:
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
-    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
 # Check links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
@@ -194,27 +194,6 @@ docs:
 docs-build:
     cd docs && pnpm run build
 
-# Preview landing page locally
-site:
-    cd site && pnpm run dev
-
-# Build landing page only (no docs merge)
-site-build-only:
-    cd site && pnpm run build
-
-# Build full unified site: generate docs → build docs → build site → merge
-site-build:
-    @printf '─── Generate Docs ──────────────────────────────\n'
-    @just generate-docs
-    @printf '\n─── Build Docs ─────────────────────────────────\n'
-    @just docs-build
-    @printf '\n─── Build Site ─────────────────────────────────\n'
-    @just site-build-only
-    @printf '\n─── Merge Docs into Site ────────────────────────\n'
-    bash scripts/merge_site.sh
-    @printf '\n─── Validate SEO Output ────────────────────────\n'
-    node scripts/validate_seo_build.mjs
-    @printf '\n─── Check Internal Links ───────────────────────\n'
-    lychee --offline --root-dir site/dist --index-files index.html 'site/dist/**/*.html'
-    @printf '\n─────────────────────────────────────────────────\n'
-    @printf 'Unified site built at site/dist/\n'
+# Validate the docs static export as it will be served under /docs
+docs-validate:
+    cd docs && pnpm run validate:export

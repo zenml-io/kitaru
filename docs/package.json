@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "next build && node scripts/materialize-markdown-pages.mjs",
+    "validate:export": "node scripts/validate-static-export.mjs",
     "dev": "next dev",
     "start": "serve out",
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
