@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.13.1"
+version = "0.14.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.4",
+    "zenml[local]>=0.94.6",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +57,7 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.4",
+    "zenml[server]>=0.94.6",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.89.0,<1.97.0",
@@ -121,7 +121,7 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.4",
+    "zenml[server]>=0.94.6",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",

@@ -41,12 +41,12 @@ def _kitaru_handlers(root: logging.Logger) -> list[logging.Handler]:
 
 def _console_handlers(root: logging.Logger) -> list[logging.Handler]:
     """Return root handlers using ZenML's console formatter."""
-    from zenml.logger import ConsoleFormatter
+    from zenml.logger import ZenMLConsoleFormatter
 
     return [
         handler
         for handler in root.handlers
-        if isinstance(getattr(handler, "formatter", None), ConsoleFormatter)
+        if isinstance(getattr(handler, "formatter", None), ZenMLConsoleFormatter)
     ]
 
 
@@ -497,13 +497,13 @@ class TestHandlerSwap:
     """Handler installation logic."""
 
     def test_swap_replaces_console_handler_keeps_storage(self) -> None:
-        from zenml.logger import ConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         # Set up mock handlers like ZenML's init_logging() would
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ConsoleFormatter())
+        console_handler.setFormatter(ZenMLConsoleFormatter())
         storage_handler = ZenMLLoggingHandler()
 
         root.handlers = [console_handler, storage_handler]
@@ -522,12 +522,12 @@ class TestHandlerSwap:
         assert storage_handlers[0] is storage_handler
 
     def test_swap_is_idempotent(self) -> None:
-        from zenml.logger import ConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ConsoleFormatter())
+        console_handler.setFormatter(ZenMLConsoleFormatter())
         storage_handler = ZenMLLoggingHandler()
         root.handlers = [console_handler, storage_handler]
 
@@ -569,12 +569,12 @@ class TestHandlerSwap:
         assert storage_handler in root.handlers
 
     def test_reload_replaces_console_without_duplicating_kitaru(self) -> None:
-        from zenml.logger import ConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ConsoleFormatter())
+        console_handler.setFormatter(ZenMLConsoleFormatter())
         storage_handler = ZenMLLoggingHandler()
         old_kitaru_handler = terminal_logging._KitaruTerminalHandler()
         old_handler_class = old_kitaru_handler.__class__
