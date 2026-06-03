@@ -120,9 +120,11 @@ async def run_gemini_interaction(
             interaction_resource.create(**_build_create_kwargs(request))
         )
         poll_count = 0
+        status = _extract(interaction, "status")
         if (
             request.background
-            and _extract(interaction, "status") not in _STABLE_STATUSES
+            and status not in _STABLE_STATUSES
+            and status not in _TERMINAL_FAILURE_STATUSES
         ):
             # Do not create a second server job. Keep polling the returned id.
             interaction_id = _string_or_none(_extract(interaction, "id"))

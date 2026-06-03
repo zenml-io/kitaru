@@ -607,6 +607,38 @@ def test_background_poll_timeout_raises_without_full_interval_oversleep(
     assert sleep_durations == pytest.approx([0.001])
 
 
+@pytest.mark.parametrize("terminal_status", ["failed", "cancelled", "canceled"])
+def test_background_create_terminal_failure_status_does_not_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+    terminal_status: str,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    client = FakeClient(
+        [_completed_interaction(id="background-1", status=terminal_status)]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        poll_interval_s=0.001,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "long task",
+        agent="deep-research",
+        background=True,
+        timeout_s=100.0,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        runner.run_sync(request)
+
+    message = str(exc_info.value)
+    assert "background-1" in message
+    assert f"non-stable status '{terminal_status}'" in message
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == []
+
+
 @pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
 def test_background_polling_stops_promptly_on_terminal_failure_status(
     monkeypatch: pytest.MonkeyPatch,
@@ -736,6 +768,23 @@ def test_cache_identity_must_be_stable_string(
             client=ClientWithPublicState(),
             cache_identity=object(),
         )
+
+
+def test_request_manifest_records_json_null_function_result_turn(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module("kitaru.adapters.gemini._serialization")
+    request = gemini_adapter.GeminiInteractionRequest.function_result(
+        previous_interaction_id="interaction-1",
+        function_call_id="call-null",
+        function_result=None,
+        model="m",
+    )
+
+    manifest = serialization.redacted_request_manifest(request, client=None)
+
+    assert manifest["request"]["has_function_result"] is True
+    assert manifest["request"]["function_result_is_json_null"] is True
 
 
 def test_request_manifest_redacts_secret_like_fields(

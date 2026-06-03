@@ -51,6 +51,7 @@ def redacted_request_manifest(
     """Build a safe manifest of request and client shape."""
     input_payload = request.input
     input_json = json.dumps(to_json_safe(input_payload), sort_keys=True, default=repr)
+    has_function_result = request.has_function_result_payload
     return {
         "adapter": ADAPTER_ID,
         "request": {
@@ -65,7 +66,9 @@ def redacted_request_manifest(
             "interaction_id": request.interaction_id,
             "function_call_id": request.function_call_id,
             "function_name": request.function_name,
-            "has_function_result": request.function_result_payload is not None,
+            "has_function_result": has_function_result,
+            "function_result_is_json_null": has_function_result
+            and request.function_result_payload is None,
             "has_environment": request.environment is not None,
             "tool_count": len(request.tools),
             "has_system_instruction": request.system_instruction is not None,

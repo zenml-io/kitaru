@@ -393,6 +393,57 @@ def test_gemini_request_rejects_checkpoint_handles(
     assert_checkpoint_handle_error(metadata_exc, field_name="GeminiInteractionRequest")
 
 
+@pytest.mark.parametrize("container_kind", ["dict", "list"])
+def test_gemini_request_rejects_cyclic_request_data_without_recursion_error(
+    gemini_adapter: types.ModuleType,
+    container_kind: str,
+) -> None:
+    if container_kind == "dict":
+        cyclic_dict: dict[str, Any] = {}
+        cyclic_dict["self"] = cyclic_dict
+        input_value: Any = cyclic_dict
+    else:
+        cyclic_list: list[Any] = []
+        cyclic_list.append(cyclic_list)
+        input_value = cyclic_list
+
+    with pytest.raises(ValidationError) as exc_info:
+        gemini_adapter.GeminiInteractionRequest.start(
+            input_value,
+            model="gemini-test",
+        )
+
+    assert "cannot be cyclic" in str(exc_info.value)
+
+
+def test_gemini_request_allows_reused_non_cyclic_request_objects(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    shared = {"type": "text", "text": "hello"}
+
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        [shared, shared],
+        model="gemini-test",
+    )
+
+    assert request.input == [shared, shared]
+
+
+def test_gemini_request_allows_deep_non_cyclic_request_data(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    nested: dict[str, Any] = {"leaf": "hello"}
+    for _ in range(1_000):
+        nested = {"next": nested}
+
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        nested,
+        model="gemini-test",
+    )
+
+    assert request.input == nested
+
+
 def test_capture_policy_defaults_raw_provider_payloads_to_opt_in(
     gemini_adapter: types.ModuleType,
 ) -> None:

@@ -45,6 +45,11 @@ class GeminiInteractionRequest(BaseModel):
             return "poll"
         return "agent" if self.agent is not None else "model"
 
+    @property
+    def has_function_result_payload(self) -> bool:
+        """Return whether this request explicitly carries a function result."""
+        return "function_result_payload" in self.model_fields_set
+
     @classmethod
     def start(
         cls,
@@ -343,7 +348,7 @@ class GeminiInteractionRequest(BaseModel):
                     bool(self.generation_config),
                     self.response_format is not None,
                     self.environment is not None,
-                    "function_result_payload" in self.__pydantic_fields_set__,
+                    self.has_function_result_payload,
                 )
             )
             if (
@@ -380,7 +385,7 @@ class GeminiInteractionRequest(BaseModel):
                 )
             if self.function_call_id is None:
                 raise ValueError("kind='function_result' requires function_call_id.")
-            if "function_result_payload" not in self.__pydantic_fields_set__:
+            if not self.has_function_result_payload:
                 raise ValueError("kind='function_result' requires function_result.")
         if self.input is None:
             raise ValueError(f"kind={self.kind!r} requires input.")
@@ -443,15 +448,48 @@ def _default_dict(value: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _reject_checkpoint_output_handles(value: Any) -> None:
-    _raise_if_checkpoint_output_handle(
-        value,
-        field_name="GeminiInteractionRequest",
-        expected="materialized Gemini interaction request data",
+    active_containers: set[int] = set()
+    validated_containers: set[int] = set()
+    values_visited = 0
+    max_values = 10_000
+    stack: list[tuple[Any, bool]] = [(value, True)]
+
+    while stack:
+        nested_value, entering = stack.pop()
+        if not entering:
+            value_id = id(nested_value)
+            active_containers.remove(value_id)
+            validated_containers.add(value_id)
+            continue
+
+        values_visited += 1
+        if values_visited > max_values:
+            raise ValueError(
+                "GeminiInteractionRequest data is too large or deeply nested."
+            )
+        _raise_if_checkpoint_output_handle(
+            nested_value,
+            field_name="GeminiInteractionRequest",
+            expected="materialized Gemini interaction request data",
+        )
+        if not _is_traversable_container(nested_value):
+            continue
+
+        value_id = id(nested_value)
+        if value_id in validated_containers:
+            continue
+        if value_id in active_containers:
+            raise ValueError("GeminiInteractionRequest data cannot be cyclic.")
+        active_containers.add(value_id)
+        stack.append((nested_value, False))
+        if isinstance(nested_value, Mapping):
+            children = list(nested_value.values())
+        else:
+            children = list(nested_value)
+        stack.extend((child, True) for child in reversed(children))
+
+
+def _is_traversable_container(value: Any) -> bool:
+    return isinstance(value, Mapping) or (
+        isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray)
     )
-    if isinstance(value, Mapping):
-        for nested in value.values():
-            _reject_checkpoint_output_handles(nested)
-        return
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        for nested in value:
-            _reject_checkpoint_output_handles(nested)
