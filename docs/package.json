@@ -16,7 +16,7 @@
     "@orama/orama": "^3.1.18",
     "@takumi-rs/image-response": "^0.73.1",
     "fumadocs-core": "16.8.8",
-    "fumadocs-mdx": "14.3.2",
+    "fumadocs-mdx": "15.0.7",
     "fumadocs-python": "^0.0.11",
     "fumadocs-ui": "16.8.8",
     "lucide-react": "^1.14.0",
