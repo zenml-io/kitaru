@@ -6,6 +6,8 @@ Story:
   Kitaru checkpoint.
 - `--dry-run` prints the same kind of result summary without credentials or a
   network call, so smoke tests can exercise the example safely.
+- `--stream` uses the public streaming runner surface for real runs and shows
+  the same final stable result after the stream finishes.
 
 Run (API key):
     uv sync --extra local --extra gemini
@@ -118,8 +120,12 @@ RUNNER = _build_runner()
 @flow
 def run_gemini_interaction(
     request: GeminiInteractionRequest,
+    *,
+    stream: bool = False,
 ) -> GeminiInteractionResult:
     """Run one Gemini interaction as one Kitaru checkpoint."""
+    if stream:
+        return RUNNER.run_stream_sync(request)
     return RUNNER.run_sync(request)
 
 
@@ -166,7 +172,12 @@ def _guard_vertex_mode(mode: Mode) -> None:
         )
 
 
-def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
+def _fake_result(
+    mode: Mode,
+    model: str,
+    *,
+    stream: bool = False,
+) -> GeminiInteractionResult:
     target = model if mode == "model" else "antigravity-preview-05-2026"
     return GeminiInteractionResult(
         status="completed",
@@ -210,7 +221,24 @@ def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
         event_log_artifact_name="gemini_events_dry_run",
         run_summary_artifact_name="gemini_run_summary_dry_run",
         warnings=["Dry run: no credentials, network call, or Kitaru flow execution."],
-        metadata={"example": "gemini_interactions_agent", "mode": mode},
+        metadata={
+            "example": "gemini_interactions_agent",
+            "mode": mode,
+            "surface": "run_stream_sync" if stream else "run_sync",
+            **(
+                {
+                    "stream": {
+                        "event_count": 0,
+                        "counts_by_event_type": {},
+                        "last_event_id": None,
+                        "final_status": "completed",
+                        "reconstruction": "stream_accumulator_v1",
+                    }
+                }
+                if stream
+                else {}
+            ),
+        },
     )
 
 
@@ -227,6 +255,11 @@ def _json_block(value: Any) -> str:
 def _print_result(result: GeminiInteractionResult) -> None:
     print("\n=== What happened ===")
     print("Kitaru records one stable Gemini interaction response as one checkpoint.")
+    if "stream" in result.metadata:
+        print(
+            "Streaming was enabled: Kitaru published best-effort live events while "
+            "Gemini worked, then returned this same stable final result."
+        )
 
     print("\n=== Interaction details ===")
     print(f"Status: {result.status}")
@@ -259,6 +292,11 @@ def _print_result(result: GeminiInteractionResult) -> None:
 
     print("\n=== Usage ===")
     print(_json_block(result.usage))
+
+    stream_metadata = result.metadata.get("stream")
+    if stream_metadata is not None:
+        print("\n=== Stream metadata ===")
+        print(_json_block(stream_metadata))
 
     print("\n=== Kitaru artifact names ===")
     print(f"Input: {result.input_artifact_name or '(disabled)'}")
@@ -312,6 +350,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--stream",
+        action="store_true",
+        help=(
+            "Use KitaruGeminiInteractionsRunner.run_stream_sync(...) for the "
+            "provider call. Streaming publishes live events while Gemini works; "
+            "the script still prints the final stable GeminiInteractionResult."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -330,13 +377,15 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     if args.dry_run:
-        _print_result(_fake_result(args.mode, str(args.model)))
+        _print_result(
+            _fake_result(args.mode, str(args.model), stream=bool(args.stream))
+        )
         return
 
     _prepare_google_credentials()
     _guard_vertex_mode(args.mode)
     request = _build_request(args)
-    handle = run_gemini_interaction.run(request)
+    handle = run_gemini_interaction.run(request, stream=bool(args.stream))
     result = _coerce_result(handle.wait())
     _print_result(result)
 

@@ -58,6 +58,14 @@ from ._events import (  # noqa: E402
     GeminiInteractionRunEvent,
 )
 from ._policy import GeminiInteractionCapturePolicy  # noqa: E402
+from ._streaming import (  # noqa: E402
+    GEMINI_STREAM_COMPLETED,
+    GEMINI_STREAM_EVENT,
+    GEMINI_STREAM_EVENT_KINDS,
+    GEMINI_STREAM_FAILED,
+    GEMINI_STREAM_STARTED,
+    GEMINI_STREAM_TERMINAL_EVENT_KINDS,
+)
 from ._types import (  # noqa: E402
     GeminiInteractionRequest,
     GeminiInteractionResult,
@@ -70,6 +78,12 @@ from ._utils import (  # noqa: E402
 )
 
 __all__ = [
+    "GEMINI_STREAM_COMPLETED",
+    "GEMINI_STREAM_EVENT",
+    "GEMINI_STREAM_EVENT_KINDS",
+    "GEMINI_STREAM_FAILED",
+    "GEMINI_STREAM_STARTED",
+    "GEMINI_STREAM_TERMINAL_EVENT_KINDS",
     "CheckpointConfig",
     "CheckpointRuntime",
     "GeminiAdapterEvent",

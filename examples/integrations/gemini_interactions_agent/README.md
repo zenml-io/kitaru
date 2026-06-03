@@ -14,6 +14,10 @@ flow body calls KitaruGeminiInteractionsRunner
   -> Gemini Interactions API runs once
   -> Kitaru stores GeminiInteractionResult
 flow continues
+
+If you pass `--stream`, the middle of that story gets a window: Kitaru publishes
+best-effort live stream events while Gemini works, then still stores the same
+final stable `GeminiInteractionResult`.
 ```
 
 For Antigravity, Google still owns the managed-agent sandbox and internal tool
@@ -84,6 +88,7 @@ execution:
 
 ```bash
 uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
+uv run python gemini_interactions_adapter.py --dry-run --stream
 ```
 
 ## Run a cheap model interaction
@@ -96,6 +101,7 @@ The default real path uses `gemini-3.5-flash`:
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode model
+uv run python gemini_interactions_adapter.py --mode model --stream
 ```
 
 Optional prompt override:
@@ -145,12 +151,14 @@ A good way to read the run is:
 
 The script prints:
 
+- whether streaming was enabled
 - interaction status
 - interaction ID and previous interaction ID when reported
 - environment ID when Google reports one
 - output preview
 - step summaries from `interaction.steps`
 - usage when reported
+- stream metadata when `--stream` was used
 - Kitaru artifact names
 - warnings from best-effort capture or compatibility handling
 
@@ -163,11 +171,13 @@ state one by one.
 
 If a later part of your Kitaru flow fails, Kitaru can replay from the saved
 `GeminiInteractionResult` instead of calling Google again for that completed or
-`requires_action` interaction. If Gemini reports another status, Kitaru raises
-instead of saving that unfinished remote job as a successful checkpoint; poll the
-same interaction ID rather than starting a duplicate job. If a file or other
-output must be durable in your workflow, explicitly return it from Gemini or
-write it in a later Kitaru-owned checkpoint.
+`requires_action` interaction. On a checkpoint cache hit, Kitaru returns the
+saved final result; it should not be expected to replay fresh live stream events.
+If Gemini reports another status, Kitaru raises instead of saving that unfinished
+remote job as a successful checkpoint; poll the same interaction ID rather than
+starting a duplicate job. If a file or other output must be durable in your
+workflow, explicitly return it from Gemini or write it in a later Kitaru-owned
+checkpoint.
 
 For the concept walkthrough, see
 [Gemini Interactions Adapter](https://kitaru.ai/docs/adapters/gemini-interactions/).
