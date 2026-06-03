@@ -387,12 +387,12 @@ def test_explicit_index_cannot_reuse_lifecycle_started_index(
     assert wrapped() == "done"
     assert [event["kind"] for event in fake_streaming.published] == [
         events.CHECKPOINT_STARTED_KIND,
-        events.CHECKPOINT_COMPLETED_KIND,
+        events.CHECKPOINT_RETURNED_KIND,
     ]
     assert [event["index"] for event in fake_streaming.published] == [0, 1]
 
 
-def test_checkpoint_lifecycle_publishes_started_user_progress_completed_and_flushes(
+def test_checkpoint_lifecycle_publishes_started_user_progress_returned_and_flushes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_streaming = _patch_streaming(monkeypatch)
@@ -408,13 +408,13 @@ def test_checkpoint_lifecycle_publishes_started_user_progress_completed_and_flus
     assert [event["kind"] for event in fake_streaming.published] == [
         events.CHECKPOINT_STARTED_KIND,
         events.CHECKPOINT_PROGRESS_KIND,
-        events.CHECKPOINT_COMPLETED_KIND,
+        events.CHECKPOINT_RETURNED_KIND,
     ]
     assert [event["index"] for event in fake_streaming.published] == [0, 1, 2]
     assert [event["payload"].get("status") for event in fake_streaming.published] == [
         "started",
         None,
-        "completed",
+        "returned",
     ]
     assert len({event["correlation_id"] for event in fake_streaming.published}) == 1
     assert fake_streaming.flushes == [events._LIFECYCLE_FLUSH_TIMEOUT]

@@ -352,7 +352,7 @@ def _wrap_entrypoint(
             except BaseException as exc:
                 events._publish_checkpoint_failed(exc)
                 raise
-            events._publish_checkpoint_completed()
+            events._publish_checkpoint_returned()
             return result
 
     return _wrapped

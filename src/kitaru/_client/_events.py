@@ -386,10 +386,10 @@ def watch_execution_events(
                 except KitaruBackendError as exc:
                     raise _NonReconnectableStreamError(str(exc)) from exc
 
+                reconnect_attempts = 0
                 if checkpoint is not None and event.checkpoint_name != checkpoint:
                     continue
 
-                reconnect_attempts = 0
                 yield event
 
             raise KitaruBackendError(

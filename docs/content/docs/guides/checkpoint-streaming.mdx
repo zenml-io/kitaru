@@ -60,11 +60,19 @@ checkpoint execution.
 
 ## Event ordering inside one checkpoint
 
-For one checkpoint execution, Kitaru publishes lifecycle events automatically:
+For one checkpoint execution, Kitaru publishes function-body lifecycle events
+automatically:
 
 1. `kitaru.checkpoint.started`
 2. your `kitaru.progress(...)` or `kitaru.events.publish(...)` calls
-3. `kitaru.checkpoint.completed` or `kitaru.checkpoint.failed`
+3. `kitaru.checkpoint.returned` if the Python function body returns, or
+   `kitaru.checkpoint.failed` if the Python function body raises
+
+`kitaru.checkpoint.returned` is intentionally named narrowly: it means the
+checkpoint function returned a value. It does **not** mean the returned value has
+already been durably stored as a checkpoint output. Use the
+execution status, `handle.wait()`, or `KitaruClient().executions.get(...)` when
+you need the durable final checkpoint outcome.
 
 Those events share one correlation ID and one increasing `index` counter. A
 simple run might look like this:
@@ -72,7 +80,7 @@ simple run might look like this:
 ```text
 index 0 → kitaru.checkpoint.started
 index 1 → kitaru.checkpoint.progress      # your call
-index 2 → kitaru.checkpoint.completed
+index 2 → kitaru.checkpoint.returned
 ```
 
 If the same checkpoint is fanned out with `.map()` or `.product()`, each actual
@@ -116,7 +124,7 @@ cursor:
 ```python
 client.executions.events(
     "execution-id",
-    kinds=["kitaru.checkpoint.started", "kitaru.checkpoint.completed"],
+    kinds=["kitaru.checkpoint.started", "kitaru.checkpoint.returned"],
     checkpoint="train_model",
     correlation_ids=["kitaru.checkpoint:train_model:..."],
     since="last-seen-cursor",
@@ -175,7 +183,7 @@ That has two important consequences:
   replay, its progress postcards can be sent again too.
 - **Cache hits may publish no events.** If Kitaru reuses a cached checkpoint
   result, the checkpoint body does not run, so there may be no started/progress/
-  completed events for that checkpoint.
+  returned events for that checkpoint.
 
 Use checkpoint outputs and artifacts when you need durable state. Use live
 events when you want to watch work in progress.

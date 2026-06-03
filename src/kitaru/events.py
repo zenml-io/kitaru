@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 CHECKPOINT_STARTED_KIND = "kitaru.checkpoint.started"
 CHECKPOINT_PROGRESS_KIND = "kitaru.checkpoint.progress"
-CHECKPOINT_COMPLETED_KIND = "kitaru.checkpoint.completed"
+CHECKPOINT_RETURNED_KIND = "kitaru.checkpoint.returned"
 CHECKPOINT_FAILED_KIND = "kitaru.checkpoint.failed"
 
 _LIFECYCLE_FLUSH_TIMEOUT = 0.1
@@ -60,9 +60,9 @@ _CHECKPOINT_STARTED_EVENT = _CheckpointLifecycleEvent(
     kind=CHECKPOINT_STARTED_KIND,
     status="started",
 )
-_CHECKPOINT_COMPLETED_EVENT = _CheckpointLifecycleEvent(
-    kind=CHECKPOINT_COMPLETED_KIND,
-    status="completed",
+_CHECKPOINT_RETURNED_EVENT = _CheckpointLifecycleEvent(
+    kind=CHECKPOINT_RETURNED_KIND,
+    status="returned",
 )
 _CHECKPOINT_FAILED_EVENT = _CheckpointLifecycleEvent(
     kind=CHECKPOINT_FAILED_KIND,
@@ -369,10 +369,15 @@ def _publish_checkpoint_started() -> None:
     _publish_checkpoint_lifecycle(_CHECKPOINT_STARTED_EVENT)
 
 
-def _publish_checkpoint_completed() -> None:
-    """Publish the automatic checkpoint-completed lifecycle event."""
+def _publish_checkpoint_returned() -> None:
+    """Publish the automatic checkpoint-body-returned lifecycle event.
+
+    This runs before ZenML/Kitaru output materialization. The event means the
+    Python checkpoint function returned, not that the checkpoint output is
+    already durably persisted.
+    """
     _publish_checkpoint_lifecycle(
-        _CHECKPOINT_COMPLETED_EVENT,
+        _CHECKPOINT_RETURNED_EVENT,
         flush_after_publish=True,
     )
 
@@ -395,9 +400,9 @@ def _publish_checkpoint_failed(error: BaseException) -> None:
 
 
 __all__ = [
-    "CHECKPOINT_COMPLETED_KIND",
     "CHECKPOINT_FAILED_KIND",
     "CHECKPOINT_PROGRESS_KIND",
+    "CHECKPOINT_RETURNED_KIND",
     "CHECKPOINT_STARTED_KIND",
     "flush",
     "progress",

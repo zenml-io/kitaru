@@ -525,6 +525,153 @@ async def test_model_request_stream_publishes_events_and_keeps_transcript(
 
 
 @pytest.mark.anyio
+async def test_model_request_stream_publishes_completed_after_capture_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    order: list[str] = []
+    published: list[str] = []
+
+    class OrderingTracker(_FakeTracker):
+        def record_model_event(
+            self, event_id: str, context: Any, **kwargs: Any
+        ) -> None:
+            order.append(f"record_{kwargs['status']}")
+            super().record_model_event(event_id, context, **kwargs)
+
+        def reserve_tool_call_order(self, **kwargs: Any) -> None:
+            order.append("tool_order_reserved")
+            super().reserve_tool_call_order(**kwargs)
+
+    def fake_publish(
+        kind: str, payload: dict[str, Any], *, flush: bool = False
+    ) -> None:
+        _ = payload, flush
+        published.append(kind)
+        if kind == "pydantic_ai.stream.completed":
+            order.append("stream_completed")
+
+    tracker = OrderingTracker()
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(
+        model_module.kitaru,
+        "save",
+        lambda *_args, **_kwargs: order.append("artifact_saved"),
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._streaming.kitaru_events.publish",
+        fake_publish,
+    )
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    async with model.request_stream([], None, ModelRequestParameters()) as response:
+        async for _event in response:
+            pass
+
+    assert published[-1] == "pydantic_ai.stream.completed"
+    assert order[-4:] == [
+        "artifact_saved",
+        "tool_order_reserved",
+        "record_completed",
+        "stream_completed",
+    ]
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_capture_failure_publishes_failed_not_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    class FailingCompletionTracker(_FakeTracker):
+        def record_model_event(
+            self, event_id: str, context: Any, **kwargs: Any
+        ) -> None:
+            if kwargs["status"] == "completed":
+                raise RuntimeError("capture failed")
+            super().record_model_event(event_id, context, **kwargs)
+
+    published = _capture_published(monkeypatch)
+    tracker = FailingCompletionTracker()
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module.kitaru, "save", lambda *_args, **_kwargs: None)
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(save_prompts=False, save_responses=False),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    with pytest.raises(RuntimeError, match="capture failed"):
+        async with model.request_stream([], None, ModelRequestParameters()) as response:
+            async for _event in response:
+                pass
+
+    published_kinds = [event["kind"] for event in published]
+    assert "pydantic_ai.stream.completed" not in published_kinds
+    assert published_kinds[-1] == "pydantic_ai.stream.failed"
+    assert tracker.model_records[-1]["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_tool_order_failure_publishes_failed_not_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    class FailingToolOrderTracker(_FakeTracker):
+        def reserve_tool_call_order(self, **kwargs: Any) -> None:
+            _ = kwargs
+            raise RuntimeError("tool order failed")
+
+    published = _capture_published(monkeypatch)
+    tracker = FailingToolOrderTracker()
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module.kitaru, "save", lambda *_args, **_kwargs: None)
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(save_prompts=False, save_responses=False),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    with pytest.raises(RuntimeError, match="tool order failed"):
+        async with model.request_stream([], None, ModelRequestParameters()) as response:
+            async for _event in response:
+                pass
+
+    published_kinds = [event["kind"] for event in published]
+    assert "pydantic_ai.stream.completed" not in published_kinds
+    assert published_kinds[-1] == "pydantic_ai.stream.failed"
+    assert [record["status"] for record in tracker.model_records] == ["failed"]
+
+
+@pytest.mark.anyio
 async def test_model_request_stream_uses_surface_and_duplicate_suppression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

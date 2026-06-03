@@ -546,6 +546,55 @@ class KitaruModel(WrapperModel):
                 )
                 yield tracked_stream
             response = tracked_stream.get()
+
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+            serialized_response: dict[str, Any] | None = None
+            if save_responses or save_transcripts:
+                serialized_response = _serialize_model_response(response)
+            if save_responses:
+                response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
+                kitaru.save(
+                    response_key,
+                    serialized_response,
+                    type=ARTIFACT_ROLE_RESPONSE,
+                )
+                artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
+            if save_transcripts:
+                transcript_key = tracker.artifact_name(
+                    event_id, ARTIFACT_ROLE_STREAM_TRANSCRIPT
+                )
+                kitaru.save(
+                    transcript_key,
+                    {
+                        "event_count": stream_event_count,
+                        "duration_ms": duration_ms,
+                        "events": stream_events,
+                        "final_response": serialized_response,
+                    },
+                    type="context",
+                )
+                artifacts[ARTIFACT_ROLE_STREAM_TRANSCRIPT] = transcript_key
+
+            # Pydantic AI only builds the CallToolsNode after this stream context
+            # closes and the final ModelResponse is returned, so this reservation
+            # is still made before any corresponding KitaruToolset calls can start.
+            self._reserve_tool_call_order(
+                tracker=tracker,
+                event_id=event_id,
+                event_context=event_context,
+                response=response,
+                model_request_parameters=model_request_parameters,
+            )
+            tracker.record_model_event(
+                event_id,
+                event_context,
+                status="completed",
+                duration_ms=duration_ms,
+                artifacts=artifacts,
+                model_name=response.model_name,
+                usage=response.usage,
+                stream_event_count=stream_event_count,
+            )
             live_publisher.completed(event_count=stream_event_count)
         except BaseException as error:
             live_publisher.failed(error)
@@ -559,52 +608,3 @@ class KitaruModel(WrapperModel):
                 stream_event_count=stream_event_count,
             )
             raise
-
-        duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-        serialized_response: dict[str, Any] | None = None
-        if save_responses or save_transcripts:
-            serialized_response = _serialize_model_response(response)
-        if save_responses:
-            response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
-            kitaru.save(
-                response_key,
-                serialized_response,
-                type=ARTIFACT_ROLE_RESPONSE,
-            )
-            artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
-        if save_transcripts:
-            transcript_key = tracker.artifact_name(
-                event_id, ARTIFACT_ROLE_STREAM_TRANSCRIPT
-            )
-            kitaru.save(
-                transcript_key,
-                {
-                    "event_count": stream_event_count,
-                    "duration_ms": duration_ms,
-                    "events": stream_events,
-                    "final_response": serialized_response,
-                },
-                type="context",
-            )
-            artifacts[ARTIFACT_ROLE_STREAM_TRANSCRIPT] = transcript_key
-
-        tracker.record_model_event(
-            event_id,
-            event_context,
-            status="completed",
-            duration_ms=duration_ms,
-            artifacts=artifacts,
-            model_name=response.model_name,
-            usage=response.usage,
-            stream_event_count=stream_event_count,
-        )
-        # Pydantic AI only builds the CallToolsNode after this stream context
-        # closes and the final ModelResponse is returned, so this reservation is
-        # still made before any corresponding KitaruToolset calls can start.
-        self._reserve_tool_call_order(
-            tracker=tracker,
-            event_id=event_id,
-            event_context=event_context,
-            response=response,
-            model_request_parameters=model_request_parameters,
-        )

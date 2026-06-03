@@ -24,8 +24,9 @@ streaming is not enabled, the flow still succeeds and the events are skipped.
   standard checkpoint progress event.
 - `kitaru.events.publish("report.outline.ready", {...})` publishes a custom
   event kind.
-- Kitaru automatically publishes checkpoint lifecycle events around the function
-  body: started, completed, or failed.
+- Kitaru automatically publishes checkpoint function-body lifecycle events:
+  started, returned, or failed. `returned` means the Python function body
+  returned; the durable checkpoint result is still the stored checkpoint output.
 
 See the docs guide for the event envelope and replay/cache behavior:
 <https://kitaru.ai/docs/guides/checkpoint-streaming/>.

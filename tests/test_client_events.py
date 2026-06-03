@@ -654,6 +654,42 @@ def test_http_503_reconnects_when_reconnect_is_enabled(
     assert seen_last_event_ids == [None, None]
 
 
+def test_reconnect_resets_after_filtered_but_valid_data_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        _FakeResponse(_event_frame(cursor="cursor-1", checkpoint_name="other")),
+        _FakeResponse(_event_frame(cursor="cursor-2", checkpoint_name="other")),
+        _FakeResponse(
+            [
+                *_event_frame(cursor="cursor-3", checkpoint_name="research"),
+                "event: end",
+                "data: {}",
+                "",
+            ]
+        ),
+    ]
+    seen_last_event_ids: list[str | None] = []
+    monkeypatch.setattr("kitaru._client._events.time.sleep", lambda delay: None)
+
+    def _open(last_event_id: str | None) -> _FakeResponse:
+        seen_last_event_ids.append(last_event_id)
+        return responses.pop(0)
+
+    events = list(
+        watch_execution_events(
+            open_stream=_open,
+            fallback_exec_id="run-1",
+            checkpoint="research",
+            reconnect=True,
+            backoff_seconds=(0,),
+        )
+    )
+
+    assert [event.cursor for event in events] == ["cursor-3"]
+    assert seen_last_event_ids == [None, "cursor-1", "cursor-2"]
+
+
 def test_reconnect_uses_sse_cursor_not_index_or_correlation_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
