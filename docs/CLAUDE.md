@@ -5,12 +5,12 @@ FumaDocs-specific instructions for AI-assisted development in the docs app.
 ## Architecture
 
 This is a **self-contained Next.js/FumaDocs app** for Kitaru's documentation,
-served at **`kitaru.ai/docs`** as part of the unified site deployment.
+served at **`kitaru.ai/docs`**.
 
 It lives entirely within `docs/` and has no dependency on the root repo's
-Python tooling (except for generated content). The static export is merged
-into the Astro landing page build (`site/dist/docs/`) and deployed as a
-single Cloudflare Worker.
+Python tooling except for generated content. The static export in `docs/out/`
+is deployed from this repository by a docs-only Cloudflare Worker. The Astro
+marketing/runtime site now lives in the sibling `zenml-io-v2` repository.
 
 - **Framework:** FumaDocs (fumadocs-ui + fumadocs-mdx + fumadocs-core)
 - **Runtime:** Next.js with static export (`output: 'export'`, `basePath: '/docs'`)
@@ -78,7 +78,7 @@ These are registered globally in `mdx-components.tsx`:
 just generate-docs  # Generate CLI + changelog + SDK reference docs (run first on fresh clone)
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
-just site-build     # Full unified build (generate + docs + site + merge)
+just docs-validate  # Validate the static export as served under /docs
 
 # Or from docs/:
 pnpm run dev        # Dev server

@@ -1,22 +1,19 @@
-const SITE_ORIGIN = 'https://kitaru.ai';
-const DOCS_BASE_PATH = '/docs';
+import { RETIRED_DOCS_REDIRECTS } from "../worker/docs-routing.mjs";
 
-const RETIRED_REDIRECTED_DOCS_PATHS = new Set([
-  '/docs/concepts/memory/',
-  '/docs/guides/memory/',
-]);
+const SITE_ORIGIN = "https://kitaru.ai";
+const DOCS_BASE_PATH = "/docs";
 
 function hasFileExtension(pathname: string): boolean {
-  const lastSegment = pathname.split('/').pop() ?? '';
+  const lastSegment = pathname.split("/").pop() ?? "";
   return /\.[^/]+$/.test(lastSegment);
 }
 
 function ensureLeadingSlash(pathname: string): string {
-  return pathname.startsWith('/') ? pathname : `/${pathname}`;
+  return pathname.startsWith("/") ? pathname : `/${pathname}`;
 }
 
 function ensureTrailingSlashForHtml(pathname: string): string {
-  if (pathname.endsWith('/') || hasFileExtension(pathname)) return pathname;
+  if (pathname.endsWith("/") || hasFileExtension(pathname)) return pathname;
   return `${pathname}/`;
 }
 
@@ -24,17 +21,22 @@ export function canonicalDocsPath(pageUrl: string): string {
   const inputPath = new URL(pageUrl, SITE_ORIGIN).pathname;
   const pathWithSlash = ensureLeadingSlash(inputPath);
   const docsPath =
-    pathWithSlash === DOCS_BASE_PATH || pathWithSlash.startsWith(`${DOCS_BASE_PATH}/`)
+    pathWithSlash === DOCS_BASE_PATH ||
+    pathWithSlash.startsWith(`${DOCS_BASE_PATH}/`)
       ? pathWithSlash
       : `${DOCS_BASE_PATH}${pathWithSlash}`;
 
-  return ensureTrailingSlashForHtml(docsPath.replace(/\/+/g, '/'));
+  return ensureTrailingSlashForHtml(docsPath.replace(/\/+/g, "/"));
 }
 
 export function canonicalDocsUrl(pageUrl: string): string {
   return `${SITE_ORIGIN}${canonicalDocsPath(pageUrl)}`;
 }
 
+const retiredRedirectedDocsPaths = new Set(
+  RETIRED_DOCS_REDIRECTS.map(([sourcePath]) => canonicalDocsPath(sourcePath)),
+);
+
 export function isRetiredRedirectedDocsPath(pageUrl: string): boolean {
-  return RETIRED_REDIRECTED_DOCS_PATHS.has(canonicalDocsPath(pageUrl));
+  return retiredRedirectedDocsPaths.has(canonicalDocsPath(pageUrl));
 }

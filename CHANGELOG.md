@@ -8,17 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added the experimental Gemini Interactions adapter (`kitaru.adapters.gemini`) with an Interactions-first design: one stable Gemini response maps to one Kitaru checkpoint, non-stable background statuses fail instead of being cached as success, raw provider payload capture is opt-in by default, and the public API includes an Antigravity managed-agent preset plus explicit `cache_identity` disambiguation while keeping Google-owned sandbox/tool internals outside Kitaru's replay promise.
 - Added OpenAI Agents live streaming via `KitaruRunner.run_stream(...)` and `run_stream_sync(...)`, publishing best-effort `openai_agents.stream.*` events while preserving `OpenAIRunResult` as the durable checkpoint output, plus a provider-key-gated runnable example at `examples/integrations/openai_agents_agent/openai_agents_streaming.py`.
 - Added LangGraph graph-call streaming via `KitaruGraphRunner.stream(...)` and `astream(...)`, publishing best-effort `langgraph.stream.*` events while preserving `LangGraphRunResult` as the durable checkpoint output, plus a provider-neutral runnable example at `examples/integrations/langgraph_agent/langgraph_streaming.py`.
 - Added Claude Agent SDK live streaming via `KitaruClaudeRunner.run_stream(...)` and `run_stream_sync(...)`, publishing best-effort `claude_agent_sdk.stream.*` events while preserving `ClaudeRunResult` as the durable checkpoint output.
 - Added PydanticAI live stream events for `KitaruAgent` runs: the adapter now emits `pydantic_ai.stream.started`, `.event`, `.completed`, and `.failed` updates for watched PydanticAI streams, plus a provider-key-gated runnable example at `examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py`.
 - Added SDK event watching: `KitaruClient().executions.events(...)` now consumes server-backed live execution events with kind/checkpoint/correlation filters, SSE cursor reconnects, and clear feature-unavailable errors for local database mode or disabled server streaming.
 - Added checkpoint live-event publishing: `kitaru.progress(...)` and `kitaru.events.publish(...)` can now emit best-effort progress/custom events from inside running checkpoints, and Kitaru automatically publishes checkpoint started/completed/failed lifecycle events when the checkpoint body executes.
-- Added PydanticAI `checkpoint_strategy="calls" | "turn"` as the preferred public spelling for adapter checkpoint placement. `"calls"` remains the default and maps to the existing per-model/tool/MCP checkpoint behavior; `"turn"` maps to the existing one-checkpoint-per-agent-run behavior. Existing `granular_checkpoints=True | False` code remains supported.
 
 ### Changed
-- Bumped the minimum ZenML dependency to `0.94.5` so Kitaru can rely on the released checkpoint live-event publishing API.
-- Standardized adapter docs and examples around the shared `checkpoint_strategy` concept while keeping framework-specific boundary names such as PydanticAI `"turn"`, OpenAI Agents `"runner_call"`, LangGraph `"graph_call"`, and Claude Agent SDK `"invocation"`.
+- Moved adapter docs into a first-class Adapters docs section, with redirects from the old guide URLs to the new canonical adapter pages.
+
+### Fixed
+- Fixed PydanticAI adapter compatibility with newer Pydantic AI releases that forward `retries=` from `run_sync()` into `run()`, while preserving Kitaru's legacy `output_retries=` keyword.
+
+## [0.14.0] - 2026-06-02
+
+### Added
+- Added PydanticAI `checkpoint_strategy="calls" | "turn"` as the preferred public spelling for adapter checkpoint placement. `"calls"` remains the default and maps to the existing per-model/tool/MCP checkpoint behavior; `"turn"` maps to the existing one-checkpoint-per-agent-run behavior. Existing `granular_checkpoints=True | False` code remains supported. (#374)
+- Added a durable chatbot example at `examples/chatbot/` that models an entire conversation as a single PydanticAI agent with one human-in-the-loop tool, using `kitaru.wait()` to release compute between turns so a session can sleep for minutes or days and resume exactly where it left off. (#376)
+
+### Changed
+- Standardized adapter docs and examples around the shared `checkpoint_strategy` concept while keeping framework-specific boundary names such as PydanticAI `"turn"`, OpenAI Agents `"runner_call"`, LangGraph `"graph_call"`, and Claude Agent SDK `"invocation"`. (#374)
+- Bumped the minimum ZenML dependency, server image, and Helm subchart versions to `0.94.6` so Kitaru tracks the latest upstream ZenML release. (#382)
 
 ## [0.13.1] - 2026-05-21
 
@@ -58,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added LangGraph `checkpoint_strategy="calls"` support via `KitaruLangGraphMiddleware`, creating true sync LangChain model/tool call checkpoints while keeping `graph_call` as the default coarse mode. The guide now explicitly documents that callbacks/event streams are trace-only, LangGraph checkpointers remain LangGraph-owned, and async calls mode is metadata-only.
-- Added a local LangGraph adapter example (`examples/integrations/langgraph_agent/`) plus a new LangGraph adapter guide (`/guides/langgraph-adapter`) covering the adapter boundary: Kitaru owns graph-call or middleware-wrapped call checkpoints, LangGraph owns thread/checkpointer semantics, and Deep Agents filesystem/sandbox behavior remains pass-through. Updated the examples indexes and smoke test to include deterministic LangGraph examples with no API keys required.
+- Added a local LangGraph adapter example (`examples/integrations/langgraph_agent/`) plus a new LangGraph adapter guide (`/adapters/langgraph/`) covering the adapter boundary: Kitaru owns graph-call or middleware-wrapped call checkpoints, LangGraph owns thread/checkpointer semantics, and Deep Agents filesystem/sandbox behavior remains pass-through. Updated the examples indexes and smoke test to include deterministic LangGraph examples with no API keys required.
 - Claude Agent SDK adapter (`kitaru.adapters.claude_agent_sdk`) for invocation-level durability: wrap a Claude SDK query in one Kitaru checkpoint, capture the session ID, final result, usage/cost, messages/transcript artifacts when available, and a redacted run manifest. Includes a guide, integration example, and smoke-test coverage while explicitly documenting that Claude-internal Bash, MCP, custom tool, and workspace side effects are not granular replay boundaries.
 - Added `kitaru.current_execution_id()` as the public way to read the active Kitaru execution ID inside a running flow or checkpoint.
 
@@ -98,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.9.0] - 2026-05-05
 
 ### Added
-- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruRunner` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`, recommended when you want a clean `.wait()` return value) or `checkpoint_strategy="calls"` (per-tool/per-model checkpoints for finer replay units, with per-checkpoint artifacts visible in the Kitaru UI / `KitaruClient`). The guide at `/guides/openai-agents-adapter` walks through the trade-offs. (#295)
+- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruRunner` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`, recommended when you want a clean `.wait()` return value) or `checkpoint_strategy="calls"` (per-tool/per-model checkpoints for finer replay units, with per-checkpoint artifacts visible in the Kitaru UI / `KitaruClient`). The guide at `/adapters/openai-agents/` walks through the trade-offs. (#295)
 - OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner/writer runner checkpoints, submitted search fan-out, and final report artifacts, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
 - Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
 

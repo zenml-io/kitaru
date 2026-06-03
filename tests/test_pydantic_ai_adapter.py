@@ -142,6 +142,38 @@ class TestTurnCacheKeyCallSites:
 
         return KitaruAgent(Agent(TestModel(), name="cache_key_agent"))
 
+    def test_run_sync_accepts_upstream_retries_callback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression for Pydantic AI run_sync() forwarding retries to run()."""
+
+        agent = self._make_agent()
+
+        def run_sync_inline(body: Any, **_kwargs: Any) -> Any:
+            return body()
+
+        async def run_async_inline(body: Any, **_kwargs: Any) -> Any:
+            return await body()
+
+        monkeypatch.setattr(agent, "_run_sync", run_sync_inline)
+        monkeypatch.setattr(agent, "_run_async", run_async_inline)
+
+        result = agent.run_sync("hello", retries=2)
+
+        assert result.output == "success (no tool calls)"
+
+    def test_legacy_output_retries_maps_to_upstream_retry_keyword(self) -> None:
+        from kitaru.adapters.pydantic_ai._agent import (
+            _UPSTREAM_RUN_RETRIES_PARAM,
+            _upstream_run_kwargs,
+        )
+
+        assert _upstream_run_kwargs(
+            conversation_id=None,
+            retries=2,
+        ) == {_UPSTREAM_RUN_RETRIES_PARAM: 2}
+
     def test_run_sync_forwards_run_kwargs_to_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,

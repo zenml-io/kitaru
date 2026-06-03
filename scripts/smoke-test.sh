@@ -155,6 +155,15 @@ skip_test() {
     SKIPPED+=("$label")
 }
 
+is_truthy_env_value() {
+    local value
+    value=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+    case "$value" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cleanup() {
     if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
         timed 10 $UV_RUN kitaru auth api-keys delete \
@@ -206,6 +215,20 @@ HAS_CLAUDE_AGENT_SDK=false
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] || [[ "${CLAUDE_CODE_USE_VERTEX:-}" == "1" ]]; then
     HAS_CLAUDE_AGENT_SDK=true
 fi
+HAS_GEMINI_API_KEY=false
+if [[ -n "${GEMINI_API_KEY:-}" ]] || [[ -n "${GOOGLE_API_KEY:-}" ]]; then
+    HAS_GEMINI_API_KEY=true
+fi
+HAS_GEMINI_VERTEX=false
+if is_truthy_env_value "${GOOGLE_GENAI_USE_VERTEXAI:-}" \
+    && [[ -n "${GOOGLE_CLOUD_PROJECT:-}" ]] \
+    && [[ -n "${GOOGLE_CLOUD_LOCATION:-}" ]]; then
+    HAS_GEMINI_VERTEX=true
+fi
+HAS_GEMINI=false
+if [[ "$HAS_GEMINI_API_KEY" == true ]] || [[ "$HAS_GEMINI_VERTEX" == true ]]; then
+    HAS_GEMINI=true
+fi
 
 # ---------------------------------------------------------------------------
 # Install from source
@@ -222,6 +245,7 @@ else
         --extra pydantic-ai
         --extra openai-agents
         --extra claude-agent-sdk
+        --extra gemini
         --extra langgraph
     )
     if [[ "$HAS_OPENAI" == true ]]; then
@@ -432,6 +456,36 @@ if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
 else
     skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
     skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+fi
+
+section_header "Gemini Interactions adapter"
+
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
+
+if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
+        timed 120 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode model \
+            --prompt "Explain one Kitaru checkpoint in one short sentence."
+elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke"
+else
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set"
+fi
+
+if [[ "$HAS_GEMINI" != true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "GEMINI_API_KEY/GOOGLE_API_KEY or Vertex ADC config not set"
+elif [[ "${KITARU_SMOKE_GEMINI_ANTIGRAVITY:-}" != "1" ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run; accepts Gemini API key or Vertex ADC config"
+else
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
+        timed 360 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode antigravity \
+            --timeout 300 \
+            --prompt "Explain what you would inspect first in this repository. Do not edit files."
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then

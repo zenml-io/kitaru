@@ -97,24 +97,28 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | Example | Demonstrates | Related docs |
 |---|---|---|
 | `features/llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
-| `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with granular Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
-| `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](/guides/pydantic-ai-adapter#streaming) |
-| `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](/guides/openai-agents-adapter) |
-| `integrations/openai_agents_agent/openai_agents_streaming.py` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](/guides/openai-agents-adapter#streaming-with-kitaru-durability) |
-| `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](/guides/claude-agent-sdk-adapter) |
-| `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](/guides/claude-agent-sdk-adapter#live-streaming-with-kitaru-durability) |
-| `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](/guides/langgraph-adapter) |
-| `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](/guides/langgraph-adapter#graph-call-streaming) |
+| `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with granular Kitaru replay boundaries | [PydanticAI Adapter](/adapters/pydantic-ai/) |
+| `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](/adapters/pydantic-ai/#streaming) |
+| `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](/adapters/openai-agents/) |
+| `integrations/openai_agents_agent/openai_agents_streaming.py` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](/adapters/openai-agents/#streaming-with-kitaru-durability) |
+| `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](/adapters/claude-agent-sdk/) |
+| `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](/adapters/claude-agent-sdk/#live-streaming-with-kitaru-durability) |
+| `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network dry-run support and optional Antigravity managed-agent mode (real calls need a `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or Application Default Credentials via Vertex AI) | [Gemini Interactions Adapter](/adapters/gemini-interactions/) |
+| `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](/adapters/langgraph/) |
+| `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](/adapters/langgraph/#graph-call-streaming) |
+
 | `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](/guides/llm-calls) |
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](/getting-started/examples) |
-| `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
+| `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](/adapters/openai-agents/#end-to-end-research-bot-example) |
 | `end_to_end/compliance_review/README.md` | Four-stage Claude Agent SDK audit: checkpointed turns, partial replay, and durable wait/resume conversation | [Replay and Overrides](/guides/replay-and-overrides) |
 | `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">
   The LLM and most adapter examples require additional dependencies and provider
-  API keys. The LangGraph `graph_call` strategy is deterministic and local; the
-  LangGraph `calls` strategy requires `langgraph-openai` and `OPENAI_API_KEY`.
+  API keys. The Gemini Interactions example has `--help` and `--dry-run` paths
+  that require no credentials or network. The LangGraph `graph_call` strategy
+  is deterministic and local; the LangGraph `calls` strategy requires
+  `langgraph-openai` and `OPENAI_API_KEY`.
   Check each example's README before running a real model-backed example.
 </Callout>
 
@@ -130,14 +134,15 @@ Agent Harness Platform is the recommended starting point for most readers — it
 6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume).
 7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides).
 8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls).
-9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter).
-10. `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` — [PydanticAI streaming](/guides/pydantic-ai-adapter#streaming).
-11. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/guides/openai-agents-adapter).
-12. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](/guides/openai-agents-adapter#streaming-with-kitaru-durability).
-13. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](/guides/claude-agent-sdk-adapter).
-14. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](/guides/claude-agent-sdk-adapter#live-streaming-with-kitaru-durability).
-15. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](/guides/langgraph-adapter).
-16. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](/guides/langgraph-adapter#graph-call-streaming).
-17. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](/guides/openai-agents-adapter#end-to-end-research-bot-example).
-18. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server).
-19. **[Agent Harness Platform](/agent-harness-platform)** — the same primitives, woven into one runnable agent harness platform.
+9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/adapters/pydantic-ai/).
+10. `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` — [PydanticAI streaming](/adapters/pydantic-ai/#streaming).
+11. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/adapters/openai-agents/).
+12. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](/adapters/openai-agents/#streaming-with-kitaru-durability).
+13. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](/adapters/claude-agent-sdk/).
+14. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](/adapters/claude-agent-sdk/#live-streaming-with-kitaru-durability).
+15. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](/adapters/gemini-interactions/).
+16. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](/adapters/langgraph/).
+17. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](/adapters/langgraph/#graph-call-streaming).
+18. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](/adapters/openai-agents/#end-to-end-research-bot-example).
+19. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server).
+20. **[Agent Harness Platform](/agent-harness-platform)** — the same primitives, woven into one runnable agent harness platform.

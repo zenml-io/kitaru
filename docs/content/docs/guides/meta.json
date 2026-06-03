@@ -15,10 +15,6 @@
     "error-handling",
     "llm-calls",
     "secrets-and-model-registration",
-    "secrets",
-    "pydantic-ai-adapter",
-    "openai-agents-adapter",
-    "claude-agent-sdk-adapter",
-    "langgraph-adapter"
+    "secrets"
   ]
 }

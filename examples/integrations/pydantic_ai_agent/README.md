@@ -54,6 +54,6 @@ PydanticAI model. Set `PYDANTIC_AI_MODEL` to choose a different PydanticAI model
 label.
 
 For the concept walkthrough, see
-[PydanticAI Adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter).
+[PydanticAI Adapter](https://kitaru.ai/docs/adapters/pydantic-ai/).
 
 For the full catalog, see [../../README.md](../../README.md).

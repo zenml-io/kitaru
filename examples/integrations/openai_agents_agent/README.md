@@ -87,7 +87,7 @@ If your OpenAI Agents SDK tools or guardrails need per-run application context,
 pass it to `runner.run_sync(..., context=...)` or `await runner.run(..., context=...)`.
 This example covers the basic checkpointing flow; for a compact context example
 and cache-identity guidance, see the main
-[OpenAI Agents adapter guide](https://kitaru.ai/docs/guides/openai-agents-adapter/).
+[OpenAI Agents adapter guide](https://kitaru.ai/docs/adapters/openai-agents/).
 
 ## Why this example uses the real API
 

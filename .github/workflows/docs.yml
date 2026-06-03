@@ -1,0 +1,135 @@
+---
+name: Docs
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - .github/workflows/docs.yml
+      - docs/**
+      - scripts/generate_*.py
+      - src/kitaru/**
+      - CHANGELOG.md
+      - pyproject.toml
+      - uv.lock
+      - wrangler.toml
+  # Cleanup is intentionally broad and does not check out PR code: if a same-repo
+  # PR ever created the deterministic preview Worker, closing or drafting that PR
+  # should try to remove it even when the closing event itself has no docs diff.
+  pull_request_target:
+    types: [closed, converted_to_draft]
+permissions: {}
+concurrency:
+  group: docs-${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-deploy:
+    if: ${{ github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+      WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN || 'zenml-migration' }}
+      WRANGLER_VERSION: 4.95.0
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          enable-cache: false
+      - run: uv sync --frozen
+      - name: Generate CLI reference
+        run: uv run python scripts/generate_cli_docs.py
+      - name: Generate changelog docs
+        run: uv run python scripts/generate_changelog_docs.py
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093  # v6.0.8
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version-file: docs/.node-version
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs
+      - name: Install SDK docs generator bridge
+        run: uv pip install ./docs/node_modules/fumadocs-python
+      - name: Generate SDK reference data
+        run: uv run python scripts/generate_sdk_docs.py
+      - name: Convert SDK reference to MDX
+        run: node scripts/convert-sdk-docs.mjs
+        working-directory: docs
+      - name: Build docs static export
+        run: pnpm run build
+        working-directory: docs
+      - name: Validate docs static export
+        run: pnpm run validate:export
+        working-directory: docs
+      - name: Deploy production docs
+        # Push deploys only from main; a manual workflow_dispatch deploys whichever
+        # branch it runs against, so docs can be shipped to production from develop.
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
+          == 'workflow_dispatch'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          command: deploy
+      - name: Deploy preview docs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
+          == github.repository && env.HAS_CF_SECRETS == 'true'
+        id: preview
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          command: deploy --name kitaru-site-preview-${{ github.event.pull_request.number }}
+      - name: Comment preview URL
+        if: steps.preview.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0  # v3.0.4
+        with:
+          header: docs-preview
+          message: |
+            ## Docs Preview
+            | | |
+            |---|---|
+            | **Preview URL** | https://kitaru-site-preview-${{ github.event.pull_request.number }}.${{ env.WORKERS_SUBDOMAIN }}.workers.dev/docs/ |
+            | **Branch** | `${{ github.head_ref }}` |
+            | **Commit** | `${{ github.sha }}` |
+  cleanup-preview:
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name
+      == github.repository
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+      WRANGLER_VERSION: 4.95.0
+    steps:
+      - name: Delete preview Worker
+        if: env.HAS_CF_SECRETS == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |-
+          set +e
+          npx "wrangler@${WRANGLER_VERSION}" delete \
+            --name "kitaru-site-preview-${{ github.event.pull_request.number }}" \
+            --force \
+            2>wrangler-delete.err
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          cat wrangler-delete.err >&2
+          if grep -Eiq 'not found|does not exist|could not find' wrangler-delete.err; then
+            echo 'Preview Worker did not exist; nothing to clean up.'
+            exit 0
+          fi
+          exit "$status"

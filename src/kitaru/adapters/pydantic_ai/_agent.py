@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import os
 import sys
 import tempfile
@@ -73,6 +74,11 @@ from ._utils import (
 # Kitaru still exposes the old keyword for compatibility, so keep the local
 # type name stable while importing the new upstream type.
 AgentBuiltinTool = AgentNativeTool
+_UPSTREAM_RUN_RETRIES_PARAM = (
+    "retries"
+    if "retries" in inspect.signature(AbstractAgent.run).parameters
+    else "output_retries"
+)
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar("kitaru_tracking_active", default=False)
 _INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar(
@@ -308,17 +314,34 @@ def _capabilities_imply_streaming_hooks(
     return False
 
 
+def _resolve_run_retries(
+    *,
+    output_retries: int | None,
+    retries: Any,
+) -> Any:
+    """Return the effective PydanticAI retry override for a run call."""
+    if output_retries is not None and retries is not None:
+        raise KitaruUsageError(
+            "Pass only one of `output_retries` or `retries` to a PydanticAI "
+            "agent run. `output_retries` is the legacy name; `retries` is the "
+            "current PydanticAI name."
+        )
+    if retries is not None:
+        return retries
+    return output_retries
+
+
 def _upstream_run_kwargs(
     *,
     conversation_id: str | None,
-    output_retries: int | None,
+    retries: Any,
 ) -> dict[str, Any]:
     """Return PydanticAI run kwargs only when callers explicitly set them."""
     kwargs: dict[str, Any] = {}
     if conversation_id is not None:
         kwargs["conversation_id"] = conversation_id
-    if output_retries is not None:
-        kwargs["output_retries"] = output_retries
+    if retries is not None:
+        kwargs[_UPSTREAM_RUN_RETRIES_PARAM] = retries
     return kwargs
 
 
@@ -1067,6 +1090,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         output_retries: int | None = None,
+        retries: Any = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1081,9 +1105,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         effective_history = self._effective_message_history(message_history)
+        effective_retries = _resolve_run_retries(
+            output_retries=output_retries,
+            retries=retries,
+        )
         upstream_run_kwargs = _upstream_run_kwargs(
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            retries=effective_retries,
         )
 
         async def _body() -> Any:
@@ -1125,7 +1153,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             output_type=output_type,
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            output_retries=effective_retries,
             instructions=instructions,
             deps=deps,
             model_settings=model_settings,
@@ -1176,6 +1204,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         output_retries: int | None = None,
+        retries: Any = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1191,9 +1220,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         effective_history = self._effective_message_history(message_history)
+        effective_retries = _resolve_run_retries(
+            output_retries=output_retries,
+            retries=retries,
+        )
         upstream_run_kwargs = _upstream_run_kwargs(
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            retries=effective_retries,
         )
 
         def _body() -> Any:
@@ -1239,7 +1272,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             output_type=output_type,
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            output_retries=effective_retries,
             instructions=instructions,
             deps=deps,
             model_settings=model_settings,
@@ -1291,6 +1324,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         output_retries: int | None = None,
+        retries: Any = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1304,9 +1338,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._prepare_toolsets(toolsets) if toolsets is not None else None
         )
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        effective_retries = _resolve_run_retries(
+            output_retries=output_retries,
+            retries=retries,
+        )
         upstream_run_kwargs = _upstream_run_kwargs(
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            retries=effective_retries,
         )
 
         with (
@@ -1356,6 +1394,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         output_retries: int | None = None,
+        retries: Any = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
@@ -1370,9 +1409,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         prepared_toolsets = (
             self._prepare_toolsets(toolsets) if toolsets is not None else None
         )
+        effective_retries = _resolve_run_retries(
+            output_retries=output_retries,
+            retries=retries,
+        )
         upstream_run_kwargs = _upstream_run_kwargs(
             conversation_id=conversation_id,
-            output_retries=output_retries,
+            retries=effective_retries,
         )
         publisher = PydanticAIStreamPublisher(
             agent_name=self._name,
