@@ -1,7 +1,7 @@
 """Public runner wrapper for the OpenAI Agents SDK adapter foundation."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from typing import Any, cast
 
@@ -18,9 +18,12 @@ from ._runner import (
     deserialize_run_state,
     deserialize_run_state_sync,
     run_openai_agent,
+    run_openai_agent_streamed,
+    run_openai_agent_streamed_sync,
     run_openai_agent_sync,
 )
 from ._serialization import stable_cache_identity
+from ._streaming import OpenAIStreamPublisher
 from ._tracking import tracker_scope
 from ._types import (
     OpenAIApprovalDecision,
@@ -199,6 +202,27 @@ class KitaruRunner:
         self._track_completed("run", result)
         return result
 
+    async def run_stream(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        context: Any | None = None,
+    ) -> OpenAIRunResult:
+        """Run or resume an OpenAI agent asynchronously, forwarding live events."""
+        self._require_streaming_runner_call()
+        self._validate_fresh_context(request, context)
+        context_cache_identity = self._context_cache_identity(context)
+        context_cache_key = self._context_cache_key(context_cache_identity)
+        result = await self._run_runner_call_stream_async(
+            request,
+            context=context,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
+        )
+        result = canonicalize_result_model(result, OpenAIRunResult)
+        self._track_completed("run_stream", result)
+        return result
+
     def run_sync(
         self,
         request: OpenAIRunRequest,
@@ -206,15 +230,7 @@ class KitaruRunner:
         context: Any | None = None,
     ) -> OpenAIRunResult:
         """Run or resume an OpenAI agent synchronously."""
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            raise KitaruUsageError(
-                "`KitaruRunner.run_sync()` cannot be called inside an already "
-                "running event loop. Use `await KitaruRunner.run(...)` instead."
-            )
+        self._reject_running_event_loop(sync_method="run_sync", async_method="run")
         self._validate_fresh_context(request, context)
         context_cache_identity = self._context_cache_identity(context)
         context_cache_key = self._context_cache_key(context_cache_identity)
@@ -237,12 +253,59 @@ class KitaruRunner:
         self._track_completed("run_sync", result)
         return result
 
+    def run_stream_sync(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        context: Any | None = None,
+    ) -> OpenAIRunResult:
+        """Run or resume an OpenAI agent synchronously, forwarding live events."""
+        self._reject_running_event_loop(
+            sync_method="run_stream_sync",
+            async_method="run_stream",
+        )
+        self._require_streaming_runner_call()
+        self._validate_fresh_context(request, context)
+        context_cache_identity = self._context_cache_identity(context)
+        context_cache_key = self._context_cache_key(context_cache_identity)
+        result = self._run_runner_call_stream_sync(
+            request,
+            context=context,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
+        )
+        result = canonicalize_result_model(result, OpenAIRunResult)
+        self._track_completed("run_stream_sync", result)
+        return result
+
+    @staticmethod
+    def _reject_running_event_loop(*, sync_method: str, async_method: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        raise KitaruUsageError(
+            f"`KitaruRunner.{sync_method}()` cannot be called inside an "
+            "already running event loop. Use `await "
+            f"KitaruRunner.{async_method}(...)` instead."
+        )
+
     def _require_calls_scope(self) -> None:
         if self._checkpoint_strategy == "calls" and is_inside_checkpoint():
             raise KitaruUsageError(
                 "`checkpoint_strategy='calls'` opens model/tool checkpoints and "
                 "must run from a flow body, not from inside another checkpoint."
             )
+
+    def _require_streaming_runner_call(self) -> None:
+        if self._checkpoint_strategy == "runner_call":
+            return
+        raise KitaruUsageError(
+            "`KitaruRunner.run_stream(...)` and `run_stream_sync(...)` support "
+            "only `checkpoint_strategy='runner_call'` today. Streaming with "
+            "`checkpoint_strategy='calls'` needs replay-safe per-call buffering "
+            "and is intentionally deferred."
+        )
 
     async def _run_calls_async(
         self,
@@ -306,19 +369,14 @@ class KitaruRunner:
                 context=context,
             )
 
-        if is_inside_flow() and not is_inside_checkpoint():
-            return await run_async_in_checkpoint(
-                config=self._runner_call_checkpoint_config(),
-                step_name=f"{self._name}_openai_runner_call",
-                body=_body,
-                cache_key=self._runner_call_cache_key(
-                    request,
-                    agent=prepared_agent,
-                    run_config=run_config,
-                    context_cache_identity=context_cache_identity,
-                ),
-            )
-        return await _body()
+        return await self._run_runner_call_checkpoint_async(
+            request,
+            agent=prepared_agent,
+            run_config=run_config,
+            context_cache_identity=context_cache_identity,
+            surface="run",
+            body=_body,
+        )
 
     def _run_runner_call_sync(
         self,
@@ -342,19 +400,132 @@ class KitaruRunner:
                 context=context,
             )
 
+        return self._run_runner_call_checkpoint_sync(
+            request,
+            agent=prepared_agent,
+            run_config=run_config,
+            context_cache_identity=context_cache_identity,
+            surface="run",
+            body=_body,
+        )
+
+    async def _run_runner_call_stream_async(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        context: Any | None,
+        context_cache_identity: Any,
+        context_cache_key: str | None,
+    ) -> OpenAIRunResult:
+        prepared_agent, run_config = self._prepare_execution_objects(
+            wrap_calls=False,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
+        )
+
+        async def _body() -> OpenAIRunResult:
+            return await self._run_sdk_stream_async(
+                request,
+                agent=prepared_agent,
+                run_config=run_config,
+                context=context,
+            )
+
+        return await self._run_runner_call_checkpoint_async(
+            request,
+            agent=prepared_agent,
+            run_config=run_config,
+            context_cache_identity=context_cache_identity,
+            surface="stream",
+            stream_identity=self._stream_cache_identity(),
+            body=_body,
+        )
+
+    def _run_runner_call_stream_sync(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        context: Any | None,
+        context_cache_identity: Any,
+        context_cache_key: str | None,
+    ) -> OpenAIRunResult:
+        prepared_agent, run_config = self._prepare_execution_objects(
+            wrap_calls=False,
+            context_cache_identity=context_cache_identity,
+            context_cache_key=context_cache_key,
+        )
+
+        def _body() -> OpenAIRunResult:
+            return self._run_sdk_stream_sync(
+                request,
+                agent=prepared_agent,
+                run_config=run_config,
+                context=context,
+            )
+
+        return self._run_runner_call_checkpoint_sync(
+            request,
+            agent=prepared_agent,
+            run_config=run_config,
+            context_cache_identity=context_cache_identity,
+            surface="stream",
+            stream_identity=self._stream_cache_identity(),
+            body=_body,
+        )
+
+    async def _run_runner_call_checkpoint_async(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        agent: Any,
+        run_config: Any,
+        context_cache_identity: Any,
+        surface: str,
+        body: Callable[[], Coroutine[Any, Any, OpenAIRunResult]],
+        stream_identity: dict[str, Any] | None = None,
+    ) -> OpenAIRunResult:
+        if is_inside_flow() and not is_inside_checkpoint():
+            return await run_async_in_checkpoint(
+                config=self._runner_call_checkpoint_config(),
+                step_name=f"{self._name}_openai_runner_call",
+                body=body,
+                cache_key=self._runner_call_cache_key(
+                    request,
+                    agent=agent,
+                    run_config=run_config,
+                    context_cache_identity=context_cache_identity,
+                    surface=surface,
+                    stream_identity=stream_identity,
+                ),
+            )
+        return await body()
+
+    def _run_runner_call_checkpoint_sync(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        agent: Any,
+        run_config: Any,
+        context_cache_identity: Any,
+        surface: str,
+        body: Callable[[], OpenAIRunResult],
+        stream_identity: dict[str, Any] | None = None,
+    ) -> OpenAIRunResult:
         if is_inside_flow() and not is_inside_checkpoint():
             return run_sync_in_checkpoint(
                 config=self._runner_call_checkpoint_config(),
                 step_name=f"{self._name}_openai_runner_call",
-                body=_body,
+                body=body,
                 cache_key=self._runner_call_cache_key(
                     request,
-                    agent=prepared_agent,
+                    agent=agent,
                     run_config=run_config,
                     context_cache_identity=context_cache_identity,
+                    surface=surface,
+                    stream_identity=stream_identity,
                 ),
             )
-        return _body()
+        return body()
 
     async def _run_sdk_async(
         self,
@@ -373,18 +544,7 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._finalize_run_result(
-                build_run_result(
-                    sdk_result,
-                    strict_sdk_version=self._strict_sdk_version,
-                    context_serializer=self._context_serializer,
-                    strict_context=self._strict_context,
-                    save_interruption_payloads=(
-                        self._capture.save_interruption_payloads
-                    ),
-                ),
-                tracker=tracker,
-            )
+            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
 
     def _run_sdk_sync(
         self,
@@ -403,18 +563,75 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._finalize_run_result(
-                build_run_result(
+            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
+
+    async def _run_sdk_stream_async(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        agent: Any,
+        run_config: Any,
+        context: Any | None,
+    ) -> OpenAIRunResult:
+        sdk_input = await self._sdk_input_async(request, agent=agent)
+        publisher = OpenAIStreamPublisher(
+            agent_name=self._name,
+            include_text_deltas=self._capture.include_stream_text_deltas,
+        )
+        with tracker_scope(self._name) as tracker:
+            publisher.started()
+            try:
+                sdk_result = await run_openai_agent_streamed(
+                    agent=agent,
+                    input=sdk_input,
+                    max_turns=request.max_turns or 10,
+                    run_config=run_config,
+                    context=context,
+                    on_event=publisher.event,
+                )
+                result = self._build_and_finalize_run_result(
                     sdk_result,
-                    strict_sdk_version=self._strict_sdk_version,
-                    context_serializer=self._context_serializer,
-                    strict_context=self._strict_context,
-                    save_interruption_payloads=(
-                        self._capture.save_interruption_payloads
-                    ),
-                ),
-                tracker=tracker,
-            )
+                    tracker=tracker,
+                )
+            except Exception as exc:
+                publisher.failed(exc)
+                raise
+        publisher.completed(status=result.status)
+        return result
+
+    def _run_sdk_stream_sync(
+        self,
+        request: OpenAIRunRequest,
+        *,
+        agent: Any,
+        run_config: Any,
+        context: Any | None,
+    ) -> OpenAIRunResult:
+        sdk_input = self._sdk_input_sync(request, agent=agent)
+        publisher = OpenAIStreamPublisher(
+            agent_name=self._name,
+            include_text_deltas=self._capture.include_stream_text_deltas,
+        )
+        with tracker_scope(self._name) as tracker:
+            publisher.started()
+            try:
+                sdk_result = run_openai_agent_streamed_sync(
+                    agent=agent,
+                    input=sdk_input,
+                    max_turns=request.max_turns or 10,
+                    run_config=run_config,
+                    context=context,
+                    on_event=publisher.event,
+                )
+                result = self._build_and_finalize_run_result(
+                    sdk_result,
+                    tracker=tracker,
+                )
+            except Exception as exc:
+                publisher.failed(exc)
+                raise
+        publisher.completed(status=result.status)
+        return result
 
     async def _sdk_input_async(self, request: OpenAIRunRequest, *, agent: Any) -> Any:
         if request.kind == "start":
@@ -441,6 +658,23 @@ class KitaruRunner:
             strict_sdk_version=self._strict_sdk_version,
         )
         return apply_approval_decision(state, decision)
+
+    def _build_and_finalize_run_result(
+        self,
+        sdk_result: Any,
+        *,
+        tracker: Any,
+    ) -> OpenAIRunResult:
+        return self._finalize_run_result(
+            build_run_result(
+                sdk_result,
+                strict_sdk_version=self._strict_sdk_version,
+                context_serializer=self._context_serializer,
+                strict_context=self._strict_context,
+                save_interruption_payloads=self._capture.save_interruption_payloads,
+            ),
+            tracker=tracker,
+        )
 
     def _finalize_run_result(
         self,
@@ -475,18 +709,34 @@ class KitaruRunner:
         agent: Any,
         run_config: Any,
         context_cache_identity: Any,
+        surface: str,
+        stream_identity: dict[str, Any] | None = None,
     ) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "adapter": "openai_agents",
             "checkpoint_strategy": "runner_call",
+            "surface": surface,
             "agents_sdk_version": agents_sdk_version(),
             "agent": self._agent_cache_identity(agent),
             "run_config": stable_cache_identity(run_config),
             "request": request.model_dump(mode="json"),
+            "capture": {
+                "save_interruption_payloads": self._capture.save_interruption_payloads,
+                "save_run_state": self._capture.save_run_state,
+                "save_final_output": self._capture.save_final_output,
+            },
         }
+        if stream_identity is not None:
+            payload["stream"] = stream_identity
         if context_cache_identity is not None:
             payload["context"] = context_cache_identity
         return checkpoint_cache_key(payload)
+
+    def _stream_cache_identity(self) -> dict[str, Any]:
+        return {
+            "sdk_surface": "Runner.run_streamed",
+            "include_stream_text_deltas": self._capture.include_stream_text_deltas,
+        }
 
     def _context_cache_identity(self, context: Any | None) -> Any:
         if context is None:

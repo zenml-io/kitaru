@@ -179,7 +179,7 @@ def test_ensure_anthropic_api_key_loads_remote_secret(
 
     class FakeSecret:
         def get(self, key: str, default: str | None = None) -> str | None:
-            return {"ANTHROPIC_API_KEY": "sk-ant-test"}.get(key, default)
+            return {"ANTHROPIC_API_KEY": "anthropic-test-key"}.get(key, default)
 
     def fake_get_secret(name_or_id: str) -> _FakeSecret:
         assert name_or_id == "anthropic"
@@ -189,7 +189,7 @@ def test_ensure_anthropic_api_key_loads_remote_secret(
 
     claude_agent_module._ensure_anthropic_api_key()
 
-    assert claude_agent_module.os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test"
+    assert claude_agent_module.os.environ["ANTHROPIC_API_KEY"] == "anthropic-test-key"
 
 
 def test_ensure_anthropic_api_key_explains_missing_remote_secret(

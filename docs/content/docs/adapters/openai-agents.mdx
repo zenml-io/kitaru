@@ -179,6 +179,142 @@ call in your own `@checkpoint` is **not** a workaround here — the adapter
 guards against it and will raise, because per-call checkpoints cannot be
 nested inside another Kitaru checkpoint.
 
+## Streaming with Kitaru durability
+
+Use `run_stream(...)` / `run_stream_sync(...)` when you want OpenAI Agents SDK
+stream updates while the Kitaru checkpoint is still running. This is supported
+for `checkpoint_strategy="runner_call"` only.
+
+The concrete story is: OpenAI sends radio chatter while the agent runs. Kitaru
+forwards useful pieces of that chatter as live events named
+`openai_agents.stream.*`. When OpenAI's stream iterator finishes, Kitaru saves
+the same durable `OpenAIRunResult` shape that `run(...)` / `run_sync(...)` save.
+The live events help a UI or terminal feel alive; the final `OpenAIRunResult` is
+the saved record.
+
+Async flow:
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+
+@flow
+async def research(prompt: str) -> str:
+    result = await runner.run_stream(OpenAIRunRequest.start(prompt))
+    return str(result.final_output)
+```
+
+Sync flow:
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+
+@flow
+def research(prompt: str) -> str:
+    result = runner.run_stream_sync(OpenAIRunRequest.start(prompt))
+    return str(result.final_output)
+```
+
+To watch the live events, submit the flow and read execution events from the
+client:
+
+```python
+import threading
+
+from kitaru.adapters.openai_agents import (
+    OPENAI_STREAM_EVENT_KINDS,
+    OPENAI_STREAM_TERMINAL_EVENT_KINDS,
+)
+from kitaru.client import KitaruClient
+
+handle = research.run("summarize the incident", cache=False)
+stop_watching = threading.Event()
+
+
+def watch_openai_events() -> None:
+    try:
+        for event in KitaruClient().executions.events(
+            handle.exec_id,
+            kinds=list(OPENAI_STREAM_EVENT_KINDS),
+        ):
+            if stop_watching.is_set():
+                return
+            data = event.payload.get("data", {})
+            print(data.get("display", event.kind))
+            if event.kind in OPENAI_STREAM_TERMINAL_EVENT_KINDS:
+                return
+    except Exception as exc:
+        print(f"Live event watching unavailable; reading saved result instead: {exc}")
+
+
+watcher = threading.Thread(target=watch_openai_events, daemon=True)
+watcher.start()
+
+result = handle.wait()
+stop_watching.set()
+watcher.join(timeout=1.0)
+```
+
+The watcher is optional and runs in the background so it cannot block the durable
+result path. If event streaming is unavailable on the active backend, or if the
+watcher sees no live events before it is stopped, `handle.wait()` still reads the
+saved result after the flow finishes.
+
+The runnable version lives at
+[`examples/integrations/openai_agents_agent/openai_agents_streaming.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/integrations/openai_agents_agent/openai_agents_streaming.py).
+It uses a real customer-support agent, submits the flow, prints
+`openai_agents.stream.*` events from `KitaruClient().executions.events(...)`, and
+then prints the final durable `OpenAIRunResult`.
+
+A few gotchas matter:
+
+- Live events are best effort. Missing stream events do **not** mean the agent
+  failed; check the final `OpenAIRunResult`.
+- Replay may emit stream events again. If the process crashes after chunk six,
+  replay may run the OpenAI stream again and you may see chunks one through six a
+  second time.
+- Cache hits may emit no OpenAI stream events. Kitaru found the saved final
+  runner-call result, so there is no fresh OpenAI stream to forward.
+- Kitaru does not save a durable token-by-token transcript in this slice. The
+  durable value is the final `OpenAIRunResult`.
+- `checkpoint_strategy="calls"` streaming is intentionally unsupported for now.
+  Per-call streaming needs a buffering design so replay knows which chunks were
+  already emitted.
+
+Streaming also works with approval interruptions. The first streamed run may
+finish with `status="interrupted"`; after the approval bridge returns a resume
+request, stream the resumed request without passing fresh `context=`:
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import (
+    KitaruRunner,
+    OpenAIRunRequest,
+    wait_for_approval,
+)
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+
+@flow
+async def publish_with_gate(prompt: str) -> str:
+    result = await runner.run_stream(OpenAIRunRequest.start(prompt))
+
+    if result.status == "interrupted":
+        resume_request = wait_for_approval(
+            result,
+            name="approve_openai_tool",
+            timeout=600,
+        )
+        result = await runner.run_stream(resume_request)
+
+    return str(result.final_output)
+```
+
 ## Structured outputs, guardrails, and nested agents
 
 OpenAI Agents SDK structured outputs work through the adapter. If your agent is
@@ -308,7 +444,10 @@ export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # default model in the example is gpt-5-nano
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
-uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+
+# streaming runner-call example
+uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 ```
 
 ## End-to-end research bot example

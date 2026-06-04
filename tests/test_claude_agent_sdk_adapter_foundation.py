@@ -56,6 +56,22 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert claude_adapter.ClaudeRunResult
     assert claude_adapter.ClaudeCapturePolicy
     assert claude_adapter.ClaudeRunEvent
+    assert claude_adapter.KitaruClaudeRunner.run_stream
+    assert claude_adapter.KitaruClaudeRunner.run_stream_sync
+    assert claude_adapter.CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"
+    assert claude_adapter.CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"
+    assert claude_adapter.CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"
+    assert claude_adapter.CLAUDE_STREAM_FAILED == "claude_agent_sdk.stream.failed"
+    assert claude_adapter.CLAUDE_STREAM_EVENT_KINDS == (
+        claude_adapter.CLAUDE_STREAM_STARTED,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_COMPLETED,
+        claude_adapter.CLAUDE_STREAM_FAILED,
+    )
+    assert claude_adapter.CLAUDE_STREAM_TERMINAL_EVENT_KINDS == (
+        claude_adapter.CLAUDE_STREAM_COMPLETED,
+        claude_adapter.CLAUDE_STREAM_FAILED,
+    )
 
     public_names = set(claude_adapter.__all__)
     assert "calls" not in public_names

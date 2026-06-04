@@ -6,6 +6,9 @@ Story:
   Kitaru checkpoint.
 - `--dry-run` prints the same kind of result summary without credentials or a
   network call, so smoke tests can exercise the example safely.
+- `--stream` uses direct model streaming for model mode and create-once,
+  observe-same-id background streaming for Antigravity mode, then shows the same
+  final stable result after the stream finishes.
 
 Run (API key):
     uv sync --extra local --extra gemini
@@ -28,16 +31,22 @@ import argparse
 import json
 import os
 import sys
+import threading
 from typing import Any, Literal
 
 from kitaru import flow
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.adapters.gemini import (
+    GEMINI_STREAM_EVENT_KINDS,
+    GEMINI_STREAM_TERMINAL_EVENT_KINDS,
+    GeminiInteractionCapturePolicy,
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
     KitaruGeminiInteractionsRunner,
 )
+from kitaru.client import KitaruClient
+from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
@@ -105,9 +114,15 @@ def _prepare_google_credentials() -> None:
     )
 
 
-def _build_runner() -> KitaruGeminiInteractionsRunner:
+def _build_runner(
+    *,
+    include_stream_text_deltas: bool = False,
+) -> KitaruGeminiInteractionsRunner:
     return KitaruGeminiInteractionsRunner(
         name="gemini_interactions_example",
+        capture=GeminiInteractionCapturePolicy(
+            include_stream_text_deltas=include_stream_text_deltas
+        ),
         checkpoint_config={"cache": False},
     )
 
@@ -118,9 +133,17 @@ RUNNER = _build_runner()
 @flow
 def run_gemini_interaction(
     request: GeminiInteractionRequest,
+    *,
+    stream: bool = False,
+    show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Run one Gemini interaction as one Kitaru checkpoint."""
-    return RUNNER.run_sync(request)
+    runner = (
+        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    )
+    if stream:
+        return runner.run_stream_sync(request)
+    return runner.run_sync(request)
 
 
 def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
@@ -131,10 +154,12 @@ def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
             model=str(args.model),
             metadata={"example": "gemini_interactions_agent", "mode": "model"},
         )
-    # Antigravity does not support background=True. Let the provider call run
-    # synchronously and bound that call with `timeout_s`.
+    # Antigravity defaults to background mode because the Vertex/Chiliagon
+    # managed-agent path can require it. Keep --foreground-antigravity as a
+    # preview-backend escape hatch if a specific endpoint rejects background mode.
     return GeminiInteractionRequest.antigravity(
         prompt,
+        background=not args.foreground_antigravity,
         timeout_s=float(args.timeout),
         metadata={
             "example": "gemini_interactions_agent",
@@ -166,7 +191,12 @@ def _guard_vertex_mode(mode: Mode) -> None:
         )
 
 
-def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
+def _fake_result(
+    mode: Mode,
+    model: str,
+    *,
+    stream: bool = False,
+) -> GeminiInteractionResult:
     target = model if mode == "model" else "antigravity-preview-05-2026"
     return GeminiInteractionResult(
         status="completed",
@@ -210,7 +240,24 @@ def _fake_result(mode: Mode, model: str) -> GeminiInteractionResult:
         event_log_artifact_name="gemini_events_dry_run",
         run_summary_artifact_name="gemini_run_summary_dry_run",
         warnings=["Dry run: no credentials, network call, or Kitaru flow execution."],
-        metadata={"example": "gemini_interactions_agent", "mode": mode},
+        metadata={
+            "example": "gemini_interactions_agent",
+            "mode": mode,
+            "surface": "run_stream_sync" if stream else "run_sync",
+            **(
+                {
+                    "stream": {
+                        "event_count": 0,
+                        "counts_by_event_type": {},
+                        "last_event_id": None,
+                        "final_status": "completed",
+                        "reconstruction": "stream_accumulator_v1",
+                    }
+                }
+                if stream
+                else {}
+            ),
+        },
     )
 
 
@@ -224,9 +271,56 @@ def _json_block(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True, default=str)
 
 
+def _event_data(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _stream_event_display_lines(kind: str, payload: dict[str, Any]) -> list[str]:
+    data = _event_data(payload)
+    display = data.get("display") or kind
+    category = data.get("category")
+    text_delta = data.get("text_delta")
+    if (
+        isinstance(text_delta, str)
+        and text_delta
+        and (category == "text_delta" or display == text_delta)
+    ):
+        display = "Gemini text delta"
+
+    prefix = f"[{category}] " if isinstance(category, str) else ""
+    lines = [f"- {prefix}{display}"]
+    if isinstance(text_delta, str) and text_delta:
+        lines.append(f"  text_delta: {text_delta}")
+    return lines
+
+
+def _watch_gemini_stream(exec_id: str, stop_event: threading.Event) -> None:
+    print("\n=== live Gemini stream events ===")
+    try:
+        for event in KitaruClient().executions.events(
+            exec_id,
+            kinds=list(GEMINI_STREAM_EVENT_KINDS),
+        ):
+            if stop_event.is_set():
+                return
+            for line in _stream_event_display_lines(event.kind, event.payload):
+                print(line)
+            if event.kind in GEMINI_STREAM_TERMINAL_EVENT_KINDS:
+                return
+    except (KitaruBackendError, KitaruFeatureNotAvailableError) as error:
+        print("\nLive event watching is unavailable on this backend.")
+        print(f"The durable result will still be read with .wait(): {error}")
+
+
 def _print_result(result: GeminiInteractionResult) -> None:
     print("\n=== What happened ===")
     print("Kitaru records one stable Gemini interaction response as one checkpoint.")
+    if "stream" in result.metadata:
+        print(
+            "Streaming was enabled: Kitaru published best-effort live events while "
+            "Gemini worked, then returned this same stable final result."
+        )
 
     print("\n=== Interaction details ===")
     print(f"Status: {result.status}")
@@ -259,6 +353,11 @@ def _print_result(result: GeminiInteractionResult) -> None:
 
     print("\n=== Usage ===")
     print(_json_block(result.usage))
+
+    stream_metadata = result.metadata.get("stream")
+    if stream_metadata is not None:
+        print("\n=== Stream metadata ===")
+        print(_json_block(stream_metadata))
 
     print("\n=== Kitaru artifact names ===")
     print(f"Input: {result.input_artifact_name or '(disabled)'}")
@@ -306,9 +405,49 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=300.0,
         help=(
-            "Seconds to let the Antigravity provider call run. The first "
-            "Vertex AI call is slow while Google provisions the sandbox. "
-            "Defaults to 300."
+            "Seconds to let the Antigravity background job and same-id "
+            "observation/polling path run. The first Vertex AI call is slow "
+            "while Google provisions the sandbox. Defaults to 300."
+        ),
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help=(
+            "Use KitaruGeminiInteractionsRunner.run_stream_sync(...) for the "
+            "provider call. Model mode uses direct create streaming; "
+            "Antigravity mode creates one background job and observes/polls "
+            "that same interaction id."
+        ),
+    )
+    text_delta_group = parser.add_mutually_exclusive_group()
+    text_delta_group.add_argument(
+        "--show-text-deltas",
+        dest="show_text_deltas",
+        action="store_true",
+        default=True,
+        help=(
+            "When used with --stream, include clipped Gemini output text chunks "
+            "in live event display. This is the example default so manual "
+            "streaming runs visibly show model output."
+        ),
+    )
+    text_delta_group.add_argument(
+        "--hide-text-deltas",
+        dest="show_text_deltas",
+        action="store_false",
+        help=(
+            "When used with --stream, hide actual Gemini output chunks and show "
+            "event labels only. Use this if live event logs should not include "
+            "model output text."
+        ),
+    )
+    parser.add_argument(
+        "--foreground-antigravity",
+        action="store_true",
+        help=(
+            "Force --mode antigravity to pass background=False. Use only if a "
+            "preview backend explicitly rejects background mode."
         ),
     )
     parser.add_argument(
@@ -330,14 +469,37 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     if args.dry_run:
-        _print_result(_fake_result(args.mode, str(args.model)))
+        _print_result(
+            _fake_result(args.mode, str(args.model), stream=bool(args.stream))
+        )
         return
 
     _prepare_google_credentials()
     _guard_vertex_mode(args.mode)
     request = _build_request(args)
-    handle = run_gemini_interaction.run(request)
+    handle = run_gemini_interaction.run(
+        request,
+        stream=bool(args.stream),
+        show_text_deltas=bool(args.stream and args.show_text_deltas),
+    )
+    print(f"Submitted execution: {handle.exec_id}")
+
+    stop_watching = threading.Event()
+    watcher: threading.Thread | None = None
+    if args.stream:
+        watcher = threading.Thread(
+            target=_watch_gemini_stream,
+            args=(handle.exec_id, stop_watching),
+            daemon=True,
+        )
+        watcher.start()
+
     result = _coerce_result(handle.wait())
+    stop_watching.set()
+    if watcher is not None:
+        watcher.join(timeout=1.0)
+        if watcher.is_alive():
+            print("\nLive watcher is still open; showing the durable result now.")
     _print_result(result)
 
 

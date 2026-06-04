@@ -22,7 +22,7 @@ kitaru init                  # Initialize a Kitaru project in this directory
 Register a model alias (one-time):
 
 ```bash
-kitaru secrets set anthropic-creds --ANTHROPIC_API_KEY=sk-ant-...
+kitaru secrets set anthropic-creds --ANTHROPIC_API_KEY=<your-anthropic-api-key>
 kitaru model register coding-agent --model anthropic/claude-sonnet-4-20250514 --secret anthropic-creds
 ```
 
