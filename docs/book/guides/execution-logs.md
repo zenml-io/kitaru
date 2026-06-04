@@ -1,0 +1,134 @@
+---
+description: Retrieve execution and checkpoint runtime logs from the SDK, CLI, and MCP
+icon: file-lines
+---
+
+# View Execution Runtime Logs
+
+Kitaru now ships a runtime-log retrieval lane that is separate from
+`kitaru.log(...)` metadata.
+
+You can fetch runtime logs through:
+
+- Python SDK: `KitaruClient().executions.logs(...)`
+- CLI: `kitaru executions logs ...`
+- MCP: `get_execution_logs`
+
+## CLI quick start
+
+```bash
+kitaru executions logs <exec_id>
+```
+
+By default, this prints merged log lines across checkpoints in chronological
+order.
+
+## Common options
+
+```bash
+# Include timestamp + level
+kitaru executions logs <exec_id> -v
+
+# Include timestamp + level + module/checkpoint context
+kitaru executions logs <exec_id> -vv
+
+# Group output by checkpoint
+kitaru executions logs <exec_id> --grouped
+
+# Structured JSON output
+kitaru executions logs <exec_id> --output json
+
+# JSONL event stream while following
+kitaru executions logs <exec_id> --follow --output json
+
+# Follow until terminal state
+kitaru executions logs <exec_id> --follow
+
+# Runner/orchestrator logs
+kitaru executions logs <exec_id> --source runner
+```
+
+`--grouped` cannot be combined with `--output json` because grouped mode emits
+human-readable section headers rather than a structured machine-readable shape.
+
+## Checkpoint filtering
+
+Use `--checkpoint <name>` to filter to one checkpoint function name (across all
+its invocations):
+
+```bash
+kitaru executions logs <exec_id> --checkpoint research
+```
+
+`--checkpoint` cannot be combined with `--source runner` because runner logs are
+execution-level, not checkpoint-level.
+
+## Prerequisites and retrieval limits
+
+Runtime log retrieval is available through the SDK, CLI, and MCP, but two
+important limits apply:
+
+1. **Server-backed connection required.** `KitaruClient().executions.logs(...)`
+   calls backend log endpoints. In local database mode, those endpoints do not
+   exist, so Kitaru raises `KitaruLogRetrievalError`.
+2. **OTEL export-only backends are not retrievable through Kitaru.** In that
+   setup, Kitaru surfaces a retrieval error and points you at the OTEL
+   backend instead of pretending the logs are available in-process.
+
+You can catch retrieval errors explicitly:
+
+```python
+import kitaru
+
+try:
+    entries = kitaru.KitaruClient().executions.logs(exec_id)
+except kitaru.KitaruLogRetrievalError as exc:
+    print("Log retrieval not available:", exc)
+```
+
+## JSON output behavior
+
+For normal (non-follow) retrieval, `--output json` emits one JSON document:
+
+- single top-level `command` field (`executions.logs`)
+- `items` list containing serialized log entries
+- `count` with the number of returned entries
+
+For follow mode, `--output json` switches to **JSONL events** instead of one
+final document. Each line is a JSON object with:
+
+- `command: "executions.logs"`
+- `event`: one of `log`, `waiting`, `terminal`, or `interrupted`
+- `item`: the event payload
+
+## Follow mode behavior
+
+`--follow` polls on an interval (default `3.0s`) and exits when execution
+reaches a terminal state.
+
+In text mode you will see terminal banners like:
+
+- `[Execution completed successfully]` (exit code `0`)
+- `[Execution failed: ...]` (exit code `1`)
+- `[Execution cancelled]` (exit code `1`)
+
+In JSON mode the equivalent terminal information is emitted as a `terminal`
+event line. When execution is waiting for input, follow mode emits a waiting
+banner in text mode or a `waiting` event in JSON mode.
+
+## Python SDK example
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+entries = client.executions.logs("kr-a8f3c2", checkpoint="research", limit=100)
+for entry in entries:
+    print(entry.timestamp, entry.level, entry.checkpoint_name, entry.message)
+```
+
+## Related pages
+
+- [Logging and Metadata](../concepts/logging.md)
+- [Configure Runtime Log Storage](../stacks/log-store.md)
+- [CLI executions commands](../cli/executions.md)

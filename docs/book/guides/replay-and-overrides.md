@@ -1,0 +1,132 @@
+---
+description: Replay executions from checkpoints with flow and checkpoint overrides
+icon: rotate-left
+---
+
+# Replay and Overrides
+
+Replay creates a **new execution** from a previous one.
+
+Use replay when you want to keep earlier durable work and rerun only parts of your workflow.
+
+## SDK replay
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+
+replayed = client.executions.replay(
+    "kr-a8f3c2",
+    from_="write_draft",
+    topic="New topic",
+    overrides={
+        "checkpoint.research": "Edited notes",
+    },
+)
+
+print(replayed.exec_id)
+print(replayed.original_exec_id)  # points to source execution
+```
+
+## Flow-object replay
+
+```python
+handle = content_pipeline.replay(
+    exec_id="kr-a8f3c2",
+    from_="write_draft",
+    topic="New topic",
+    overrides={"checkpoint.research": "Edited notes"},
+)
+
+result = handle.wait()
+```
+
+## CLI replay
+
+```bash
+kitaru executions replay kr-a8f3c2 \
+  --from write_draft \
+  --args '{"topic":"New topic"}' \
+  --overrides '{"checkpoint.research":"Edited notes"}'
+```
+
+## Selector rules
+
+`from_` can target:
+
+- checkpoint name (for example `write_draft`)
+- checkpoint invocation ID
+- checkpoint call ID
+
+If a selector is ambiguous, replay raises `KitaruStateError`.
+
+## What gets replayed
+
+Replay computes a set of replay roots, then re-executes those roots and their
+downstream descendants.
+
+- `from_` always contributes one replay root.
+- Each `checkpoint.<selector>` override adds replay roots at the direct
+  consumers of that checkpoint output.
+- Any checkpoint that is neither a replay root nor a downstream dependency is skipped.
+
+## Override keys
+
+Replay override keys must start with `checkpoint.`.
+
+Examples:
+
+- `checkpoint.research`
+- `checkpoint.fetch_data`
+
+Any other prefix raises `KitaruUsageError`.
+
+Override behavior:
+
+- Overrides target checkpoint outputs (`checkpoint.<selector>`).
+- The overridden checkpoint must expose a single output.
+- `checkpoint.<selector>` replaces that checkpoint output at each direct
+  consumer input; the source checkpoint itself is not forced to re-execute.
+- Replay roots include direct consumers of the overridden checkpoint output, so
+  replay re-executes from those consumers forward.
+- If an overridden checkpoint fans out to multiple direct consumers, replay
+  re-executes all those consumer branches.
+
+## Waits during replay
+
+Replay does not support overriding or pre-populating wait results. If a replayed
+execution reaches a `wait()` during normal execution, that wait behaves like any
+new wait and must be resolved through the normal wait input flow:
+
+- SDK: `client.executions.input(exec_id, wait="name", value=...)`
+- CLI: `kitaru executions input <exec_id> --value ...` (auto-detects single pending wait)
+- CLI interactive: `kitaru executions input <exec_id> --interactive`
+
+## Divergence
+
+Replay can raise `KitaruDivergenceError` when the backend detects that durable
+call sequence compatibility is broken.
+
+Also check replayed execution failure metadata:
+
+```python
+latest = client.executions.get(replayed.exec_id)
+if latest.failure:
+    print(latest.failure.origin, latest.failure.message)
+```
+
+## Example in this repository
+
+```bash
+uv sync --extra local
+uv run examples/features/replay/replay_with_overrides.py
+uv run pytest tests/test_phase16_replay_example.py
+```
+
+For the broader catalog, see [Examples](../getting-started/examples.md).
+
+## Related blog posts
+
+- [Agents need more than traces](https://kitaru.ai/blog/agents-need-more-than-traces)
+- [Why agents need durable execution](https://kitaru.ai/blog/why-agents-need-durable-execution)

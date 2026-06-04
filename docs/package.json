@@ -33,6 +33,7 @@
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "playwright": "^1.60.0",
     "postcss": "^8.5.15",
     "serve": "^14.2.5",
     "tailwindcss": "^4.3.0",
