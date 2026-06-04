@@ -22,7 +22,3 @@ redirects:
   adapters: adapters/README.md
   stacks: stacks/README.md
   agent-harness-platform: agent-harness-platform/README.md
-  learn: learn/README.md
-  build: build/README.md
-  operate: operate/README.md
-  integrations: integrations/README.md

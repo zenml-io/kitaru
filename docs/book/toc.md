@@ -9,13 +9,6 @@
 * [Examples](getting-started/examples.md)
 * [Troubleshooting](getting-started/troubleshooting.md)
 
-## Journeys
-
-* [Learn Kitaru](learn/README.md)
-* [Build Workflows](build/README.md)
-* [Operate Kitaru](operate/README.md)
-* [Integrations](integrations/README.md)
-
 ## Agent Harness Platform
 
 * [Overview](agent-harness-platform/README.md)
