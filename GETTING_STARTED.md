@@ -221,7 +221,7 @@ If you use Claude Code, install the Kitaru skills plugin:
 ```
 
 This adds scoping and authoring skills that teach Claude how to design and
-build durable workflows. See the [Claude Code Skills docs](https://kitaru.ai/docs/agent-integrations/claude-code-skill) for details.
+build durable workflows. See the [Claude Code Skills docs](https://docs.zenml.io/kitaru/agent-native/claude-code-skill) for details.
 
 ## Option B: Run the Kitaru server (Docker)
 
