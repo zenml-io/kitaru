@@ -131,4 +131,4 @@ for entry in entries:
 
 - [Logging and Metadata](../concepts/logging.md)
 - [Configure Runtime Log Storage](../stacks/log-store.md)
-- [CLI executions commands](../cli/executions/README.md)
+- [CLI executions commands](https://docs.zenml.io/sdk-reference)

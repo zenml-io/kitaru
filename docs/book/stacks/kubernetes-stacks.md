@@ -9,7 +9,7 @@ This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: 
 
 Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Stacks](README.md), which also covers Vertex, SageMaker, and AzureML.
 
-Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](../cli/stack/create.md), [`kitaru stack show`](../cli/stack/show.md), and [`kitaru stack delete`](../cli/stack/delete.md).
+Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](https://docs.zenml.io/sdk-reference), [`kitaru stack show`](https://docs.zenml.io/sdk-reference), and [`kitaru stack delete`](https://docs.zenml.io/sdk-reference).
 
 ## Before you start
 
@@ -68,7 +68,7 @@ kitaru stack create prod-k8s \
   --credentials aws-profile:production
 ```
 
-For the full option list, see [`kitaru stack create`](../cli/stack/create.md).
+For the full option list, see [`kitaru stack create`](https://docs.zenml.io/sdk-reference).
 
 ## Advanced Kubernetes defaults
 
@@ -143,9 +143,9 @@ Use this when you want the wider picture: what exists, which one is active, and 
 
 Reference pages:
 
-- [`kitaru stack show`](../cli/stack/show.md)
-- [`kitaru stack current`](../cli/stack/current.md)
-- [`kitaru stack list`](../cli/stack/list.md)
+- [`kitaru stack show`](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack current`](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack list`](https://docs.zenml.io/sdk-reference)
 
 ## Repeatable path: create from YAML
 
@@ -218,7 +218,7 @@ If you want the full precedence story, see:
 
 - [Configuration](../guides/configuration.md)
 - [Flows](../concepts/flows.md)
-- [`kitaru stack use`](../cli/stack/use.md)
+- [`kitaru stack use`](https://docs.zenml.io/sdk-reference)
 
 ## Delete safely
 
@@ -248,14 +248,14 @@ kitaru stack delete prod-k8s --recursive --force
 
 Use this when the stack you are deleting is currently active. Kitaru will switch away first and then continue.
 
-For exact behavior and flags, see [`kitaru stack delete`](../cli/stack/delete.md).
+For exact behavior and flags, see [`kitaru stack delete`](https://docs.zenml.io/sdk-reference).
 
 ## Full reference
 
 When you need exact command syntax instead of the walkthrough, jump to:
 
-- [Stack command overview](../cli/stack/README.md)
-- [`kitaru stack create`](../cli/stack/create.md)
-- [`kitaru stack show`](../cli/stack/show.md)
-- [`kitaru stack use`](../cli/stack/use.md)
-- [`kitaru stack delete`](../cli/stack/delete.md)
+- [Stack command overview](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack create`](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack show`](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack use`](https://docs.zenml.io/sdk-reference)
+- [`kitaru stack delete`](https://docs.zenml.io/sdk-reference)

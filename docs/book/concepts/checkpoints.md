@@ -98,7 +98,7 @@ results = my_checkpoint.product(["a", "b"], [1, 2])
 ```
 
 These are convenience wrappers over concurrent submission. See the
-[API reference](../reference/python/checkpoint.md) for detailed signatures.
+[API reference](https://docs.zenml.io/sdk-reference) for detailed signatures.
 
 ## Decorator options
 
@@ -231,7 +231,7 @@ def outer():
 * Add structured metadata to your checkpoints with
   [Logging and Metadata](logging.md)
 * Understand how results and errors surface in [Flows](flows.md#how-errors-surface)
-* See the full API in the [Checkpoint Reference](../reference/python/checkpoint.md)
+* See the full API in the [Checkpoint Reference](https://docs.zenml.io/sdk-reference)
 
 ## Related blog posts
 

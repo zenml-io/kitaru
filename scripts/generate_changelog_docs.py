@@ -17,22 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG_SRC = REPO_ROOT / "CHANGELOG.md"
 OUTPUT_FILE = REPO_ROOT / "docs" / "content" / "docs" / "changelog.mdx"
 
-# GitBook output. Unlike the FumaDocs MDX page (generated at build time and
-# gitignored), the GitBook page is committed under docs/book/ so GitBook's Git
-# Sync can serve it. Regenerate with `just generate-docs`.
-GITBOOK_OUTPUT_FILE = REPO_ROOT / "docs" / "book" / "changelog.md"
-
 FRONTMATTER = """\
 ---
 title: Changelog
 description: Release history for Kitaru
----
-"""
-
-GITBOOK_FRONTMATTER = """\
----
-description: Release history for Kitaru.
-icon: clock-rotate-left
 ---
 """
 
@@ -86,34 +74,20 @@ def transform_changelog(source: str) -> str:
     return "\n".join(result)
 
 
-def transform_changelog_gitbook(source: str) -> str:
-    """Convert raw CHANGELOG.md content into a GitBook page body.
-
-    GitBook renders plain Markdown and uses the first H1 as the page title, so
-    keep the source ``# Changelog`` heading and skip the MDX escaping the
-    FumaDocs page needs.
-    """
-    return source.strip()
-
-
 def main() -> int:
-    """Generate the changelog docs pages (FumaDocs MDX + GitBook Markdown)."""
+    """Generate the changelog docs page."""
     if not CHANGELOG_SRC.exists():
         print(f"ERROR: {CHANGELOG_SRC} not found")
         return 1
 
     source = CHANGELOG_SRC.read_text()
-
     body = transform_changelog(source)
+
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_FILE.write_text(FRONTMATTER + "\n" + body.strip() + "\n")
-    print(f"Generated {OUTPUT_FILE.relative_to(REPO_ROOT)}")
 
-    gitbook_body = transform_changelog_gitbook(source)
-    GITBOOK_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    GITBOOK_OUTPUT_FILE.write_text(GITBOOK_FRONTMATTER + "\n" + gitbook_body + "\n")
-    print(f"Generated {GITBOOK_OUTPUT_FILE.relative_to(REPO_ROOT)}")
-
+    rel = OUTPUT_FILE.relative_to(REPO_ROOT)
+    print(f"Generated {rel}")
     return 0
 
 

@@ -412,4 +412,4 @@ For the broader catalog, see [Examples](../getting-started/examples.md).
 - [Secrets + Model Registration](secrets-and-model-registration.md)
 - [Tracked LLM Calls](llm-calls.md)
 - [Flows](../concepts/flows.md)
-- [Python configuration reference](../reference/python/config.md)
+- [Python configuration reference](https://docs.zenml.io/sdk-reference)

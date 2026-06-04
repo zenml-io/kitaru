@@ -144,6 +144,6 @@ and [Configure Runtime Log Storage](../stacks/log-store.md).
 ## Next steps
 
 * Learn how executions run and surface results in [Flows](flows.md)
-* See the full API in the [Logging Reference](../reference/python/logging.md)
+* See the full API in the [Logging Reference](https://docs.zenml.io/sdk-reference)
 * Retrieve execution runtime logs with [Execution Logs](../guides/execution-logs.md)
 * Configure runtime log backends with [Log Store Setup](../stacks/log-store.md)
