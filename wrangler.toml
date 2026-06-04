@@ -1,37 +1,16 @@
-name = "kitaru-site"
-main = "site/worker/index.js"
+# Standalone Kitaru SDK + CLI reference site, served at sdkdocs.kitaru.ai
+# (mirrors zenml's sdkdocs.zenml.io). Static assets only — the FumaDocs app is
+# exported to docs/out and served at the domain root.
+#
+# The sdkdocs.kitaru.ai custom domain is bound to this worker once (Cloudflare
+# dashboard, or a one-off `wrangler deploy` with a routes config + a token that
+# has Workers Routes edit). It is intentionally NOT declared here: keeping it
+# out of the committed config means CI deploys (production + per-PR previews)
+# only push code/assets and never hit the workers/routes API — preview workers
+# get a *.workers.dev URL, and the custom domain stays bound to production.
+name = "kitaru-sdkdocs"
 compatibility_date = "2025-09-27"
-compatibility_flags = ["nodejs_compat"]
 
 [assets]
-directory = "./site/dist"
-binding = "ASSETS"
+directory = "./docs/out"
 not_found_handling = "404-page"
-run_worker_first = [
-  "/docs",
-  "/docs/*",
-  "/api/*",
-  "/_server-islands/*",
-  "/_image",
-  "/blog",
-  "/blog/*",
-  "/compare",
-  "/compare/*",
-  "/get-started",
-  "/get-started/",
-  "/book-a-demo",
-  "/pricing",
-  "/newsletter",
-]
-
-[[kv_namespaces]]
-binding = "WAITLIST_KV"
-id = "7a952406df5543418f0cb8c4552ee65f"
-
-[[kv_namespaces]]
-binding = "GET_STARTED_KV"
-id = "a6a7c01a20c841b092649453ef2e0365"
-
-[[kv_namespaces]]
-binding = "NEWSLETTER_KV"
-id = "d2717e825cc84afd973fe5d3e11dc3f4"

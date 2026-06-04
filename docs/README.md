@@ -26,6 +26,7 @@ From the **repo root** (recommended):
 ```bash
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build (output in docs/out/)
+just docs-validate  # Validate the static export as served under /docs
 just generate-docs  # Generate CLI reference + changelog + SDK reference
 ```
 
@@ -51,19 +52,19 @@ components.
 
 ## CI / Deployment
 
-The docs site is part of the unified deployment at
-[kitaru.ai](https://kitaru.ai). The `.github/workflows/site.yml` workflow
-builds docs as a static export and merges them into the Astro landing page's
-Worker deployment under the `/docs` subpath.
+The docs site is deployed from this repository to
+[kitaru.ai/docs](https://kitaru.ai/docs). The `.github/workflows/docs.yml`
+workflow builds the static export in `docs/out/` and deploys it with a
+docs-only Cloudflare Worker.
 
-- **Production deploy:** Automatically on every push to `main`.
-- **PR previews:** On PRs to `main` or `develop` that touch site or docs files.
+- **Production deploy:** Automatically on every push to `main`, and by manual workflow dispatch from `main`.
+- **PR previews:** Same-repo PRs that touch docs-related deployment inputs — docs content, docs generation scripts, SDK source that feeds generated reference pages, workflow config, `wrangler.toml`, or dependency lockfiles — get a Cloudflare Worker preview. Fork PRs still build the docs, but do not receive deploy previews because Cloudflare secrets are unavailable.
 
 CI runs doc generation automatically before building. Locally, you must run
 `just generate-docs` yourself before `just docs-build` when generated content
 (CLI reference, changelog, SDK reference) may have changed.
 
-To build the full unified site locally: `just site-build`
+To build and validate the docs locally: `just generate-docs && just docs-build && just docs-validate`
 
 ## What's Generated vs Hand-Written
 

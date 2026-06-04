@@ -24,6 +24,7 @@ class OpenAICapturePolicy(BaseModel):
     save_response_items: bool = False
     save_usage: bool = True
     correlate_otel_spans: bool = True
+    include_stream_text_deltas: bool = False
 
 
 class OpenAIDurabilityPolicy(BaseModel):

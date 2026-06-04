@@ -1,3 +1,6 @@
-# Exclude our own site URLs from link checking — they may not be deployed yet
-# on the branch being tested (site deploys only from main)
-https://kitaru.ai/.*
+# kitaru.ai is now a redirect-only domain (docs -> GitBook/sdkdocs, marketing ->
+# zenml.io). Those URLs resolve via 301, so they are NOT blanket-ignored here —
+# stale first-party links should surface. Only ignore what CI genuinely cannot
+# verify: blog posts redirect to www.zenml.io/blog/<slug>, and not every Kitaru
+# post has a matching slug there yet.
+https://kitaru\.ai/blog/.*

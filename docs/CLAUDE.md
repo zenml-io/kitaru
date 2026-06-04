@@ -2,24 +2,67 @@
 
 FumaDocs-specific instructions for AI-assisted development in the docs app.
 
+## Where the docs live now (read this first)
+
+Kitaru documentation is split across three surfaces:
+
+- **Hand-written docs** (concepts, guides, adapters, getting-started, etc.) live
+  in **GitBook** at **`docs.zenml.io/kitaru`**, sourced from **`docs/book/`**
+  (GitBook Git Sync, plain Markdown). Edit those `.md` files directly.
+- **Generated SDK + CLI reference** is served by **this FumaDocs app** at
+  **`sdkdocs.kitaru.ai`** (mirrors `sdkdocs.zenml.io`).
+- **`kitaru.ai/docs/*`** is now a **redirect** to those new homes
+  (`docs/worker/redirect.mjs` + `wrangler.redirect.toml`, worker `kitaru-site`).
+
+So **this app is reference-only** — its content is just the generated
+`content/docs/cli/` + `content/docs/reference/python/` + a landing `index.mdx`.
+Do not add hand-written pages here; those belong in `docs/book/` (GitBook).
+
 ## Architecture
 
-This is a **self-contained Next.js/FumaDocs app** for Kitaru's documentation,
-served at **`kitaru.ai/docs`** as part of the unified site deployment.
+This is a **self-contained Next.js/FumaDocs app** that builds the Kitaru SDK +
+CLI reference site, served at **`sdkdocs.kitaru.ai`**.
 
 It lives entirely within `docs/` and has no dependency on the root repo's
-Python tooling (except for generated content). The static export is merged
-into the Astro landing page build (`site/dist/docs/`) and deployed as a
-single Cloudflare Worker.
+Python tooling except for the generated reference content. The static export in
+`docs/out/` is deployed to the `kitaru-sdkdocs` Cloudflare Worker (root
+`wrangler.toml`, bound to the `sdkdocs.kitaru.ai` custom domain).
 
 - **Framework:** FumaDocs (fumadocs-ui + fumadocs-mdx + fumadocs-core)
-- **Runtime:** Next.js with static export (`output: 'export'`, `basePath: '/docs'`)
-- **Domain:** `kitaru.ai/docs` (subpath of the unified site, not a subdomain)
+- **Runtime:** Next.js with static export (`output: 'export'`, served at domain root — no basePath)
+- **Domain:** `sdkdocs.kitaru.ai` (custom domain on the `kitaru-sdkdocs` worker)
 - **Package manager:** pnpm (lockfile committed)
 - **Node version:** 22+ (pinned in `.node-version`)
 - **Styling:** Tailwind CSS v4 (CSS-based config, not JS config file)
 - **Search:** Orama client-side (static index built at build time)
 - **Linter:** Biome
+
+## Deploying sdkdocs.kitaru.ai
+
+**Automatic (the normal path):** the `SDK Reference Docs` workflow
+(`.github/workflows/docs.yml`) regenerates the CLI + SDK reference, builds the
+static export, and `wrangler deploy`s it to `kitaru-sdkdocs`, then deploys the
+`kitaru-site` redirect worker. It runs on:
+
+- **push to `main`** (i.e. at release time), and
+- **manual `workflow_dispatch`** (Actions → "SDK Reference Docs" → Run workflow)
+  — deploys whichever branch it runs against, so you can ship from `develop`.
+
+PRs get an ephemeral preview Worker (`kitaru-sdkdocs-preview-<PR#>`).
+
+**Manual (from a clone, needs Cloudflare creds via `wrangler login`):**
+
+```bash
+# from repo root — regenerate reference, build, deploy
+uv run python scripts/generate_cli_docs.py
+uv run python scripts/generate_sdk_docs.py
+cd docs && node scripts/convert-sdk-docs.mjs && pnpm run build && cd ..
+npx wrangler deploy                                   # SDK site -> sdkdocs.kitaru.ai
+npx wrangler deploy --config wrangler.redirect.toml   # kitaru.ai/docs redirect worker
+```
+
+The redirect worker (`wrangler.redirect.toml`) has no build output and only
+changes when redirect rules in `docs/worker/redirect.mjs` change.
 
 ## Key Rules
 
@@ -78,7 +121,7 @@ These are registered globally in `mdx-components.tsx`:
 just generate-docs  # Generate CLI + changelog + SDK reference docs (run first on fresh clone)
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
-just site-build     # Full unified build (generate + docs + site + merge)
+just docs-validate  # Validate the static export as served under /docs
 
 # Or from docs/:
 pnpm run dev        # Dev server

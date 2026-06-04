@@ -4252,13 +4252,13 @@ def test_parse_secret_assignments_accepts_equals_and_split_values() -> None:
         [
             "--OPENAI_API_KEY=sk-123",
             "--ANTHROPIC_API_KEY",
-            "sk-ant-456",
+            "anthropic-test-key-456",
         ]
     )
 
     assert parsed == {
         "OPENAI_API_KEY": "sk-123",
-        "ANTHROPIC_API_KEY": "sk-ant-456",
+        "ANTHROPIC_API_KEY": "anthropic-test-key-456",
     }
 
 
@@ -4291,7 +4291,7 @@ def test_parse_secret_assignments_rejects_missing_split_value() -> None:
         _parse_secret_assignments(
             [
                 "--OPENAI_API_KEY",
-                "--ANTHROPIC_API_KEY=sk-ant-123",
+                "--ANTHROPIC_API_KEY=anthropic-test-key-123",
             ]
         )
 

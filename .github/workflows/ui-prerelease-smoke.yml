@@ -23,7 +23,7 @@ concurrency:
   group: ui-prerelease-smoke-${{ github.ref }}-${{ inputs.ui-tag }}
   cancel-in-progress: false
 env:
-  ZENML_SERVER_TAG: 0.94.5
+  ZENML_SERVER_TAG: 0.94.6
 jobs:
   smoke:
     runs-on: ubuntu-latest

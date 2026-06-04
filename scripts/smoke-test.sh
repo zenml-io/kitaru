@@ -155,6 +155,15 @@ skip_test() {
     SKIPPED+=("$label")
 }
 
+is_truthy_env_value() {
+    local value
+    value=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+    case "$value" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cleanup() {
     if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
         timed 10 $UV_RUN kitaru auth api-keys delete \
@@ -206,6 +215,20 @@ HAS_CLAUDE_AGENT_SDK=false
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] || [[ "${CLAUDE_CODE_USE_VERTEX:-}" == "1" ]]; then
     HAS_CLAUDE_AGENT_SDK=true
 fi
+HAS_GEMINI_API_KEY=false
+if [[ -n "${GEMINI_API_KEY:-}" ]] || [[ -n "${GOOGLE_API_KEY:-}" ]]; then
+    HAS_GEMINI_API_KEY=true
+fi
+HAS_GEMINI_VERTEX=false
+if is_truthy_env_value "${GOOGLE_GENAI_USE_VERTEXAI:-}" \
+    && [[ -n "${GOOGLE_CLOUD_PROJECT:-}" ]] \
+    && [[ -n "${GOOGLE_CLOUD_LOCATION:-}" ]]; then
+    HAS_GEMINI_VERTEX=true
+fi
+HAS_GEMINI=false
+if [[ "$HAS_GEMINI_API_KEY" == true ]] || [[ "$HAS_GEMINI_VERTEX" == true ]]; then
+    HAS_GEMINI=true
+fi
 
 # ---------------------------------------------------------------------------
 # Install from source
@@ -222,6 +245,7 @@ else
         --extra pydantic-ai
         --extra openai-agents
         --extra claude-agent-sdk
+        --extra gemini
         --extra langgraph
     )
     if [[ "$HAS_OPENAI" == true ]]; then
@@ -230,6 +254,20 @@ else
     run_test "uv sync --python $PY ${UV_SYNC_EXTRAS[*]}" \
         uv sync --python "$PY" "${UV_SYNC_EXTRAS[@]}"
 fi
+
+# ---------------------------------------------------------------------------
+# SDK API surface
+# ---------------------------------------------------------------------------
+section_header "SDK API surface"
+
+run_test "checkpoint live-event API imports" \
+    $UV_RUN python -c 'import kitaru; assert callable(kitaru.progress); assert callable(kitaru.events.publish); assert isinstance(kitaru.events.flush(), bool)'
+run_test "execution event watcher API imports" \
+    $UV_RUN python -c 'from kitaru import ExecutionEvent, KitaruClient; fields = ExecutionEvent.__dataclass_fields__; assert callable(KitaruClient); assert "cursor" in fields and "correlation_id" in fields and "stream_id" not in fields and "timestamp" not in fields'
+run_test "Claude Agent SDK stream API imports" \
+    $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_EVENT_KINDS, CLAUDE_STREAM_FAILED, CLAUDE_STREAM_STARTED, CLAUDE_STREAM_TERMINAL_EVENT_KINDS, KitaruClaudeRunner; assert hasattr(KitaruClaudeRunner, "run_stream"); assert hasattr(KitaruClaudeRunner, "run_stream_sync"); assert CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"; assert CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"; assert CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"; assert CLAUDE_STREAM_FAILED == "claude_agent_sdk.stream.failed"; assert CLAUDE_STREAM_EVENT_KINDS == (CLAUDE_STREAM_STARTED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED); assert CLAUDE_STREAM_TERMINAL_EVENT_KINDS == (CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED)'
+run_test "OpenAI Agents stream API imports" \
+    $UV_RUN python -c 'from kitaru.adapters.openai_agents import OPENAI_STREAM_COMPLETED, OPENAI_STREAM_EVENT, OPENAI_STREAM_EVENT_KINDS, OPENAI_STREAM_FAILED, OPENAI_STREAM_STARTED, OPENAI_STREAM_TERMINAL_EVENT_KINDS, KitaruRunner; assert hasattr(KitaruRunner, "run_stream"); assert hasattr(KitaruRunner, "run_stream_sync"); assert OPENAI_STREAM_STARTED == "openai_agents.stream.started"; assert OPENAI_STREAM_EVENT == "openai_agents.stream.event"; assert OPENAI_STREAM_COMPLETED == "openai_agents.stream.completed"; assert OPENAI_STREAM_FAILED == "openai_agents.stream.failed"; assert OPENAI_STREAM_EVENT_KINDS == (OPENAI_STREAM_STARTED, OPENAI_STREAM_EVENT, OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED); assert OPENAI_STREAM_TERMINAL_EVENT_KINDS == (OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED)'
 
 # ---------------------------------------------------------------------------
 # Clear state
@@ -366,10 +404,19 @@ section_header "PydanticAI adapter"
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+else
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example"
+fi
+
 section_header "LangGraph adapter"
 
 run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call" \
     $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+run_test "examples/integrations/langgraph_agent/langgraph_streaming.py" \
+    timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_streaming.py
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
         $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
@@ -385,8 +432,11 @@ run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
         $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+    run_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 else
     skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" "OPENAI_API_KEY not set; provider credentials required for OpenAI Agents streaming example"
 fi
 
 section_header "Claude Agent SDK adapter"
@@ -399,8 +449,45 @@ if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
         timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py \
             --prompt "Explain one Kitaru checkpoint in one short sentence. Do not use tools, Bash, or files." \
             --max-turns 1
+    run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" \
+        timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py \
+            --prompt "Explain one Kitaru streamed checkpoint in one short sentence. Do not use tools, Bash, or files." \
+            --max-turns 1
 else
     skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+fi
+
+section_header "Gemini Interactions adapter"
+
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
+
+if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
+        timed 120 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode model \
+            --prompt "Explain one Kitaru checkpoint in one short sentence."
+elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke"
+else
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set"
+fi
+
+if [[ "$HAS_GEMINI" != true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "GEMINI_API_KEY/GOOGLE_API_KEY or Vertex ADC config not set"
+elif [[ "${KITARU_SMOKE_GEMINI_ANTIGRAVITY:-}" != "1" ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run; accepts Gemini API key or Vertex ADC config"
+else
+    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
+        timed 360 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+            --mode antigravity \
+            --timeout 300 \
+            --prompt "Explain what you would inspect first in this repository. Do not edit files."
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then

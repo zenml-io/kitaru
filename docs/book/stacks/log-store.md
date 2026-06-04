@@ -1,0 +1,90 @@
+---
+description: Set, inspect, and reset Kitaru's global runtime log-store backend
+icon: database
+---
+
+# Configure Runtime Log Storage
+
+This guide shows how to configure Kitaru's preferred runtime log backend.
+
+## What this controls
+
+Kitaru has two separate observability channels:
+
+- `kitaru.log(...)` writes **structured metadata** to executions/checkpoints.
+- `kitaru log-store ...` configures the backend for **runtime logs**.
+
+By default, runtime logs use `artifact-store`.
+
+## Important: preference vs active stack
+
+`kitaru log-store set` stores a Kitaru-side preference. Runtime log capture
+still follows the active stack's log-store component. If they differ,
+Kitaru now shows a warning in:
+
+- `kitaru log-store show`
+- `kitaru status`
+
+Use those warnings as a signal that your saved preference and active runtime
+destination are different.
+
+## Show current log-store backend
+
+```bash
+kitaru log-store show
+```
+
+This command shows the effective preferred backend and where it came from
+(`default`, `global user config`, or `environment`).
+
+## Set a global backend override
+
+```bash
+kitaru log-store set datadog \
+  --endpoint https://logs.datadoghq.com \
+  --api-key "{{ DATADOG_KEY }}"
+```
+
+This stores a global user-level override and applies to all flows on that
+machine.
+
+## Reset to default behavior
+
+```bash
+kitaru log-store reset
+```
+
+Reset removes the persisted global override and returns to default
+`artifact-store` behavior.
+
+## Environment overrides
+
+Environment variables take precedence over the persisted global setting:
+
+- `KITARU_LOG_STORE_BACKEND`
+- `KITARU_LOG_STORE_ENDPOINT`
+- `KITARU_LOG_STORE_API_KEY`
+
+Example:
+
+```bash
+export KITARU_LOG_STORE_BACKEND=datadog
+export KITARU_LOG_STORE_ENDPOINT=https://logs.datadoghq.com
+export KITARU_LOG_STORE_API_KEY="${DATADOG_API_KEY}"
+kitaru log-store show
+```
+
+To force default behavior via environment, set:
+
+```bash
+export KITARU_LOG_STORE_BACKEND=artifact-store
+unset KITARU_LOG_STORE_ENDPOINT
+unset KITARU_LOG_STORE_API_KEY
+kitaru log-store show
+```
+
+## Related reference pages
+
+- [View execution runtime logs](../guides/execution-logs.md)
+- [CLI log-store commands](https://sdkdocs.kitaru.ai)
+- [Python logging reference](https://sdkdocs.kitaru.ai)

@@ -13,6 +13,9 @@ extend-exclude = [
 
 [default.extend-identifiers]
 HashiCorp = "HashiCorp"
+# OpenAI Agents SDK stream event name is misspelled in the public SDK.
+handoff_occured = "handoff_occured"
+MockValSer = "MockValSer"
 
 [default.extend-words]
 # Don't correct the surname "Teh"

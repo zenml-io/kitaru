@@ -1,20 +1,8 @@
 {
-  "title": "Documentation",
+  "title": "Kitaru Reference",
   "pages": [
     "index",
-    "---",
-    "getting-started",
-    "agent-harness-platform",
-    "concepts",
-    "guides",
-    "deploy",
-    "stacks",
-    "agent-native",
-    "---Reference---",
-    "cli",
     "reference/python",
-    "---Project---",
-    "contributing",
-    "changelog"
+    "cli"
   ]
 }

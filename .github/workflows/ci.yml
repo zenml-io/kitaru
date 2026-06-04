@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@5374cbf686e897b15713110e233094e2874de7ef  # v1.46.1
+      - uses: crate-ci/typos@7b04f660f4ee4f048d18fd341887cf28dfbedfe2  # v1.46.3
   typecheck:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -80,6 +80,8 @@ jobs:
       # pinned SHA freezes behavior; revisit when a tagged release lands.
       - uses: lycheeverse/lychee-action@6da1d14f3a43098a294b7696d93d938aa8d20fc0  # master @ 2026-05-03
         with:
+          # Source MDX uses docs-app-root routes such as /guides/...; site.yml
+          # validates those after docs build/materialization. This job checks raw Markdown.
           args: --root-dir . --verbose --no-progress './**/*.md'
           fail: true
           jobSummary: true
@@ -90,7 +92,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
-      ZENML_SERVER_TAG: 0.94.5
+      ZENML_SERVER_TAG: 0.94.6
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:

@@ -1,30 +1,30 @@
-import { docs } from 'fumadocs-mdx:collections/server';
-import { type InferPageType, loader } from 'fumadocs-core/source';
+import { docs } from "fumadocs-mdx:collections/server";
+import { type InferPageType, loader } from "fumadocs-core/source";
 
 // See https://fumadocs.dev/docs/headless/source-api for more info
 export const source = loader({
-  baseUrl: '/',
+  baseUrl: "/",
   source: docs.toFumadocsSource(),
   plugins: [],
 });
 
 export function getPageImage(page: InferPageType<typeof source>) {
-  const segments = [...page.slugs, 'image.webp'];
+  const segments = [...page.slugs, "image.webp"];
 
   return {
     segments,
-    url: `/docs/og/docs/${segments.join('/')}`,
+    url: `/og/docs/${segments.join("/")}`,
   };
 }
 
 export function getMarkdownUrl(page: InferPageType<typeof source>) {
-  const pagePath = page.slugs.length === 0 ? 'index' : page.slugs.join('/');
+  const pagePath = page.slugs.length === 0 ? "index" : page.slugs.join("/");
 
-  return `/docs/${pagePath}.md`;
+  return `/${pagePath}.md`;
 }
 
 export async function getLLMText(page: InferPageType<typeof source>) {
-  const processed = await page.data.getText('processed');
+  const processed = await page.data.getText("processed");
 
   return `# ${page.data.title}
 

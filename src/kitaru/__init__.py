@@ -23,6 +23,7 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
+  ``kitaru.progress()``, ``kitaru.events.publish()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
   ``create_secret()``, ``delete_secret()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
@@ -30,8 +31,9 @@ Current status:
   ``delete_stack()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/statistics/input/retry/resume/cancel/replay` +
-  artifacts), and a typed Kitaru exception hierarchy with failure journaling
-  (`Execution.failure`, `CheckpointCall.attempts`).
+  artifacts), a typed Kitaru exception hierarchy with failure journaling
+  (``Execution.failure``, ``CheckpointCall.attempts``), and live-event watching
+  (``KitaruClient.executions.events(...)``).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
@@ -62,6 +64,7 @@ from kitaru._client._models import (
     AuthAPIKey,
     AuthAPIKeyWithValue,
     AuthServiceAccount,
+    ExecutionEvent,
     ExecutionStatistics,
     ExecutionStatisticsDimension,
     ExecutionStatisticsGroup,
@@ -101,6 +104,7 @@ from kitaru.errors import (
     KitaruUserCodeError,
     KitaruWaitValidationError,
 )
+from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
@@ -114,11 +118,14 @@ from kitaru.secrets import (
 )
 from kitaru.wait import wait
 
+from . import events as events
+
 __all__ = [
     "AuthAPIKey",
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionEvent",
     "ExecutionStatistics",
     "ExecutionStatisticsDimension",
     "ExecutionStatisticsGroup",
@@ -155,12 +162,14 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "events",
     "flow",
     "get_secret",
     "list_stacks",
     "llm",
     "load",
     "log",
+    "progress",
     "save",
     "use_stack",
     "wait",

@@ -236,6 +236,7 @@ def test_runner_call_cache_key_omits_context_when_context_absent(
         agent=runner.agent,
         run_config=RunConfig(tracing_disabled=True),
         context_cache_identity=None,
+        surface="run",
     )
 
     assert cache_key == "cache-key"
@@ -258,6 +259,7 @@ def test_runner_call_cache_identity_varies_by_structural_context() -> None:
         context_cache_identity=runner._context_cache_identity(
             WorkerContext(team_id="team-a", user_id="user-1", thread_id="thread-1")
         ),
+        surface="run",
     )
     team_b_key = runner._runner_call_cache_key(
         request,
@@ -266,6 +268,7 @@ def test_runner_call_cache_identity_varies_by_structural_context() -> None:
         context_cache_identity=runner._context_cache_identity(
             WorkerContext(team_id="team-b", user_id="user-1", thread_id="thread-1")
         ),
+        surface="run",
     )
 
     assert team_a_key != team_b_key
