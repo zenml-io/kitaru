@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-04
+
 ### Added
 - Added the experimental Gemini Interactions adapter (`kitaru.adapters.gemini`) with an Interactions-first design: one stable Gemini response maps to one Kitaru checkpoint, non-stable background statuses fail instead of being cached as success, raw provider payload capture is opt-in by default, and the public API includes an Antigravity managed-agent preset plus explicit `cache_identity` disambiguation while keeping Google-owned sandbox/tool internals outside Kitaru's replay promise.
 - Added OpenAI Agents live streaming via `KitaruRunner.run_stream(...)` and `run_stream_sync(...)`, publishing best-effort `openai_agents.stream.*` events while preserving `OpenAIRunResult` as the durable checkpoint output, plus a provider-key-gated runnable example at `examples/integrations/openai_agents_agent/openai_agents_streaming.py`.
