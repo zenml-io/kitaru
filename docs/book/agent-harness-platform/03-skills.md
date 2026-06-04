@@ -21,7 +21,7 @@ Picture a support lead who wants the triage agent to run one extra verification 
 
 Stage 3 pulls the procedure out of the code. It adds a `skill` tool, and the system prompt shrinks to a single instruction: find your skill and follow it. The steps themselves live in a markdown file, `skills/basic/default-agent/SKILL.md`, that an operator edits in their own editor. The agent calls `skill(action="list")` to discover its skill files, `skill(action="read", path=...)` to load one, then carries out what it read using the `exec` tool from the earlier stages. Edit the markdown, re-run, and the agent behaves differently with no change to Python.
 
-<figure><img src="../.gitbook/assets/skill-procedure-flow.png" alt="The agent lists, reads, and acts on a markdown skill file instead of a hard-coded prompt."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/skill-procedure-flow.png" alt="The agent lists, reads, and acts on a markdown skill file instead of a hard-coded prompt."><figcaption></figcaption></figure>
 
 ## One-time setup
 

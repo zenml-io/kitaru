@@ -13,7 +13,7 @@ lands.
 
 ## The wait/resume timeline
 
-<figure><img src="../.gitbook/assets/wait-resume.png" alt="The server holds durable state while compute is idle, then the runner resumes at the exact wait point when input lands."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/wait-resume.png" alt="The server holds durable state while compute is idle, then the runner resumes at the exact wait point when input lands."><figcaption></figcaption></figure>
 
 The server holds the run's durable state while compute is idle. When input lands,
 the runner picks up at the exact point the wait left off — same checkpoint state

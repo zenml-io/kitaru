@@ -36,7 +36,7 @@ If you only want to make one function durable, start with the [Quickstart](../ge
 
 ## Architecture at a glance
 
-<figure><img src="../.gitbook/assets/agent-harness-platform-overview.png" alt="Architecture overview of the agent harness platform: profile-driven agents on shared platform rails."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/agent-harness-platform-overview.png" alt="Architecture overview of the agent harness platform: profile-driven agents on shared platform rails."><figcaption></figcaption></figure>
 
 The six patterns below build up this picture one capability at a time, in the order a platform team usually adds them.
 

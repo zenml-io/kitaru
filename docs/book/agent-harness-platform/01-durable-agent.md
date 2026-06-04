@@ -29,7 +29,7 @@ A plain agent loop kept turn 1's result inside the running process, and that pro
 
 That second bill is what Stage 1 removes. Here is the shape of what changes once Kitaru is in the loop:
 
-<figure><img src="../.gitbook/assets/durable-agent-replay.png" alt="On replay, finished agent turns return from cache instead of re-running the model calls."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/durable-agent-replay.png" alt="On replay, finished agent turns return from cache instead of re-running the model calls."><figcaption></figcaption></figure>
 
 ## Run it
 

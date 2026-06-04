@@ -14,6 +14,24 @@
 // baseUrl defaults to http://localhost:3000 (the dev server). The script
 // targets `${baseUrl}/docs/diagram-export` because next.config.mjs sets
 // basePath: '/docs'.
+//
+// Publishing: the GitBook pages reference these PNGs from Cloudflare R2
+// (https://assets.kitaru.ai/docs/diagrams/<slug>.png), not from the repo —
+// docs/book/.gitbook/assets/ is gitignored. After rendering, compress and
+// upload (compression: downscale 0.5 + 256-color palette via Pillow; upload to
+// the kitaru-assets bucket, custom domain assets.kitaru.ai):
+//
+//   uv run python - <<'PY'
+//   import glob; from PIL import Image
+//   for f in glob.glob("docs/book/.gitbook/assets/*.png"):
+//       im = Image.open(f).convert("RGBA"); w,h = im.size
+//       im = im.resize((round(w*0.5), round(h*0.5)), Image.LANCZOS)
+//       bg = Image.new("RGB", im.size, (255,255,255)); bg.paste(im, mask=im.split()[3])
+//       bg.quantize(256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).save(f, optimize=True)
+//   PY
+//   for f in docs/book/.gitbook/assets/*.png; do \
+//     npx wrangler r2 object put "kitaru-assets/docs/diagrams/$(basename "$f")" \
+//       --file "$f" --content-type image/png --remote; done
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

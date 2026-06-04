@@ -21,7 +21,7 @@ The obvious way to ask is `input()`: stop and read a line from the keyboard. It 
 
 Stage 6 adds `ask_question`, a tool the agent calls exactly like any other. From the agent's side it is deliberately boring: it calls `ask_question("What suffix should I add before publishing?")` and, a moment later, gets a string back. As far as the agent knows, a slow function returned. Underneath, something very different happened:
 
-<figure><img src="../.gitbook/assets/hitl-pause-resume.png" alt="The flow pauses on a durable wait record and resumes from the same point once an operator answers."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/hitl-pause-resume.png" alt="The flow pauses on a durable wait record and resumes from the same point once an operator answers."><figcaption></figcaption></figure>
 
 ## Run it
 

@@ -25,7 +25,7 @@ So the worker is the last place the token should live, and also the thing that h
 
 That separate process is a small proxy container. The worker is configured to send its HTTP traffic through the proxy, the proxy holds the real `wiki-token`, and the proxy adds the `Authorization` header as the request passes through. The worker can ask for `wiki.local`. It can't see what makes the request succeed.
 
-<figure><img src="../.gitbook/assets/credential-proxy.png" alt="A proxy container holds the credential and injects the auth header; the worker never sees the token."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/credential-proxy.png" alt="A proxy container holds the credential and injects the auth header; the worker never sees the token."><figcaption></figcaption></figure>
 
 ## Run it
 

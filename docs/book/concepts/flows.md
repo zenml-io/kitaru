@@ -21,7 +21,7 @@ orchestrates those checkpoints. Side effects in the flow body itself are not
 automatically durable — put anything that needs to survive a crash, be replayed,
 or be rolled back behind a `@checkpoint`.
 
-<figure><img src="../.gitbook/assets/flow-shape.png" alt="The flow body orchestrates checkpoints, which are the durable replay boundaries."><figcaption><p>The flow body is the orchestration layer. The checkpoints inside are the replay boundaries.</p></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/flow-shape.png" alt="The flow body orchestrates checkpoints, which are the durable replay boundaries."><figcaption><p>The flow body is the orchestration layer. The checkpoints inside are the replay boundaries.</p></figcaption></figure>
 
 ## Defining a flow
 

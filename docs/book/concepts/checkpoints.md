@@ -22,7 +22,7 @@ Every checkpoint is a boundary the runner remembers. On the first run, checkpoin
 outputs are computed and stored. On replay, completed checkpoints return their
 persisted outputs — execution only re-enters the first incomplete one.
 
-<figure><img src="../.gitbook/assets/checkpoint-replay.png" alt="On replay, completed checkpoints return cached outputs and execution re-enters the first incomplete checkpoint."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/checkpoint-replay.png" alt="On replay, completed checkpoints return cached outputs and execution re-enters the first incomplete checkpoint."><figcaption></figcaption></figure>
 
 You can also **override** a cached checkpoint's output during replay — useful
 when you want to correct a single step's result and let the rest of the flow

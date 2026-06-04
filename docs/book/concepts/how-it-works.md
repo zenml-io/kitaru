@@ -12,7 +12,7 @@ the **Kitaru server** (shared metadata, auth, deployment registry), the
 three collapse into a single Python process. In production they separate across
 your infrastructure.
 
-<figure><img src="../.gitbook/assets/components.png" alt="The Kitaru server, runner, and execution targets and how they relate."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/components.png" alt="The Kitaru server, runner, and execution targets and how they relate."><figcaption></figcaption></figure>
 
 Kitaru separates **durable control flow** from **code execution**:
 
@@ -33,7 +33,7 @@ replay, resume, and wait. Execution targets do the work. **Checkpoints are the
 contract between the two.**
 {% endhint %}
 
-<figure><img src="../.gitbook/assets/execution-architecture.png" alt="Execution architecture: the runner delegates checkpoint work to inline or isolated execution targets."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/execution-architecture.png" alt="Execution architecture: the runner delegates checkpoint work to inline or isolated execution targets."><figcaption></figcaption></figure>
 
 ## Control / orchestration / execution
 
@@ -42,7 +42,7 @@ the [harness / runtime / platform](harness-runtime-platform.md) split, which is
 about where Kitaru sits in the broader agent stack — not about how a single run
 executes.)
 
-<figure><img src="../.gitbook/assets/three-planes.png" alt="The control, orchestration, and execution planes of a Kitaru run."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/three-planes.png" alt="The control, orchestration, and execution planes of a Kitaru run."><figcaption></figcaption></figure>
 
 | Plane | What lives here | Responsibility |
 |---|---|---|
@@ -145,7 +145,7 @@ retry policy can reason about.
 
 Consider a document-synthesis agent:
 
-<figure><img src="../.gitbook/assets/failed-checkpoint.png" alt="A failed checkpoint is persisted as a typed artifact the runner, agent, or human can act on."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/failed-checkpoint.png" alt="A failed checkpoint is persisted as a typed artifact the runner, agent, or human can act on."><figcaption></figcaption></figure>
 
 Because the retrieval checkpoint's failure is persisted as a typed artifact, a
 downstream consumer has several real options:
@@ -235,7 +235,7 @@ runtime primitive. The harness choice stays a per-team decision.
 Kitaru can be used directly through its invocation API, or placed **behind** your
 existing platform/gateway:
 
-<figure><img src="../.gitbook/assets/gateway-stack.png" alt="Kitaru placed behind an existing platform gateway that owns auth, entitlements, and UI."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/gateway-stack.png" alt="Kitaru placed behind an existing platform gateway that owns auth, entitlements, and UI."><figcaption></figcaption></figure>
 
 You keep your auth, entitlements, interceptors, observability, and UI. Kitaru
 handles the durable execution layer underneath. This is how Kitaru drops into a

@@ -26,7 +26,7 @@ Stage 5 adds a second tool, `exec_service`. The agent keeps `exec` for shell-sha
 
 The agent only sees the services this profile allows. The `exec_service` tool's description is built from the profile's `allowed_services` set, so an agent that isn't allowed to publish never sees `publish_summary` in the tool description. Here is how the two paths run side by side:
 
-<figure><img src="../.gitbook/assets/service-call-paths.png" alt="Two call paths: exec runs in the sandbox, exec_service runs typed handlers in the host process."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/service-call-paths.png" alt="Two call paths: exec runs in the sandbox, exec_service runs typed handlers in the host process."><figcaption></figcaption></figure>
 
 ## Run it
 

@@ -21,7 +21,7 @@ In Stage 1 those commands run with whatever access the worker has. On your lapto
 
 Stage 2 gives the agent a room of its own. Each run happens inside a `with DockerSandbox(...)` block, and every shell command runs inside that container instead of on the host. The container has its own filesystem, its own process table, and its own network view, so a bad command lands on a throwaway container and a mounted workspace rather than reaching back to your machine.
 
-<figure><img src="../.gitbook/assets/sandbox-boundary.png" alt="The sandbox boundary: shell commands run inside a throwaway container, not on the host."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/sandbox-boundary.png" alt="The sandbox boundary: shell commands run inside a throwaway container, not on the host."><figcaption></figcaption></figure>
 
 ## One-time setup
 
@@ -101,7 +101,7 @@ Turn 1 runs its commands in the container and gets checkpointed, then the flow r
 
 There is one important difference from Stage 1: cached shell turns do not replay their side effects. The saved output comes back, but the earlier `cd /tmp` or file writes do not run again. If the next live turn needs filesystem state, put it in `/workspace` or write it as its own checkpointed value. The diagram and warning below spell this out because it is exactly the kind of detail that matters when agents start touching real files.
 
-<figure><img src="../.gitbook/assets/sandbox-replay-side-effects.png" alt="On replay a cached shell turn returns its saved output but does not re-run its side effects."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/sandbox-replay-side-effects.png" alt="On replay a cached shell turn returns its saved output but does not re-run its side effects."><figcaption></figcaption></figure>
 
 ## What's simplified for the tutorial
 

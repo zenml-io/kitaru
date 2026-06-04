@@ -8,7 +8,7 @@ icon: layer-group
 Agent tooling spans four layers. Confusion between them is where most "is Kitaru
 a competitor to X?" questions come from.
 
-<figure><img src="../.gitbook/assets/harness-runtime-platform.png" alt="The four layers of an agent stack: model, harness, runtime, and platform."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/harness-runtime-platform.png" alt="The four layers of an agent stack: model, harness, runtime, and platform."><figcaption></figcaption></figure>
 
 * **Model layer** — the LLM itself. A compute unit over a context window, picked
   per-call or per-agent: OpenAI, Anthropic, Google, open-weights, fine-tuned
@@ -76,7 +76,7 @@ Runtime-first (Kitaru)
 
 Neither is universally better. They optimize for different buyers.
 
-<figure><img src="../.gitbook/assets/buyer-matrix.png" alt="A matrix contrasting harness-first and runtime-first buyers."><figcaption></figcaption></figure>
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/buyer-matrix.png" alt="A matrix contrasting harness-first and runtime-first buyers."><figcaption></figcaption></figure>
 
 ## What Kitaru owns vs integrates with
 
