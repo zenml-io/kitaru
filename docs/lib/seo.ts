@@ -1,7 +1,7 @@
-import { RETIRED_DOCS_REDIRECTS } from "../worker/docs-routing.mjs";
-
-const SITE_ORIGIN = "https://kitaru.ai";
-const DOCS_BASE_PATH = "/docs";
+// SEO helpers for the standalone SDK/CLI reference site at sdkdocs.kitaru.ai.
+// This site serves at the domain root (no /docs basePath) and has no retired
+// redirects of its own.
+const SITE_ORIGIN = "https://sdkdocs.kitaru.ai";
 
 function hasFileExtension(pathname: string): boolean {
   const lastSegment = pathname.split("/").pop() ?? "";
@@ -19,24 +19,15 @@ function ensureTrailingSlashForHtml(pathname: string): string {
 
 export function canonicalDocsPath(pageUrl: string): string {
   const inputPath = new URL(pageUrl, SITE_ORIGIN).pathname;
-  const pathWithSlash = ensureLeadingSlash(inputPath);
-  const docsPath =
-    pathWithSlash === DOCS_BASE_PATH ||
-    pathWithSlash.startsWith(`${DOCS_BASE_PATH}/`)
-      ? pathWithSlash
-      : `${DOCS_BASE_PATH}${pathWithSlash}`;
-
-  return ensureTrailingSlashForHtml(docsPath.replace(/\/+/g, "/"));
+  return ensureTrailingSlashForHtml(
+    ensureLeadingSlash(inputPath).replace(/\/+/g, "/"),
+  );
 }
 
 export function canonicalDocsUrl(pageUrl: string): string {
   return `${SITE_ORIGIN}${canonicalDocsPath(pageUrl)}`;
 }
 
-const retiredRedirectedDocsPaths = new Set(
-  RETIRED_DOCS_REDIRECTS.map(([sourcePath]) => canonicalDocsPath(sourcePath)),
-);
-
-export function isRetiredRedirectedDocsPath(pageUrl: string): boolean {
-  return retiredRedirectedDocsPaths.has(canonicalDocsPath(pageUrl));
+export function isRetiredRedirectedDocsPath(_pageUrl: string): boolean {
+  return false;
 }
