@@ -114,7 +114,7 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [tool.uv]
 exclude-newer = "3 days"
-exclude-newer-package = { zenml = false }
+exclude-newer-package = { zenml = false, aiohttp = false }
 
 [dependency-groups]
 dev = [

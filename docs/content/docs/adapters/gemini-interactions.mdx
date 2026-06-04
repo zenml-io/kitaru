@@ -154,6 +154,15 @@ location. Use `model=` interactions with an API key, and `agent=` interactions
 on Vertex. Antigravity does not support `background=True`, so bound longer agent
 runs with the provider call timeout rather than background polling.
 
+<Callout type="info">
+  Migrating an existing Gemini Interactions or Antigravity managed-agent project?
+  The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
+  package includes `/kitaru:kitaru-gemini-interactions-migration` for wrapping stable
+  interaction responses and checking polling, `requires_action`, function-result,
+  and Google-owned-internals boundaries. See
+  [Agent Skills](/agent-native/claude-code-skill/).
+</Callout>
+
 ## Minimal flow
 
 Use `GeminiInteractionRequest.start(...)` for a fresh interaction. Exactly one of
