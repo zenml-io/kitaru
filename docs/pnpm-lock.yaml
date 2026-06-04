@@ -4,56 +4,55 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
 
-importers:
+specifiers:
+  '@biomejs/biome': ^2.4.16
+  '@orama/orama': ^3.1.18
+  '@tailwindcss/postcss': ^4.3.0
+  '@takumi-rs/image-response': ^0.73.1
+  '@types/mdx': ^2.0.13
+  '@types/node': ^25.9.1
+  '@types/react': ^19.2.15
+  '@types/react-dom': ^19.2.3
+  fumadocs-core: 16.9.1
+  fumadocs-mdx: 15.0.10
+  fumadocs-python: ^0.0.11
+  fumadocs-ui: 16.9.1
+  lucide-react: ^1.16.0
+  next: 16.2.6
+  postcss: ^8.5.15
+  react: ^19.2.6
+  react-dom: ^19.2.6
+  serve: ^14.2.5
+  shiki: ^4.1.0
+  tailwind-merge: ^3.6.0
+  tailwindcss: ^4.3.0
+  typescript: ^5.9.3
 
-  .:
-    specifiers:
-      '@biomejs/biome': ^2.4.16
-      '@orama/orama': ^3.1.18
-      '@tailwindcss/postcss': ^4.3.0
-      '@takumi-rs/image-response': ^0.73.1
-      '@types/mdx': ^2.0.13
-      '@types/node': ^25.9.1
-      '@types/react': ^19.2.15
-      '@types/react-dom': ^19.2.3
-      fumadocs-core: 16.9.1
-      fumadocs-mdx: 15.0.10
-      fumadocs-python: ^0.0.11
-      fumadocs-ui: 16.9.1
-      lucide-react: ^1.16.0
-      next: 16.2.6
-      postcss: ^8.5.15
-      react: ^19.2.6
-      react-dom: ^19.2.6
-      serve: ^14.2.5
-      shiki: ^4.1.0
-      tailwind-merge: ^3.6.0
-      tailwindcss: ^4.3.0
-      typescript: ^5.9.3
-    dependencies:
-      '@orama/orama': 3.1.18
-      '@takumi-rs/image-response': 0.73.1
-      fumadocs-core: 16.9.1_73usqappq652tat6yw5ff6mu5q
-      fumadocs-mdx: 15.0.10_emnsurpkt3zcs4lflop72vtxti
-      fumadocs-python: 0.0.11_xd6gjl3m7nfbwcghv3gb2tgivu
-      fumadocs-ui: 16.9.1_2xi4nd5vhafa5ubnaezvdtmbyy
-      lucide-react: 1.17.0_react@19.2.7
-      next: 16.2.6_tr5srszcxqwfln4zz73l4ytshu
-      react: 19.2.7
-      react-dom: 19.2.7_react@19.2.7
-      shiki: 4.2.0
-      tailwind-merge: 3.6.0
-    devDependencies:
-      '@biomejs/biome': 2.4.16
-      '@tailwindcss/postcss': 4.3.0
-      '@types/mdx': 2.0.13
-      '@types/node': 25.9.1
-      '@types/react': 19.2.16
-      '@types/react-dom': 19.2.3_@types+react@19.2.16
-      postcss: 8.5.15
-      serve: 14.2.6
-      tailwindcss: 4.3.0
-      typescript: 5.9.3
+dependencies:
+  '@orama/orama': 3.1.18
+  '@takumi-rs/image-response': 0.73.1
+  fumadocs-core: 16.9.1_73usqappq652tat6yw5ff6mu5q
+  fumadocs-mdx: 15.0.10_emnsurpkt3zcs4lflop72vtxti
+  fumadocs-python: 0.0.11_xd6gjl3m7nfbwcghv3gb2tgivu
+  fumadocs-ui: 16.9.1_2xi4nd5vhafa5ubnaezvdtmbyy
+  lucide-react: 1.17.0_react@19.2.7
+  next: 16.2.6_tr5srszcxqwfln4zz73l4ytshu
+  react: 19.2.7
+  react-dom: 19.2.7_react@19.2.7
+  shiki: 4.2.0
+  tailwind-merge: 3.6.0
+
+devDependencies:
+  '@biomejs/biome': 2.4.16
+  '@tailwindcss/postcss': 4.3.0
+  '@types/mdx': 2.0.13
+  '@types/node': 25.9.1
+  '@types/react': 19.2.16
+  '@types/react-dom': 19.2.3_@types+react@19.2.16
+  postcss: 8.5.15
+  serve: 14.2.6
+  tailwindcss: 4.3.0
+  typescript: 5.9.3
 
 packages:
 
