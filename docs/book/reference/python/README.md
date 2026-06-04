@@ -1,5 +1,6 @@
 ---
 description: "Kitaru Python SDK reference."
+icon: code
 ---
 
 

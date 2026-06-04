@@ -260,14 +260,21 @@ def _first_line(text: str) -> str:
     return ""
 
 
-def _frontmatter(description: str) -> str:
+def _frontmatter(description: str, *, icon: str | None = None) -> str:
     safe = description.replace('"', '\\"') or "Kitaru Python SDK reference."
-    return f'---\ndescription: "{safe}"\n---\n'
+    icon_line = f"icon: {icon}\n" if icon else ""
+    return f'---\ndescription: "{safe}"\n{icon_line}---\n'
+
+
+def _is_public_param(param: dict) -> bool:
+    """Exclude method receivers and private (underscore) parameters."""
+    name = param.get("name", "")
+    return name not in {"self", "cls"} and not name.startswith("_")
 
 
 def _params_table(parameters: list[dict]) -> list[str]:
-    """Render a parameters table, skipping ``self``."""
-    rows = [p for p in parameters if p.get("name") != "self"]
+    """Render a parameters table, skipping receivers and private params."""
+    rows = [p for p in parameters if _is_public_param(p)]
     if not rows:
         return []
     lines = [
@@ -288,14 +295,18 @@ def _params_table(parameters: list[dict]) -> list[str]:
     return lines
 
 
-def _strip_self(signature: str) -> str:
-    """Drop the leading ``self`` parameter from a method signature."""
-    return re.sub(r"\(\s*self\s*,\s*", "(", re.sub(r"\(\s*self\s*\)", "()", signature))
+def _clean_signature(signature: str) -> str:
+    """Drop method receivers (self/cls) and private kwargs from a signature."""
+    s = re.sub(r"\(\s*(?:self|cls)\s*,\s*", "(", signature)
+    s = re.sub(r"\(\s*(?:self|cls)\s*\)", "()", s)
+    # Remove private keyword params like ", _require_project=True".
+    s = re.sub(r",\s*_\w+(?:\s*:\s*[^,=()]+)?(?:\s*=\s*[^,()]+)?", "", s)
+    return s
 
 
 def _render_callable(name: str, fn: dict, heading: str) -> list[str]:
     """Render a function or method as Markdown."""
-    signature = _strip_self(fn.get("signature") or "()")
+    signature = _clean_signature(fn.get("signature") or "()")
     lines = [
         f"{heading} `{name}`",
         "",
@@ -341,7 +352,7 @@ def _render_class(name: str, cls: dict, heading: str = "##") -> list[str]:
     if "__init__" in cls.get("functions", {}):
         # Surface the constructor signature inline rather than as a method.
         init = cls["functions"]["__init__"]
-        sig = _strip_self(init.get("signature") or "()")
+        sig = _clean_signature(init.get("signature") or "()")
         lines += ["**Constructor**", "", "```python", f"{name}{sig}", "```", ""]
         lines += _params_table(init.get("parameters") or [])
     for mname, method in methods.items():
@@ -377,7 +388,7 @@ def _render_index(
     modules: list[tuple[str, str]], root_classes: list[tuple[str, str]]
 ) -> str:
     lines = [
-        _frontmatter("Kitaru Python SDK reference."),
+        _frontmatter("Kitaru Python SDK reference.", icon="code"),
         "",
         "# Python SDK Reference",
         "",

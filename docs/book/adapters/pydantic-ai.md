@@ -1,6 +1,6 @@
 ---
 description: Make any PydanticAI agent replayable, resumable, and observable by wrapping it once with KitaruAgent
-icon: robot
+icon: cube
 ---
 
 # PydanticAI Adapter

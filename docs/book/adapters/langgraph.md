@@ -1,6 +1,6 @@
 ---
 description: Run LangGraph graphs inside Kitaru flows with either coarse graph-call checkpoints or granular LangChain call checkpoints
-icon: robot
+icon: diagram-project
 ---
 
 # LangGraph Adapter

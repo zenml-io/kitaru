@@ -1,6 +1,6 @@
 ---
 description: Wrap Claude Agent SDK invocations in Kitaru checkpoints, capture session context, and replay completed Claude calls honestly
-icon: robot
+icon: comments
 ---
 
 # Claude Agent SDK Adapter

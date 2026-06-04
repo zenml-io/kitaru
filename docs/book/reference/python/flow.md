@@ -13,7 +13,7 @@ function whose execution becomes durable, replayable, and observable.
 ## `flow`
 
 ```python
-flow(func=None, *, stack=None, image=None, cache=None, retries=None) -> _FlowDefinition | Callable[[Callable[..., Any]], _FlowDefinition]
+flow(func=None, *, stack=None, image=None, cache=None, retries=None) -> _FlowDefinition | Callable[[Callable[..., Any]]]
 ```
 
 Mark a function as a durable flow.

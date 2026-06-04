@@ -24,15 +24,8 @@ SDK-facing deployment facade with convenience operations.
 **Constructor**
 
 ```python
-Deployment(_record, _client) -> None
+Deployment(_record) -> None
 ```
-
-**Parameters**
-
-| Name | Type | Default | Description |
-| --- | --- | --- | --- |
-| `_record` | `DeploymentRecord` |  |  |
-| `_client` | `KitaruClient` |  |  |
 
 ### `Deployment.invoke`
 

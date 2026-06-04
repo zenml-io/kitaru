@@ -1,6 +1,6 @@
 ---
 description: Make Gemini Interactions API turns replayable and observable with Kitaru checkpoints, including Antigravity managed-agent runs
-icon: robot
+icon: gem
 ---
 
 # Gemini Interactions Adapter

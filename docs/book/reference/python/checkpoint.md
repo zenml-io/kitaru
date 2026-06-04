@@ -13,7 +13,7 @@ Successful outputs become artifacts; failures are recorded for retry.
 ## `checkpoint`
 
 ```python
-checkpoint(func=None, *, retries=0, type=None, runtime=None, cache=None) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]
+checkpoint(func=None, *, retries=0, type=None, runtime=None, cache=None) -> _CheckpointDefinition | Callable[[Callable[..., Any]]]
 ```
 
 Mark a function as a durable checkpoint.
