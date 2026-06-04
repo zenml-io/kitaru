@@ -32,6 +32,6 @@ you full observability without changing the agent's control flow.
 Uses `TestModel` so no API keys are needed to run it.
 
 For the concept walkthrough, see
-[PydanticAI Adapter](https://kitaru.ai/docs/adapters/pydantic-ai/).
+[PydanticAI Adapter](https://docs.zenml.io/kitaru/adapters/pydantic-ai/).
 
 For the full catalog, see [../../README.md](../../README.md).

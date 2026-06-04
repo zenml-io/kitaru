@@ -97,6 +97,7 @@ kitaru = "kitaru_init_hook:init"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
+Documentation = "https://docs.zenml.io/kitaru"
 Repository = "https://github.com/zenml-io/kitaru"
 
 [build-system]

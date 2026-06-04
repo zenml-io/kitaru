@@ -31,6 +31,6 @@ the same tools an AI assistant uses when you add Kitaru as an MCP server —
 this example just calls them directly as Python functions.
 
 For the broader lifecycle story, see
-[Execution Management](https://kitaru.ai/docs/getting-started/execution-management).
+[Execution Management](https://docs.zenml.io/kitaru/guides/execution-management).
 
 For the full catalog, see [../../README.md](../../README.md).

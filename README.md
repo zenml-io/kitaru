@@ -17,9 +17,9 @@
 </p>
 
 <p align="center">
-  <a href="https://kitaru.ai/docs">Docs</a> &middot;
+  <a href="https://docs.zenml.io/kitaru">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="https://kitaru.ai/docs/getting-started/examples">Examples</a> &middot;
+  <a href="https://docs.zenml.io/kitaru/getting-started/examples">Examples</a> &middot;
   <a href="GETTING_STARTED.md">Getting Started Guide</a> &middot;
   <a href="https://kitaru.ai/roadmap">Roadmap</a> &middot;
   <a href="https://kitaru.ai/community">Community</a>
@@ -252,10 +252,10 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 | Resource | Description |
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
-| [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
-| [Agent Harness Platform](https://kitaru.ai/docs/agent-harness-platform) | Build a durable agent harness platform stage by stage |
-| [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
-| [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
+| [Documentation](https://docs.zenml.io/kitaru) | Complete reference and guides |
+| [Agent Harness Platform](https://docs.zenml.io/kitaru/agent-harness-platform) | Build a durable agent harness platform stage by stage |
+| [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
+| [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
 ## 🌱 Origins
 
@@ -275,7 +275,7 @@ all PRs should target it.
 - [Discussions](https://kitaru.ai/community) — ask questions, share ideas
 - [Issues](https://github.com/zenml-io/kitaru/issues) — report bugs, request features
 - [Roadmap](https://kitaru.ai/roadmap) — see what's coming next
-- [Docs](https://kitaru.ai/docs) — guides and reference
+- [Docs](https://docs.zenml.io/kitaru) — guides and reference
 
 ## 📄 License
 
