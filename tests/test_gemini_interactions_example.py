@@ -22,6 +22,7 @@ def test_gemini_interactions_example_help(capsys: pytest.CaptureFixture[str]) ->
     assert "Gemini Interactions API" in output
     assert "--dry-run" in output
     assert "--show-text-deltas" in output
+    assert "--hide-text-deltas" in output
 
 
 def test_gemini_interactions_example_dry_run_without_credentials(
@@ -57,7 +58,7 @@ def test_gemini_interactions_example_dry_run_accepts_show_text_deltas(
     assert "Stream metadata" in output
 
 
-def test_gemini_interactions_example_main_forwards_show_text_delta_flag(
+def test_gemini_interactions_example_main_shows_text_deltas_by_default(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -103,9 +104,7 @@ def test_gemini_interactions_example_main_forwards_show_text_delta_flag(
         gemini_interactions_adapter.run_gemini_interaction, "run", fake_run
     )
 
-    gemini_interactions_adapter.main(
-        ["--mode", "model", "--stream", "--show-text-deltas"]
-    )
+    gemini_interactions_adapter.main(["--mode", "model", "--stream"])
 
     capsys.readouterr()
     assert calls == [
@@ -115,6 +114,17 @@ def test_gemini_interactions_example_main_forwards_show_text_delta_flag(
             "show_text_deltas": True,
         }
     ]
+
+
+def test_gemini_interactions_example_hide_text_deltas_overrides_stream_default() -> (
+    None
+):
+    args = gemini_interactions_adapter._parse_args(
+        ["--mode", "model", "--stream", "--hide-text-deltas"]
+    )
+
+    assert args.stream is True
+    assert args.show_text_deltas is False
 
 
 def test_gemini_interactions_example_google_api_key_alias(
@@ -183,6 +193,33 @@ def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> 
 
     assert default_runner._capture.include_stream_text_deltas is False
     assert opt_in_runner._capture.include_stream_text_deltas is True
+
+
+def test_gemini_interactions_example_text_delta_display_is_not_duplicated() -> None:
+    lines = gemini_interactions_adapter._stream_event_display_lines(
+        "gemini_interactions.stream.event",
+        {
+            "data": {
+                "category": "text_delta",
+                "display": "hello streamed chunk",
+                "text_delta": "hello streamed chunk",
+            }
+        },
+    )
+
+    assert lines == [
+        "- [text_delta] Gemini text delta",
+        "  text_delta: hello streamed chunk",
+    ]
+
+
+def test_gemini_interactions_example_non_text_delta_display_is_preserved() -> None:
+    lines = gemini_interactions_adapter._stream_event_display_lines(
+        "gemini_interactions.stream.event",
+        {"data": {"category": "content_start", "display": "Gemini content started"}},
+    )
+
+    assert lines == ["- [content_start] Gemini content started"]
 
 
 def test_gemini_interactions_example_vertex_requires_project_and_location(

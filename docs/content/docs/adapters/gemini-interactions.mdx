@@ -350,6 +350,11 @@ stay out of the default live payloads. This setting also changes the streaming
 cache identity, so Kitaru does not silently mix checkpoints created with different
 stream-display policies.
 
+The runnable `examples/integrations/gemini_interactions_agent/` script is more
+visual by design: `--stream` enables clipped text-delta display by default so you
+can confirm streaming in a terminal. Pass `--hide-text-deltas` there if you want
+the example watcher to show event labels only.
+
 ### Stable result semantics
 
 The public return value is still `GeminiInteractionResult`. Streaming metadata is

@@ -276,6 +276,25 @@ def _event_data(payload: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _stream_event_display_lines(kind: str, payload: dict[str, Any]) -> list[str]:
+    data = _event_data(payload)
+    display = data.get("display") or kind
+    category = data.get("category")
+    text_delta = data.get("text_delta")
+    if (
+        isinstance(text_delta, str)
+        and text_delta
+        and (category == "text_delta" or display == text_delta)
+    ):
+        display = "Gemini text delta"
+
+    prefix = f"[{category}] " if isinstance(category, str) else ""
+    lines = [f"- {prefix}{display}"]
+    if isinstance(text_delta, str) and text_delta:
+        lines.append(f"  text_delta: {text_delta}")
+    return lines
+
+
 def _watch_gemini_stream(exec_id: str, stop_event: threading.Event) -> None:
     print("\n=== live Gemini stream events ===")
     try:
@@ -285,14 +304,8 @@ def _watch_gemini_stream(exec_id: str, stop_event: threading.Event) -> None:
         ):
             if stop_event.is_set():
                 return
-            data = _event_data(event.payload)
-            display = data.get("display") or event.kind
-            category = data.get("category")
-            prefix = f"[{category}] " if isinstance(category, str) else ""
-            print(f"- {prefix}{display}")
-            text_delta = data.get("text_delta")
-            if isinstance(text_delta, str) and text_delta:
-                print(f"  text_delta: {text_delta}")
+            for line in _stream_event_display_lines(event.kind, event.payload):
+                print(line)
             if event.kind in GEMINI_STREAM_TERMINAL_EVENT_KINDS:
                 return
     except (KitaruBackendError, KitaruFeatureNotAvailableError) as error:
@@ -407,13 +420,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "that same interaction id."
         ),
     )
-    parser.add_argument(
+    text_delta_group = parser.add_mutually_exclusive_group()
+    text_delta_group.add_argument(
         "--show-text-deltas",
+        dest="show_text_deltas",
         action="store_true",
+        default=True,
         help=(
             "When used with --stream, include clipped Gemini output text chunks "
-            "in live event display. Off by default because live events may be "
-            "stored in event logs."
+            "in live event display. This is the example default so manual "
+            "streaming runs visibly show model output."
+        ),
+    )
+    text_delta_group.add_argument(
+        "--hide-text-deltas",
+        dest="show_text_deltas",
+        action="store_false",
+        help=(
+            "When used with --stream, hide actual Gemini output chunks and show "
+            "event labels only. Use this if live event logs should not include "
+            "model output text."
         ),
     )
     parser.add_argument(
@@ -454,7 +480,7 @@ def main(argv: list[str] | None = None) -> None:
     handle = run_gemini_interaction.run(
         request,
         stream=bool(args.stream),
-        show_text_deltas=bool(args.show_text_deltas),
+        show_text_deltas=bool(args.stream and args.show_text_deltas),
     )
     print(f"Submitted execution: {handle.exec_id}")
 
