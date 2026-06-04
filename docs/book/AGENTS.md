@@ -48,7 +48,7 @@ handled separately by `docs/worker/redirect.mjs`.
 
 ## Diagrams
 
-Diagrams are **static PNGs hosted on Cloudflare R2** and referenced as:
+Diagrams are **static PNG images hosted on Cloudflare R2** and referenced as:
 
 ```
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/<slug>.png" alt="..."><figcaption></figcaption></figure>
