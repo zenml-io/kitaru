@@ -15,26 +15,21 @@ on:
       - pyproject.toml
       - uv.lock
       - wrangler.toml
-  # Cleanup is intentionally broad and does not check out PR code: if a same-repo
-  # PR ever created the deterministic preview Worker, closing or drafting that PR
-  # should try to remove it even when the closing event itself has no docs diff.
-  pull_request_target:
-    types: [closed, converted_to_draft]
+      - wrangler.redirect.toml
 permissions: {}
 concurrency:
-  group: docs-${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.number || github.ref }}
+  group: docs-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   build-deploy:
-    if: ${{ github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    # PRs only build (no secrets/deploy). Production deploy runs from main or a
+    # manual dispatch — the Cloudflare token is never exposed to PR-triggered
+    # runs, which execute PR-controlled generation/build scripts.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
     env:
-      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
-      WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN || 'zenml-migration' }}
       WRANGLER_VERSION: 4.95.0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -65,6 +60,8 @@ jobs:
       - name: Build docs static export
         run: pnpm run build
         working-directory: docs
+      - name: Test redirect worker mapping
+        run: node --test docs/worker/redirect.test.mjs
       - name: Deploy production docs
         # Push deploys only from main; a manual workflow_dispatch deploys whichever
         # branch it runs against, so docs can be shipped to production from develop.
@@ -88,55 +85,3 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy --config wrangler.redirect.toml
-      - name: Deploy preview docs
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
-          == github.repository && env.HAS_CF_SECRETS == 'true'
-        id: preview
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: ${{ env.WRANGLER_VERSION }}
-          command: deploy --name kitaru-sdkdocs-preview-${{ github.event.pull_request.number }}
-      - name: Comment preview URL
-        if: steps.preview.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0  # v3.0.4
-        with:
-          header: docs-preview
-          message: |
-            ## Docs Preview
-            | | |
-            |---|---|
-            | **Preview URL** | https://kitaru-sdkdocs-preview-${{ github.event.pull_request.number }}.${{ env.WORKERS_SUBDOMAIN }}.workers.dev/ |
-            | **Branch** | `${{ github.head_ref }}` |
-            | **Commit** | `${{ github.sha }}` |
-  cleanup-preview:
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name
-      == github.repository
-    runs-on: ubuntu-latest
-    permissions: {}
-    env:
-      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
-      WRANGLER_VERSION: 4.95.0
-    steps:
-      - name: Delete preview Worker
-        if: env.HAS_CF_SECRETS == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |-
-          set +e
-          npx "wrangler@${WRANGLER_VERSION}" delete \
-            --name "kitaru-sdkdocs-preview-${{ github.event.pull_request.number }}" \
-            --force \
-            2>wrangler-delete.err
-          status=$?
-          if [ "$status" -eq 0 ]; then
-            exit 0
-          fi
-          cat wrangler-delete.err >&2
-          if grep -Eiq 'not found|does not exist|could not find' wrangler-delete.err; then
-            echo 'Preview Worker did not exist; nothing to clean up.'
-            exit 0
-          fi
-          exit "$status"

@@ -34,15 +34,20 @@ function withPreservedQuery(target, sourceUrl) {
   return targetUrl.href;
 }
 
-function docsRedirectTarget(pathname) {
+export function docsRedirectTarget(pathname) {
   // Resolve any retired in-docs redirect first (its value is also /docs-rooted).
-  const resolved = retiredDocsRedirects.get(normalizePath(pathname)) ?? pathname;
+  const resolved =
+    retiredDocsRedirects.get(normalizePath(pathname)) ?? pathname;
   const rest = resolved.slice(DOCS_PREFIX.length); // "" or "/concepts/flows" ...
 
-  if (rest === "/changelog" || rest.startsWith("/changelog")) {
+  // Segment-aware matching so e.g. /docs/clipboard does not match /cli and
+  // /docs/changelog-old does not match /changelog.
+  const isUnder = (prefix) => rest === prefix || rest.startsWith(`${prefix}/`);
+
+  if (isUnder("/changelog")) {
     return CHANGELOG_URL;
   }
-  if (rest.startsWith("/cli") || rest.startsWith("/reference/python")) {
+  if (isUnder("/cli") || isUnder("/reference")) {
     return `${SDKDOCS_BASE}${rest}`;
   }
   return `${GITBOOK_BASE}${rest}`;

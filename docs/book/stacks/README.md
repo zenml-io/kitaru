@@ -305,4 +305,4 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 - [Kubernetes](kubernetes-stacks.md)
 - [Containerization](../guides/containerization.md)
 - [Flows](../concepts/flows.md)
-- [CLI stack commands](https://docs.zenml.io/sdk-reference)
+- [CLI stack commands](https://sdkdocs.kitaru.ai)

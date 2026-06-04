@@ -242,4 +242,4 @@ For the broader catalog, see [Examples](../getting-started/examples.md).
 - [Secrets + Model Registration](secrets-and-model-registration.md)
 - [Manage Secrets](secrets.md)
 - [Configuration](configuration.md)
-- [CLI model commands](https://docs.zenml.io/sdk-reference)
+- [CLI model commands](https://sdkdocs.kitaru.ai)

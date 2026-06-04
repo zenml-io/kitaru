@@ -33,8 +33,8 @@ reference-only FumaDocs app (generated CLI + SDK reference, served at
 
 - **Within this space:** relative `.md` paths — `../concepts/checkpoints.md`,
   `flows.md#runtime-options`. Section index → `../concepts/README.md`.
-- **SDK / CLI reference:** `https://docs.zenml.io/sdk-reference` (it lives on the
-  separate `sdkdocs.kitaru.ai` site, not in this space).
+- **SDK / CLI reference:** `https://sdkdocs.kitaru.ai` — the separate reference
+  site, not part of this GitBook space.
 - **Other ZenML docs:** absolute `https://docs.zenml.io/...`.
 - **Changelog:** `https://docs.zenml.io/changelog` (owned by the changelog repo).
 - Don't link to `kitaru.ai/docs/*` — those are legacy URLs the redirect worker

@@ -154,4 +154,3 @@ Agent Harness Platform is the recommended starting point for most readers — it
 18. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
 19. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
 20. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.
-</content>

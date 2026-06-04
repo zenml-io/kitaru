@@ -86,5 +86,5 @@ kitaru log-store show
 ## Related reference pages
 
 - [View execution runtime logs](../guides/execution-logs.md)
-- [CLI log-store commands](https://docs.zenml.io/sdk-reference)
-- [Python logging reference](https://docs.zenml.io/sdk-reference)
+- [CLI log-store commands](https://sdkdocs.kitaru.ai)
+- [Python logging reference](https://sdkdocs.kitaru.ai)

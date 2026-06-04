@@ -140,8 +140,8 @@ the CLI or Python SDK when you need to delete a secret.
 ## Related reference pages
 
 - [Secrets + Model Registration](secrets-and-model-registration.md)
-- [CLI secrets commands](https://docs.zenml.io/sdk-reference)
-- [Python secrets reference](https://docs.zenml.io/sdk-reference)
+- [CLI secrets commands](https://sdkdocs.kitaru.ai)
+- [Python secrets reference](https://sdkdocs.kitaru.ai)
 - [MCP Server](../agent-native/mcp-server.md)
 - [Tracked LLM calls](llm-calls.md)
 - [Configuration guide](configuration.md)

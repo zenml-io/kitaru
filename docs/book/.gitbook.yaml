@@ -17,6 +17,7 @@ redirects:
   guides/pydantic-ai-adapter: adapters/pydantic-ai.md
   guides/openai-agents-adapter: adapters/openai-agents.md
   guides/claude-agent-sdk-adapter: adapters/claude-agent-sdk.md
+  guides/gemini-interactions-adapter: adapters/gemini-interactions.md
   guides/langgraph-adapter: adapters/langgraph.md
   concepts: concepts/README.md
   adapters: adapters/README.md

@@ -254,4 +254,3 @@ not require checkpoint scope and returns `False` if flushing fails or times out.
 - [Checkpoints](../concepts/checkpoints.md)
 - [Execution Runtime Logs](execution-logs.md)
 - [Logging and Metadata](../concepts/logging.md)
-</content>
