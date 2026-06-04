@@ -295,12 +295,81 @@ So `"calls"` is a shared idea, not a promise of identical mechanics. It means Ki
 
 ## Streaming
 
-Two patterns are supported:
+PydanticAI streaming has two records in Kitaru:
 
-- **`event_stream_handler`** (recommended) — pass a handler to `run()` / `run_sync()` for live progress updates; auto-flow and auto-checkpoint still work.
-- **`run_stream()` / `iter()`** — these return context managers and cannot auto-open a checkpoint. Wrap them in an explicit `@kitaru.checkpoint` yourself.
+1. **Live events** are the radio chatter while the agent is running. They are
+   useful for a dashboard, terminal watcher, or progress log.
+2. **Checkpoint outputs and artifacts** are the saved truth. If you need to
+   resume, inspect, or replay a run later, read the final result plus artifacts
+   such as `pydantic_ai_events`, `pydantic_ai_run_summaries`, and
+   `stream_transcript`.
 
-Stream transcripts are persisted as artifacts when `CapturePolicy.save_stream_transcripts=True` (the default).
+Kitaru publishes these adapter-specific live event kinds when the backend
+supports live event streaming:
+
+- `pydantic_ai.stream.started`
+- `pydantic_ai.stream.event`
+- `pydantic_ai.stream.completed`
+- `pydantic_ai.stream.failed`
+
+The recommended PydanticAI path is `event_stream_handler` on `run()` /
+`run_sync()`. PydanticAI drives the full agent graph, including tool calls, while
+Kitaru watches the same event stream and publishes privacy-preserving live
+updates:
+
+```python
+from typing import Any
+
+from pydantic_ai import Agent, RunContext
+from kitaru.adapters.pydantic_ai import KitaruAgent
+
+
+async def drain_events(_ctx: RunContext[None], stream: Any) -> None:
+    async for _event in stream:
+        pass
+
+agent = Agent("openai:gpt-5-nano", name="support_agent")
+durable_agent = KitaruAgent(agent, event_stream_handler=drain_events)
+result = durable_agent.run_sync("Check order ORD-1007").output
+```
+
+Watch those events from another thread or process with the normal execution
+watcher. Import the event-kind tuple instead of hard-coding strings:
+
+```python
+from kitaru.client import KitaruClient
+from kitaru.adapters.pydantic_ai import PYDANTIC_AI_STREAM_EVENT_KINDS
+
+for event in KitaruClient().executions.events(
+    exec_id,
+    kinds=list(PYDANTIC_AI_STREAM_EVENT_KINDS),
+):
+    data = event.payload.get("data", {})
+    print(data.get("display", event.kind))
+```
+
+`run_stream()` and `iter()` are still available, but they return async context
+managers. Kitaru cannot safely auto-open a function-shaped checkpoint around a
+context manager, so those surfaces require an explicit `@kitaru.checkpoint`.
+PydanticAI's `run_stream()` can stop after the first output that matches the
+agent output type; if you want full graph completion plus live observation, use
+`run()` / `run_sync()` with `event_stream_handler` instead.
+
+Replay and cache behavior is the same as other live events: if the checkpoint
+body re-executes, live events may be published again; if Kitaru reuses a cached
+checkpoint result, the body does not run and there may be no live stream events.
+Use the durable result and artifacts for saved state.
+
+Live payloads are deliberately small. Kitaru includes safe fields such as event
+category, event type, tool names or IDs, short display text, and clipped text
+deltas when stream transcripts are enabled. It does not publish raw prompts,
+full tool arguments, full tool results, final outputs, raw upstream event dumps,
+or reasoning content.
+
+Stream transcripts are persisted as artifacts when
+`CapturePolicy.save_stream_transcripts=True` (the default). Set
+`CapturePolicy.emit_child_events=False` to turn off adapter-owned child/live
+events while keeping normal PydanticAI execution behavior.
 
 ## Capture policy
 
@@ -379,14 +448,29 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 - **Replay cost control** — `checkpoint_strategy="calls"` gives per-call checkpoint boundaries, not a billing guarantee. Pair it with provider-side caching or idempotency for expensive calls.
 - **Checkpoints not appearing in the dashboard** — verify `kitaru status` shows a running server and that `kitaru init` has been run in the project root.
 
-## Runnable example
+## Runnable examples
+
+The base adapter example uses PydanticAI's `TestModel`, so it needs no provider
+key:
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
+uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
-The example prints the execution ID, final result, child-event count, and run-summary count. For the broader catalog, see [Examples](../getting-started/examples.md).
+The streaming example uses a real OpenAI-backed PydanticAI model so users can
+watch live provider events. Set `OPENAI_API_KEY` first:
+
+```bash
+uv sync --extra local --extra pydantic-ai --extra openai
+export OPENAI_API_KEY=sk-...
+uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+```
+
+Set `PYDANTIC_AI_MODEL` to override the default `openai:gpt-5-nano` model. The
+example submits a flow, watches `pydantic_ai.stream.*` events, and then prints
+the durable final answer from `.wait()`. For the broader catalog, see
+[Examples](../getting-started/examples.md).
 
 ## Related guides
 

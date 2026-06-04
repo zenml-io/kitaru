@@ -39,6 +39,7 @@
 * [Containerization](guides/containerization.md)
 * [Execution Management](guides/execution-management.md)
 * [View Execution Runtime Logs](guides/execution-logs.md)
+* [Checkpoint Live Events](guides/checkpoint-streaming.md)
 * [Replay and Overrides](guides/replay-and-overrides.md)
 * [Wait, Input, and Resume](guides/wait-and-resume.md)
 * [Artifacts](guides/artifacts.md)

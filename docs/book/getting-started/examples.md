@@ -20,7 +20,7 @@ git clone https://github.com/zenml-io/kitaru.git
 cd kitaru
 uv sync --extra local
 uv run kitaru init
-uv run examples/features/basic_flow/first_working_flow.py
+uv run python examples/features/basic_flow/first_working_flow.py
 ```
 
 {% hint style="info" %}
@@ -29,7 +29,7 @@ It creates the project marker Kitaru uses when replaying or resolving flow
 source from a saved execution.
 {% endhint %}
 
-Most examples can be run from the repository root with `uv run path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
+Most examples can be run from the repository root with `uv run python path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 {% hint style="info" %}
 Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK, or
@@ -87,6 +87,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 |---|---|---|
 | `features/basic_flow/first_working_flow.py` | Smallest `@flow` + `@checkpoint` example | [Quickstart](quickstart.md) |
 | `features/basic_flow/flow_with_logging.py` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging](../concepts/logging.md) |
+| `features/checkpoint_streaming/checkpoint_streaming.py` | `kitaru.progress()` and `kitaru.events.publish()` from checkpoint bodies | [Checkpoint Live Events](../guides/checkpoint-streaming.md) |
 | `features/basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](../guides/artifacts.md) |
 | `features/basic_flow/flow_with_checkpoint_runtime.py` | `@checkpoint(runtime="isolated")` for work that should run outside the runner process | [Checkpoints](../concepts/checkpoints.md) |
 | `features/basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](../guides/configuration.md) |
@@ -105,10 +106,15 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 |---|---|---|
 | `features/llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](../guides/llm-calls.md) |
 | `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with granular Kitaru replay boundaries | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
+| `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming) |
 | `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
+| `integrations/openai_agents_agent/openai_agents_streaming.py` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](../adapters/openai-agents.md#streaming-with-kitaru-durability) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
-| `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network dry-run support and optional Antigravity managed-agent mode (real calls need a `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or Application Default Credentials via Vertex AI) | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
+| `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability) |
+| `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network previews, streaming mode, and an Antigravity managed-agent path | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
 | `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](../adapters/langgraph.md) |
+| `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](../adapters/langgraph.md#graph-call-streaming) |
+
 | `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](../guides/llm-calls.md) |
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](examples.md) |
 | `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](../adapters/openai-agents.md#end-to-end-research-bot-example) |
@@ -131,15 +137,21 @@ Agent Harness Platform is the recommended starting point for most readers — it
 1. [Quickstart](quickstart.md) — `@flow` + `@checkpoint` in 6 lines.
 2. `features/basic_flow/first_working_flow.py` — the same idea as a runnable file.
 3. `features/basic_flow/flow_with_logging.py` — [Logging](../concepts/logging.md).
-4. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](../guides/artifacts.md).
-5. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](../guides/wait-and-resume.md).
-6. `features/replay/replay_with_overrides.py` — [Replay and Overrides](../guides/replay-and-overrides.md).
-7. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](../guides/llm-calls.md).
-8. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](../adapters/pydantic-ai.md).
-9. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](../adapters/openai-agents.md).
-10. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
-11. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
-12. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
-13. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-14. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
-15. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.
+4. `features/checkpoint_streaming/checkpoint_streaming.py` — [Checkpoint Live Events](../guides/checkpoint-streaming.md).
+5. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](../guides/artifacts.md).
+6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](../guides/wait-and-resume.md).
+7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](../guides/replay-and-overrides.md).
+8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](../guides/llm-calls.md).
+9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](../adapters/pydantic-ai.md).
+10. `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` — [PydanticAI streaming](../adapters/pydantic-ai.md#streaming).
+11. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](../adapters/openai-agents.md).
+12. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](../adapters/openai-agents.md#streaming-with-kitaru-durability).
+13. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
+14. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
+15. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
+16. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
+17. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
+18. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
+19. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
+20. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.
+</content>

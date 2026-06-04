@@ -72,6 +72,7 @@ Kitaru is not replacing LangGraph persistence. It is adding Kitaru durability an
 The adapter gives existing LangGraph users:
 
 - one durable Kitaru checkpoint around each completed `graph.invoke(...)` / `graph.ainvoke(...)` call (the default `graph_call` strategy)
+- graph-call streaming through `runner.stream(...)` / `runner.astream(...)`, which forwards best-effort `langgraph.stream.*` live events while still returning a durable `LangGraphRunResult`
 - optional granular Kitaru checkpoints around synchronous LangChain model and tool calls (the opt-in `calls` strategy with `KitaruLangGraphMiddleware`)
 - a typed `LangGraphRunResult` with status, output, observed LangGraph `thread_id` and latest checkpoint ID, interrupt summaries, pending-state metadata, and warnings
 - a `build_resume_request(...)` helper that turns an interrupted result into a `Command(resume=...)`-backed resume request
@@ -171,6 +172,53 @@ There are three important details in this small example:
 1. `thread_id=ticket` gives LangGraph a stable conversation key.
 2. `runner.invoke(...)` is called from flow scope, so Kitaru can create graph-call checkpoints.
 3. `kitaru.save(...)` happens inside a normal `@checkpoint`, so the summary becomes a Kitaru artifact.
+
+## Graph-call streaming
+
+Use `runner.stream(...)` or `runner.astream(...)` when you want to watch LangGraph progress while the outer graph call is running:
+
+```python
+from kitaru import flow
+from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest
+
+runner = KitaruGraphRunner(graph, name="review_graph")
+
+@flow
+def review(ticket: str):
+    return runner.stream(
+        LangGraphRunRequest.start(
+            {"ticket": ticket},
+            thread_id=ticket,
+        )
+    )
+
+handle = review.run("ticket-42", cache=False)
+```
+
+The shape is deliberately simple: Kitaru drains LangGraph's `.stream(..., version="v2")` output inside the graph-call checkpoint, publishes safe live events while chunks arrive, and then returns the same durable `LangGraphRunResult` shape as `invoke(...)`.
+
+Picture it as two lanes:
+
+```text
+live lane:    langgraph.stream.started → updates/custom/messages → completed
+saved lane:   one graph-call checkpoint result: LangGraphRunResult
+```
+
+The live lane is for watching. The saved lane is what replay and later workflow steps should trust.
+
+By default, Kitaru asks LangGraph for `messages`, `updates`, and `custom` stream modes, plus an internal `values` mode so it can reconstruct the final result without calling the graph a second time. Kitaru does **not** publish that internal `values` state unless you explicitly request `stream_mode="values"` or include it in a mode list.
+
+Safe defaults matter because LangGraph stream payloads can contain prompts, state, tool results, or SDK internals. Message chunks are summarized as text deltas plus safe metadata. Updates and custom events are summarized and made JSON-safe. `values`, `checkpoints`, `tasks`, and `debug` are summarized by default; raw payloads require explicit policy opt-in, and `debug` requires `allow_debug=True`.
+
+Streaming is currently graph-call only. `checkpoint_strategy="calls"` rejects `stream(...)` / `astream(...)` because a stream event only says "something happened". It does not wrap the actual LangChain handler call. Kitaru would not be physically around the model/tool side effect, so pretending those stream chunks are replay checkpoints would be unsafe.
+
+Cache and replay have the same live-event behavior as other checkpoint live events:
+
+- if the graph-call checkpoint body runs, it may publish live stream events;
+- if replay re-executes the body, it may publish those events again;
+- if a cached graph-call result is reused, fresh stream events may not appear because the body did not run.
+
+For the general live-event API and watcher behavior, see [Checkpoint Live Events](../guides/checkpoint-streaming.md).
 
 ## Minimal `calls` flow pattern
 
@@ -364,6 +412,8 @@ The reason is safety. A true Kitaru checkpoint needs to be wrapped around the ac
 
 LangChain callbacks, LangChain event streams, and LangGraph streams are useful for timelines. They are not Kitaru replay boundaries.
 
+This is why graph-call streaming above returns one durable `LangGraphRunResult`: the stream is live observability, while the outer graph-call checkpoint remains the replay boundary.
+
 Here is the concrete difference:
 
 - Middleware is handed `handler(request)`. It can decide, "Open a Kitaru checkpoint, then call the handler inside it."
@@ -440,6 +490,7 @@ By default, event persistence is best-effort. A graph result should not disappea
 
 - Run your graph calls inside Kitaru flows.
 - Create one outer Kitaru checkpoint per `runner.invoke(...)` / `runner.ainvoke(...)` call in `graph_call` mode.
+- Publish best-effort `langgraph.stream.*` live events from `runner.stream(...)` / `runner.astream(...)` in `graph_call` mode while returning a durable `LangGraphRunResult`.
 - Create true sync model/tool checkpoints in `calls` mode when `KitaruLangGraphMiddleware` wraps LangChain handlers inside flow scope.
 - Preserve and record the LangGraph `thread_id` used for the call.
 - Record status, interrupt summaries, latest checkpoint ID, call events, and run-summary metadata.
@@ -453,11 +504,11 @@ By default, event persistence is best-effort. A graph result should not disappea
 - Replace LangGraph's checkpointer or store.
 - Replay arbitrary LangGraph nodes as Kitaru checkpoints.
 - Create call checkpoints from callbacks or event streams alone.
+- Stream in `checkpoint_strategy="calls"` mode; streams observe activity but do not own the LangChain handler call that would need a replay boundary.
 - Open true async model/tool call checkpoints yet; async calls mode is metadata-only.
 - Snapshot arbitrary Python process memory.
 - Snapshot Deep Agents sandbox files, local filesystem writes, or external volumes.
 - Make non-idempotent tool side effects exactly-once.
-- Provide `stream` / `astream` as a supported adapter contract yet. Streaming support is deferred until Kitaru/ZenML streaming support lands.
 
 ## LangChain and Deep Agents
 
@@ -475,12 +526,23 @@ If you are using Deep Agents' virtual filesystem or sandbox backends, Kitaru rec
 
 ## Runnable example
 
-The included example has two strategy paths. The `graph_call` path is local and needs no provider API key:
+The included examples have two provider-neutral graph-call paths and one provider-backed calls path. The `graph_call` path is local and needs no provider API key:
 
 ```bash
 uv sync --extra local --extra langgraph
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
 ```
+
+The streaming path is also local and needs no provider API key:
+
+```bash
+uv sync --extra local --extra langgraph
+uv run kitaru init
+uv run kitaru login
+uv run python examples/integrations/langgraph_agent/langgraph_streaming.py
+```
+
+It builds a small `StateGraph` with `InMemorySaver`, emits custom progress from graph nodes, watches `langgraph.stream.*` events with `KitaruClient().executions.events(...)` when the backend supports live watching, and then prints the durable `LangGraphRunResult` from `handle.wait()`.
 
 The `calls` path uses a real OpenAI-backed LangChain agent with deterministic local ticket tools:
 
@@ -489,7 +551,7 @@ uv sync --extra local --extra langgraph-openai
 export OPENAI_API_KEY='sk-...'
 # Optional: override the default gpt-5-nano model.
 export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
-uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
 `--strategy graph_call` runs the interrupt/resume demo:
@@ -500,6 +562,14 @@ uv run examples/integrations/langgraph_agent/langgraph_adapter.py --strategy cal
 4. The flow resumes the graph with `build_resume_request(...)`.
 5. Kitaru records two `langgraph_local_interrupt_demo_langgraph_call...` checkpoints.
 6. The flow saves a `summary__langgraph_demo` artifact.
+
+`langgraph_streaming.py` runs the streaming demo:
+
+1. Builds a local graph with two nodes.
+2. Calls `runner.stream(...)` inside a Kitaru flow submitted with `cache=False`.
+3. Emits LangGraph custom progress from inside the graph.
+4. Watches `langgraph.stream.started`, mode events, and terminal events when the backend supports live event watching.
+5. Prints the final durable `LangGraphRunResult` after the stream finishes.
 
 `--strategy calls` runs the LangChain middleware demo:
 
@@ -520,6 +590,19 @@ LangGraph adapter demo summary (graph_call):
 - strategy: graph_call
 - first_status: interrupted
 - resume_status: completed
+```
+
+for the streaming demo:
+
+```text
+Submitted execution: <execution-id>
+=== live LangGraph stream events ===
+- [custom] Looking up ticket-42
+- [updates] Graph update: lookup_ticket
+=== durable LangGraphRunResult ===
+status: completed
+final output:
+{...}
 ```
 
 or, for a typical calls-mode run where the model follows the lookup instruction:
@@ -548,7 +631,8 @@ For the full catalog, see [Examples](../getting-started/examples.md).
 - **Restart durability does not work with `InMemorySaver`** — use a persistent LangGraph checkpointer/store. `InMemorySaver` is only in-memory, so a new process or Kubernetes pod cannot see the old graph state.
 - **`calls` mode produced no model/tool checkpoints** — check that your graph uses `KitaruLangGraphMiddleware` and that the observed calls are synchronous LangChain model/tool handlers inside a Kitaru flow.
 - **Async calls only show metadata** — expected for now. Async model/tool handlers do not create true Kitaru checkpoints yet.
-- **You need streaming** — streaming is intentionally deferred from this adapter contract until Kitaru/ZenML streaming support is available.
+- **`stream(...)` says calls mode is unsupported** — expected. LangGraph streaming is supported for `checkpoint_strategy="graph_call"` only. Use calls mode for synchronous middleware-wrapped model/tool checkpoints, not for stream chunks.
+- **You do not see live stream events** — check that you are connected to a backend with live-event streaming enabled. The graph result is still durable even when event watching is unavailable. Also remember that cache hits may skip fresh live events because the graph body did not run.
 - **You expected Deep Agents files to appear as Kitaru artifacts** — Deep Agents owns its filesystem backends. Save important outputs explicitly with `kitaru.save(...)` if you want them as Kitaru artifacts.
 
 ## Related docs
@@ -560,5 +644,6 @@ For the full catalog, see [Examples](../getting-started/examples.md).
 - [LangChain event streaming](https://docs.langchain.com/oss/python/langchain/event-streaming)
 - [LangGraph streaming](https://docs.langchain.com/oss/python/langgraph/streaming)
 - [Deep Agents backends](https://docs.langchain.com/oss/python/deepagents/backends)
+- [Checkpoint Live Events](../guides/checkpoint-streaming.md)
 - [Replay and overrides](../guides/replay-and-overrides.md)
 - [Wait, Input, and Resume](../guides/wait-and-resume.md)
