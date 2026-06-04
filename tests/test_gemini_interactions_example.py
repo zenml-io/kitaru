@@ -21,6 +21,7 @@ def test_gemini_interactions_example_help(capsys: pytest.CaptureFixture[str]) ->
     output = capsys.readouterr().out
     assert "Gemini Interactions API" in output
     assert "--dry-run" in output
+    assert "--show-text-deltas" in output
 
 
 def test_gemini_interactions_example_dry_run_without_credentials(
@@ -40,6 +41,80 @@ def test_gemini_interactions_example_dry_run_without_credentials(
     assert "Input: (disabled)" in output
     assert "Raw interaction: (disabled)" in output
     assert "Steps: (disabled)" in output
+
+
+def test_gemini_interactions_example_dry_run_accepts_show_text_deltas(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    gemini_interactions_adapter.main(["--dry-run", "--stream", "--show-text-deltas"])
+
+    output = capsys.readouterr().out
+    assert "Dry run only: no Google request was made" in output
+    assert "Stream metadata" in output
+
+
+def test_gemini_interactions_example_main_forwards_show_text_delta_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeHandle:
+        exec_id = "exec-123"
+
+        def wait(self) -> gemini_interactions_adapter.GeminiInteractionResult:
+            return gemini_interactions_adapter._fake_result(
+                "model",
+                "gemini-test",
+                stream=True,
+            )
+
+    def fake_run(
+        request: gemini_interactions_adapter.GeminiInteractionRequest,
+        *,
+        stream: bool = False,
+        show_text_deltas: bool = False,
+    ) -> FakeHandle:
+        calls.append(
+            {
+                "model": request.model,
+                "stream": stream,
+                "show_text_deltas": show_text_deltas,
+            }
+        )
+        return FakeHandle()
+
+    monkeypatch.setattr(
+        gemini_interactions_adapter, "_prepare_google_credentials", lambda: None
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter, "_guard_vertex_mode", lambda mode: None
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "_watch_gemini_stream",
+        lambda exec_id, stop_watching: None,
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter.run_gemini_interaction, "run", fake_run
+    )
+
+    gemini_interactions_adapter.main(
+        ["--mode", "model", "--stream", "--show-text-deltas"]
+    )
+
+    capsys.readouterr()
+    assert calls == [
+        {
+            "model": "gemini-3.5-flash",
+            "stream": True,
+            "show_text_deltas": True,
+        }
+    ]
 
 
 def test_gemini_interactions_example_google_api_key_alias(
@@ -98,6 +173,16 @@ def test_gemini_interactions_example_antigravity_foreground_override() -> None:
     assert request.agent == "antigravity-preview-05-2026"
     assert request.background is False
     assert request.store is True
+
+
+def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> None:
+    default_runner = gemini_interactions_adapter._build_runner()
+    opt_in_runner = gemini_interactions_adapter._build_runner(
+        include_stream_text_deltas=True
+    )
+
+    assert default_runner._capture.include_stream_text_deltas is False
+    assert opt_in_runner._capture.include_stream_text_deltas is True
 
 
 def test_gemini_interactions_example_vertex_requires_project_and_location(

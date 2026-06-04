@@ -39,6 +39,7 @@ from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.adapters.gemini import (
     GEMINI_STREAM_EVENT_KINDS,
     GEMINI_STREAM_TERMINAL_EVENT_KINDS,
+    GeminiInteractionCapturePolicy,
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
@@ -113,9 +114,15 @@ def _prepare_google_credentials() -> None:
     )
 
 
-def _build_runner() -> KitaruGeminiInteractionsRunner:
+def _build_runner(
+    *,
+    include_stream_text_deltas: bool = False,
+) -> KitaruGeminiInteractionsRunner:
     return KitaruGeminiInteractionsRunner(
         name="gemini_interactions_example",
+        capture=GeminiInteractionCapturePolicy(
+            include_stream_text_deltas=include_stream_text_deltas
+        ),
         checkpoint_config={"cache": False},
     )
 
@@ -128,11 +135,15 @@ def run_gemini_interaction(
     request: GeminiInteractionRequest,
     *,
     stream: bool = False,
+    show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Run one Gemini interaction as one Kitaru checkpoint."""
+    runner = (
+        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    )
     if stream:
-        return RUNNER.run_stream_sync(request)
-    return RUNNER.run_sync(request)
+        return runner.run_stream_sync(request)
+    return runner.run_sync(request)
 
 
 def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
@@ -397,6 +408,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--show-text-deltas",
+        action="store_true",
+        help=(
+            "When used with --stream, include clipped Gemini output text chunks "
+            "in live event display. Off by default because live events may be "
+            "stored in event logs."
+        ),
+    )
+    parser.add_argument(
         "--foreground-antigravity",
         action="store_true",
         help=(
@@ -431,7 +451,11 @@ def main(argv: list[str] | None = None) -> None:
     _prepare_google_credentials()
     _guard_vertex_mode(args.mode)
     request = _build_request(args)
-    handle = run_gemini_interaction.run(request, stream=bool(args.stream))
+    handle = run_gemini_interaction.run(
+        request,
+        stream=bool(args.stream),
+        show_text_deltas=bool(args.show_text_deltas),
+    )
     print(f"Submitted execution: {handle.exec_id}")
 
     stop_watching = threading.Event()

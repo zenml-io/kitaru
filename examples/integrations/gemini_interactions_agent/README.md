@@ -138,6 +138,21 @@ uv run python gemini_interactions_adapter.py --mode antigravity --timeout 300
 uv run python gemini_interactions_adapter.py --mode antigravity --stream --timeout 300
 ```
 
+By default, streamed text deltas are shown as event labels only, because live
+stream events may also be stored in event logs. If you want to see the actual
+clipped output chunks in your terminal while testing, opt in explicitly:
+
+```bash
+uv run python gemini_interactions_adapter.py \
+  --mode antigravity \
+  --stream \
+  --show-text-deltas \
+  --timeout 300
+```
+
+When this is enabled, `[text_delta]` lines include an indented `text_delta: ...`
+line with the actual chunk content.
+
 If a preview endpoint explicitly rejects background mode, force foreground mode:
 
 ```bash
