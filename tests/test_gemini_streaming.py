@@ -63,8 +63,95 @@ class AsyncStream:
             yield event
 
 
+class FailingAsyncStream:
+    def __init__(self, events: list[Any]) -> None:
+        self.events = list(events)
+
+    async def __aiter__(self) -> Any:
+        for event in self.events:
+            yield event
+        raise RuntimeError("stream observation dropped")
+
+
+class CreateWithoutStreamInteractions:
+    def __init__(self, streams: list[Any]) -> None:
+        self.streams = list(streams)
+        self.create_calls: list[dict[str, Any]] = []
+        self.get_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def create(
+        self,
+        *,
+        input: Any,
+        agent: str,
+        background: bool = False,
+        store: bool = True,
+        timeout: float | None = None,
+    ) -> Any:
+        call = {
+            "input": input,
+            "agent": agent,
+            "background": background,
+            "store": store,
+        }
+        if timeout is not None:
+            call["timeout"] = timeout
+        self.create_calls.append(call)
+        return self.streams.pop(0)
+
+    def get(self, id: str, **kwargs: Any) -> Any:
+        self.get_calls.append((id, kwargs))
+        return self.streams.pop(0)
+
+
 def _event(event_type: str, **fields: Any) -> SimpleNamespace:
     return SimpleNamespace(type=event_type, **fields)
+
+
+def _background_created_interaction(
+    *,
+    interaction_id: str = "background-1",
+    status: str = "in_progress",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=interaction_id,
+        status=status,
+        agent="antigravity-preview-05-2026",
+        environment_id="environment-1",
+        usage=SimpleNamespace(seed_tokens=1),
+    )
+
+
+def _background_observation_stream(
+    *,
+    interaction_id: str = "background-1",
+) -> list[Any]:
+    return [
+        _event(
+            "step.start",
+            id="evt-bg-1",
+            step_index=0,
+            step=SimpleNamespace(
+                id="step-bg-1",
+                type="message",
+                role="assistant",
+                status="in_progress",
+            ),
+        ),
+        _event(
+            "step.delta",
+            id="evt-bg-2",
+            step_index=0,
+            delta={"type": "text", "text": "background answer"},
+        ),
+        _event("step.stop", id="evt-bg-3", step_index=0),
+        _event(
+            "interaction.completed",
+            id="evt-bg-4",
+            interaction=SimpleNamespace(id=interaction_id, status="completed"),
+        ),
+        _event("done", id="evt-bg-5"),
+    ]
 
 
 def _completed_stream(*, interaction_id: str = "interaction-1") -> list[Any]:
@@ -745,6 +832,365 @@ def test_stream_bridge_poll_uses_get_stream_true(
     assert client.aio.interactions.get_calls == [("existing", {"stream": True})]
     assert result.interaction_id == "existing"
     assert result.poll_count == 1
+
+
+def test_stream_bridge_background_create_then_get_stream_same_id(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(),
+            AsyncStream(_background_observation_stream()),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        environment="remote",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.create_calls[0]["background"] is True
+    assert client.interactions.create_calls[0]["store"] is True
+    assert "stream" not in client.interactions.create_calls[0]
+    assert len(client.interactions.get_calls) == 1
+    get_id, get_kwargs = client.interactions.get_calls[0]
+    assert get_id == "background-1"
+    assert get_kwargs["stream"] is True
+    assert result.status == "completed"
+    assert result.interaction_id == "background-1"
+    assert result.agent == "antigravity-preview-05-2026"
+    assert result.environment_id == "environment-1"
+    assert result.output_text == "background answer"
+    assert result.stream_metadata is not None
+    assert (
+        result.stream_metadata["observation_mode"]
+        == "background_create_then_get_stream"
+    )
+    assert result.stream_metadata["fallback_used"] is False
+
+
+def test_stream_bridge_background_resume_create_then_get_stream_same_new_id(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(interaction_id="background-2"),
+            AsyncStream(_background_observation_stream(interaction_id="background-2")),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.resume(
+        "continue inspection",
+        previous_interaction_id="background-1",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert len(client.interactions.create_calls) == 1
+    assert (
+        client.interactions.create_calls[0]["previous_interaction_id"] == "background-1"
+    )
+    assert "stream" not in client.interactions.create_calls[0]
+    assert len(client.interactions.get_calls) == 1
+    get_id, get_kwargs = client.interactions.get_calls[0]
+    assert get_id == "background-2"
+    assert get_kwargs["stream"] is True
+    assert 0 < get_kwargs["timeout"] <= 30.0
+    assert result.interaction_id == "background-2"
+
+
+@pytest.mark.parametrize("terminal_status", ["failed", "cancelled", "incomplete"])
+def test_stream_bridge_background_terminal_create_status_does_not_observe(
+    gemini_adapter: types.ModuleType,
+    terminal_status: str,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient([_background_created_interaction(status=terminal_status)])
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        asyncio.run(
+            runner_module.run_gemini_interaction_streamed(
+                request=request,
+                client=client,
+                client_factory=None,
+                allow_sync_stream=True,
+            )
+        )
+
+    assert f"non-stable status '{terminal_status}'" in str(exc_info.value)
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == []
+
+
+def test_stream_bridge_background_expired_deadline_does_not_get_timeout_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    monkeypatch.setattr(runner_module, "_remaining_timeout_s", lambda deadline: 0.0)
+    client = FakeClient([_background_created_interaction()])
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=0.001,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        asyncio.run(
+            runner_module.run_gemini_interaction_streamed(
+                request=request,
+                client=client,
+                client_factory=None,
+                allow_sync_stream=True,
+            )
+        )
+
+    assert "GeminiInteractionRequest.poll" in str(exc_info.value)
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == []
+
+
+def test_stream_bridge_background_does_not_require_create_stream_support(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    interactions = CreateWithoutStreamInteractions(
+        [
+            _background_created_interaction(),
+            AsyncStream(_background_observation_stream()),
+        ]
+    )
+    client = SimpleNamespace(interactions=interactions)
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert result.interaction_id == "background-1"
+    assert len(interactions.create_calls) == 1
+    create_kwargs = interactions.create_calls[0]
+    assert create_kwargs["input"] == "inspect repository"
+    assert create_kwargs["agent"] == "antigravity-preview-05-2026"
+    assert create_kwargs["background"] is True
+    assert create_kwargs["store"] is True
+    assert 0 < create_kwargs["timeout"] <= 30.0
+    assert len(interactions.get_calls) == 1
+    get_id, get_kwargs = interactions.get_calls[0]
+    assert get_id == "background-1"
+    assert get_kwargs["stream"] is True
+    assert 0 < get_kwargs["timeout"] <= 30.0
+
+
+def test_stream_bridge_background_without_timeout_checks_same_id_once(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(),
+            SimpleNamespace(
+                id="background-1",
+                status="completed",
+                agent="antigravity-preview-05-2026",
+                output_text="one status check final answer",
+            ),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == [("background-1", {})]
+    assert result.status == "completed"
+    assert result.output_text == "one status check final answer"
+    assert result.stream_metadata is not None
+    assert result.stream_metadata["fallback_used"] is True
+
+
+def test_stream_bridge_background_stream_failure_polls_same_id_without_second_create(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(),
+            FailingAsyncStream([]),
+            SimpleNamespace(
+                id="background-1",
+                status="completed",
+                agent="antigravity-preview-05-2026",
+                output_text="fallback final answer",
+            ),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert len(client.interactions.create_calls) == 1
+    assert len(client.interactions.get_calls) == 2
+    stream_get_id, stream_get_kwargs = client.interactions.get_calls[0]
+    fallback_get_id, fallback_get_kwargs = client.interactions.get_calls[1]
+    assert stream_get_id == fallback_get_id == "background-1"
+    assert stream_get_kwargs["stream"] is True
+    assert 0 < stream_get_kwargs["timeout"] <= 30.0
+    assert 0 < fallback_get_kwargs["timeout"] <= 30.0
+    assert result.status == "completed"
+    assert result.output_text == "fallback final answer"
+    assert result.stream_metadata is not None
+    assert (
+        result.stream_metadata["observation_mode"]
+        == "background_create_then_get_stream"
+    )
+    assert result.stream_metadata["fallback_used"] is True
+    assert result.stream_metadata["final_status"] == "completed"
+    assert any("same interaction id" in warning for warning in result.warnings)
+
+
+def test_stream_bridge_background_provider_error_event_polls_same_id(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(),
+            AsyncStream([_event("error")]),
+            SimpleNamespace(
+                id="background-1",
+                status="completed",
+                agent="antigravity-preview-05-2026",
+                output_text="provider recovered answer",
+            ),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+        timeout_s=30.0,
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert len(client.interactions.create_calls) == 1
+    assert len(client.interactions.get_calls) == 2
+    stream_get_id, stream_get_kwargs = client.interactions.get_calls[0]
+    fallback_get_id, fallback_get_kwargs = client.interactions.get_calls[1]
+    assert stream_get_id == fallback_get_id == "background-1"
+    assert stream_get_kwargs["stream"] is True
+    assert 0 < stream_get_kwargs["timeout"] <= 30.0
+    assert 0 < fallback_get_kwargs["timeout"] <= 30.0
+    assert result.status == "completed"
+    assert result.output_text == "provider recovered answer"
+    assert result.stream_metadata is not None
+    assert result.stream_metadata["fallback_used"] is True
+
+
+def test_stream_bridge_background_fallback_unstable_status_raises_poll_instruction(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _background_created_interaction(),
+            SimpleNamespace(id="background-1", status="in_progress"),
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "inspect repository",
+        agent="antigravity-preview-05-2026",
+        background=True,
+    )
+
+    with pytest.raises(KitaruRuntimeError) as exc_info:
+        asyncio.run(
+            runner_module.run_gemini_interaction_streamed(
+                request=request,
+                client=client,
+                client_factory=None,
+                allow_sync_stream=True,
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "background-1" in message
+    assert "non-stable status 'in_progress'" in message
+    assert "GeminiInteractionRequest.poll" in message
+    assert "duplicate job" in message
+    assert len(client.interactions.create_calls) == 1
+    assert client.interactions.get_calls == [("background-1", {})]
 
 
 def test_stream_bridge_accumulates_requires_action(

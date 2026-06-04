@@ -73,7 +73,8 @@ use `--mode antigravity`. If you specifically want `--mode model`, you need an A
 key (Option A); raw model interactions are an AI Studio (Developer API) feature.
 The agent backend is only deployed to the `global` location, so set
 `GOOGLE_CLOUD_LOCATION=global`. The first agent call is slow while Google provisions
-a remote sandbox, so use `--timeout` to bound how long the provider call may run.
+a remote sandbox, so use `--timeout` to bound how long the background job and
+same-id observation/polling path may run.
 
 ## Check without credentials
 
@@ -104,6 +105,10 @@ uv run python gemini_interactions_adapter.py --mode model
 uv run python gemini_interactions_adapter.py --mode model --stream
 ```
 
+`--mode model --stream` is the direct Gemini Developer API streaming route: the
+adapter calls `interactions.create(..., stream=True)` and reconstructs one stable
+result from the stream.
+
 Optional prompt override:
 
 ```bash
@@ -122,12 +127,24 @@ uv run python gemini_interactions_adapter.py --mode antigravity
 ```
 
 On ADC/Vertex, set `GOOGLE_CLOUD_LOCATION=global` first (the agent backend only
-runs there). Antigravity does not support `background=True`, so the example keeps
-the request synchronous and uses `--timeout` to bound the provider call while Google
-provisions the remote sandbox:
+runs there). Antigravity defaults to `background=True`: the adapter creates one
+background interaction, observes that same interaction id with streaming when the
+backend supports it, and falls back to polling that same id if the stream drops.
+Within that same live invocation, it does **not** start a duplicate provider job
+after the interaction id is known.
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode antigravity --timeout 300
+uv run python gemini_interactions_adapter.py --mode antigravity --stream --timeout 300
+```
+
+If a preview endpoint explicitly rejects background mode, force foreground mode:
+
+```bash
+uv run python gemini_interactions_adapter.py \
+  --mode antigravity \
+  --foreground-antigravity \
+  --timeout 300
 ```
 
 The default Antigravity prompt asks for a high-level, non-destructive inspection
@@ -148,6 +165,13 @@ A good way to read the run is:
 4. The printed artifact names point to the captured redacted request manifest,
    output, usage, event log, and run summary. Raw input, raw interaction, and
    raw step artifacts are disabled by default unless you opt in.
+
+One local-orchestrator wrinkle: the script submits the flow first, then starts a
+watcher thread. On a very fast local run, some stream events may print only after
+the flow submission returns, or the final result may appear before you see many
+live lines. That is a display timing issue, not a second Gemini call. The durable
+adapter assertion is still: one interaction id is created, observed or polled,
+and saved as one stable `GeminiInteractionResult`.
 
 The script prints:
 

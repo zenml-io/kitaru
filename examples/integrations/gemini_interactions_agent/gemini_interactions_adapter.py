@@ -6,8 +6,9 @@ Story:
   Kitaru checkpoint.
 - `--dry-run` prints the same kind of result summary without credentials or a
   network call, so smoke tests can exercise the example safely.
-- `--stream` uses the public streaming runner surface for real runs and shows
-  the same final stable result after the stream finishes.
+- `--stream` uses direct model streaming for model mode and create-once,
+  observe-same-id background streaming for Antigravity mode, then shows the same
+  final stable result after the stream finishes.
 
 Run (API key):
     uv sync --extra local --extra gemini
@@ -142,10 +143,12 @@ def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
             model=str(args.model),
             metadata={"example": "gemini_interactions_agent", "mode": "model"},
         )
-    # Antigravity does not support background=True. Let the provider call run
-    # synchronously and bound that call with `timeout_s`.
+    # Antigravity defaults to background mode because the Vertex/Chiliagon
+    # managed-agent path can require it. Keep --foreground-antigravity as a
+    # preview-backend escape hatch if a specific endpoint rejects background mode.
     return GeminiInteractionRequest.antigravity(
         prompt,
+        background=not args.foreground_antigravity,
         timeout_s=float(args.timeout),
         metadata={
             "example": "gemini_interactions_agent",
@@ -378,9 +381,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=300.0,
         help=(
-            "Seconds to let the Antigravity provider call run. The first "
-            "Vertex AI call is slow while Google provisions the sandbox. "
-            "Defaults to 300."
+            "Seconds to let the Antigravity background job and same-id "
+            "observation/polling path run. The first Vertex AI call is slow "
+            "while Google provisions the sandbox. Defaults to 300."
         ),
     )
     parser.add_argument(
@@ -388,8 +391,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Use KitaruGeminiInteractionsRunner.run_stream_sync(...) for the "
-            "provider call. Streaming publishes live events while Gemini works; "
-            "the script still prints the final stable GeminiInteractionResult."
+            "provider call. Model mode uses direct create streaming; "
+            "Antigravity mode creates one background job and observes/polls "
+            "that same interaction id."
+        ),
+    )
+    parser.add_argument(
+        "--foreground-antigravity",
+        action="store_true",
+        help=(
+            "Force --mode antigravity to pass background=False. Use only if a "
+            "preview backend explicitly rejects background mode."
         ),
     )
     parser.add_argument(

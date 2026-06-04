@@ -166,6 +166,10 @@ class _StreamAccumulator:
     text_truncated: bool = False
     arguments_truncated: bool = False
 
+    def seed_interaction(self, interaction: Any) -> None:
+        """Seed metadata from an interaction created before observation starts."""
+        self._merge_interaction_metadata(interaction)
+
     def record(self, event: Any) -> None:
         self.event_count += 1
         kind = event_type(event)
@@ -244,8 +248,23 @@ class _StreamAccumulator:
     def _record_interaction_event(self, event: Any) -> None:
         interaction = interaction_from_event(event)
         self.latest_interaction = interaction
+        self._merge_interaction_metadata(
+            interaction,
+            interaction_id=coerce_string(extract(event, "interaction_id")),
+            status=coerce_string(extract(event, "status")),
+            usage=dict_or_none(extract(event, "usage")),
+        )
+
+    def _merge_interaction_metadata(
+        self,
+        interaction: Any,
+        *,
+        interaction_id: str | None = None,
+        status: str | None = None,
+        usage: dict[str, Any] | None = None,
+    ) -> None:
         self.interaction_id = (
-            coerce_string(extract(event, "interaction_id"))
+            interaction_id
             or coerce_string(extract(interaction, "id"))
             or self.interaction_id
         )
@@ -254,14 +273,12 @@ class _StreamAccumulator:
             or self.previous_interaction_id
         )
         self.status = (
-            coerce_string(extract(event, "status"))
-            or coerce_string(extract(interaction, "status"))
-            or self.status
+            status or coerce_string(extract(interaction, "status")) or self.status
         )
         self.model = coerce_string(extract(interaction, "model")) or self.model
         self.agent = coerce_string(extract(interaction, "agent")) or self.agent
         self.environment_id = environment_id(interaction) or self.environment_id
-        usage = dict_or_none(extract(interaction, "usage") or extract(event, "usage"))
+        usage = usage or dict_or_none(extract(interaction, "usage"))
         if usage is not None:
             self.usage = usage
 

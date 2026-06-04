@@ -153,8 +153,9 @@ export GOOGLE_CLOUD_LOCATION=global
 On Vertex AI the Interactions API currently serves agent interactions (`agent=`,
 such as Antigravity), not raw model interactions, and only in the `global`
 location. Use `model=` interactions with an API key, and `agent=` interactions
-on Vertex. Antigravity does not support `background=True`, so bound longer agent
-runs with the provider call timeout rather than background polling.
+on Vertex. Antigravity defaults to `background=True` because some Vertex / Chiliagon
+managed-agent paths require it. If a preview endpoint explicitly rejects
+background mode, pass `background=False` as a foreground escape hatch.
 
 <Callout type="info">
   Migrating an existing Gemini Interactions or Antigravity managed-agent project?
@@ -240,16 +241,26 @@ streaming changes how you watch the run
 streaming does not change what Kitaru saves for replay
 ```
 
-A streamed run looks like this:
+A foreground model streamed run looks like this:
 
 ```text
 1. Your flow calls runner.run_stream_sync(request) or awaits runner.run_stream(request).
 2. Kitaru opens the same one Gemini interaction checkpoint.
-3. The adapter calls Gemini with stream=True.
+3. The adapter calls Gemini with interactions.create(..., stream=True).
 4. Live events are published while Gemini emits stream updates.
 5. Kitaru reconstructs the final interaction result from the stream.
 6. Only completed or requires_action returns normally.
 7. Kitaru saves and returns the final GeminiInteractionResult.
+```
+
+A background managed-agent streamed run uses a slightly different provider route:
+
+```text
+1. Kitaru calls interactions.create(..., background=True) once.
+2. Gemini returns one interaction id.
+3. Kitaru observes that same id with interactions.get(id, stream=True) when possible.
+4. If that stream drops or ends before a stable result, Kitaru polls that same id.
+5. Within that same live invocation, Kitaru never starts a second provider job after the interaction id is known.
 ```
 
 So if the flow later replays from a completed checkpoint, the saved final result
@@ -301,7 +312,7 @@ Their values are:
 |---|---|---|
 | `GEMINI_STREAM_STARTED` | `gemini_interactions.stream.started` | Kitaru started draining a Gemini stream. |
 | `GEMINI_STREAM_EVENT` | `gemini_interactions.stream.event` | A safe normalized stream update, such as interaction status, step start/stop, text delta metadata, tool-argument metadata, thought metadata, media metadata, provider error, or done. |
-| `GEMINI_STREAM_COMPLETED` | `gemini_interactions.stream.completed` | Kitaru finalized, persisted, and returned a stable result. This terminal event is flushed. |
+| `GEMINI_STREAM_COMPLETED` | `gemini_interactions.stream.completed` | The adapter finalized a stable provider result and is returning it to the surrounding checkpoint. This terminal event is flushed. |
 | `GEMINI_STREAM_FAILED` | `gemini_interactions.stream.failed` | The provider stream, finalization, artifact capture, strict event persistence, or cancellation failed. This terminal event is flushed. |
 
 `GEMINI_STREAM_EVENT_KINDS` contains all four names. `GEMINI_STREAM_TERMINAL_EVENT_KINDS`
@@ -344,7 +355,8 @@ stream-display policies.
 The public return value is still `GeminiInteractionResult`. Streaming metadata is
 stored under `result.metadata["stream"]` and includes the event count, counts by
 provider event type, last event ID when reported, final status, truncation flags,
-accumulated step count, and the reconstruction policy. These are inspection
+accumulated step count, the reconstruction policy, which observation route was
+used, and whether same-id fallback polling was needed. These are inspection
 details, not new top-level result fields.
 
 Kitaru only completes normally for:
@@ -370,9 +382,14 @@ result = runner.run_stream_sync(poll_request)
 ```
 
 That streamed poll still checks the existing remote interaction. It does not
-create a duplicate Gemini job. If the installed SDK does not support streamed
-`get(...)`, Kitaru raises a feature-availability error when you call the stream
-method; importing `kitaru.adapters.gemini` still works.
+create a duplicate Gemini job. Background streaming also depends on streamed
+`get(...)` when `timeout_s` is set, because Kitaru creates the background job
+without `stream=True` and then watches the returned id. If no timeout is set,
+Kitaru does not open an unbounded background stream: it creates the job, checks
+the same id once, and raises with a `GeminiInteractionRequest.poll(...)`
+continuation instruction if the status is still not stable. If the installed SDK
+does not support streamed `get(...)`, Kitaru raises a feature-availability error
+when you call the stream method; importing `kitaru.adapters.gemini` still works.
 
 ### Antigravity streaming caveats
 
@@ -382,12 +399,16 @@ still preview-shaped and still one coarse checkpoint: Google owns the managed
 agent loop, sandbox, tool execution, environment reuse, and internal event
 schema.
 
-The adapter's Antigravity preset keeps `background=False` and `store=True`.
-Google's public Antigravity surfaces have not been consistent about background
-streaming support, so Kitaru does not promise Antigravity `background=True`
-behavior here. For long Antigravity runs, use `timeout_s` to bound the provider
-call and keep the task non-destructive unless you intentionally want the managed
-agent to edit or execute things.
+The adapter's Antigravity preset now keeps `store=True` and defaults to
+`background=True`. With `timeout_s` set, Kitaru creates one background interaction,
+observes that same id with streaming when the backend supports it, and falls back
+to polling that same id if the stream is unavailable or incomplete. Without
+`timeout_s`, Kitaru creates/checks the same id once and asks you to continue with
+`GeminiInteractionRequest.poll(...)` if it is still running. Google's public Antigravity
+surfaces have not been consistent about background behavior during preview, so
+pass `background=False` only when a specific endpoint explicitly rejects
+background mode. Keep tasks non-destructive unless you intentionally want the
+managed agent to edit or execute things.
 
 ## Requests and continuation
 
@@ -437,12 +458,13 @@ Continuation and Kitaru replay are related but different:
 
 `GeminiInteractionRequest.antigravity(...)` is the convenience path for the
 Google Antigravity managed-agent preview. It uses the adapter's centralized
-Antigravity agent ID, defaults `environment="remote"`, forces `store=True`, keeps
-`background=False`, and adds non-sensitive preview metadata.
+Antigravity agent ID, defaults `environment="remote"`, forces `store=True`,
+defaults `background=True`, and adds non-sensitive preview metadata.
 
 ```python
 request = GeminiInteractionRequest.antigravity(
-    "Inspect this repository and summarize the main test strategy. Do not edit files."
+    "Inspect this repository and summarize the main test strategy. Do not edit files.",
+    timeout_s=300,
 )
 result = runner.run_sync(request)
 ```
@@ -459,9 +481,13 @@ uv run python examples/integrations/gemini_interactions_agent/gemini_interaction
 ```
 
 Use Antigravity mode intentionally. It may be slower, costlier, and more
-preview-shaped than a simple model interaction. If a run is slow, raise the
-request timeout; do not switch this preset to `background=True`, because Google's
-Antigravity preview rejects background mode.
+preview-shaped than a simple model interaction. Set `timeout_s` when you want
+Kitaru to wait for a background Antigravity job to finish or reach
+`requires_action`. Without `timeout_s`, Kitaru creates/checks the background job
+without waiting forever; if the status is still in progress, it raises with a
+`GeminiInteractionRequest.poll(...)` continuation instruction for the same
+interaction id. If a preview endpoint explicitly rejects background mode, pass
+`background=False` for that endpoint only.
 
 ## `requires_action` and function results
 

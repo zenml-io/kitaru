@@ -155,6 +155,7 @@ async def run_gemini_interaction_streamed(
     client_factory: Callable[[], Any] | None,
     on_event: Callable[[Any], Any] | None = None,
     allow_sync_stream: bool = False,
+    poll_interval_s: float = 2.0,
 ) -> GeminiInteractionPayload:
     """Drain one Gemini Interactions stream and normalize its final result."""
     started_at = time.perf_counter()
@@ -168,35 +169,283 @@ async def run_gemini_interaction_streamed(
     )
 
     if request.kind == "poll":
-        interaction_id = cast(str, request.interaction_id)
-        stream = await _maybe_await(
-            interaction_resource.get(
-                interaction_id,
-                **_build_get_kwargs(request),
-                stream=True,
-            )
+        return await _run_poll_stream(
+            request=request,
+            interaction_resource=interaction_resource,
+            started_at=started_at,
+            on_event=on_event,
+            allow_sync_stream=allow_sync_stream,
         )
-    else:
-        stream = await _maybe_await(
-            interaction_resource.create(
-                **_build_create_kwargs(request),
-                stream=True,
-            )
+    if request.background:
+        return await _run_background_stream(
+            request=request,
+            interaction_resource=interaction_resource,
+            started_at=started_at,
+            on_event=on_event,
+            allow_sync_stream=allow_sync_stream,
+            poll_interval_s=poll_interval_s,
+        )
+    return await _run_direct_create_stream(
+        request=request,
+        interaction_resource=interaction_resource,
+        started_at=started_at,
+        on_event=on_event,
+        allow_sync_stream=allow_sync_stream,
+    )
+
+
+async def _run_direct_create_stream(
+    *,
+    request: GeminiInteractionRequest,
+    interaction_resource: Any,
+    started_at: float,
+    on_event: Callable[[Any], Any] | None,
+    allow_sync_stream: bool,
+) -> GeminiInteractionPayload:
+    stream = await _maybe_await(
+        interaction_resource.create(
+            **_build_create_kwargs(request),
+            stream=True,
+        )
+    )
+    accumulator = await _drain_stream(
+        request=request,
+        stream=stream,
+        on_event=on_event,
+        allow_sync_stream=allow_sync_stream,
+    )
+    return _normalize_streamed_interaction(
+        accumulator.build_interaction(),
+        started_at=started_at,
+        poll_count=0,
+        accumulator=accumulator,
+        observation_mode="direct_create_stream",
+        fallback_used=False,
+    )
+
+
+async def _run_poll_stream(
+    *,
+    request: GeminiInteractionRequest,
+    interaction_resource: Any,
+    started_at: float,
+    on_event: Callable[[Any], Any] | None,
+    allow_sync_stream: bool,
+) -> GeminiInteractionPayload:
+    interaction_id = cast(str, request.interaction_id)
+    stream = await _maybe_await(
+        interaction_resource.get(
+            interaction_id,
+            **_build_get_kwargs(request),
+            stream=True,
+        )
+    )
+    accumulator = await _drain_stream(
+        request=request,
+        stream=stream,
+        on_event=on_event,
+        allow_sync_stream=allow_sync_stream,
+    )
+    return _normalize_streamed_interaction(
+        accumulator.build_interaction(),
+        started_at=started_at,
+        poll_count=1,
+        accumulator=accumulator,
+        observation_mode="poll_get_stream",
+        fallback_used=False,
+    )
+
+
+async def _run_background_stream(
+    *,
+    request: GeminiInteractionRequest,
+    interaction_resource: Any,
+    started_at: float,
+    on_event: Callable[[Any], Any] | None,
+    allow_sync_stream: bool,
+    poll_interval_s: float,
+) -> GeminiInteractionPayload:
+    deadline = started_at + request.timeout_s if request.timeout_s is not None else None
+    create_kwargs = _build_create_kwargs(request)
+    if deadline is not None:
+        create_kwargs["timeout"] = _remaining_timeout_s(deadline)
+    created_interaction = await _maybe_await(
+        interaction_resource.create(**create_kwargs)
+    )
+    interaction_id = coerce_string(extract(created_interaction, "id"))
+    if interaction_id is None:
+        raise KitaruRuntimeError(
+            "Gemini background streamed interaction was created without an "
+            "interaction id. Kitaru cannot safely observe or poll it without "
+            "risking duplicate provider work."
         )
 
     accumulator = _StreamAccumulator(request=request)
+    accumulator.seed_interaction(created_interaction)
+
+    created_status = extract(created_interaction, "status")
+    if (
+        created_status in _STABLE_STATUSES
+        or created_status in _TERMINAL_FAILURE_STATUSES
+    ):
+        return _normalize_stable_interaction(
+            created_interaction,
+            duration_ms=elapsed_ms(started_at),
+            poll_count=0,
+            stream_metadata=_stream_metadata(
+                accumulator,
+                observation_mode="background_create_completed",
+                fallback_used=False,
+            ),
+        )
+
+    if deadline is None:
+        return await _fallback_poll_background_stream(
+            request=request,
+            interaction_resource=interaction_resource,
+            interaction=created_interaction,
+            interaction_id=interaction_id,
+            started_at=started_at,
+            deadline=deadline,
+            accumulator=accumulator,
+            poll_interval_s=poll_interval_s,
+        )
+    if deadline is not None and _remaining_timeout_s(deadline) <= 0:
+        return await _fallback_poll_background_stream(
+            request=request,
+            interaction_resource=interaction_resource,
+            interaction=created_interaction,
+            interaction_id=interaction_id,
+            started_at=started_at,
+            deadline=deadline,
+            accumulator=accumulator,
+            poll_interval_s=poll_interval_s,
+        )
+    try:
+        stream = await _maybe_await(
+            interaction_resource.get(
+                interaction_id,
+                **_build_background_get_kwargs(request, deadline=deadline),
+                stream=True,
+            )
+        )
+        accumulator = await _drain_stream(
+            request=request,
+            stream=stream,
+            on_event=on_event,
+            allow_sync_stream=allow_sync_stream,
+            accumulator=accumulator,
+        )
+    except Exception:
+        return await _fallback_poll_background_stream(
+            request=request,
+            interaction_resource=interaction_resource,
+            interaction=created_interaction,
+            interaction_id=interaction_id,
+            started_at=started_at,
+            deadline=deadline,
+            accumulator=accumulator,
+            poll_interval_s=poll_interval_s,
+        )
+
+    stream_interaction = accumulator.build_interaction()
+    stream_status = extract(stream_interaction, "status")
+    if stream_status in _STABLE_STATUSES or stream_status in _TERMINAL_FAILURE_STATUSES:
+        return _normalize_streamed_interaction(
+            stream_interaction,
+            started_at=started_at,
+            poll_count=1,
+            accumulator=accumulator,
+            observation_mode="background_create_then_get_stream",
+            fallback_used=False,
+        )
+    return await _fallback_poll_background_stream(
+        request=request,
+        interaction_resource=interaction_resource,
+        interaction=stream_interaction,
+        interaction_id=interaction_id,
+        started_at=started_at,
+        deadline=deadline,
+        accumulator=accumulator,
+        poll_interval_s=poll_interval_s,
+    )
+
+
+async def _fallback_poll_background_stream(
+    *,
+    request: GeminiInteractionRequest,
+    interaction_resource: Any,
+    interaction: Any,
+    interaction_id: str,
+    started_at: float,
+    deadline: float | None,
+    accumulator: _StreamAccumulator,
+    poll_interval_s: float,
+) -> GeminiInteractionPayload:
+    interaction, poll_count = await _poll_background_same_id_after_stream(
+        interaction_resource=interaction_resource,
+        interaction=interaction,
+        interaction_id=interaction_id,
+        deadline=deadline,
+        poll_interval_s=poll_interval_s,
+    )
+    payload = _normalize_stable_interaction(
+        interaction,
+        duration_ms=elapsed_ms(started_at),
+        poll_count=poll_count,
+    )
+    metadata = _stream_metadata(
+        accumulator,
+        observation_mode="background_create_then_get_stream",
+        fallback_used=True,
+    )
+    metadata["final_status"] = payload.status
+    return replace(
+        payload,
+        stream_metadata=metadata,
+        warnings=[
+            *payload.warnings,
+            "Gemini background stream observation failed or ended before a "
+            "stable result; Kitaru continued by polling the same interaction id.",
+        ],
+    )
+
+
+async def _drain_stream(
+    *,
+    request: GeminiInteractionRequest,
+    stream: Any,
+    on_event: Callable[[Any], Any] | None,
+    allow_sync_stream: bool,
+    accumulator: _StreamAccumulator | None = None,
+) -> _StreamAccumulator:
+    accumulator = accumulator or _StreamAccumulator(request=request)
     async for event in _iter_stream(stream, allow_sync_stream=allow_sync_stream):
         if on_event is not None:
             with suppress(Exception):
                 await _maybe_await(on_event(event))
         accumulator.record(event)
+    return accumulator
 
-    interaction = accumulator.build_interaction()
+
+def _normalize_streamed_interaction(
+    interaction: Any,
+    *,
+    started_at: float,
+    poll_count: int,
+    accumulator: _StreamAccumulator,
+    observation_mode: str,
+    fallback_used: bool,
+) -> GeminiInteractionPayload:
     payload = _normalize_stable_interaction(
         interaction,
         duration_ms=elapsed_ms(started_at),
-        poll_count=1 if request.kind == "poll" else 0,
-        stream_metadata=accumulator.stream_metadata(),
+        poll_count=poll_count,
+        stream_metadata=_stream_metadata(
+            accumulator,
+            observation_mode=observation_mode,
+            fallback_used=fallback_used,
+        ),
     )
     if payload.interaction_id is None:
         raise KitaruRuntimeError(
@@ -204,6 +453,57 @@ async def run_gemini_interaction_streamed(
             "Kitaru will not store an incomplete streamed provider result."
         )
     return payload
+
+
+def _stream_metadata(
+    accumulator: _StreamAccumulator,
+    *,
+    observation_mode: str,
+    fallback_used: bool,
+) -> dict[str, Any]:
+    metadata = accumulator.stream_metadata()
+    metadata["observation_mode"] = observation_mode
+    metadata["fallback_used"] = fallback_used
+    return metadata
+
+
+def _build_background_get_kwargs(
+    request: GeminiInteractionRequest,
+    *,
+    deadline: float | None,
+) -> dict[str, Any]:
+    kwargs = _build_get_kwargs(request)
+    if deadline is not None:
+        kwargs["timeout"] = _remaining_timeout_s(deadline)
+    return kwargs
+
+
+async def _poll_background_same_id_after_stream(
+    *,
+    interaction_resource: Any,
+    interaction: Any,
+    interaction_id: str,
+    deadline: float | None,
+    poll_interval_s: float,
+) -> tuple[Any, int]:
+    kwargs: dict[str, Any] = {}
+    if deadline is not None:
+        remaining_s = _remaining_timeout_s(deadline)
+        if remaining_s <= 0:
+            return interaction, 0
+        kwargs["timeout"] = remaining_s
+    interaction = await _maybe_await(interaction_resource.get(interaction_id, **kwargs))
+    poll_count = 1
+    if deadline is None:
+        return interaction, poll_count
+    return await _poll_until_stable_or_terminal(
+        interaction_resource=interaction_resource,
+        interaction=interaction,
+        interaction_id=interaction_id,
+        deadline=deadline,
+        poll_interval_s=poll_interval_s,
+        poll_count=poll_count,
+    )
 
 
 async def _poll_until_stable_or_terminal(
@@ -433,10 +733,13 @@ def _validate_streaming_interactions_resource(
     get = extract(interaction_resource, "get")
     if not _is_interactions_resource(interaction_resource):
         raise KitaruFeatureNotAvailableError(INTERACTIONS_CONTRACT_ERROR_MESSAGE)
-    target = get if request.kind == "poll" else create
-    target_name = (
-        "interactions.get" if request.kind == "poll" else "interactions.create"
+    if request.background and request.timeout_s is None:
+        return interaction_resource
+    needs_get_stream = request.kind == "poll" or (
+        request.background and request.timeout_s is not None
     )
+    target = get if needs_get_stream else create
+    target_name = "interactions.get" if needs_get_stream else "interactions.create"
     if not _call_accepts_keyword(target, "stream"):
         raise KitaruFeatureNotAvailableError(
             "Gemini Interactions streaming requires a google-genai SDK whose "

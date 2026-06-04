@@ -69,11 +69,28 @@ def test_gemini_interactions_example_vertex_adc_needs_no_api_key(
     gemini_interactions_adapter._prepare_google_credentials()
 
 
-def test_gemini_interactions_example_antigravity_request_is_synchronous() -> None:
+def test_gemini_interactions_example_antigravity_request_uses_background() -> None:
     args = argparse.Namespace(
         mode="antigravity",
         prompt="inspect safely",
         timeout=123.0,
+        foreground_antigravity=False,
+    )
+
+    request = gemini_interactions_adapter._build_request(args)
+
+    assert request.agent == "antigravity-preview-05-2026"
+    assert request.background is True
+    assert request.store is True
+    assert request.timeout_s == 123.0
+
+
+def test_gemini_interactions_example_antigravity_foreground_override() -> None:
+    args = argparse.Namespace(
+        mode="antigravity",
+        prompt="inspect safely",
+        timeout=123.0,
+        foreground_antigravity=True,
     )
 
     request = gemini_interactions_adapter._build_request(args)
@@ -81,7 +98,6 @@ def test_gemini_interactions_example_antigravity_request_is_synchronous() -> Non
     assert request.agent == "antigravity-preview-05-2026"
     assert request.background is False
     assert request.store is True
-    assert request.timeout_s == 123.0
 
 
 def test_gemini_interactions_example_vertex_requires_project_and_location(

@@ -515,6 +515,7 @@ class KitaruGeminiInteractionsRunner:
             client_factory=self._client_factory,
             on_event=stream_publisher.event,
             allow_sync_stream=allow_sync_stream,
+            poll_interval_s=self._poll_interval_s,
         )
 
     @staticmethod
