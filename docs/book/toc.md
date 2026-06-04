@@ -76,17 +76,16 @@
 * [MCP Server](agent-native/mcp-server.md)
 * [Claude Code Skill](agent-native/claude-code-skill.md)
 
+## Reference
+
+* [Changelog](changelog.md)
+
+<!--
+Remaining generated reference still to land here (see migration plan):
+* [CLI Reference](cli.md)                              <- scripts/generate_cli_docs.py
+* [Python SDK Reference](reference/python/README.md)   <- generate_sdk_docs.py + convert
+-->
+
 ## Project
 
 * [Contributing](contributing.md)
-
-<!--
-Generated reference docs (CLI, Python SDK, Changelog) are produced by the
-generation scripts and emit FumaDocs MDX today. They need a GitBook-markdown
-emitter before they can be registered here. Planned nav slots:
-
-## Reference
-* [CLI Reference](cli.md)            <- scripts/generate_cli_docs.py
-* [Python SDK Reference](reference/python/README.md)  <- generate_sdk_docs.py + convert
-* [Changelog](changelog.md)          <- scripts/generate_changelog_docs.py
--->
