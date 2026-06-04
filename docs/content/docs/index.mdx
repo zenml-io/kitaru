@@ -1,149 +1,24 @@
 ---
-title: Overview
-description: The runtime layer underneath your agent stack
+title: Kitaru Reference
+description: Auto-generated reference for the Kitaru Python SDK and command-line interface
 ---
 
-Kitaru is the runtime layer underneath your agent stack. It gives you durable
-execution for Python agents &mdash; checkpoints, replay, resume, `wait()`,
-versioned deployments &mdash; while the harness you already picked (Pydantic
-AI, Deep Agents, LangGraph, Claude Agent SDK, raw Python) keeps owning how the
-agent thinks, and your existing platform keeps owning auth, observability, and
-policy.
+This site is the auto-generated reference for Kitaru's public **Python SDK** and
+**command-line interface**. It is generated directly from the Kitaru source on
+every release.
 
-Kitaru is self-host-first: a single-service server on your own Kubernetes,
-artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in
-the path of your agent&rsquo;s data. See
-[Harness, Runtime, Platform](/concepts/harness-runtime-platform) for the full
-picture of where Kitaru fits.
-
-## Create a durable agent
-
-```python
-import kitaru
-from kitaru import checkpoint, flow
-
-@checkpoint
-def research(topic: str) -> str:
-    return kitaru.llm(f"Summarize {topic} in two sentences.")
-
-@checkpoint
-def draft_report(summary: str) -> str:
-    return kitaru.llm(f"Write a short report based on: {summary}")
-
-@flow
-def research_agent(topic: str) -> str:
-    summary = research(topic)
-    return draft_report(summary)
-
-if __name__ == "__main__":
-    research_agent.run(topic="Why do AI agents need durable execution?")
-```
-
-Each `@checkpoint` is a durable unit of work — its output is persisted
-automatically. If the flow fails at `draft_report`, replaying it skips
-`research` and reuses its recorded result. `kitaru.llm()` logs model calls
-with prompt, response, tokens, and latency per call.
-
-See the [Quickstart](/getting-started/quickstart) to install and run this yourself.
-
-## What your agent can do with Kitaru
-
-These are the runtime primitives Kitaru adds on top of your existing Python
-agent code. You keep your harness and your control flow; Kitaru makes the run
-durable.
-
-- **Durable execution:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off without re-running expensive work
-- **Replay from failure:** Re-run only the failed part of a flow by replaying from a checkpoint instead of starting from scratch
-- **Wait and resume:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents pause for a human, another system, or later input; after the polling timeout, compute is released and the run resumes when input lands
-- **Artifact lineage:** Every checkpoint output is written to your object store as a typed, versioned artifact — step through runs, diff outputs across runs, and trace a bad final output back to the exact step that produced it
-- **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel executions from code or CLI
-- **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and token/latency logging
-- **Persistent data:** [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) let agents store and retrieve files, objects, and results across executions
-- **Structured observability:** [`kitaru.log()`](/concepts/logging) attaches key-value metadata to any checkpoint or flow for debugging and the UI
-- **Runtime configuration:** [`kitaru.configure()`](/guides/configuration) sets your model, log store, and stack defaults in one call
-- **Framework and infrastructure portability:** Keep your Python control flow, use your preferred framework, and run locally or on remote stacks — Kubernetes, Vertex AI, SageMaker, AzureML
-
-## Next Steps
+Looking for guides, concepts, and tutorials? Those live in the main
+[Kitaru documentation](https://docs.zenml.io/kitaru).
 
 <Cards>
   <Card
-    title="Installation"
-    description="Install Kitaru with uv or pip"
-    href="/getting-started/installation/"
-  />
-  <Card
-    title="Quickstart"
-    description="Run a tiny flow end to end"
-    href="/getting-started/quickstart/"
-  />
-  <Card
-    title="Examples"
-    description="Browse runnable workflows grouped by goal"
-    href="/getting-started/examples/"
-  />
-  <Card
-    title="Harness, Runtime, Platform"
-    description="Where Kitaru fits in an agent stack, and where it doesn't"
-    href="/concepts/harness-runtime-platform/"
-  />
-  <Card
-    title="How It Works"
-    description="Server, runner, execution targets, and what lives where in local dev vs production"
-    href="/concepts/how-it-works/"
-  />
-  <Card
-    title="Core Concepts"
-    description="Flows, checkpoints, and the execution model"
-    href="/concepts/"
-  />
-  <Card
-    title="Execution Management"
-    description="Inspect runs, replay, retry, resume, and fetch logs"
-    href="/guides/execution-management/"
-  />
-  <Card
-    title="Wait, Input, and Resume"
-    description="Pause flows for external input and continue the same execution"
-    href="/guides/wait-and-resume/"
-  />
-  <Card
-    title="Tracked LLM Calls"
-    description="Use kitaru.llm() with aliases, secrets, and captured artifacts"
-    href="/guides/llm-calls/"
-  />
-  <Card
-    title="Secrets + Model Registration"
-    description="Store provider credentials, register a model alias, and use kitaru.llm()"
-    href="/guides/secrets-and-model-registration/"
-  />
-  <Card
-    title="Configuration"
-    description="Set runtime defaults and understand override precedence"
-    href="/guides/configuration/"
-  />
-  <Card
-    title="Stacks"
-    description="Create, inspect, switch, and clean up local and remote stacks across Kubernetes, AWS, GCP, and Azure"
-    href="/stacks/"
-  />
-  <Card
-    title="MCP Server"
-    description="Query and manage executions via MCP tools"
-    href="/agent-native/mcp-server/"
-  />
-  <Card
-    title="Agent Skills"
-    description="Install quickstart, scoping, authoring, and adapter migration skills"
-    href="/agent-native/claude-code-skill/"
+    title="Python SDK Reference"
+    description="Every public function, class, and decorator in the kitaru package"
+    href="/reference/python"
   />
   <Card
     title="CLI Reference"
-    description="Browse the generated command reference"
-    href="/cli/"
-  />
-  <Card
-    title="Blog"
-    description="Read essays on durable execution, long-running agents, and Kitaru's design"
-    href="https://kitaru.ai/blog/"
+    description="Every kitaru command, subcommand, flag, and argument"
+    href="/cli"
   />
 </Cards>

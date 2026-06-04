@@ -1,0 +1,7 @@
+# Redirect-only worker for kitaru.ai (docs moved to GitBook + sdkdocs.kitaru.ai).
+# Keeps the "kitaru-site" worker name so the existing kitaru.ai custom-domain
+# binding carries over on deploy. Deploy with:
+#   wrangler deploy --config wrangler.redirect.toml
+name = "kitaru-site"
+main = "docs/worker/redirect.mjs"
+compatibility_date = "2025-09-27"

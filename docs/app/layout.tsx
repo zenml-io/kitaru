@@ -1,44 +1,48 @@
-import { DM_Sans, JetBrains_Mono } from 'next/font/google';
-import { Provider } from '@/components/provider';
-import type { Metadata } from 'next';
-import './global.css';
+import type { Metadata } from "next";
+import { DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Provider } from "@/components/provider";
+import "./global.css";
 
 const dmSans = DM_Sans({
-  subsets: ['latin'],
-  variable: '--font-dm-sans',
-  display: 'swap',
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-jetbrains-mono',
-  display: 'swap',
-  weight: ['400', '500'],
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://kitaru.ai'),
+  metadataBase: new URL("https://sdkdocs.kitaru.ai"),
   title: {
-    default: 'Kitaru Documentation',
-    template: '%s | Kitaru',
+    default: "Kitaru SDK & CLI Reference",
+    template: "%s | Kitaru Reference",
   },
   description:
-    'Durable execution for AI agents. Primitives that make agent workflows persistent, replayable, and observable.',
+    "Auto-generated reference for the Kitaru Python SDK and command-line interface.",
   icons: {
-    icon: '/favicon.svg',
+    icon: "/favicon.svg",
   },
   openGraph: {
-    siteName: 'Kitaru Documentation',
-    type: 'website',
+    siteName: "Kitaru SDK & CLI Reference",
+    type: "website",
   },
   twitter: {
-    card: 'summary_large_image',
+    card: "summary_large_image",
   },
 };
 
-export default function Layout({ children }: LayoutProps<'/'>) {
+export default function Layout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${dmSans.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script
           async
@@ -47,7 +51,7 @@ export default function Layout({ children }: LayoutProps<'/'>) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)};plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
+              "window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)};plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()",
           }}
         />
         <script
@@ -58,7 +62,15 @@ export default function Layout({ children }: LayoutProps<'/'>) {
         />
       </head>
       <body className="flex flex-col min-h-screen">
-        <img referrerPolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=ce7012ba-8b28-4529-8614-c7bafaf20f72" alt="" aria-hidden="true" width="1" height="1" style={{position:'absolute'}} />
+        <img
+          referrerPolicy="no-referrer-when-downgrade"
+          src="https://static.scarf.sh/a.png?x-pxid=ce7012ba-8b28-4529-8614-c7bafaf20f72"
+          alt=""
+          aria-hidden="true"
+          width="1"
+          height="1"
+          style={{ position: "absolute" }}
+        />
         <Provider>{children}</Provider>
       </body>
     </html>

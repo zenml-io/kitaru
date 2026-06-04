@@ -1,0 +1,155 @@
+---
+description: Service accounts, API keys, and short-lived bearer tokens for Kitaru servers
+icon: key
+---
+
+# Authentication
+
+Kitaru has two different server-auth concepts that fit together like a
+front-door key and a temporary visitor badge:
+
+1. **Service-account API keys** are the long-lived automation credentials you
+   create for CI, scripts, containers, and other non-human callers.
+2. **Bearer tokens** are short-lived server access tokens derived from the
+   currently active Kitaru connection. `kitaru auth token` prints one when you
+   need to paste it into a raw HTTP request.
+
+For OSS Kitaru automation, start with a **service account + API key**. Do not
+use personal access tokens (PATs) as the default Kitaru primitive; PATs are a
+Pro-only server feature and are documented separately from OSS Kitaru auth.
+
+## The credential chain
+
+The normal machine-auth flow is:
+
+```text
+service account -> long-lived API key -> Kitaru login/env config -> short-lived bearer token
+```
+
+Concretely:
+
+1. Create a service account for the machine or automation job.
+2. Create an API key for that service account.
+3. Use that API key with `kitaru login --api-key ...` or
+   `KITARU_AUTH_TOKEN=...`.
+4. When a raw HTTP call needs a bearer token, run `kitaru auth token`. Kitaru
+   exchanges the active API-key-backed connection for a short-lived bearer
+   token.
+
+That final bearer token is useful for curl snippets, but it is not the
+long-lived secret you store in CI.
+
+In automation, `KITARU_AUTH_TOKEN` is usually set to the long-lived
+service-account API key; `kitaru auth token` exchanges that active connection
+for a short-lived bearer token when a raw HTTP call needs one.
+
+## Create a service account and API key
+
+Run these commands from an account that can manage server auth:
+
+```bash
+kitaru auth service-accounts create ci-runner \
+  --description "CI runner for production deployments"
+
+kitaru auth api-keys create ci-runner default -o json
+```
+
+The API-key create response includes a one-time `key` value:
+
+```json
+{
+  "command": "auth.api-keys.create",
+  "item": {
+    "name": "default",
+    "service_account_name": "ci-runner",
+    "active": true,
+    "key": "kat_..."
+  }
+}
+```
+
+Store that `key` immediately in your secret manager. Kitaru can show API-key
+metadata later, but it cannot retrieve the raw key again.
+
+## Use the API key from CI or a container
+
+For a non-interactive job, configure the server URL, service-account API key,
+and project:
+
+```bash
+export KITARU_SERVER_URL=https://kitaru.example.com
+export KITARU_AUTH_TOKEN=kat_...
+export KITARU_PROJECT=production
+```
+
+Or persist the same connection locally:
+
+```bash
+kitaru login https://kitaru.example.com \
+  --api-key kat_... \
+  --project production
+```
+
+`KITARU_PROJECT` is required for project-scoped operations such as running,
+listing, replaying, or invoking executions. Auth-management commands are
+server-level, so they can run with just a server URL and auth token when you are
+creating or rotating credentials.
+
+## Get a short-lived bearer token
+
+Use `kitaru auth token` when a raw HTTP client needs an `Authorization: Bearer`
+header:
+
+```bash
+KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"
+
+curl -H "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" \
+  https://kitaru.example.com/api/v1/...
+```
+
+This command does not create a long-lived API key. It asks the active Kitaru
+server connection for a temporary bearer token. If your active connection was
+made with a service-account API key, the bearer token is derived from that API
+key.
+
+## Rotate an API key
+
+To replace a long-lived API key:
+
+```bash
+kitaru auth api-keys rotate ci-runner default --retain-minutes 10 -o json
+```
+
+The rotate response includes the replacement `key` once. `--retain-minutes`
+keeps the old key valid for a short overlap window, which is useful when you
+need time to update CI secrets safely.
+
+After updating your secret manager, verify the new key and delete credentials
+you no longer need:
+
+```bash
+kitaru auth api-keys list ci-runner
+kitaru auth api-keys delete ci-runner old-key --yes
+```
+
+## SDK usage
+
+The Python SDK exposes the same OSS-first auth-management surface:
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient.for_auth_management()
+service_account = client.auth.service_accounts.create(
+    "ci-runner",
+    description="CI runner for production deployments",
+)
+api_key = client.auth.api_keys.create(service_account.name, "default")
+
+print(api_key.api_key.name)
+print(api_key.key)  # one-time value: store it now
+```
+
+Use `KitaruClient.for_auth_management()` for server-level credential
+administration. Use normal `KitaruClient()` for project-scoped execution,
+artifact, deployment, and execution operations.

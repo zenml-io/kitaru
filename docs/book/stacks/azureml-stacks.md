@@ -1,0 +1,120 @@
+---
+description: Create, inspect, and use AzureML-backed stacks with Azure Blob storage
+icon: microsoft
+---
+
+# Azure (AzureML)
+
+An AzureML stack runs each Kitaru execution as a managed AzureML job and stores checkpoint outputs in Azure storage.
+
+Use this page when your team wants Azure-managed job execution. If you want the broader stack model first, start with [Stacks](README.md).
+
+## Prerequisites
+
+Before creating the stack, make sure these resources already exist:
+
+- a Kitaru server you are connected to with `kitaru login ...`
+- an Azure storage URI for artifacts, for example `az://my-container/kitaru`, `abfs://my-container/kitaru`, or `abfss://my-container/kitaru`
+- an Azure Container Registry repository, for example `demo.azurecr.io/kitaru`
+- an Azure subscription ID, resource group, and AzureML workspace
+- Azure credentials available to the Kitaru server / stack setup path
+- optionally, the Azure region you want reported on the stack
+
+Kitaru creates the stack definition and component records. It does not create your storage account, container registry, AzureML workspace, resource group, or IAM setup for you.
+
+## Create the stack
+
+```bash
+kitaru stack create prod-azureml \
+  --type azureml \
+  --artifact-store az://my-container/kitaru \
+  --container-registry demo.azurecr.io/kitaru \
+  --subscription-id 00000000-0000-0000-0000-000000000123 \
+  --resource-group ml-platform \
+  --workspace team-ml \
+  --region westeurope
+```
+
+The required AzureML fields are:
+
+| Field | Meaning |
+|---|---|
+| `--artifact-store` | Azure storage URI where Kitaru writes checkpoint outputs and saved artifacts |
+| `--container-registry` | Azure Container Registry repository where Kitaru pushes the run image |
+| `--subscription-id` | Azure subscription containing the AzureML workspace |
+| `--resource-group` | Resource group containing the AzureML workspace |
+| `--workspace` | AzureML workspace name |
+
+`--region` is optional for AzureML stack creation, but it is useful for humans reading `kitaru stack show` output.
+
+You can add an optional credentials reference with `--credentials` when your server setup uses named cloud credentials.
+
+## Set advanced AzureML defaults
+
+Named flags cover the common setup. Use `--extra` for lower-level component fields that Kitaru does not expose as first-class flags.
+
+For example, write the asynchronous runner default explicitly with `--extra`:
+
+```bash
+kitaru stack create prod-azureml \
+  --type azureml \
+  --artifact-store az://my-container/kitaru \
+  --container-registry demo.azurecr.io/kitaru \
+  --subscription-id 00000000-0000-0000-0000-000000000123 \
+  --resource-group ml-platform \
+  --workspace team-ml \
+  --region westeurope \
+  --extra orchestrator.synchronous=false
+```
+
+`--async` is shorthand for that same `orchestrator.synchronous=false` setting. If you provide both, the explicit `--extra` value wins.
+
+If you need provider-specific settings not shown here, keep them in a reviewed stack YAML template and pass them through `extra:` / `--extra`.
+
+## Use YAML for repeatable setup
+
+```yaml
+name: prod-azureml
+type: azureml
+artifact_store: az://my-container/kitaru
+container_registry: demo.azurecr.io/kitaru
+subscription_id: 00000000-0000-0000-0000-000000000123
+resource_group: ml-platform
+workspace: team-ml
+region: westeurope
+extra:
+  orchestrator:
+    synchronous: false
+```
+
+Create it with:
+
+```bash
+kitaru stack create -f stack.yaml
+```
+
+CLI flags override YAML values, and `--extra` values merge on top of the YAML `extra:` block.
+
+## Inspect and use it
+
+```bash
+kitaru stack show prod-azureml
+kitaru stack use prod-azureml
+kitaru stack current
+```
+
+`kitaru stack show` reports the translated Kitaru view: runner, storage, image registry, subscription, resource group, workspace, active status, and whether the stack was created by Kitaru.
+
+Once active, normal flow runs use the AzureML stack unless a flow-level or run-level stack override is present.
+
+## Delete it
+
+```bash
+kitaru stack delete prod-azureml
+```
+
+Use `--recursive` if you want Kitaru to remove Kitaru-managed component records too. Kitaru does not delete your cloud storage, registry, workspace, resource group, or IAM resources.
+
+## Related
+
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Stacks</strong></td><td>The shared stack model, precedence rules, YAML, --extra, and --async</td><td><a href="README.md">README.md</a></td></tr><tr><td><strong>Containerization</strong></td><td>How Kitaru builds and configures remote execution images</td><td><a href="../guides/containerization.md">../guides/containerization.md</a></td></tr></tbody></table>

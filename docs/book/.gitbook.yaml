@@ -1,0 +1,25 @@
+# GitBook space config for the Kitaru documentation.
+#
+# Point a GitBook space's Git Sync at this repository and set the space's
+# root directory to `docs/book/` (this file's directory). The space base path
+# on docs.zenml.io (e.g. `/kitaru`) is decided with the docs.zenml.io owner.
+root: .
+
+structure:
+  readme: README.md
+  summary: toc.md
+
+# Old URLs → current file locations. Adapter pages moved out of the former
+# `guides/<x>-adapter` location into the dedicated `adapters/` section; keep
+# these so existing inbound links resolve. Most other slugs are unchanged from
+# the previous FumaDocs site.
+redirects:
+  guides/pydantic-ai-adapter: adapters/pydantic-ai.md
+  guides/openai-agents-adapter: adapters/openai-agents.md
+  guides/claude-agent-sdk-adapter: adapters/claude-agent-sdk.md
+  guides/gemini-interactions-adapter: adapters/gemini-interactions.md
+  guides/langgraph-adapter: adapters/langgraph.md
+  concepts: concepts/README.md
+  adapters: adapters/README.md
+  stacks: stacks/README.md
+  agent-harness-platform: agent-harness-platform/README.md

@@ -222,6 +222,6 @@ workflow, explicitly return it from Gemini or write it in a later Kitaru-owned
 checkpoint.
 
 For the concept walkthrough, see
-[Gemini Interactions Adapter](https://kitaru.ai/docs/adapters/gemini-interactions/).
+[Gemini Interactions Adapter](https://docs.zenml.io/kitaru/adapters/gemini-interactions/).
 
 For the full catalog, see [../../README.md](../../README.md).

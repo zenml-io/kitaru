@@ -1,0 +1,254 @@
+---
+description: How Kitaru builds and configures container images for remote execution
+icon: box
+---
+
+# Containerization
+
+When you run a flow on a remote stack (Kubernetes, Vertex AI, SageMaker, Azure ML),
+Kitaru packages your code into a container image automatically. The `image`
+parameter on `@flow` controls how that image is built.
+
+## Default behavior
+
+With no `image` configuration, Kitaru:
+
+1. Uses a default Python base image
+2. Installs `kitaru` into the container
+3. Packages your project source code (detected from the `.kitaru/` project root)
+
+This is enough for simple flows with no extra dependencies.
+
+## The `image` parameter
+
+Pass `image` to `@flow`, `.run()`, or `kitaru.configure()`. It accepts an
+`ImageSettings` object or a plain dictionary:
+
+```python
+from kitaru import flow
+import kitaru
+
+@flow(
+    image=kitaru.ImageSettings(
+        base_image="python:3.12-slim",
+        requirements=["httpx", "pydantic-ai"],
+        apt_packages=["git"],
+        environment={"MY_VAR": "value"},
+    ),
+)
+def my_agent(topic: str) -> str:
+    ...
+```
+
+Or as a dictionary:
+
+```python
+@flow(
+    image={
+        "base_image": "python:3.12-slim",
+        "requirements": ["httpx", "pydantic-ai"],
+    },
+)
+def my_agent(topic: str) -> str:
+    ...
+```
+
+### Available fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `base_image` | `str` | Docker image to start from (e.g. `python:3.12-slim`) |
+| `requirements` | `list[str]` | Python packages to install (pip format) |
+| `dockerfile` | `str` | Path to a custom Dockerfile instead of auto-building |
+| `build_context_root` | `str` | Root directory for the Docker build context |
+| `environment` | `dict[str, str]` | Environment variables set inside the container (non-secret values only) |
+| `secret_environment_from` | `list[str]` | Names/IDs of ZenML secrets whose keys are exposed as runtime environment variables during step execution |
+| `apt_packages` | `list[str]` | System packages to install via apt |
+| `replicate_local_python_environment` | `bool` | Mirror your local `pip freeze` into the container |
+| `image_tag` | `str` | Custom tag for the built image |
+| `target_repository` | `str` | Registry repository to push the image to (e.g. `my-registry/my-repo`) |
+| `user` | `str` | OS user to run as inside the container (e.g. `nonroot`) |
+| `platform` | `str` | Target platform for the Docker build (e.g. `linux/amd64`) |
+
+## Automatic Kitaru injection
+
+Kitaru automatically adds itself to the container requirements so your flow code
+can import and run `kitaru` at execution time. You do not need to add `kitaru` to
+your `requirements` list manually.
+
+If you already include `kitaru` (with or without a version pin), it is not
+duplicated:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        requirements=["kitaru>=0.2.0", "httpx"],
+    ),
+)
+def my_agent(topic: str) -> str:
+    ...
+# Container installs: kitaru>=0.2.0, httpx (no duplicate)
+```
+
+{% hint style="warning" %}
+If you provide a custom `base_image` or `dockerfile`, Kitaru does **not**
+auto-inject the SDK. Your image must already include `kitaru`.
+{% endhint %}
+
+## Replicating your local environment
+
+During development, you can mirror your entire local Python environment into the
+container. This runs `pip freeze` and installs everything so the remote container
+matches your dev setup exactly:
+
+```python
+@flow(image={"replicate_local_python_environment": True})
+def my_agent(topic: str) -> str:
+    ...
+```
+
+This is convenient for quick iteration but produces less reproducible builds.
+For production, pin explicit `requirements` instead.
+
+## Custom Dockerfile
+
+For full control, point to your own Dockerfile:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        dockerfile="docker/Dockerfile.agent",
+    ),
+)
+def my_agent(topic: str) -> str:
+    ...
+```
+
+When using a custom Dockerfile, you are responsible for installing Python,
+`kitaru`, and any other dependencies your flow needs.
+
+## System packages
+
+If your flow needs OS-level tools (e.g., `git`, `ffmpeg`, `poppler-utils`),
+use `apt_packages`:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        apt_packages=["git", "ffmpeg"],
+        requirements=["httpx"],
+    ),
+)
+def my_agent(topic: str) -> str:
+    ...
+```
+
+## Setting image config at different levels
+
+The `image` parameter follows the same
+[precedence rules](configuration.md#precedence-highest-to-lowest) as other
+execution settings. From highest to lowest priority:
+
+```python
+# 1. Per-run override (highest)
+my_agent.run("topic", image={"requirements": ["httpx"]})
+
+# 2. Flow decorator default
+@flow(image={"requirements": ["httpx"]})
+def my_agent(topic: str) -> str: ...
+
+# 3. Process-level default
+kitaru.configure(image=kitaru.ImageSettings(requirements=["httpx"]))
+
+# 4. Environment variable
+# export KITARU_IMAGE='{"requirements": ["httpx"]}'
+
+# 5. pyproject.toml
+# [tool.kitaru.image]
+# requirements = ["httpx"]
+```
+
+## Environment variables inside the container
+
+Use `environment` for non-sensitive runtime configuration such as feature flags
+or log levels. Values listed here are treated as literal Docker build/runtime
+env vars, so they are **not** safe for API keys, tokens, or passwords:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        environment={
+            "LOG_LEVEL": "DEBUG",
+            "FEATURE_FLAG_X": "1",
+        },
+    ),
+)
+def my_agent(topic: str) -> str:
+    ...
+```
+
+{% hint style="warning" %}
+Do not put API keys, tokens, or passwords in `environment`. Those values
+travel through Docker build metadata, image checksums, and log output. Use
+`secret_environment_from` instead.
+{% endhint %}
+
+## Secret-backed environment variables
+
+For credentials, configure `secret_environment_from` with a list of ZenML
+secret names or IDs. Every key in each referenced secret is exposed as an
+environment variable during step execution, and Kitaru never copies the
+values into Docker build metadata:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        requirements=["openai"],
+        environment={"LOG_LEVEL": "INFO"},
+        secret_environment_from=["openai-creds"],
+    ),
+)
+def my_agent(topic: str) -> str:
+    import os
+
+    # If the `openai-creds` secret has a key named OPENAI_API_KEY, user code
+    # and provider SDKs can read it from the runtime environment directly.
+    return os.environ["OPENAI_API_KEY"]
+```
+
+Under the hood, Kitaru forwards the list to ZenML via
+`Pipeline.with_options(secrets=[...])`. The backend resolves the secret
+values at runtime, so plaintext credentials never enter your image, config
+files, or frozen execution spec. Secret references (names/IDs) are the only
+thing persisted.
+
+Current limitations:
+
+- The common case is that the secret's key names already match the desired
+  environment variable names (e.g., a secret with a `OPENAI_API_KEY` key is
+  read as `os.environ["OPENAI_API_KEY"]`). Per-key renaming or selecting a
+  single key from a multi-key secret is not supported yet.
+- `kitaru.llm()` continues to auto-resolve alias-linked secrets without needing
+  this field; use `secret_environment_from` when user code or a third-party
+  SDK needs raw environment variables.
+
+{% hint style="info" %}
+`secret_environment_from` merges in list-replacement style. An override layer
+with a non-`None` list replaces the inherited list (an empty `[]` explicitly
+clears inherited references).
+{% endhint %}
+
+## How source code is packaged
+
+Kitaru detects your project root from the `.kitaru/` directory created by
+`kitaru init`. Everything under that root is packaged into the container image
+so your flow code, local modules, and utility files are available at runtime.
+
+Make sure you have run `kitaru init` in your project directory before running
+flows on remote stacks.
+
+## Related pages
+
+- [Configuration](configuration.md) — full config precedence and env vars
+- [Stacks](../stacks/README.md) — execution environments and stack management
+- [Kubernetes](../stacks/kubernetes-stacks.md)

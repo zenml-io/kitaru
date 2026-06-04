@@ -13,10 +13,12 @@ src/kitaru/           # Python SDK package (src layout)
 tests/                # pytest tests
 tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
 examples/             # Runnable SDK examples
-docs/                 # FumaDocs Next.js app — documentation content + static export
-  content/docs/       # Documentation content (MDX files)
+docs/                 # Two docs surfaces — see "Documentation surfaces" below
+  book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
+  content/docs/       # FumaDocs SDK+CLI reference content (generated cli/ + reference/)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
-  app/                # Next.js app routes, layout, metadata
+  app/                # Next.js app routes for the sdkdocs.kitaru.ai reference site
+  worker/             # Cloudflare worker: redirect.mjs (kitaru.ai/docs) + routing maps
 scripts/              # Doc generation, smoke test, and UI bundle scripts
 FRONTEND-TESTING.md   # Internal runbook for Kitaru UI bundle/frontend testing
                          and stable/prerelease release validation
@@ -24,13 +26,15 @@ docker/               # Dockerfiles (production server, server-dev, and dev flow
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
 
-### Docs and web ownership
+### Documentation surfaces
 
-The docs app stays in this repo because it is generated from the Python SDK and CLI source:
+Kitaru docs live on three surfaces — know which one a task touches:
 
-1. Python scripts generate docs content (`scripts/generate_cli_docs.py`, `scripts/generate_changelog_docs.py`, `scripts/generate_sdk_docs.py`)
-2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
-3. Root `wrangler.toml` deploys a docs-only Cloudflare Worker named `kitaru-site` so `kitaru.ai/docs` and PR previews still come from this repo
+1. **Hand-written docs → GitBook.** Concepts, guides, adapters, getting-started, etc. are plain Markdown in **`docs/book/`**, published to **`docs.zenml.io/kitaru`** via GitBook Git Sync. Edit those `.md` directly; nav is `docs/book/toc.md`, config is `docs/book/.gitbook.yaml`, authoring conventions are in `docs/book/AGENTS.md`.
+2. **Generated SDK + CLI reference → `sdkdocs.kitaru.ai`.** The FumaDocs app in `docs/` is now reference-only (generated `content/docs/cli/` + `content/docs/reference/python/` + a landing). Built/deployed to the `kitaru-sdkdocs` worker (root `wrangler.toml`). See `docs/CLAUDE.md`.
+3. **`kitaru.ai/docs` → redirects.** The `kitaru-site` worker (`docs/worker/redirect.mjs`, `wrangler.redirect.toml`) 301-redirects old `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
+
+Do not add hand-written pages to the FumaDocs app (`docs/content/docs/`) — they belong in `docs/book/`. The changelog is owned by the changelog repo (`docs.zenml.io/changelog`).
 
 The public marketing/runtime site for Kitaru now lives in `zenml-io-v2`. If a task involves Astro pages, public site assets, marketing Cloudflare Pages deployment, or runtime web APIs such as waitlist/get-started/newsletter endpoints, switch to that repository instead of adding that code back here.
 
@@ -158,7 +162,7 @@ When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard packa
 
 ### Docs CI (`docs.yml`)
 
-Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generation scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or `wrangler.toml`. It generates the CLI/changelog/SDK reference docs, builds and validates the static docs export, deploys production docs to `kitaru.ai/docs`, and creates/cleans same-repo PR preview Workers. Marketing site deployment is handled from `zenml-io-v2`, not this repository.
+Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generation scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or `wrangler.toml`. It generates the CLI/SDK reference, builds the FumaDocs static export, and deploys the **SDK+CLI reference site to `sdkdocs.kitaru.ai`** (worker `kitaru-sdkdocs`) plus the **`kitaru.ai/docs` redirect worker** (`kitaru-site`, `wrangler.redirect.toml`); it also creates/cleans same-repo PR preview Workers. Hand-written docs (`docs/book/`) publish separately to `docs.zenml.io/kitaru` via GitBook Git Sync (not this workflow). Marketing site deployment is handled from `zenml-io-v2`.
 
 ### Other workflows
 
@@ -180,8 +184,8 @@ Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generat
 
 - **Only document shipped features.** No "Coming Soon" sections.
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
-- **Generated vs static docs:** generated CLI reference content, changelog output, and SDK reference pages come from generation scripts and should not be hand-edited. Static hand-written MDX pages under `docs/content/docs/` (for example `getting-started/*.mdx` or `cli/login.mdx`) are tracked and may be edited directly when the feature behavior changes. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
-- **Docs URL references:** inside `docs/content/docs/` and generated docs MDX, link to other docs pages using docs-app-root paths such as `/cli/executions/` or `/concepts/checkpoints/`, not `/docs/...`; Next's `basePath: '/docs'` adds the public prefix for HTML. From public surfaces such as the marketing site in `zenml-io-v2`, link to docs with the full public `/docs/...` path. Public materialized Markdown is rewritten during export by `docs/scripts/materialize-markdown-pages.mjs`.
+- **Where to edit:** hand-written docs are GitBook Markdown in **`docs/book/`** (see `docs/book/AGENTS.md`) — add new pages there and to `docs/book/toc.md`. The FumaDocs app under `docs/content/docs/` is reference-only and **fully generated** (CLI + SDK); do not hand-edit it. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
+- **Docs URL references:** inside `docs/book/`, link to sibling pages with relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the SDK/CLI reference with `https://sdkdocs.kitaru.ai`, to other ZenML docs with absolute `https://docs.zenml.io/...`, and to diagrams with `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
 - **Planning artifacts stay untracked:** do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. These are coordination scratchpads, not product docs.
 - **Secret docs accuracy:** only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, label it clearly as the current low-level pattern instead of implying there is already a dedicated Kitaru secret getter.
 - **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), never the generated `docs/content/docs/cli/*` output.
