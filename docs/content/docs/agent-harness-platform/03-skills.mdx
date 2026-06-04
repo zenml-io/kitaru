@@ -105,6 +105,13 @@ Forks usually want one of:
 
 The `SkillSource` seam lives in `agent_harness_platform/profile.py`, with these alternatives spelled out in a comment right where you would add your own. Adding a source means writing a subclass with a `resolve(self) -> Path` method; the `skill` tool does not change. This is also the natural home for everything the tutorial leaves out. Review, change history, provenance, and version pinning all belong on the source, not in the agent.
 
+<Callout type="info">
+  Related: the [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
+  package provides reusable Markdown skills for coding agents, including Kitaru
+  quickstart, scoping, authoring, and adapter migration skills. See
+  [Agent Skills](/agent-native/claude-code-skill/) for install details.
+</Callout>
+
 ## Where this leaves us
 
 Stage 3 moved the agent's procedure out of code and into a file an operator can edit. Put the three stages together and the agent now survives a crash, runs its shell inside a container, and changes its behavior through a markdown edit instead of a redeploy.

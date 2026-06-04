@@ -49,6 +49,20 @@ Use the adapter that matches the framework object you are already calling:
 - Use **Gemini Interactions** when your code calls Gemini Interactions, including Antigravity managed-agent calls, and you want the response captured as replayable Kitaru output.
 - Use **LangGraph** when your agent runs as a LangGraph graph, or when you are using LangChain agents on top of LangGraph and want graph, model, and tool boundaries recorded.
 
+## Migrating existing agent code
+
+If you already have framework-specific agent code, the [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package includes migration skills that walk your coding agent through the conservative adapter path.
+
+In Claude Code, invoke the migration skill that matches your current framework:
+
+- `/kitaru:kitaru-pydantic-ai-migration`
+- `/kitaru:kitaru-openai-agents-migration`
+- `/kitaru:kitaru-langgraph-migration`
+- `/kitaru:kitaru-claude-agent-sdk-migration`
+- `/kitaru:kitaru-gemini-interactions-migration`
+
+For install instructions and the full skill list, see [Agent Skills](/agent-native/claude-code-skill/).
+
 ## What adapters do not promise
 
 Adapters do not magically checkpoint every action inside another framework. If the framework hides an internal model call, shell command, browser step, or tool call from Kitaru, Kitaru cannot replay that hidden step by itself later.

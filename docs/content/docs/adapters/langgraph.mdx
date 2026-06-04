@@ -113,6 +113,14 @@ kitaru login        # local server; add a URL to connect to a deployed one
 kitaru status
 ```
 
+<Callout type="info">
+  Migrating an existing LangGraph, LangChain agent, or Deep Agents-style project?
+  The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
+  package includes `/kitaru:kitaru-langgraph-migration` for choosing between the outer
+  `graph_call` boundary and middleware-backed `calls` checkpoints. See
+  [Agent Skills](/agent-native/claude-code-skill/).
+</Callout>
+
 ## Minimal `graph_call` flow pattern
 
 This pattern has no LLM and no interactive wait prompt. It just shows the default adapter shape.
