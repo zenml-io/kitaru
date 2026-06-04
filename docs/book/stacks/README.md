@@ -305,4 +305,4 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 - [Kubernetes](kubernetes-stacks.md)
 - [Containerization](../guides/containerization.md)
 - [Flows](../concepts/flows.md)
-- [CLI stack commands](../cli/stack.md)
+- [CLI stack commands](../cli/stack/README.md)

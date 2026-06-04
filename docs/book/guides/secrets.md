@@ -140,7 +140,7 @@ the CLI or Python SDK when you need to delete a secret.
 ## Related reference pages
 
 - [Secrets + Model Registration](secrets-and-model-registration.md)
-- [CLI secrets commands](../cli/secrets.md)
+- [CLI secrets commands](../cli/secrets/README.md)
 - [Python secrets reference](../reference/python/secrets.md)
 - [MCP Server](../agent-native/mcp-server.md)
 - [Tracked LLM calls](llm-calls.md)

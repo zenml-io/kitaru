@@ -86,5 +86,5 @@ kitaru log-store show
 ## Related reference pages
 
 - [View execution runtime logs](../guides/execution-logs.md)
-- [CLI log-store commands](../cli/log-store.md)
+- [CLI log-store commands](../cli/log-store/README.md)
 - [Python logging reference](../reference/python/logging.md)

@@ -254,7 +254,7 @@ For exact behavior and flags, see [`kitaru stack delete`](../cli/stack/delete.md
 
 When you need exact command syntax instead of the walkthrough, jump to:
 
-- [Stack command overview](../cli/stack.md)
+- [Stack command overview](../cli/stack/README.md)
 - [`kitaru stack create`](../cli/stack/create.md)
 - [`kitaru stack show`](../cli/stack/show.md)
 - [`kitaru stack use`](../cli/stack/use.md)
