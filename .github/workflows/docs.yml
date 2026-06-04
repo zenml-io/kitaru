@@ -76,6 +76,18 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy
+      - name: Deploy redirect worker
+        # The kitaru-site worker redirects kitaru.ai/docs/* to their new homes
+        # (docs.zenml.io/kitaru, sdkdocs.kitaru.ai). It has no build output, so
+        # redeploy it alongside the SDK site to keep the cutover in sync.
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
+          == 'workflow_dispatch'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          command: deploy --config wrangler.redirect.toml
       - name: Deploy preview docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository && env.HAS_CF_SECRETS == 'true'
