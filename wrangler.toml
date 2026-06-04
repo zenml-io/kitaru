@@ -1,13 +1,16 @@
 # Standalone Kitaru SDK + CLI reference site, served at sdkdocs.kitaru.ai
 # (mirrors zenml's sdkdocs.zenml.io). Static assets only — the FumaDocs app is
 # exported to docs/out and served at the domain root.
+#
+# The sdkdocs.kitaru.ai custom domain is bound to this worker once (Cloudflare
+# dashboard, or a one-off `wrangler deploy` with a routes config + a token that
+# has Workers Routes edit). It is intentionally NOT declared here: keeping it
+# out of the committed config means CI deploys (production + per-PR previews)
+# only push code/assets and never hit the workers/routes API — preview workers
+# get a *.workers.dev URL, and the custom domain stays bound to production.
 name = "kitaru-sdkdocs"
 compatibility_date = "2025-09-27"
 
 [assets]
 directory = "./docs/out"
 not_found_handling = "404-page"
-
-[[routes]]
-pattern = "sdkdocs.kitaru.ai"
-custom_domain = true
