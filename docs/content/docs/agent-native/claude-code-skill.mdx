@@ -1,82 +1,108 @@
 ---
 title: Agent Skills
-description: Install Kitaru's agent skills for quickstart, scoping, and authoring durable agent workflows
+description: Install the zenml-io/kitaru-skills package for Kitaru quickstarts, workflow authoring, and adapter migrations
 ---
 
-Kitaru provides three agent skills that teach coding agents how to discover,
-design, and build durable workflows with Kitaru.
+The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
+package contains eight reusable Markdown agent skills for discovering, designing,
+migrating, and building durable Kitaru workflows.
 
-## Available skills
+Think of the package as a field guide for your coding agent. The skills do not
+add a new runtime product to Kitaru. They are Markdown procedures that Claude
+Code and other skill-aware agent hosts can read so they know the current Kitaru
+patterns: where to put checkpoints, where waits are safe, which adapter boundary
+is honest, and which side effects need extra care.
 
-### Quickstart skill
+## Skill inventory
 
-The **kitaru-quickstart** skill gives you an interactive tour of Kitaru. It
-scaffolds a small demo flow and walks through the core ideas: crash recovery
-with replay, human-in-the-loop pauses with `wait()`, artifact capture, and
-optional MCP integration.
+### Core workflow skills
 
-**Use it when:**
-- You want to try Kitaru and see what it does before designing a real workflow
-- You want a five-minute tour of crash recovery, replay, waits, and artifacts
-- You want an agent to set up a small local demo for your own workflow shape
+Use these when you are learning Kitaru or designing new durable workflow code.
 
-### Scoping skill
+| Skill | Claude Code command | Use it for |
+|---|---|---|
+| `kitaru-quickstart` | `/kitaru-quickstart` | Interactive onboarding: scaffold a small demo flow, then walk through crash recovery, replay, `wait()`, artifacts, dashboard inspection, and optional MCP setup. |
+| `kitaru-scoping` | `/kitaru-scoping` | A structured interview that decides whether durable execution helps your workflow and produces a concrete `flow_architecture.md` plan. |
+| `kitaru-authoring` | `/kitaru-authoring` | Implementation help for `@flow`, `@checkpoint`, waits, artifacts, `kitaru.llm()`, `KitaruClient`, CLI/MCP operations, deployments, secrets, and adapter usage. |
 
-The **kitaru-scoping** skill helps you decide whether your agent workflow
-benefits from durable execution, then designs the flow architecture —
-checkpoint boundaries, wait points, replay anchors, artifact strategy, operator
-surface, and MVP scope.
+### Adapter migration skills
 
-It runs a structured interview and produces a `flow_architecture.md`
-specification that feeds directly into the authoring skill.
+Use these when you already have framework-specific agent code and want to add
+Kitaru without pretending Kitaru can replay hidden framework internals.
 
-**Use it when:**
-- You're starting a new agent project and aren't sure where durability adds value
-- You have a complex workflow and need help identifying checkpoint/wait boundaries
-- You want to validate that Kitaru is the right tool before writing code
-
-### Authoring skill
-
-The **kitaru-authoring** skill teaches coding agents how to write valid Kitaru flows,
-checkpoints, waits, logging, artifacts, `KitaruClient` usage, replay/resume/retry
-flows, deployments, secrets, CLI/MCP operations, and adapter usage patterns.
-
-**What it covers:**
-- `@flow` and `@checkpoint` roles
-- `kitaru.wait()` flow-level guardrails
-- `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`
-- `.submit()` / `.result()` checkpoint concurrency
-- PydanticAI adapter guidance with `kitaru.adapters.pydantic_ai.KitaruAgent(...)`
-- OpenAI Agents adapter guidance with `KitaruRunner`
-- LangGraph adapter guidance with `KitaruGraphRunner`
-- Claude Agent SDK adapter guidance with `KitaruClaudeRunner`
-- Common mistakes such as nested flows, non-serializable checkpoint outputs, and unsafe side effects
+| Skill | Claude Code command | Use it for |
+|---|---|---|
+| `kitaru-pydantic-ai-migration` | `/kitaru-pydantic-ai-migration` | Move existing PydanticAI code to `KitaruAgent`, choose `calls` vs `turn` boundaries, check human-in-the-loop safety, and produce a migration report. |
+| `kitaru-openai-agents-migration` | `/kitaru-openai-agents-migration` | Move OpenAI Agents SDK code to `KitaruRunner`, `OpenAIRunRequest`, and `OpenAIRunResult`; handle runner-call vs per-call checkpoints, approvals, resumes, and context serialization. |
+| `kitaru-langgraph-migration` | `/kitaru-langgraph-migration` | Move LangGraph, LangChain `create_agent(...)`, or Deep Agents-style code to `KitaruGraphRunner`; choose `graph_call` or middleware-backed `calls` boundaries. |
+| `kitaru-claude-agent-sdk-migration` | `/kitaru-claude-agent-sdk-migration` | Move Claude Agent SDK code to `KitaruClaudeRunner` with one invocation checkpoint and explicit caveats for Claude-owned tools, Bash, MCP, sessions, and workspace files. |
+| `kitaru-gemini-interactions-migration` | `/kitaru-gemini-interactions-migration` | Move Gemini Interactions, Google GenAI Interactions, or Antigravity managed-agent code to `KitaruGeminiInteractionsRunner`; handle stable responses, polling, `requires_action`, and Google-owned internals. |
 
 ## Recommended workflow
 
-1. **Quickstart first** — use `/kitaru-quickstart` to see what Kitaru does and
-   build intuition for crash recovery, replay, waits, and artifacts
-2. **Scope second** — use `/kitaru-scoping` to validate fit and define your flow
-   architecture before writing code
-3. **Author third** — use `/kitaru-authoring` to build the flows defined in
-   your `flow_architecture.md`
+For new Kitaru work:
 
-## Install from the marketplace
+1. **Quickstart first** — run `/kitaru-quickstart` to see the crash-and-replay
+   story before touching your own code.
+2. **Scope second** — run `/kitaru-scoping` to turn your workflow idea into
+   checkpoint boundaries, wait points, artifact names, and an MVP shape.
+3. **Author third** — run `/kitaru-authoring` against the scoped plan to write
+   the actual Kitaru flow code.
 
-The Kitaru skills are published as a Claude Code plugin. Add the marketplace
-and install with two commands:
+For existing framework code:
+
+1. **Pick the migration skill that matches the source framework.** For example,
+   use `/kitaru-langgraph-migration` for an existing LangGraph graph, not the
+   generic authoring skill first.
+2. **Let the skill classify the boundary.** The useful output is not just code;
+   it is a report that says which behavior maps directly to Kitaru, which needs
+   an approximate boundary, and which behavior stays owned by the framework.
+3. **Use `/kitaru-authoring` for follow-up Kitaru work.** After the adapter seam
+   is in place, authoring helps with extra checkpoints, waits, artifacts,
+   deployment commands, CLI/MCP inspection, and operational polish.
+
+## Install from the Claude Code marketplace
+
+Claude Code users can install the packaged skills from the Claude Code plugin
+marketplace:
 
 ```bash
 /plugin marketplace add zenml-io/kitaru-skills
 /plugin install kitaru@kitaru
 ```
 
-These are Markdown skill directories, so the same files can also be reused by
-other agent hosts that support local skill folders.
+For project/team installation, add the plugin to your project's
+`.claude/settings.json`:
 
-Once installed, Claude Code will automatically use the skills based on context.
-You can also invoke them explicitly with `/kitaru-quickstart`,
-`/kitaru-scoping`, or `/kitaru-authoring`.
+```json
+{
+  "plugins": {
+    "kitaru": {
+      "source": "zenml-io/kitaru-skills",
+      "name": "kitaru"
+    }
+  }
+}
+```
+
+Once installed, Claude Code can select skills automatically from context. You can
+also invoke them explicitly:
+
+```text
+/kitaru-quickstart
+/kitaru-scoping
+/kitaru-authoring
+/kitaru-pydantic-ai-migration
+/kitaru-openai-agents-migration
+/kitaru-langgraph-migration
+/kitaru-claude-agent-sdk-migration
+/kitaru-gemini-interactions-migration
+```
+
+These are Markdown skill directories, so the same source package can also be
+used by other agent hosts that support local skill folders or explicit
+context-loading workflows. Check your host's current skill-loading mechanism and
+copy the relevant directories from `skills/`.
 
 ## Manual installation
 
@@ -89,37 +115,50 @@ mkdir -p .claude/skills
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-quickstart" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-scoping" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-authoring" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-pydantic-ai-migration" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-openai-agents-migration" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-langgraph-migration" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-claude-agent-sdk-migration" .claude/skills/
+cp -R "$tmpdir/kitaru-skills/skills/kitaru-gemini-interactions-migration" .claude/skills/
 rm -rf "$tmpdir"
 ```
 
-Copying the full `kitaru-quickstart` directory is important because that skill
-includes reference files used during the guided demo.
+Copy each full skill directory, not just the top-level `SKILL.md`. Several skills
+include `references/` files that the agent reads during the guided workflow.
 
 ## Good prompts to pair with the skills
 
-**Quickstart:**
-- "I want to try Kitaru — show me what it does."
-- "Give me a five-minute tour of Kitaru's crash recovery."
-- "Set up a Kitaru demo for my data pipeline workflow."
-- "Walk me through Kitaru with MCP integration."
+### Quickstart
 
-**Scoping:**
-- "I want to build a research agent — is Kitaru right for this?"
-- "Help me figure out where to put checkpoints in my coding agent workflow."
-- "Should repo conventions be stored as explicit artifacts or outside the flow?"
-- "I have a complex agent with 10 steps — help me scope it down."
+- "Use `/kitaru-quickstart` and show me what Kitaru does with a tiny local demo."
+- "Give me a five-minute Kitaru tour that includes replay, waits, artifacts, and the dashboard."
+- "Set up a Kitaru demo shaped like my research workflow."
+- "Walk me through Kitaru with MCP integration, but keep the first run local."
 
-**Authoring:**
-- "Refactor this script into one `@flow` with explicit checkpoints."
-- "Add a flow-level `kitaru.wait()` approval gate before publish."
-- "Add explicit artifact saving to this flow."
-- "How do I inspect executions, waits, logs, and artifacts from the CLI or MCP?"
-- "Convert this PydanticAI agent to `KitaruAgent` and preserve replay safety."
-- "Use `KitaruRunner` for this OpenAI Agents workflow and choose the checkpoint strategy."
-- "Help me add Kitaru durability around a LangGraph graph."
-- "Make this Claude Agent SDK invocation durable without promising granular tool replay."
+### Scoping
+
+- "Use `/kitaru-scoping` to decide whether this customer-support agent needs durable execution."
+- "Help me find the right checkpoint and wait boundaries for this coding-agent workflow."
+- "Interview me and produce a `flow_architecture.md` for a durable research workflow."
+- "I have a ten-step agent. Help me cut it to the smallest useful Kitaru MVP."
+
+### Authoring
+
+- "Use `/kitaru-authoring` to refactor this script into one `@flow` with explicit checkpoints."
+- "Add a flow-level `kitaru.wait()` approval gate before publishing the final report."
+- "Add named `kitaru.save()` artifacts so I can inspect the plan, draft, and final output later."
+- "Show me how to inspect executions, waits, logs, and artifacts from the CLI and MCP tools."
+
+### Migration
+
+- "Use `/kitaru-pydantic-ai-migration` on this PydanticAI agent and tell me which tools are safe for per-call checkpoints."
+- "Use `/kitaru-openai-agents-migration` and choose between `calls` and `runner_call` for this OpenAI Agents workflow."
+- "Use `/kitaru-langgraph-migration` on this LangGraph graph and explain whether `graph_call` or middleware-backed `calls` is honest here."
+- "Use `/kitaru-claude-agent-sdk-migration` to make this Claude Agent SDK invocation durable without claiming granular tool replay."
+- "Use `/kitaru-gemini-interactions-migration` to wrap this Antigravity interaction and flag polling or `requires_action` risks."
 
 ## Related pages
 
-- [MCP Server](/agent-native/mcp-server)
-- [Execution management](/guides/execution-management)
+- [Adapters](/adapters/)
+- [MCP Server](/agent-native/mcp-server/)
+- [Execution management](/guides/execution-management/)

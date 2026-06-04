@@ -124,6 +124,15 @@ export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
 The Claude SDK also supports Bedrock and Vertex modes when their
 provider-specific environment is configured.
 
+<Callout type="info">
+  Migrating an existing Claude Agent SDK project? The
+  [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package
+  includes `/kitaru-claude-agent-sdk-migration` for wrapping one Claude
+  invocation checkpoint while keeping Claude-owned tools, Bash, MCP, sessions,
+  and workspace-file caveats explicit. See
+  [Agent Skills](/agent-native/claude-code-skill/).
+</Callout>
+
 ## Minimal flow
 
 This example keeps Claude's tools disabled so the first run is easy to reason
