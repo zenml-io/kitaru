@@ -30,16 +30,21 @@ import argparse
 import json
 import os
 import sys
+import threading
 from typing import Any, Literal
 
 from kitaru import flow
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.adapters.gemini import (
+    GEMINI_STREAM_EVENT_KINDS,
+    GEMINI_STREAM_TERMINAL_EVENT_KINDS,
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
     KitaruGeminiInteractionsRunner,
 )
+from kitaru.client import KitaruClient
+from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
@@ -252,6 +257,35 @@ def _json_block(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True, default=str)
 
 
+def _event_data(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _watch_gemini_stream(exec_id: str, stop_event: threading.Event) -> None:
+    print("\n=== live Gemini stream events ===")
+    try:
+        for event in KitaruClient().executions.events(
+            exec_id,
+            kinds=list(GEMINI_STREAM_EVENT_KINDS),
+        ):
+            if stop_event.is_set():
+                return
+            data = _event_data(event.payload)
+            display = data.get("display") or event.kind
+            category = data.get("category")
+            prefix = f"[{category}] " if isinstance(category, str) else ""
+            print(f"- {prefix}{display}")
+            text_delta = data.get("text_delta")
+            if isinstance(text_delta, str) and text_delta:
+                print(f"  text_delta: {text_delta}")
+            if event.kind in GEMINI_STREAM_TERMINAL_EVENT_KINDS:
+                return
+    except (KitaruBackendError, KitaruFeatureNotAvailableError) as error:
+        print("\nLive event watching is unavailable on this backend.")
+        print(f"The durable result will still be read with .wait(): {error}")
+
+
 def _print_result(result: GeminiInteractionResult) -> None:
     print("\n=== What happened ===")
     print("Kitaru records one stable Gemini interaction response as one checkpoint.")
@@ -386,7 +420,24 @@ def main(argv: list[str] | None = None) -> None:
     _guard_vertex_mode(args.mode)
     request = _build_request(args)
     handle = run_gemini_interaction.run(request, stream=bool(args.stream))
+    print(f"Submitted execution: {handle.exec_id}")
+
+    stop_watching = threading.Event()
+    watcher: threading.Thread | None = None
+    if args.stream:
+        watcher = threading.Thread(
+            target=_watch_gemini_stream,
+            args=(handle.exec_id, stop_watching),
+            daemon=True,
+        )
+        watcher.start()
+
     result = _coerce_result(handle.wait())
+    stop_watching.set()
+    if watcher is not None:
+        watcher.join(timeout=1.0)
+        if watcher.is_alive():
+            print("\nLive watcher is still open; showing the durable result now.")
     _print_result(result)
 
 
