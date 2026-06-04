@@ -31,6 +31,27 @@ uv run python openai_agents_adapter.py
 
 If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
+## Streaming example
+
+To watch OpenAI Agents stream updates while Kitaru saves the final durable
+result, run:
+
+```bash
+uv run python openai_agents_streaming.py
+```
+
+The streaming script also uses `gpt-5-nano` by default, with the same
+`OPENAI_AGENTS_MODEL` override. It submits a `checkpoint_strategy="runner_call"`
+flow, prints `openai_agents.stream.*` live events from
+`KitaruClient().executions.events(...)`, then prints the final saved
+`OpenAIRunResult` after `.wait()` finishes.
+
+If you want OpenAI tracing for the streaming example, opt in explicitly:
+
+```bash
+OPENAI_AGENTS_ENABLE_TRACING=1 uv run python openai_agents_streaming.py
+```
+
 ## What to look for in Kitaru UI
 
 By default this example uses `checkpoint_strategy="runner_call"` — Kitaru

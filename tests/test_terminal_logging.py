@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import logging
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -39,14 +40,28 @@ def _kitaru_handlers(root: logging.Logger) -> list[logging.Handler]:
     ]
 
 
+def _zenml_console_formatter_cls() -> type[Any]:
+    """Return ZenML's console formatter class across supported versions."""
+    import zenml.logger as zenml_logger
+
+    console_formatter_cls = getattr(zenml_logger, "ConsoleFormatter", None)
+    if console_formatter_cls is None:
+        return zenml_logger.ZenMLConsoleFormatter
+    return console_formatter_cls
+
+
+def _new_zenml_console_formatter() -> logging.Formatter:
+    """Create ZenML's console formatter across supported versions."""
+    return _zenml_console_formatter_cls()()
+
+
 def _console_handlers(root: logging.Logger) -> list[logging.Handler]:
     """Return root handlers using ZenML's console formatter."""
-    from zenml.logger import ZenMLConsoleFormatter
-
+    console_formatter_cls = _zenml_console_formatter_cls()
     return [
         handler
         for handler in root.handlers
-        if isinstance(getattr(handler, "formatter", None), ZenMLConsoleFormatter)
+        if isinstance(getattr(handler, "formatter", None), console_formatter_cls)
     ]
 
 
@@ -497,13 +512,13 @@ class TestHandlerSwap:
     """Handler installation logic."""
 
     def test_swap_replaces_console_handler_keeps_storage(self) -> None:
-        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         # Set up mock handlers like ZenML's init_logging() would
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ZenMLConsoleFormatter())
+        console_handler.setFormatter(_new_zenml_console_formatter())
         storage_handler = ZenMLLoggingHandler()
 
         root.handlers = [console_handler, storage_handler]
@@ -522,12 +537,12 @@ class TestHandlerSwap:
         assert storage_handlers[0] is storage_handler
 
     def test_swap_is_idempotent(self) -> None:
-        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ZenMLConsoleFormatter())
+        console_handler.setFormatter(_new_zenml_console_formatter())
         storage_handler = ZenMLLoggingHandler()
         root.handlers = [console_handler, storage_handler]
 
@@ -569,12 +584,12 @@ class TestHandlerSwap:
         assert storage_handler in root.handlers
 
     def test_reload_replaces_console_without_duplicating_kitaru(self) -> None:
-        from zenml.logger import ZenMLConsoleFormatter, ZenMLLoggingHandler
+        from zenml.logger import ZenMLLoggingHandler
 
         root = logging.getLogger()
 
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(ZenMLConsoleFormatter())
+        console_handler.setFormatter(_new_zenml_console_formatter())
         storage_handler = ZenMLLoggingHandler()
         old_kitaru_handler = terminal_logging._KitaruTerminalHandler()
         old_handler_class = old_kitaru_handler.__class__

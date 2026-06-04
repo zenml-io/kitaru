@@ -5,7 +5,7 @@ Each ``demo_*`` function exercises one feature of ``KitaruAgent`` using
 
 Run:
     uv sync --extra local --extra pydantic-ai
-    uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
+    uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 """
 
 import uuid

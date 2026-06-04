@@ -5,6 +5,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+LangGraphStreamMode = Literal[
+    "values",
+    "updates",
+    "messages",
+    "custom",
+    "checkpoints",
+    "tasks",
+    "debug",
+]
+
 
 class LangGraphInterruptSummary(BaseModel):
     """Serializable summary of one pending LangGraph interrupt."""

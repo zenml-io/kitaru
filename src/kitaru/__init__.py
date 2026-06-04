@@ -23,6 +23,7 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
+  ``kitaru.progress()``, ``kitaru.events.publish()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
   ``create_secret()``, ``delete_secret()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
@@ -31,7 +32,8 @@ Current status:
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and
   a typed Kitaru exception hierarchy with failure journaling
-  (`Execution.failure`, `CheckpointCall.attempts`).
+  (``Execution.failure``, ``CheckpointCall.attempts``) and live-event watching
+  (``KitaruClient.executions.events(...)``).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
@@ -58,7 +60,12 @@ _default_analytics_source = os.environ.get(
 )
 set_source(_default_analytics_source)
 
-from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._models import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionEvent,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -92,6 +99,7 @@ from kitaru.errors import (
     KitaruUserCodeError,
     KitaruWaitValidationError,
 )
+from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
@@ -105,11 +113,14 @@ from kitaru.secrets import (
 )
 from kitaru.wait import wait
 
+from . import events as events
+
 __all__ = [
     "AuthAPIKey",
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionEvent",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
@@ -141,12 +152,14 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "events",
     "flow",
     "get_secret",
     "list_stacks",
     "llm",
     "load",
     "log",
+    "progress",
     "save",
     "use_stack",
     "wait",

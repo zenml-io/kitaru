@@ -18,3 +18,4 @@ class ClaudeCapturePolicy(BaseModel):
     redact_options_manifest: bool = True
     fail_on_artifact_capture_error: bool = False
     fail_on_event_persistence_error: bool = False
+    include_stream_text_deltas: bool = False

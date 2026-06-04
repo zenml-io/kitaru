@@ -121,7 +121,7 @@ is persisted in runtime storage and may evolve in later releases.
 
 ```bash
 uv sync --extra local
-uv run examples/features/basic_flow/flow_with_artifacts.py
+uv run python examples/features/basic_flow/flow_with_artifacts.py
 uv run pytest tests/test_phase8_artifacts_example.py
 ```
 

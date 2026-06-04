@@ -12,7 +12,7 @@ One-time deploy (rerun after editing chatbot.py):
 Then:
     uv add --dev gradio
     export OPENAI_API_KEY=sk-...
-    uv run examples/chatbot/ui.py
+    uv run python examples/chatbot/ui.py
 """
 
 import sys

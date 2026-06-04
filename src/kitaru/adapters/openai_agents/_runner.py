@@ -1,8 +1,10 @@
 """Small bridge around OpenAI Agents SDK runner calls."""
 
 import asyncio
+from collections.abc import Callable
 from functools import lru_cache
 from importlib import metadata
+from inspect import isawaitable
 from typing import Any
 
 from kitaru.errors import KitaruUsageError
@@ -60,6 +62,63 @@ def run_openai_agent_sync(
         max_turns=max_turns,
         run_config=run_config,
         context=context,
+    )
+
+
+async def run_openai_agent_streamed(
+    *,
+    agent: Any,
+    input: Any,
+    max_turns: int,
+    run_config: Any,
+    context: Any | None = None,
+    on_event: Callable[[Any], Any] | None = None,
+) -> Any:
+    """Run an OpenAI agent through ``Runner.run_streamed(...)`` and drain it."""
+    from agents import Runner
+
+    result: Any = Runner.run_streamed(
+        agent,
+        input,
+        max_turns=max_turns,
+        run_config=run_config,
+        context=context,
+    )
+    if isawaitable(result):
+        result = await result
+
+    stream_events = result.stream_events
+    if on_event is None:
+        async for _event in stream_events():
+            pass
+        return result
+
+    async for event in stream_events():
+        callback_result = on_event(event)
+        if isawaitable(callback_result):
+            await callback_result
+    return result
+
+
+def run_openai_agent_streamed_sync(
+    *,
+    agent: Any,
+    input: Any,
+    max_turns: int,
+    run_config: Any,
+    context: Any | None = None,
+    on_event: Callable[[Any], Any] | None = None,
+) -> Any:
+    """Synchronous wrapper for ``run_openai_agent_streamed(...)``."""
+    return asyncio.run(
+        run_openai_agent_streamed(
+            agent=agent,
+            input=input,
+            max_turns=max_turns,
+            run_config=run_config,
+            context=context,
+            on_event=on_event,
+        )
     )
 
 

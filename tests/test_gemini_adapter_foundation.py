@@ -47,6 +47,10 @@ def test_public_import_surface_uses_interaction_vocabulary(
     assert gemini_adapter.GeminiInteractionStepSummary
     assert gemini_adapter.GeminiInteractionCapturePolicy
     assert gemini_adapter.GeminiInteractionRunEvent
+    assert gemini_adapter.GEMINI_STREAM_STARTED
+    assert gemini_adapter.GEMINI_STREAM_EVENT
+    assert gemini_adapter.GEMINI_STREAM_COMPLETED
+    assert gemini_adapter.GEMINI_STREAM_FAILED
 
     public_names = set(gemini_adapter.__all__)
     assert "calls" not in public_names
@@ -172,11 +176,14 @@ def test_installed_google_genai_interactions_contract(
         "timeout",
         "previous_interaction_id",
         "store",
+        "stream",
     }:
         assert field in create_signature.parameters
     assert "id" in get_signature.parameters
     assert "extra_body" in get_signature.parameters
     assert "timeout" in get_signature.parameters
+    assert "stream" in get_signature.parameters
+    assert "last_event_id" in get_signature.parameters
 
     function_call_fields = interaction_types.FunctionCallContent.__annotations__
     function_result_fields = interaction_types.FunctionResultContent.__annotations__
@@ -443,19 +450,30 @@ def test_antigravity_preset_is_preview_labeled(
     assert request.model is None
     assert request.environment == "remote"
     assert request.store is True
-    assert request.background is False
+    assert request.background is True
     assert request.metadata["adapter_preview"] is True
     assert request.metadata["agent_family"] == "antigravity"
 
 
-def test_antigravity_preset_rejects_background_mode(
+def test_antigravity_preset_defaults_to_background_mode(
     gemini_adapter: types.ModuleType,
 ) -> None:
-    with pytest.raises(ValueError, match="does not support background=True"):
-        gemini_adapter.GeminiInteractionRequest.antigravity(
-            "inspect this",
-            background=True,
-        )
+    request = gemini_adapter.GeminiInteractionRequest.antigravity("inspect this")
+
+    assert request.background is True
+    assert request.store is True
+
+
+def test_antigravity_preset_allows_foreground_override(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    request = gemini_adapter.GeminiInteractionRequest.antigravity(
+        "inspect this",
+        background=False,
+    )
+
+    assert request.background is False
+    assert request.store is True
 
 
 def test_gemini_request_rejects_checkpoint_handles(
@@ -564,6 +582,7 @@ def test_capture_policy_defaults_raw_provider_payloads_to_opt_in(
     assert policy.save_steps is False
     assert policy.save_output is True
     assert policy.save_usage is True
+    assert policy.include_stream_text_deltas is False
 
 
 def test_capture_policy_accepts_strict_capture_failure_knobs(

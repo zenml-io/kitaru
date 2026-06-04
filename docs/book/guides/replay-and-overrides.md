@@ -120,7 +120,7 @@ if latest.failure:
 
 ```bash
 uv sync --extra local
-uv run examples/features/replay/replay_with_overrides.py
+uv run python examples/features/replay/replay_with_overrides.py
 uv run pytest tests/test_phase16_replay_example.py
 ```
 

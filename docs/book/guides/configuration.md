@@ -399,7 +399,7 @@ a different image later, create a new deployment version.
 
 ```bash
 uv sync --extra local
-uv run examples/features/basic_flow/flow_with_configuration.py
+uv run python examples/features/basic_flow/flow_with_configuration.py
 uv run pytest tests/test_phase10_configuration_example.py
 ```
 

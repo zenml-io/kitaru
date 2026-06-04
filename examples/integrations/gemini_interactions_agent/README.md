@@ -14,6 +14,10 @@ flow body calls KitaruGeminiInteractionsRunner
   -> Gemini Interactions API runs once
   -> Kitaru stores GeminiInteractionResult
 flow continues
+
+If you pass `--stream`, the middle of that story gets a window: Kitaru publishes
+best-effort live stream events while Gemini works, then still stores the same
+final stable `GeminiInteractionResult`.
 ```
 
 For Antigravity, Google still owns the managed-agent sandbox and internal tool
@@ -69,7 +73,8 @@ use `--mode antigravity`. If you specifically want `--mode model`, you need an A
 key (Option A); raw model interactions are an AI Studio (Developer API) feature.
 The agent backend is only deployed to the `global` location, so set
 `GOOGLE_CLOUD_LOCATION=global`. The first agent call is slow while Google provisions
-a remote sandbox, so use `--timeout` to bound how long the provider call may run.
+a remote sandbox, so use `--timeout` to bound how long the background job and
+same-id observation/polling path may run.
 
 ## Check without credentials
 
@@ -84,6 +89,7 @@ execution:
 
 ```bash
 uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
+uv run python gemini_interactions_adapter.py --dry-run --stream
 ```
 
 ## Run a cheap model interaction
@@ -96,7 +102,12 @@ The default real path uses `gemini-3.5-flash`:
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode model
+uv run python gemini_interactions_adapter.py --mode model --stream
 ```
+
+`--mode model --stream` is the direct Gemini Developer API streaming route: the
+adapter calls `interactions.create(..., stream=True)` and reconstructs one stable
+result from the stream.
 
 Optional prompt override:
 
@@ -116,12 +127,42 @@ uv run python gemini_interactions_adapter.py --mode antigravity
 ```
 
 On ADC/Vertex, set `GOOGLE_CLOUD_LOCATION=global` first (the agent backend only
-runs there). Antigravity does not support `background=True`, so the example keeps
-the request synchronous and uses `--timeout` to bound the provider call while Google
-provisions the remote sandbox:
+runs there). Antigravity defaults to `background=True`: the adapter creates one
+background interaction, observes that same interaction id with streaming when the
+backend supports it, and falls back to polling that same id if the stream drops.
+Within that same live invocation, it does **not** start a duplicate provider job
+after the interaction id is known.
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode antigravity --timeout 300
+uv run python gemini_interactions_adapter.py --mode antigravity --stream --timeout 300
+```
+
+For this example, `--stream` shows clipped Gemini text chunks by default so you
+can confirm streaming from the terminal. `[text_delta]` lines include an indented
+`text_delta: ...` line with the actual chunk content.
+
+If you want event labels only, hide the chunks explicitly:
+
+```bash
+uv run python gemini_interactions_adapter.py \
+  --mode antigravity \
+  --stream \
+  --hide-text-deltas \
+  --timeout 300
+```
+
+This affects the example display only. In SDK code, live stream text deltas are
+still hidden by default unless you opt into
+`GeminiInteractionCapturePolicy(include_stream_text_deltas=True)`.
+
+If a preview endpoint explicitly rejects background mode, force foreground mode:
+
+```bash
+uv run python gemini_interactions_adapter.py \
+  --mode antigravity \
+  --foreground-antigravity \
+  --timeout 300
 ```
 
 The default Antigravity prompt asks for a high-level, non-destructive inspection
@@ -143,14 +184,23 @@ A good way to read the run is:
    output, usage, event log, and run summary. Raw input, raw interaction, and
    raw step artifacts are disabled by default unless you opt in.
 
+One local-orchestrator wrinkle: the script submits the flow first, then starts a
+watcher thread. On a very fast local run, some stream events may print only after
+the flow submission returns, or the final result may appear before you see many
+live lines. That is a display timing issue, not a second Gemini call. The durable
+adapter assertion is still: one interaction id is created, observed or polled,
+and saved as one stable `GeminiInteractionResult`.
+
 The script prints:
 
+- whether streaming was enabled
 - interaction status
 - interaction ID and previous interaction ID when reported
 - environment ID when Google reports one
 - output preview
 - step summaries from `interaction.steps`
 - usage when reported
+- stream metadata when `--stream` was used
 - Kitaru artifact names
 - warnings from best-effort capture or compatibility handling
 
@@ -163,11 +213,13 @@ state one by one.
 
 If a later part of your Kitaru flow fails, Kitaru can replay from the saved
 `GeminiInteractionResult` instead of calling Google again for that completed or
-`requires_action` interaction. If Gemini reports another status, Kitaru raises
-instead of saving that unfinished remote job as a successful checkpoint; poll the
-same interaction ID rather than starting a duplicate job. If a file or other
-output must be durable in your workflow, explicitly return it from Gemini or
-write it in a later Kitaru-owned checkpoint.
+`requires_action` interaction. On a checkpoint cache hit, Kitaru returns the
+saved final result; it should not be expected to replay fresh live stream events.
+If Gemini reports another status, Kitaru raises instead of saving that unfinished
+remote job as a successful checkpoint; poll the same interaction ID rather than
+starting a duplicate job. If a file or other output must be durable in your
+workflow, explicitly return it from Gemini or write it in a later Kitaru-owned
+checkpoint.
 
 For the concept walkthrough, see
 [Gemini Interactions Adapter](https://docs.zenml.io/kitaru/adapters/gemini-interactions/).

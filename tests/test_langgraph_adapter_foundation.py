@@ -36,6 +36,7 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.LangGraphCallCheckpointPolicy
     assert langgraph_adapter.LangGraphCapturePolicy
     assert langgraph_adapter.LangGraphDurabilityPolicy
+    assert langgraph_adapter.LangGraphStreamPolicy
     assert langgraph_adapter.build_resume_request
     assert langgraph_adapter.wait_for_interrupt
 
@@ -46,8 +47,9 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert "checkpoint_strategy" in signature.parameters
     assert "call_checkpoint_policy" in signature.parameters
     assert "durability_mode" not in signature.parameters
-    assert not hasattr(langgraph_adapter.KitaruGraphRunner, "stream")
-    assert not hasattr(langgraph_adapter.KitaruGraphRunner, "astream")
+    assert hasattr(langgraph_adapter.KitaruGraphRunner, "stream")
+    assert hasattr(langgraph_adapter.KitaruGraphRunner, "astream")
+    assert "stream_policy" in signature.parameters
 
 
 def test_synthetic_checkpoint_marks_flow_result_non_candidate(
