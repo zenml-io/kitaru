@@ -7,11 +7,13 @@ from kitaru.adapters._streaming_utils import BaseStreamPublisher, clip_stream_te
 
 from ._stream_shapes import (
     ARGUMENT_DELTA_TYPES,
+    CONTENT_START_EVENT_TYPE,
+    CONTENT_STOP_EVENT_TYPE,
+    DELTA_EVENT_TYPES,
     DONE_EVENT_TYPE,
     ERROR_EVENT_TYPE,
     INTERACTION_COMPLETED_EVENT_TYPES,
     MEDIA_DELTA_TYPES,
-    STEP_DELTA_EVENT_TYPE,
     STEP_START_EVENT_TYPE,
     STEP_STOP_EVENT_TYPE,
     TEXT_DELTA_TYPES,
@@ -22,7 +24,7 @@ from ._stream_shapes import (
     event_type,
     extract,
     interaction_from_event,
-    is_safe_output_text_source,
+    is_safe_stream_text_delta_source,
     normalized_delta_type,
     role_from_step,
     safe_event_identity,
@@ -50,6 +52,12 @@ GEMINI_STREAM_TERMINAL_EVENT_KINDS = (
 _MAX_DISPLAY_CHARS = 240
 _MAX_TEXT_DELTA_CHARS = 240
 _MAX_ERROR_CHARS = 500
+_LIFECYCLE_EVENT_METADATA = {
+    STEP_START_EVENT_TYPE: ("step_start", "Gemini step started"),
+    CONTENT_START_EVENT_TYPE: ("content_start", "Gemini content started"),
+    STEP_STOP_EVENT_TYPE: ("step_stop", "Gemini step stopped"),
+    CONTENT_STOP_EVENT_TYPE: ("content_stop", "Gemini content stopped"),
+}
 
 
 class GeminiStreamPublisher(BaseStreamPublisher):
@@ -124,22 +132,17 @@ class GeminiStreamPublisher(BaseStreamPublisher):
                 display="Gemini interaction completed",
                 event_type=kind,
             )
-        if kind == STEP_START_EVENT_TYPE:
+        lifecycle_metadata = _LIFECYCLE_EVENT_METADATA.get(kind)
+        if lifecycle_metadata is not None:
+            category, display = lifecycle_metadata
             return self._normalize_step_event(
                 event,
-                category="step_start",
-                display="Gemini step started",
+                category=category,
+                display=display,
                 event_type=kind,
             )
-        if kind == STEP_DELTA_EVENT_TYPE:
+        if kind in DELTA_EVENT_TYPES:
             return self._normalize_step_delta(event, event_type=kind)
-        if kind == STEP_STOP_EVENT_TYPE:
-            return self._normalize_step_event(
-                event,
-                category="step_stop",
-                display="Gemini step stopped",
-                event_type=kind,
-            )
         if kind == ERROR_EVENT_TYPE:
             return self._base_payload(
                 category="error",
@@ -246,7 +249,11 @@ class GeminiStreamPublisher(BaseStreamPublisher):
             include_text = (
                 self._include_text_deltas
                 and text_delta is not None
-                and self._step_allows_text_delta(step_snapshot)
+                and is_safe_stream_text_delta_source(
+                    event_type_value=event_type,
+                    role=step_snapshot.get("role"),
+                    step_type=step_snapshot.get("type"),
+                )
             )
             payload = self._base_payload(
                 category="text_delta",
@@ -337,13 +344,6 @@ class GeminiStreamPublisher(BaseStreamPublisher):
         if step_type is not None:
             snapshot["type"] = step_type
         return snapshot
-
-    @staticmethod
-    def _step_allows_text_delta(step: dict[str, str]) -> bool:
-        return is_safe_output_text_source(
-            role=step.get("role"),
-            step_type=step.get("type"),
-        )
 
     def _base_payload(
         self, *, category: str, display: str, **fields: Any

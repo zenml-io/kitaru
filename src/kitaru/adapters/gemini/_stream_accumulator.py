@@ -8,13 +8,14 @@ from kitaru.errors import KitaruRuntimeError
 from ._stream_shapes import (
     _STREAM_RECONSTRUCTION_POLICY,
     ARGUMENT_DELTA_TYPES,
+    CONTENT_DELTA_EVENT_TYPE,
+    DELTA_EVENT_TYPES,
     ERROR_EVENT_TYPE,
     INTERACTION_COMPLETED_EVENT_TYPES,
     INTERACTION_EVENT_TYPES,
     MEDIA_DELTA_TYPES,
-    STEP_DELTA_EVENT_TYPE,
-    STEP_START_EVENT_TYPE,
-    STEP_STOP_EVENT_TYPE,
+    START_EVENT_TYPES,
+    STOP_EVENT_TYPES,
     TEXT_DELTA_TYPES,
     THOUGHT_DELTA_TYPES,
     coerce_string,
@@ -188,13 +189,13 @@ class _StreamAccumulator:
                 if terminal_status is None:
                     self.status = "completed"
             return
-        if kind == STEP_START_EVENT_TYPE:
+        if kind in START_EVENT_TYPES:
             self._step_for_event(event).update_from_step(step_from_event(event))
             return
-        if kind == STEP_DELTA_EVENT_TYPE:
-            self._record_step_delta(event)
+        if kind in DELTA_EVENT_TYPES:
+            self._record_step_delta(event, kind=kind)
             return
-        if kind == STEP_STOP_EVENT_TYPE:
+        if kind in STOP_EVENT_TYPES:
             step = self._step_for_event(event)
             step.update_from_step(step_from_event(event))
             step.status = step.status or "completed"
@@ -264,12 +265,14 @@ class _StreamAccumulator:
         if usage is not None:
             self.usage = usage
 
-    def _record_step_delta(self, event: Any) -> None:
+    def _record_step_delta(self, event: Any, *, kind: str) -> None:
         step = self._step_for_event(event)
         step.update_from_step(step_from_event(event))
         delta = delta_from_event(event)
         normalized_type = normalized_delta_type(event, delta)
         if normalized_type in TEXT_DELTA_TYPES:
+            if kind == CONTENT_DELTA_EVENT_TYPE and step.type in (None, "text"):
+                step.type = "output_text"
             text = delta_text(delta)
             if text is not None:
                 accepted = step.append_text(

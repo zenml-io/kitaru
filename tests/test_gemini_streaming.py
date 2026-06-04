@@ -143,6 +143,38 @@ def _final_payload_only_stream() -> list[Any]:
     ]
 
 
+def _content_delta_stream() -> list[Any]:
+    return [
+        _event(
+            "interaction.created",
+            interaction=SimpleNamespace(id="interaction-content", status="in_progress"),
+        ),
+        SimpleNamespace(
+            event_type="content.start",
+            event_id="evt-content-1",
+            index=0,
+            content=SimpleNamespace(type="text", text=""),
+        ),
+        SimpleNamespace(
+            event_type="content.delta",
+            event_id="evt-content-2",
+            index=0,
+            delta=SimpleNamespace(type="text", text="hello "),
+        ),
+        SimpleNamespace(
+            event_type="content.delta",
+            event_id="evt-content-3",
+            index=0,
+            delta=SimpleNamespace(type="text", text="world"),
+        ),
+        SimpleNamespace(event_type="content.stop", event_id="evt-content-4", index=0),
+        _event(
+            "interaction.complete",
+            interaction=SimpleNamespace(id="interaction-content", status="completed"),
+        ),
+    ]
+
+
 def _unsafe_tool_text_stream() -> list[Any]:
     return [
         _event(
@@ -371,6 +403,35 @@ def test_publisher_hides_text_deltas_by_default(
     assert "secret output" not in repr(payload)
 
 
+def test_publisher_handles_content_delta_text_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = _collect_live_events(monkeypatch)
+    streaming = importlib.import_module("kitaru.adapters.gemini._streaming")
+    publisher = streaming.GeminiStreamPublisher(
+        runner_name="gemini",
+        surface="run_stream",
+        include_text_deltas=True,
+    )
+
+    publisher.event(
+        SimpleNamespace(
+            event_type="content.delta",
+            event_id="evt-content-1",
+            index=0,
+            delta=SimpleNamespace(type="text", text="hello world"),
+        )
+    )
+
+    payload = events[-1][1]
+    assert payload["category"] == "text_delta"
+    assert payload["event_type"] == "content.delta"
+    assert payload["event_id"] == "evt-content-1"
+    assert payload["step_index"] == 0
+    assert payload["display"] == "hello world"
+    assert payload["text_delta"] == "hello world"
+
+
 def test_publisher_can_opt_into_clipped_text_deltas(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -531,6 +592,34 @@ def test_stream_bridge_create_drains_callback_and_accumulates_completed_result(
     assert result.stream_metadata is not None
     assert result.stream_metadata["event_count"] == 7
     assert result.stream_metadata["last_event_id"] == "evt-7"
+
+
+def test_stream_bridge_accumulates_content_delta_events(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient([_content_delta_stream()])
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.interaction_id == "interaction-content"
+    assert result.output_text == "hello world"
+    assert result.raw_steps == [
+        {"type": "output_text", "status": "completed", "text": "hello world"}
+    ]
+    assert result.stream_metadata is not None
+    assert result.stream_metadata["counts_by_event_type"]["content.delta"] == 2
 
 
 def test_stream_bridge_uses_final_completed_payload_when_deltas_are_empty(

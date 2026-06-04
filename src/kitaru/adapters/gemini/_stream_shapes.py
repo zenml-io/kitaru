@@ -21,6 +21,12 @@ INTERACTION_COMPLETED_EVENT_TYPES = frozenset(
 STEP_START_EVENT_TYPE = "step.start"
 STEP_DELTA_EVENT_TYPE = "step.delta"
 STEP_STOP_EVENT_TYPE = "step.stop"
+CONTENT_START_EVENT_TYPE = "content.start"
+CONTENT_DELTA_EVENT_TYPE = "content.delta"
+CONTENT_STOP_EVENT_TYPE = "content.stop"
+START_EVENT_TYPES = frozenset({STEP_START_EVENT_TYPE, CONTENT_START_EVENT_TYPE})
+DELTA_EVENT_TYPES = frozenset({STEP_DELTA_EVENT_TYPE, CONTENT_DELTA_EVENT_TYPE})
+STOP_EVENT_TYPES = frozenset({STEP_STOP_EVENT_TYPE, CONTENT_STOP_EVENT_TYPE})
 ERROR_EVENT_TYPE = "error"
 DONE_EVENT_TYPE = "done"
 DEFAULT_DELTA_TYPE = "delta"
@@ -129,8 +135,8 @@ def interaction_from_event(event: Any) -> Any:
 
 
 def step_from_event(event: Any) -> Any:
-    """Return the nested step payload when a stream event carries one."""
-    for key in ("step", "data"):
+    """Return the nested step/content payload when a stream event carries one."""
+    for key in ("step", "content", "data"):
         value = extract(event, key)
         if value is not None:
             return value
@@ -279,3 +285,15 @@ def is_safe_output_text_source(
         role=role,
         step_type=step_type,
     )
+
+
+def is_safe_stream_text_delta_source(
+    *,
+    event_type_value: str,
+    role: str | None,
+    step_type: str | None,
+) -> bool:
+    """Return whether a text delta may be surfaced as output text."""
+    if event_type_value == CONTENT_DELTA_EVENT_TYPE:
+        return True
+    return is_safe_output_text_source(role=role, step_type=step_type)
