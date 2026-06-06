@@ -180,6 +180,24 @@ def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
     return ", ".join(entries)
 
 
+def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
+    """Render a compact LLM usage summary for execution details."""
+    if not summary:
+        return "none"
+    call_count = summary.get("call_count", 0)
+    incurred = summary.get("incurred_call_count", 0)
+    reused = summary.get("reused_call_count", 0)
+    total_tokens = summary.get("total_tokens", 0)
+    display_cost = summary.get("display_cost_usd", 0.0)
+    actual_cost = summary.get("actual_cost_usd", 0.0)
+    estimated_cost = summary.get("estimated_cost_usd", 0.0)
+    return (
+        f"{call_count} calls ({incurred} incurred, {reused} reused), "
+        f"{total_tokens} tokens, display cost ${float(display_cost):.6f} "
+        f"(actual ${float(actual_cost):.6f}, estimated ${float(estimated_cost):.6f})"
+    )
+
+
 def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
     """Build label/value rows for execution details output."""
     pending_wait_name = "none"
@@ -203,6 +221,7 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
         ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
+        ("LLM usage", _format_llm_usage_summary(execution.llm_usage_summary)),
     ]
 
 

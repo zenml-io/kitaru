@@ -5,6 +5,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from typing import Any, cast
 
+from kitaru._llm_usage import build_usage_record, log_usage_record
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -694,7 +695,31 @@ class KitaruRunner:
             updates["estimated_cost_usd"] = self._cost_calculator(
                 OpenAIUsageSummary.model_validate(result.usage)
             )
-        return result.model_copy(update=updates)
+        finalized = result.model_copy(update=updates)
+        if finalized.usage is not None:
+            usage_summary = OpenAIUsageSummary.model_validate(finalized.usage)
+            usage_record = build_usage_record(
+                adapter="openai_agents",
+                surface="runner_call",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=finalized.usage,
+                model=usage_summary.model_name,
+                estimated_cost_usd=finalized.estimated_cost_usd,
+                cost_source=(
+                    "calculator" if finalized.estimated_cost_usd is not None else "none"
+                ),
+                cost_source_label="openai_agents.cost_calculator",
+                status=finalized.status,
+                billing_effect="incurred"
+                if finalized.status == "completed"
+                else "unknown",
+                cache_status="executed",
+                warnings=finalized.warnings,
+            )
+            log_usage_record(usage_record)
+        return finalized
 
     def _runner_call_checkpoint_config(self) -> CheckpointConfig:
         return {

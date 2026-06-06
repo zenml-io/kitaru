@@ -158,6 +158,10 @@ def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:
         "ended_at": to_jsonable(attempt.ended_at, fallback_repr=True),
         "metadata": to_jsonable(attempt.metadata, fallback_repr=True),
         "failure": serialize_failure(attempt.failure),
+        "llm_usage_records": to_jsonable(
+            attempt.llm_usage_records,
+            fallback_repr=True,
+        ),
     }
 
 
@@ -180,6 +184,10 @@ def serialize_checkpoint_call(checkpoint: CheckpointCall) -> dict[str, Any]:
         "artifacts": [
             serialize_artifact_ref(artifact) for artifact in checkpoint.artifacts
         ],
+        "llm_usage_records": to_jsonable(
+            checkpoint.llm_usage_records,
+            fallback_repr=True,
+        ),
     }
 
 
@@ -199,6 +207,10 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "metadata": to_jsonable(execution.metadata, fallback_repr=True),
         "checkpoint_count": len(execution.checkpoints),
         "artifact_count": len(execution.artifacts),
+        "llm_usage_summary": to_jsonable(
+            execution.llm_usage_summary,
+            fallback_repr=True,
+        ),
     }
 
 

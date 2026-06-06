@@ -7,6 +7,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from kitaru._llm_usage import (
+    LLM_USAGE_SUMMARY_METADATA_KEY,
+    parse_usage_summary,
+    usage_records_from_metadata,
+)
 from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin, KitaruUsageError
 
@@ -382,6 +387,14 @@ class CheckpointAttempt:
     metadata: dict[str, Any]
     failure: FailureInfo | None
 
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records persisted on this attempt."""
+        return usage_records_from_metadata(
+            self.metadata,
+            source_attempt_id=self.attempt_id,
+        )
+
 
 @dataclass(frozen=True)
 class ArtifactRef:
@@ -423,6 +436,16 @@ class CheckpointCall:
     artifacts: list[ArtifactRef]
     checkpoint_type: str | None = None
 
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records persisted on this checkpoint."""
+        records: list[dict[str, Any]] = []
+        for attempt in self.attempts:
+            records.extend(attempt.llm_usage_records)
+        if records:
+            return records
+        return usage_records_from_metadata(self.metadata)
+
 
 @dataclass(frozen=True)
 class Execution:
@@ -444,6 +467,19 @@ class Execution:
     checkpoints: list[CheckpointCall]
     artifacts: list[ArtifactRef]
     _client: KitaruClient = field(repr=False, compare=False)
+
+    @property
+    def llm_usage_summary(self) -> dict[str, Any] | None:
+        """Execution-level LLM usage summary, when terminal aggregation ran."""
+        return parse_usage_summary(self.metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records from all checkpoint attempts."""
+        records: list[dict[str, Any]] = []
+        for checkpoint in self.checkpoints:
+            records.extend(checkpoint.llm_usage_records)
+        return records
 
     def refresh(self) -> Execution:
         """Fetch the latest execution state."""

@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection, register_model_alias
 from kitaru.errors import (
@@ -377,6 +378,13 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert logged_payload["total_tokens"] == 30
     # cost_usd should be absent (not provided by direct SDK calls)
     assert "cost_usd" not in logged_payload
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    usage_record = usage_records["summary_call"]
+    assert usage_record["adapter"] == "kitaru.llm"
+    assert usage_record["usage"]["input_tokens"] == 10
+    assert usage_record["usage"]["output_tokens"] == 20
+    assert usage_record["usage"]["total_tokens"] == 30
+    assert usage_record["cost"]["source"] == "none"
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +445,12 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     assert logged_payload["tokens_output"] == 15
     assert logged_payload["total_tokens"] == 20
     assert "cost_usd" not in logged_payload
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    usage_record = usage_records["translate_call"]
+    assert usage_record["provider"] == "anthropic"
+    assert usage_record["usage"]["input_tokens"] == 5
+    assert usage_record["usage"]["output_tokens"] == 15
+    assert usage_record["cost"]["source"] == "none"
 
 
 # ---------------------------------------------------------------------------

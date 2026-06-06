@@ -7,6 +7,7 @@ from functools import lru_cache
 from importlib import metadata
 from typing import Any, cast
 
+from kitaru._llm_usage import build_usage_record, log_usage_record
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -699,6 +700,25 @@ class KitaruGraphRunner:
             if self._cost_calculator is not None and usage is not None
             else None
         )
+        usage_record = None
+        if usage is not None:
+            usage_record = build_usage_record(
+                adapter="langgraph",
+                surface="graph_call",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=usage.model_dump(mode="json"),
+                model=usage.model_name,
+                estimated_cost_usd=estimated_cost,
+                cost_source="calculator" if estimated_cost is not None else "none",
+                cost_source_label="langgraph.cost_calculator",
+                status=status,
+                billing_effect="incurred" if status == "completed" else "unknown",
+                cache_status="executed",
+                warnings=warnings,
+            )
+            log_usage_record(usage_record)
         result = LangGraphRunResult(
             status=status,
             output=None if status == "interrupted" else output,

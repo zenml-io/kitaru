@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from kitaru._llm_usage import build_usage_record, log_usage_record
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -481,6 +482,23 @@ class KitaruClaudeRunner:
         ]
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
+        usage_record = build_usage_record(
+            adapter="claude_agent_sdk",
+            surface="agent_invocation",
+            call_name=self._name,
+            event_id=tracker.run_label,
+            record_id=tracker.run_label,
+            usage=payload.usage,
+            actual_cost_usd=payload.cost_usd,
+            cost_source="provider_reported" if payload.cost_usd is not None else "none",
+            cost_source_label="claude_agent_sdk.total_cost_usd",
+            latency_ms=payload.duration_api_ms or payload.duration_ms,
+            status="completed",
+            billing_effect="incurred",
+            cache_status="executed",
+            warnings=warnings,
+        )
+        log_usage_record(usage_record)
         if self._capture.emit_events:
             tracker.record_invocation(
                 status="completed",

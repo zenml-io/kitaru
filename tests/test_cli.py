@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -101,6 +102,7 @@ def _execution_stub(
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
     checkpoints: list[SimpleNamespace] | None = None,
+    llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
@@ -119,6 +121,7 @@ def _execution_stub(
         frozen_execution_spec=None,
         original_exec_id=None,
         checkpoints=checkpoints or [],
+        llm_usage_summary=llm_usage_summary,
     )
 
 
@@ -2274,6 +2277,15 @@ def test_executions_get_renders_execution_details(
             SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
             SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
         ],
+        llm_usage_summary={
+            "call_count": 2,
+            "incurred_call_count": 1,
+            "reused_call_count": 1,
+            "total_tokens": 42,
+            "display_cost_usd": 0.125,
+            "actual_cost_usd": 0.1,
+            "estimated_cost_usd": 0.025,
+        },
     )
     fake_client = Mock()
     fake_client.executions.get.return_value = execution
@@ -2294,6 +2306,7 @@ def test_executions_get_renders_execution_details(
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
+    assert "LLM usage: 2 calls (1 incurred, 1 reused), 42 tokens" in output
 
 
 def test_executions_list_applies_filters(

@@ -485,6 +485,7 @@ def test_serialize_checkpoint_attempt_contract() -> None:
             "traceback": "Traceback...\nValueError: boom",
             "origin": "user_code",
         },
+        "llm_usage_records": [],
     }
 
 
@@ -520,6 +521,7 @@ def test_serialize_checkpoint_call_contract() -> None:
                     "traceback": "Traceback...\nValueError: boom",
                     "origin": "user_code",
                 },
+                "llm_usage_records": [],
             }
         ],
         "artifacts": [
@@ -532,6 +534,7 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "metadata": {"source": "notes"},
             }
         ],
+        "llm_usage_records": [],
     }
 
 
@@ -595,6 +598,7 @@ def test_serialize_execution_summary_contract() -> None:
         "metadata": {"owner": "alice"},
         "checkpoint_count": 1,
         "artifact_count": 1,
+        "llm_usage_summary": None,
     }
 
 
@@ -615,6 +619,7 @@ def test_serialize_execution_contract() -> None:
         "metadata",
         "checkpoint_count",
         "artifact_count",
+        "llm_usage_summary",
         "frozen_execution_spec",
         "original_exec_id",
         "checkpoints",
