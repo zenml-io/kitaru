@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -19,6 +19,9 @@ from kitaru._client._models import (
     ExecutionStatisticsDimension,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
 )
@@ -33,7 +36,7 @@ if TYPE_CHECKING:
 
 JsonScalar = str | int | float | bool | None
 GroupMergeKey = tuple[tuple[str, JsonScalar], ...]
-GroupEntry = tuple[dict[str, Any], int]
+GroupEntry = tuple[dict[str, Any], int, dict[str, float | None]]
 
 
 @dataclass(frozen=True)
@@ -41,10 +44,14 @@ class _ZenMLStatisticsModels:
     """Lazily imported ZenML statistics model classes."""
 
     metadata_grouping: Any
+    metadata_metric: Any
     pipeline_run_filter: Any
     run_statistics_request: Any
     simple_grouping: Any
+    simple_metric: Any
+    statistics_aggregation: Any
     statistics_grouping_type: Any
+    statistics_metric_source: Any
     statistics_time_granularity: Any
     time_grouping: Any
 
@@ -56,15 +63,152 @@ class _RunStatisticsRequestParts:
     request: Any
     groupings: list[ExecutionStatisticsGrouping]
     backend_groupings: list[ExecutionStatisticsGrouping]
+    metrics: list[ExecutionStatisticsMetric]
     max_groups: int
     public_status_filter: ExecutionStatus | None
     status_grouping_name: str | None
 
 
+@dataclass
+class _StatisticsGroupAccumulator:
+    """Incrementally build one public statistics group from backend groups."""
+
+    keys: dict[str, JsonScalar]
+    metrics_by_name: Mapping[str, ExecutionStatisticsMetric]
+    execution_count: int = 0
+    metrics: dict[str, float | None] = field(default_factory=dict)
+    metric_weights: dict[str, int] = field(default_factory=dict)
+    ambiguous_metadata_avg_metrics: set[str] = field(default_factory=set)
+
+    def add_backend_group(
+        self,
+        *,
+        run_count: int,
+        metrics: Mapping[str, float | None],
+    ) -> None:
+        """Merge one backend statistics group into this public group."""
+        previous_count = self.execution_count
+        self.execution_count += run_count
+        for metric_name, value in metrics.items():
+            self._add_metric_value(
+                metric_name=metric_name,
+                value=value,
+                run_count=run_count,
+                previous_count=previous_count,
+            )
+
+    def to_public_group(self) -> ExecutionStatisticsGroup:
+        """Return the public DTO for this accumulated group."""
+        return ExecutionStatisticsGroup(
+            keys=self.keys,
+            execution_count=self.execution_count,
+            metrics=self.metrics,
+        )
+
+    def _add_metric_value(
+        self,
+        *,
+        metric_name: str,
+        value: float | None,
+        run_count: int,
+        previous_count: int,
+    ) -> None:
+        """Merge one metric value, preserving safe semantics for each aggregation."""
+        if value is None:
+            self.metrics.setdefault(metric_name, None)
+            return
+
+        metric = self.metrics_by_name.get(metric_name)
+        aggregation = (
+            ExecutionStatisticsMetricAggregation(metric.aggregation)
+            if metric is not None
+            else ExecutionStatisticsMetricAggregation.SUM
+        )
+        metric_source = (
+            ExecutionStatisticsMetricSource(metric.source)
+            if metric is not None
+            else None
+        )
+        if metric_name in self.ambiguous_metadata_avg_metrics:
+            self.metrics[metric_name] = None
+            return
+
+        current_value = self.metrics.get(metric_name)
+        if (
+            aggregation is ExecutionStatisticsMetricAggregation.AVG
+            and metric_source is ExecutionStatisticsMetricSource.METADATA
+            and current_value is not None
+        ):
+            self.metrics[metric_name] = None
+            self.ambiguous_metadata_avg_metrics.add(metric_name)
+            return
+
+        self.metrics[metric_name] = self._merge_metric_value(
+            metric_name=metric_name,
+            current_value=current_value,
+            new_value=float(value),
+            aggregation=aggregation,
+            run_count=run_count,
+        )
+        self._update_metric_weight(
+            metric_name=metric_name,
+            aggregation=aggregation,
+            run_count=run_count,
+            previous_count=previous_count,
+        )
+
+    def _merge_metric_value(
+        self,
+        *,
+        metric_name: str,
+        current_value: float | None,
+        new_value: float,
+        aggregation: ExecutionStatisticsMetricAggregation,
+        run_count: int,
+    ) -> float:
+        """Return the merged metric value for one aggregation operator."""
+        if current_value is None:
+            return new_value
+        if aggregation is ExecutionStatisticsMetricAggregation.SUM:
+            return current_value + new_value
+        if aggregation is ExecutionStatisticsMetricAggregation.MIN:
+            return min(current_value, new_value)
+        if aggregation is ExecutionStatisticsMetricAggregation.MAX:
+            return max(current_value, new_value)
+        if aggregation is ExecutionStatisticsMetricAggregation.AVG:
+            current_weight = self.metric_weights.get(metric_name, 0)
+            total_weight = current_weight + run_count
+            if total_weight <= 0:
+                return new_value
+            return ((current_value * current_weight) + (new_value * run_count)) / (
+                total_weight
+            )
+
+        raise KitaruUsageError(
+            f"Unsupported execution statistics metric aggregation: {aggregation!r}."
+        )
+
+    def _update_metric_weight(
+        self,
+        *,
+        metric_name: str,
+        aggregation: ExecutionStatisticsMetricAggregation,
+        run_count: int,
+        previous_count: int,
+    ) -> None:
+        """Track denominator information needed for later average merges."""
+        if aggregation is ExecutionStatisticsMetricAggregation.AVG:
+            self.metric_weights[metric_name] = (
+                self.metric_weights.get(metric_name, 0) + run_count
+            )
+        else:
+            self.metric_weights[metric_name] = previous_count + run_count
+
+
 def _statistics_model_import_error(exc: Exception) -> KitaruFeatureNotAvailableError:
     """Build a clear error when the active ZenML lacks statistics support."""
     return KitaruFeatureNotAvailableError(
-        "Execution statistics require ZenML 0.94.5 or newer on the active "
+        "Execution statistics require ZenML 0.94.6 or newer on the active "
         "Kitaru runtime. Upgrade the client/server environment and retry."
     )
 
@@ -74,9 +218,13 @@ def _load_zenml_statistics_models() -> _ZenMLStatisticsModels:
     try:
         from zenml.models import (  # type: ignore[attr-defined]
             MetadataGrouping,
+            MetadataMetric,
             RunStatisticsRequest,
             SimpleGrouping,
+            SimpleMetric,
+            StatisticsAggregation,
             StatisticsGroupingType,
+            StatisticsMetricSource,
             StatisticsTimeGranularity,
             TimeGrouping,
         )
@@ -86,10 +234,14 @@ def _load_zenml_statistics_models() -> _ZenMLStatisticsModels:
 
     return _ZenMLStatisticsModels(
         metadata_grouping=MetadataGrouping,
+        metadata_metric=MetadataMetric,
         pipeline_run_filter=PipelineRunFilter,
         run_statistics_request=RunStatisticsRequest,
         simple_grouping=SimpleGrouping,
+        simple_metric=SimpleMetric,
+        statistics_aggregation=StatisticsAggregation,
         statistics_grouping_type=StatisticsGroupingType,
+        statistics_metric_source=StatisticsMetricSource,
         statistics_time_granularity=StatisticsTimeGranularity,
         time_grouping=TimeGrouping,
     )
@@ -136,6 +288,24 @@ def coerce_execution_statistics_grouping(
     )
 
 
+def _validate_unique_names(
+    names: Iterable[str],
+    *,
+    description: str,
+) -> None:
+    """Reject duplicate public output names in linear time."""
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for name in names:
+        if name in seen:
+            duplicates.add(name)
+        else:
+            seen.add(name)
+    if duplicates:
+        joined = ", ".join(repr(name) for name in sorted(duplicates))
+        raise KitaruUsageError(f"Duplicate {description} are not allowed: {joined}.")
+
+
 def normalize_execution_statistics_groupings(
     group_by: Sequence[ExecutionStatisticsGrouping | str],
 ) -> list[ExecutionStatisticsGrouping]:
@@ -143,14 +313,10 @@ def normalize_execution_statistics_groupings(
     groupings = [
         coerce_execution_statistics_grouping(grouping) for grouping in group_by
     ]
-    names = [grouping.name for grouping in groupings]
-    duplicate_names = sorted({name for name in names if names.count(name) > 1})
-    if duplicate_names:
-        joined = ", ".join(repr(name) for name in duplicate_names)
-        raise KitaruUsageError(
-            "Duplicate execution statistics grouping output names are not "
-            f"allowed: {joined}."
-        )
+    _validate_unique_names(
+        (grouping.name for grouping in groupings if grouping.name is not None),
+        description="execution statistics grouping output names",
+    )
 
     time_grouping_count = sum(
         1
@@ -161,6 +327,62 @@ def normalize_execution_statistics_groupings(
         raise KitaruUsageError("At most one time statistics grouping is allowed.")
 
     return groupings
+
+
+def coerce_execution_statistics_metric(
+    metric: ExecutionStatisticsMetric | Mapping[str, Any] | str,
+) -> ExecutionStatisticsMetric:
+    """Normalize one public metric object, mapping, or CLI string shorthand."""
+    if isinstance(metric, ExecutionStatisticsMetric):
+        return metric
+    if isinstance(metric, Mapping):
+        return ExecutionStatisticsMetric(**dict(metric))
+    if not isinstance(metric, str):
+        raise KitaruUsageError(
+            "Execution statistics metrics must be strings, mappings, or "
+            "ExecutionStatisticsMetric objects."
+        )
+
+    token = metric.strip()
+    if not token:
+        raise KitaruUsageError("Execution statistics metric tokens cannot be empty.")
+
+    parts = [part.strip() for part in token.split(":")]
+    if len(parts) == 3:
+        name, source, aggregation = parts
+        return ExecutionStatisticsMetric(
+            name=name,
+            source=source,
+            aggregation=aggregation,
+        )
+    if len(parts) == 4 and parts[1] == ExecutionStatisticsMetricSource.METADATA.value:
+        name, source, metadata_key, aggregation = parts
+        return ExecutionStatisticsMetric(
+            name=name,
+            source=source,
+            aggregation=aggregation,
+            metadata_key=metadata_key,
+        )
+
+    raise KitaruUsageError(
+        f"Unsupported execution statistics metric {metric!r}. Expected "
+        "<name>:<source>:<avg|sum|min|max> for built-in sources or "
+        "<name>:metadata:<metadata_key>:<avg|sum|min|max> for metadata."
+    )
+
+
+def normalize_execution_statistics_metrics(
+    metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str],
+) -> list[ExecutionStatisticsMetric]:
+    """Normalize and validate a public metric sequence."""
+    normalized_metrics = [
+        coerce_execution_statistics_metric(metric) for metric in metrics
+    ]
+    _validate_unique_names(
+        (metric.name for metric in normalized_metrics),
+        description="execution statistics metric names",
+    )
+    return normalized_metrics
 
 
 def validate_statistics_max_groups(
@@ -294,10 +516,37 @@ def _zenml_grouping(
     )
 
 
+def _zenml_metric(
+    metric: ExecutionStatisticsMetric,
+    models: _ZenMLStatisticsModels,
+) -> Any:
+    """Map one public metric to its upstream ZenML metric model."""
+    metric_aggregation = ExecutionStatisticsMetricAggregation(metric.aggregation)
+    metric_source = ExecutionStatisticsMetricSource(metric.source)
+    aggregation = models.statistics_aggregation(metric_aggregation.value)
+    source = models.statistics_metric_source(metric_source.value)
+
+    if metric_source is ExecutionStatisticsMetricSource.METADATA:
+        assert metric.metadata_key is not None
+        return models.metadata_metric(
+            name=metric.name,
+            aggregation=aggregation,
+            source=source,
+            metadata_key=metric.metadata_key,
+        )
+
+    return models.simple_metric(
+        name=metric.name,
+        aggregation=aggregation,
+        source=source,
+    )
+
+
 def _build_run_statistics_request_parts(
     *,
     project: str | None,
     group_by: Sequence[ExecutionStatisticsGrouping | str],
+    metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str],
     flow: str | None,
     status: ExecutionStatus | str | None,
     stack: str | None,
@@ -307,6 +556,7 @@ def _build_run_statistics_request_parts(
     """Build validated ZenML request data for execution statistics."""
     models = _load_zenml_statistics_models()
     normalized_groupings = normalize_execution_statistics_groupings(group_by)
+    normalized_metrics = normalize_execution_statistics_metrics(metrics)
     validated_max_groups = validate_statistics_max_groups(max_groups)
     normalized_tags = normalize_execution_statistics_tags(tags)
     public_status_filter = _coerce_status_filter(status)
@@ -330,7 +580,7 @@ def _build_run_statistics_request_parts(
             groupings=[
                 _zenml_grouping(grouping, models) for grouping in backend_groupings
             ],
-            metrics=[],
+            metrics=[_zenml_metric(metric, models) for metric in normalized_metrics],
             max_groups=validated_max_groups,
         )
     except ValidationError as exc:
@@ -340,6 +590,7 @@ def _build_run_statistics_request_parts(
         request=request,
         groupings=normalized_groupings,
         backend_groupings=backend_groupings,
+        metrics=normalized_metrics,
         max_groups=validated_max_groups,
         public_status_filter=public_status_filter,
         status_grouping_name=status_grouping_name,
@@ -350,6 +601,7 @@ def build_run_statistics_request(
     *,
     project: str | None,
     group_by: Sequence[ExecutionStatisticsGrouping | str],
+    metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str] = (),
     flow: str | None,
     status: ExecutionStatus | str | None,
     stack: str | None,
@@ -368,6 +620,7 @@ def build_run_statistics_request(
     return _build_run_statistics_request_parts(
         project=project,
         group_by=normalized_groupings,
+        metrics=metrics,
         flow=flow,
         status=status,
         stack=stack,
@@ -430,6 +683,7 @@ def _map_run_statistics_group_entries(
     group_entries: Iterable[GroupEntry],
     *,
     normalized_groupings: Sequence[ExecutionStatisticsGrouping],
+    normalized_metrics: Sequence[ExecutionStatisticsMetric],
     max_groups: int,
     truncated: bool,
 ) -> ExecutionStatistics:
@@ -449,25 +703,25 @@ def _map_run_statistics_group_entries(
         None,
     )
 
-    merged_counts: dict[GroupMergeKey, int] = {}
-    merged_keys: dict[GroupMergeKey, dict[str, JsonScalar]] = {}
+    metrics_by_name = {metric.name: metric for metric in normalized_metrics}
+    accumulators: dict[GroupMergeKey, _StatisticsGroupAccumulator] = {}
 
-    for raw_keys, run_count in group_entries:
+    for raw_keys, run_count, raw_metrics in group_entries:
         public_keys = _public_group_keys(
             raw_keys,
             status_grouping_names=status_grouping_names,
         )
         merge_key = tuple(sorted(public_keys.items()))
-        merged_keys.setdefault(merge_key, public_keys)
-        merged_counts[merge_key] = merged_counts.get(merge_key, 0) + run_count
-
-    groups = [
-        ExecutionStatisticsGroup(
-            keys=merged_keys[merge_key],
-            execution_count=execution_count,
+        accumulator = accumulators.setdefault(
+            merge_key,
+            _StatisticsGroupAccumulator(
+                keys=public_keys,
+                metrics_by_name=metrics_by_name,
+            ),
         )
-        for merge_key, execution_count in merged_counts.items()
-    ]
+        accumulator.add_backend_group(run_count=run_count, metrics=raw_metrics)
+
+    groups = [accumulator.to_public_group() for accumulator in accumulators.values()]
     groups.sort(
         key=lambda group: _group_sort_key(
             group,
@@ -486,6 +740,7 @@ def _map_run_statistics_response_with_groupings(
     response: Any,
     *,
     normalized_groupings: Sequence[ExecutionStatisticsGrouping],
+    normalized_metrics: Sequence[ExecutionStatisticsMetric],
     max_groups: int,
 ) -> ExecutionStatistics:
     """Map a run-statistics response using already-normalized groupings."""
@@ -494,10 +749,12 @@ def _map_run_statistics_response_with_groupings(
             (
                 dict(getattr(group, "group_keys", {})),
                 int(getattr(group, "run_count", 0)),
+                dict(getattr(group, "metrics", {})),
             )
             for group in getattr(response, "groups", [])
         ),
         normalized_groupings=normalized_groupings,
+        normalized_metrics=normalized_metrics,
         max_groups=max_groups,
         truncated=bool(getattr(response, "truncated", False)),
     )
@@ -507,14 +764,17 @@ def map_run_statistics_response(
     response: Any,
     *,
     group_by: Sequence[ExecutionStatisticsGrouping | str] = (),
+    metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str] = (),
     max_groups: int,
 ) -> ExecutionStatistics:
     """Map an upstream run-statistics response to Kitaru DTOs."""
     validated_max_groups = validate_statistics_max_groups(max_groups)
     normalized_groupings = normalize_execution_statistics_groupings(group_by)
+    normalized_metrics = normalize_execution_statistics_metrics(metrics)
     return _map_run_statistics_response_with_groupings(
         response,
         normalized_groupings=normalized_groupings,
+        normalized_metrics=normalized_metrics,
         max_groups=validated_max_groups,
     )
 
@@ -539,6 +799,7 @@ def get_execution_statistics(
     *,
     client: KitaruClient,
     group_by: Sequence[ExecutionStatisticsGrouping | str] = (),
+    metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str] = (),
     flow: str | None = None,
     status: ExecutionStatus | str | None = None,
     stack: str | None = None,
@@ -549,6 +810,7 @@ def get_execution_statistics(
     request_parts = _build_run_statistics_request_parts(
         project=client._project,
         group_by=group_by,
+        metrics=metrics,
         flow=flow,
         status=status,
         stack=stack,
@@ -579,6 +841,7 @@ def get_execution_statistics(
         return _map_run_statistics_response_with_groupings(
             response,
             normalized_groupings=request_parts.groupings,
+            normalized_metrics=request_parts.metrics,
             max_groups=request_parts.max_groups,
         )
 
@@ -593,6 +856,7 @@ def get_execution_statistics(
             bucket_request = _build_run_statistics_request_parts(
                 project=client._project,
                 group_by=request_parts.backend_groupings,
+                metrics=request_parts.metrics,
                 flow=flow,
                 status=public_status,
                 stack=stack,
@@ -605,11 +869,18 @@ def get_execution_statistics(
         for group in getattr(response, "groups", []):
             raw_keys = dict(getattr(group, "group_keys", {}))
             raw_keys[request_parts.status_grouping_name] = public_status.value
-            group_entries.append((raw_keys, int(getattr(group, "run_count", 0))))
+            group_entries.append(
+                (
+                    raw_keys,
+                    int(getattr(group, "run_count", 0)),
+                    dict(getattr(group, "metrics", {})),
+                )
+            )
 
     return _map_run_statistics_group_entries(
         group_entries,
         normalized_groupings=request_parts.groupings,
+        normalized_metrics=request_parts.metrics,
         max_groups=request_parts.max_groups,
         truncated=truncated,
     )
@@ -618,9 +889,11 @@ def get_execution_statistics(
 __all__ = [
     "build_run_statistics_request",
     "coerce_execution_statistics_grouping",
+    "coerce_execution_statistics_metric",
     "get_execution_statistics",
     "map_run_statistics_response",
     "normalize_execution_statistics_groupings",
+    "normalize_execution_statistics_metrics",
     "normalize_execution_statistics_tags",
     "validate_statistics_max_groups",
 ]

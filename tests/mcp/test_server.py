@@ -227,7 +227,11 @@ def test_executions_statistics_calls_client_and_serializes(
     statistics = ExecutionStatistics(
         groups=[
             ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=12),
-            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+            ExecutionStatisticsGroup(
+                keys={"status": "failed"},
+                execution_count=2,
+                metrics={"duration_avg": 3.5},
+            ),
         ],
         truncated=False,
     )
@@ -240,11 +244,13 @@ def test_executions_statistics_calls_client_and_serializes(
             status="completed",
             stack="prod",
             tags=["nightly", "customer-facing"],
+            metrics=["duration_avg:duration:avg"],
             max_groups=25,
         )
 
     mock_kitaru_client.executions.statistics.assert_called_once_with(
         group_by=["status"],
+        metrics=["duration_avg:duration:avg"],
         flow="content_pipeline",
         status="completed",
         stack="prod",
@@ -253,8 +259,16 @@ def test_executions_statistics_calls_client_and_serializes(
     )
     assert payload == {
         "groups": [
-            {"keys": {"status": "completed"}, "execution_count": 12},
-            {"keys": {"status": "failed"}, "execution_count": 2},
+            {
+                "keys": {"status": "completed"},
+                "execution_count": 12,
+                "metrics": {},
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {"duration_avg": 3.5},
+            },
         ],
         "truncated": False,
         "group_count": 2,
@@ -282,6 +296,7 @@ def test_executions_statistics_delegates_to_inspection_serializer(
 
     mock_kitaru_client.executions.statistics.assert_called_once_with(
         group_by=[],
+        metrics=[],
         flow=None,
         status=None,
         stack=None,

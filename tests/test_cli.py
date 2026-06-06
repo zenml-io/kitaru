@@ -13,6 +13,7 @@ import pytest
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+from kitaru._cli._executions import _execution_statistics_table
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
@@ -2403,6 +2404,7 @@ def test_executions_statistics_forwards_filters_and_repeatable_options() -> None
             ExecutionStatisticsGroup(
                 keys={"status": "failed", "flow_id": "flow-123"},
                 execution_count=2,
+                metrics={"duration_avg": 4.2},
             )
         ],
         truncated=False,
@@ -2420,6 +2422,8 @@ def test_executions_statistics_forwards_filters_and_repeatable_options() -> None
                 "status",
                 "--group-by",
                 "flow",
+                "--metric",
+                "duration_avg:duration:avg",
                 "--flow",
                 "content_pipeline",
                 "--status",
@@ -2438,6 +2442,7 @@ def test_executions_statistics_forwards_filters_and_repeatable_options() -> None
     assert exc_info.value.code == 0
     fake_client.executions.statistics.assert_called_once_with(
         group_by=["status", "flow"],
+        metrics=["duration_avg:duration:avg"],
         flow="content_pipeline",
         status="failed",
         stack="prod",
@@ -2453,7 +2458,11 @@ def test_executions_statistics_renders_grouped_text(
     fake_client = Mock()
     fake_client.executions.statistics.return_value = ExecutionStatistics(
         groups=[
-            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=12),
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"duration_avg": 5.5},
+            ),
             ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
             ExecutionStatisticsGroup(keys={"status": "running"}, execution_count=1),
         ],
@@ -2471,12 +2480,36 @@ def test_executions_statistics_renders_grouped_text(
     assert "Kitaru execution statistics" in output
     assert "Status" in output
     assert "Executions" in output
+    assert "Duration Avg" in output
     assert "completed" in output
     assert "failed" in output
     assert "running" in output
     assert "12" in output
+    assert "5.5" in output
     assert "2" in output
     assert "1" in output
+
+
+def test_executions_statistics_table_uses_requested_metric_order() -> None:
+    """Metric columns should follow request order, not response dict order."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"cost_sum": 2.5, "duration_avg": 5.5},
+            )
+        ],
+        truncated=False,
+    )
+
+    columns, rows = _execution_statistics_table(
+        statistics,
+        requested_metric_names=["duration_avg", "cost_sum"],
+    )
+
+    assert columns == ["Status", "Executions", "Duration Avg", "Cost Sum"]
+    assert rows == [["completed", "12", "5.5", "2.5"]]
 
 
 def test_executions_statistics_renders_truncation_note(
@@ -2536,6 +2569,7 @@ def test_executions_statistics_emits_json(
             ExecutionStatisticsGroup(
                 keys={"status": "completed", "day": "2026-05-30"},
                 execution_count=7,
+                metrics={"duration_avg": 9.5},
             )
         ],
         truncated=True,
@@ -2567,6 +2601,7 @@ def test_executions_statistics_emits_json(
                 {
                     "keys": {"status": "completed", "day": "2026-05-30"},
                     "execution_count": 7,
+                    "metrics": {"duration_avg": 9.5},
                 }
             ],
             "truncated": True,

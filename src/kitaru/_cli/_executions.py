@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
 
-from kitaru._client._statistics import validate_statistics_max_groups
+from kitaru._client._statistics import (
+    normalize_execution_statistics_metrics,
+    validate_statistics_max_groups,
+)
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import (
@@ -229,29 +233,59 @@ def _statistics_column_label(key: str) -> str:
     )
 
 
-def _execution_statistics_columns(statistics: ExecutionStatistics) -> list[str]:
-    """Return dynamic grouping columns in first-seen response order."""
+def _ordered_mapping_keys(mappings: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Return mapping keys in first-seen order across all mappings."""
     columns: list[str] = []
-    for group in statistics.groups:
-        for key in group.keys:
+    for mapping in mappings:
+        for key in mapping:
             if key not in columns:
                 columns.append(key)
     return columns
 
 
+def _execution_statistics_metric_columns(
+    statistics: ExecutionStatistics,
+    requested_metric_names: Sequence[str] = (),
+) -> list[str]:
+    """Return metric columns, preferring the user's requested metric order."""
+    response_columns = _ordered_mapping_keys(
+        group.metrics for group in statistics.groups
+    )
+    columns = [
+        metric_name
+        for metric_name in requested_metric_names
+        if metric_name in response_columns
+    ]
+    columns.extend(
+        metric_name for metric_name in response_columns if metric_name not in columns
+    )
+    return columns
+
+
 def _execution_statistics_table(
     statistics: ExecutionStatistics,
+    *,
+    requested_metric_names: Sequence[str] = (),
 ) -> tuple[list[str], list[list[str]]]:
     """Build dynamic table headers and rows for execution statistics."""
-    group_columns = _execution_statistics_columns(statistics)
+    group_columns = _ordered_mapping_keys(group.keys for group in statistics.groups)
+    metric_columns = _execution_statistics_metric_columns(
+        statistics,
+        requested_metric_names=requested_metric_names,
+    )
     columns = [
         *[_statistics_column_label(column) for column in group_columns],
         "Executions",
+        *[_statistics_column_label(column) for column in metric_columns],
     ]
     rows = [
         [
             *[str(group.keys.get(column, "")) for column in group_columns],
             str(group.execution_count),
+            *[
+                "" if group.metrics.get(column) is None else str(group.metrics[column])
+                for column in metric_columns
+            ],
         ]
         for group in statistics.groups
     ]
@@ -631,6 +665,18 @@ def statistics(
             ),
         ),
     ] = None,
+    metric: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--metric"],
+            help=(
+                "Metric to compute. Repeat for multiple metrics. Use "
+                "<name>:<source>:<avg|sum|min|max> for built-in sources "
+                "(duration, step_count, cached_step_count, output_artifact_count) "
+                "or <name>:metadata:<metadata_key>:<avg|sum|min|max>."
+            ),
+        ),
+    ] = None,
     flow: Annotated[
         str | None,
         Parameter(help="Optional flow-name or flow-ID filter."),
@@ -658,7 +704,7 @@ def statistics(
     ] = 1000,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Show grouped execution count statistics."""
+    """Show grouped execution statistics."""
     command = "executions.statistics"
     output_format = _resolve_output_format(output)
     try:
@@ -672,6 +718,7 @@ def statistics(
             .kitaru_client()
             .executions.statistics(
                 group_by=group_by or [],
+                metrics=metric or [],
                 flow=flow,
                 status=status,
                 stack=stack,
@@ -692,7 +739,13 @@ def statistics(
         )
         return
 
-    columns, rows = _execution_statistics_table(statistics_result)
+    requested_metric_names = [
+        metric.name for metric in normalize_execution_statistics_metrics(metric or [])
+    ]
+    columns, rows = _execution_statistics_table(
+        statistics_result,
+        requested_metric_names=requested_metric_names,
+    )
     _emit_table("Kitaru execution statistics", columns, rows)
     if statistics_result.truncated:
         print(

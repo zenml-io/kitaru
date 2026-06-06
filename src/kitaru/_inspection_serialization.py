@@ -228,6 +228,7 @@ def serialize_execution_statistics_group(
     return {
         "keys": to_jsonable(group.keys, fallback_repr=True),
         "execution_count": group.execution_count,
+        "metrics": to_jsonable(group.metrics, fallback_repr=True),
     }
 
 

@@ -69,6 +69,9 @@ from kitaru._client._models import (
     ExecutionStatisticsDimension,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
 )
 from kitaru._interface_deployments import Deployment
@@ -130,6 +133,9 @@ __all__ = [
     "ExecutionStatisticsDimension",
     "ExecutionStatisticsGroup",
     "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
     "ExecutionStatisticsTimeGranularity",
     "FailureOrigin",
     "FlowHandle",

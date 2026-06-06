@@ -223,10 +223,10 @@ Deploy `flows/research.py:research_agent` with topic="durable execution" as a ca
 
 ## Querying execution statistics
 
-Use `kitaru_executions_statistics` when an assistant needs counts instead of
-full execution records. A good agent pattern is: ask the cheap aggregate
-question first, then fetch individual executions only for the group that looks
-interesting.
+Use `kitaru_executions_statistics` when an assistant needs counts or numeric
+aggregates instead of full execution records. A good agent pattern is: ask the
+cheap aggregate question first, then fetch individual executions only for the
+group that looks interesting.
 
 Example payloads:
 
@@ -240,6 +240,7 @@ Example payloads:
 ```json
 {
   "group_by": ["time:day", "status"],
+  "metrics": ["duration_avg:duration:avg"],
   "flow": "content_pipeline",
   "max_groups": 30
 }
@@ -258,8 +259,16 @@ The result shape is:
 ```json
 {
   "groups": [
-    {"keys": {"status": "completed"}, "execution_count": 12},
-    {"keys": {"status": "failed"}, "execution_count": 2}
+    {
+      "keys": {"status": "completed"},
+      "execution_count": 12,
+      "metrics": {"duration_avg": 43.2}
+    },
+    {
+      "keys": {"status": "failed"},
+      "execution_count": 2,
+      "metrics": {"duration_avg": 18.7}
+    }
   ],
   "truncated": false,
   "group_count": 2
@@ -269,8 +278,11 @@ The result shape is:
 Supported groupings are `status`, `flow`, `stack`, `tag`, `time:hour`,
 `time:day`, `time:week`, `time:month`, and `metadata:<key>`. `flow` and
 `stack` groupings return IDs as `flow_id` and `stack_id`; filters can still use
-names. The v1 tool returns counts only, not duration/cost metrics, and it does
-not yet filter by time range or metadata value.
+names. Optional metrics use the same string format as the CLI:
+`<name>:<source>:<avg|sum|min|max>` for built-in numeric sources such as
+`duration`, or `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for numeric
+execution metadata. The tool does not yet filter by time range or metadata
+value.
 
 <Callout type="warn">
   Grouping by `metadata:<key>` includes the matching metadata values in the MCP

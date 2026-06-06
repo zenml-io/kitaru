@@ -121,19 +121,21 @@ def kitaru_executions_list(
 @tracked_mcp_tool
 def kitaru_executions_statistics(
     group_by: list[str] | None = None,
+    metrics: list[str | dict[str, Any]] | None = None,
     flow: str | None = None,
     status: str | None = None,
     stack: str | None = None,
     tags: list[str] | None = None,
     max_groups: int = 1000,
 ) -> dict[str, Any]:
-    """Return grouped execution count statistics."""
+    """Return grouped execution statistics with optional numeric metrics."""
 
     def _statistics() -> dict[str, Any]:
         validate_statistics_max_groups(max_groups)
         client = client_api.KitaruClient()
         statistics = client.executions.statistics(
             group_by=group_by or [],
+            metrics=metrics or [],
             flow=flow,
             status=status,
             stack=stack,

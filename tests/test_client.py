@@ -36,6 +36,7 @@ from kitaru._client._statistics import (
     build_run_statistics_request,
     map_run_statistics_response,
     normalize_execution_statistics_groupings,
+    normalize_execution_statistics_metrics,
 )
 from kitaru._interface_deployments import Deployment
 from kitaru.analytics import AnalyticsEvent
@@ -46,6 +47,9 @@ from kitaru.client import (
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     KitaruClient,
@@ -358,9 +362,11 @@ def test_deployment_facade_is_exported_at_top_level() -> None:
 def test_execution_statistics_dtos_are_exported_at_top_level() -> None:
     from kitaru import ExecutionStatistics as PublicStatistics
     from kitaru import ExecutionStatisticsGrouping as PublicGrouping
+    from kitaru import ExecutionStatisticsMetric as PublicMetric
 
     assert PublicStatistics is ExecutionStatistics
     assert PublicGrouping is ExecutionStatisticsGrouping
+    assert PublicMetric is ExecutionStatisticsMetric
 
 
 def test_execution_statistics_grouping_defaults_and_validation() -> None:
@@ -411,6 +417,105 @@ def test_execution_statistics_grouping_parser_rejects_duplicates() -> None:
     with pytest.raises(KitaruUsageError, match="Duplicate"):
         normalize_execution_statistics_groupings(
             ["status", ExecutionStatisticsGrouping("metadata", metadata_key="status")]
+        )
+
+
+def test_execution_statistics_metric_defaults_and_validation() -> None:
+    metric = ExecutionStatisticsMetric(
+        name="duration_avg",
+        source="duration",
+        aggregation="avg",
+    )
+    assert metric.name == "duration_avg"
+    assert metric.source is ExecutionStatisticsMetricSource.DURATION
+    assert metric.aggregation is ExecutionStatisticsMetricAggregation.AVG
+    assert metric.metadata_key is None
+
+    metadata_metric = ExecutionStatisticsMetric(
+        name="cost_sum",
+        source="metadata",
+        aggregation="sum",
+        metadata_key="kitaru_cost_usd",
+    )
+    assert metadata_metric.source is ExecutionStatisticsMetricSource.METADATA
+    assert metadata_metric.metadata_key == "kitaru_cost_usd"
+
+
+def test_execution_statistics_metric_enums_match_zenml_values() -> None:
+    from zenml.models import StatisticsAggregation, StatisticsMetricSource
+
+    assert {item.value for item in ExecutionStatisticsMetricSource} == {
+        item.value for item in StatisticsMetricSource
+    }
+    assert {item.value for item in ExecutionStatisticsMetricAggregation} == {
+        item.value for item in StatisticsAggregation
+    }
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (
+            {"name": "   ", "source": "duration", "aggregation": "sum"},
+            "name cannot be empty",
+        ),
+        (
+            {"name": "x", "source": "metadata", "aggregation": "sum"},
+            "require metadata_key",
+        ),
+        (
+            {
+                "name": "x",
+                "source": "duration",
+                "aggregation": "sum",
+                "metadata_key": "cost",
+            },
+            "cannot use metadata_key",
+        ),
+        (
+            {"name": "x", "source": "duration", "aggregation": "median"},
+            "Unsupported",
+        ),
+    ],
+)
+def test_execution_statistics_metric_rejects_invalid_combinations(
+    kwargs: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(KitaruUsageError, match=message):
+        ExecutionStatisticsMetric(**kwargs)
+
+
+def test_execution_statistics_metric_parser_rejects_duplicates() -> None:
+    metrics = normalize_execution_statistics_metrics(
+        [
+            "duration_avg:duration:avg",
+            {
+                "name": "cost_sum",
+                "source": "metadata",
+                "aggregation": "sum",
+                "metadata_key": "kitaru_cost_usd",
+            },
+        ]
+    )
+
+    assert metrics == [
+        ExecutionStatisticsMetric(
+            name="duration_avg",
+            source="duration",
+            aggregation="avg",
+        ),
+        ExecutionStatisticsMetric(
+            name="cost_sum",
+            source="metadata",
+            aggregation="sum",
+            metadata_key="kitaru_cost_usd",
+        ),
+    ]
+
+    with pytest.raises(KitaruUsageError, match="Duplicate"):
+        normalize_execution_statistics_metrics(
+            ["duration_avg:duration:avg", "duration_avg:step_count:sum"]
         )
 
 
@@ -2488,6 +2593,15 @@ def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
     request = build_run_statistics_request(
         project="project-a",
         group_by=["flow", "time:day", "metadata:customer_tier"],
+        metrics=[
+            "duration_avg:duration:avg",
+            {
+                "name": "cost_sum",
+                "source": "metadata",
+                "aggregation": "sum",
+                "metadata_key": "kitaru_cost_usd",
+            },
+        ],
         flow="support_flow",
         status="completed",
         stack="prod-stack",
@@ -2513,6 +2627,16 @@ def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
     ]
     assert request.groupings[1].granularity.value == "day"
     assert request.groupings[2].metadata_key == "customer_tier"
+    assert [metric.name for metric in request.metrics] == [
+        "duration_avg",
+        "cost_sum",
+    ]
+    assert [metric.source.value for metric in request.metrics] == [
+        "duration",
+        "metadata",
+    ]
+    assert [metric.aggregation.value for metric in request.metrics] == ["avg", "sum"]
+    assert request.metrics[1].metadata_key == "kitaru_cost_usd"
 
 
 def test_build_run_statistics_request_rejects_status_grouping() -> None:
@@ -2624,6 +2748,106 @@ def test_map_run_statistics_response_sorts_counts_before_trimming() -> None:
     assert statistics.truncated is True
 
 
+def test_map_run_statistics_response_preserves_metrics() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"flow_id": "flow-a"},
+                run_count=3,
+                metrics={"duration_avg": 12.5, "cost_sum": None},
+            )
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["flow"],
+        metrics=[
+            "duration_avg:duration:avg",
+            "cost_sum:metadata:kitaru_cost_usd:sum",
+        ],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"flow_id": "flow-a"},
+            execution_count=3,
+            metrics={"duration_avg": 12.5, "cost_sum": None},
+        )
+    ]
+
+
+def test_map_run_statistics_response_merges_metric_values_for_public_status() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"status": "completed"},
+                run_count=2,
+                metrics={"duration_avg": 10.0, "cost_sum": 1.5},
+            ),
+            SimpleNamespace(
+                group_keys={"status": "cached"},
+                run_count=3,
+                metrics={"duration_avg": 20.0, "cost_sum": 2.5},
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["status"],
+        metrics=[
+            "duration_avg:duration:avg",
+            "cost_sum:metadata:kitaru_cost_usd:sum",
+        ],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"status": "completed"},
+            execution_count=5,
+            metrics={"duration_avg": 16.0, "cost_sum": 4.0},
+        )
+    ]
+
+
+def test_map_run_statistics_response_does_not_guess_merged_metadata_avg() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"status": "completed"},
+                run_count=100,
+                metrics={"score_avg": 500.0},
+            ),
+            SimpleNamespace(
+                group_keys={"status": "cached"},
+                run_count=1,
+                metrics={"score_avg": 10.0},
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["status"],
+        metrics=["score_avg:metadata:score:avg"],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"status": "completed"},
+            execution_count=101,
+            metrics={"score_avg": None},
+        )
+    ]
+
+
 def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> None:
     result = ExecutionStatistics(
         groups=[ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2)],
@@ -2644,6 +2868,7 @@ def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> No
         client = KitaruClient()
         statistics = client.executions.statistics(
             group_by=["status", "metadata:private_key"],
+            metrics=["duration_avg:duration:avg"],
             flow="private-flow",
             status="failed",
             stack="private-stack",
@@ -2655,6 +2880,7 @@ def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> No
     delegate.assert_called_once_with(
         client=client,
         group_by=["status", "metadata:private_key"],
+        metrics=["duration_avg:duration:avg"],
         flow="private-flow",
         status="failed",
         stack="private-stack",
@@ -2666,6 +2892,12 @@ def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> No
     assert event is AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
     assert metadata == {
         "grouping_count": 2,
+        "metric_count": 1,
+        "has_duration_metric": True,
+        "has_step_count_metric": False,
+        "has_cached_step_count_metric": False,
+        "has_output_artifact_count_metric": False,
+        "has_metadata_metric": False,
         "has_status_grouping": True,
         "has_flow_grouping": False,
         "has_stack_grouping": False,
@@ -2713,6 +2945,55 @@ def test_statistics_fetches_global_count_from_zen_store() -> None:
     assert request.max_groups == 1000
     assert statistics == ExecutionStatistics(
         groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+
+
+def test_statistics_fetches_metrics_from_zen_store() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"flow_id": "flow-a"},
+                run_count=2,
+                metrics={"duration_avg": 11.0, "cost_sum": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["flow"],
+            metrics=[
+                "duration_avg:duration:avg",
+                "cost_sum:metadata:kitaru_cost_usd:sum",
+            ],
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert [metric.name for metric in request.metrics] == [
+        "duration_avg",
+        "cost_sum",
+    ]
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-a"},
+                execution_count=2,
+                metrics={"duration_avg": 11.0, "cost_sum": 0.42},
+            )
+        ],
         truncated=False,
     )
 
@@ -2896,7 +3177,7 @@ def test_statistics_missing_backend_support_raises_feature_error() -> None:
         client_cls.return_value.zen_store = SimpleNamespace()
         client = KitaruClient()
 
-        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.5"):
+        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.6"):
             client.executions.statistics()
 
 
@@ -2916,7 +3197,7 @@ def test_statistics_old_server_endpoint_error_raises_feature_error() -> None:
         client_cls.return_value.zen_store = zen_store
         client = KitaruClient()
 
-        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.5"):
+        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.6"):
             client.executions.statistics()
 
 

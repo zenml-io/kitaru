@@ -541,6 +541,7 @@ def test_serialize_execution_statistics_contract() -> None:
             ExecutionStatisticsGroup(
                 keys={"status": "completed", "day": "2026-03-14"},
                 execution_count=12,
+                metrics={"duration_avg": 15.5},
             ),
             ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
         ],
@@ -550,16 +551,19 @@ def test_serialize_execution_statistics_contract() -> None:
     assert serialize_execution_statistics_group(statistics.groups[0]) == {
         "keys": {"status": "completed", "day": "2026-03-14"},
         "execution_count": 12,
+        "metrics": {"duration_avg": 15.5},
     }
     assert serialize_execution_statistics(statistics) == {
         "groups": [
             {
                 "keys": {"status": "completed", "day": "2026-03-14"},
                 "execution_count": 12,
+                "metrics": {"duration_avg": 15.5},
             },
             {
                 "keys": {"status": "failed"},
                 "execution_count": 2,
+                "metrics": {},
             },
         ],
         "truncated": True,

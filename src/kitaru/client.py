@@ -105,6 +105,9 @@ from kitaru._client._models import (
     ExecutionStatisticsDimension,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     FailureInfo,
@@ -117,6 +120,7 @@ from kitaru._client._models import (
 from kitaru._client._statistics import (
     get_execution_statistics,
     normalize_execution_statistics_groupings,
+    normalize_execution_statistics_metrics,
 )
 from kitaru._interface_deployments import (
     Deployment,
@@ -1390,16 +1394,18 @@ class _ExecutionsAPI:
         self,
         *,
         group_by: Sequence[ExecutionStatisticsGrouping | str] = (),
+        metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str] = (),
         flow: str | None = None,
         status: ExecutionStatus | str | None = None,
         stack: str | None = None,
         tags: Sequence[str] | None = None,
         max_groups: int = 1000,
     ) -> ExecutionStatistics:
-        """Return grouped execution count statistics."""
+        """Return grouped execution statistics with optional numeric metrics."""
         statistics = get_execution_statistics(
             client=self._client_ref,
             group_by=group_by,
+            metrics=metrics,
             flow=flow,
             status=status,
             stack=stack,
@@ -1408,11 +1414,30 @@ class _ExecutionsAPI:
         )
 
         normalized_groupings = normalize_execution_statistics_groupings(group_by)
+        normalized_metrics = normalize_execution_statistics_metrics(metrics)
         grouping_dimensions = {grouping.dimension for grouping in normalized_groupings}
+        metric_sources = {metric.source for metric in normalized_metrics}
         track(
             AnalyticsEvent.EXECUTION_STATISTICS_QUERIED,
             {
                 "grouping_count": len(normalized_groupings),
+                "metric_count": len(normalized_metrics),
+                "has_duration_metric": (
+                    ExecutionStatisticsMetricSource.DURATION in metric_sources
+                ),
+                "has_step_count_metric": (
+                    ExecutionStatisticsMetricSource.STEP_COUNT in metric_sources
+                ),
+                "has_cached_step_count_metric": (
+                    ExecutionStatisticsMetricSource.CACHED_STEP_COUNT in metric_sources
+                ),
+                "has_output_artifact_count_metric": (
+                    ExecutionStatisticsMetricSource.OUTPUT_ARTIFACT_COUNT
+                    in metric_sources
+                ),
+                "has_metadata_metric": (
+                    ExecutionStatisticsMetricSource.METADATA in metric_sources
+                ),
                 "has_status_grouping": (
                     ExecutionStatisticsDimension.STATUS in grouping_dimensions
                 ),
@@ -2550,6 +2575,9 @@ __all__ = [
     "ExecutionStatisticsDimension",
     "ExecutionStatisticsGroup",
     "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
     "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",

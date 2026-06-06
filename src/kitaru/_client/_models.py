@@ -58,6 +58,25 @@ class ExecutionStatisticsTimeGranularity(StrEnum):
     MONTH = "month"
 
 
+class ExecutionStatisticsMetricSource(StrEnum):
+    """Numeric value sources that execution statistics can aggregate."""
+
+    DURATION = "duration"
+    STEP_COUNT = "step_count"
+    CACHED_STEP_COUNT = "cached_step_count"
+    OUTPUT_ARTIFACT_COUNT = "output_artifact_count"
+    METADATA = "metadata"
+
+
+class ExecutionStatisticsMetricAggregation(StrEnum):
+    """Supported aggregation operators for execution statistics metrics."""
+
+    AVG = "avg"
+    SUM = "sum"
+    MIN = "min"
+    MAX = "max"
+
+
 @dataclass(frozen=True)
 class ExecutionStatisticsGrouping:
     """One public grouping dimension for execution statistics.
@@ -158,16 +177,82 @@ class ExecutionStatisticsGrouping:
 
 
 @dataclass(frozen=True)
+class ExecutionStatisticsMetric:
+    """One numeric metric to compute for each execution-statistics group.
+
+    ``name`` is the output key under each group's ``metrics`` mapping. Simple
+    metrics aggregate built-in execution values such as duration or step
+    counts. Metadata metrics aggregate one top-level numeric execution metadata
+    key.
+    """
+
+    name: str
+    source: ExecutionStatisticsMetricSource | str
+    aggregation: ExecutionStatisticsMetricAggregation | str
+    metadata_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize enum inputs and validate source-specific fields."""
+        name = self.name.strip() if isinstance(self.name, str) else self.name
+        if not isinstance(name, str) or not name:
+            raise KitaruUsageError("Execution statistics metric name cannot be empty.")
+
+        try:
+            source = ExecutionStatisticsMetricSource(str(self.source).strip().lower())
+        except ValueError as exc:
+            expected = ", ".join(item.value for item in ExecutionStatisticsMetricSource)
+            raise KitaruUsageError(
+                f"Unsupported execution statistics metric source {self.source!r}. "
+                f"Expected one of: {expected}."
+            ) from exc
+
+        try:
+            aggregation = ExecutionStatisticsMetricAggregation(
+                str(self.aggregation).strip().lower()
+            )
+        except ValueError as exc:
+            expected = ", ".join(
+                item.value for item in ExecutionStatisticsMetricAggregation
+            )
+            raise KitaruUsageError(
+                "Unsupported execution statistics metric aggregation "
+                f"{self.aggregation!r}. Expected one of: {expected}."
+            ) from exc
+
+        metadata_key = self.metadata_key
+        if metadata_key is not None:
+            metadata_key = metadata_key.strip()
+            if not metadata_key:
+                raise KitaruUsageError("Metadata metric key cannot be empty.")
+
+        if source is ExecutionStatisticsMetricSource.METADATA:
+            if metadata_key is None:
+                raise KitaruUsageError(
+                    "Metadata statistics metrics require metadata_key."
+                )
+        elif metadata_key is not None:
+            raise KitaruUsageError(
+                f"{source.value!r} statistics metrics cannot use metadata_key."
+            )
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "aggregation", aggregation)
+        object.__setattr__(self, "metadata_key", metadata_key)
+
+
+@dataclass(frozen=True)
 class ExecutionStatisticsGroup:
     """One aggregate execution-statistics row."""
 
     keys: dict[str, str | int | float | bool | None]
     execution_count: int
+    metrics: dict[str, float | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class ExecutionStatistics:
-    """Grouped execution count statistics."""
+    """Grouped execution statistics with counts and optional numeric metrics."""
 
     groups: list[ExecutionStatisticsGroup]
     truncated: bool
@@ -414,6 +499,9 @@ __all__ = [
     "ExecutionStatisticsDimension",
     "ExecutionStatisticsGroup",
     "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
     "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
