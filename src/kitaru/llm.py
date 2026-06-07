@@ -12,6 +12,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -672,7 +673,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         adapter="kitaru.llm",
         surface="direct_llm",
         call_name=request.call_name,
-        record_id=request.call_name,
+        record_id=f"{request.call_name}:{uuid4().hex}",
         requested_model=model_selection.requested_model,
         resolved_model=model_selection.resolved_model,
         model=model_selection.resolved_model,
