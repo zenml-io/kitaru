@@ -223,6 +223,18 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Key design patterns
 
+- **Internal backend routing:** `KitaruClient` creates a private
+  `KitaruBackendGateway` at `client._backend`. Client namespaces validate public
+  inputs and map backend models to Kitaru DTOs; backend calls to ZenML clients,
+  REST stores, logs, events, snapshots, stack operations, and API-key local
+  activation should go through the gateway. CLI and MCP stack commands should
+  route through their dependency gateway methods while preserving existing
+  monkeypatch bridges in tests. Do not add a public `KitaruClient().stacks`
+  namespace.
+- **Temporary stack activation:** `flow.py` and gateway retry/resume both use
+  `kitaru._stack_binding.temporary_active_stack(...)`. Reuse that helper for
+  temporary stack activation so concurrent submissions and retry/resume share the
+  same lock and restore behavior.
 - **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()`
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive

@@ -181,31 +181,22 @@ def _list_checkpoint_attempts_for_run(
     page = 1
     page_size = 200
 
-    try:
-        while True:
-            step_page = client._client().list_run_steps(
-                sort_by="asc:created",
-                page=page,
-                size=page_size,
-                pipeline_run_id=run.id,
-                project=client._project,
-                exclude_retried=False,
-                hydrate=True,
-            )
-            step_items = list(step_page.items)
-            if not step_items:
-                break
+    while True:
+        step_page = client._backend.list_run_steps(
+            run_id=run.id,
+            page=page,
+            size=page_size,
+        )
+        step_items = list(step_page.items)
+        if not step_items:
+            break
 
-            for step in step_items:
-                grouped_attempts[_checkpoint_lineage_key(step)].append(step)
+        for step in step_items:
+            grouped_attempts[_checkpoint_lineage_key(step)].append(step)
 
-            if len(step_items) < page_size:
-                break
-            page += 1
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to fetch checkpoint attempts for execution {run.id}: {exc}"
-        ) from exc
+        if len(step_items) < page_size:
+            break
+        page += 1
 
     return dict(grouped_attempts)
 
@@ -394,26 +385,10 @@ def _list_run_wait_conditions(
     status: str | None = None,
 ) -> list[Any]:
     """Return wait-condition models for an execution."""
-    try:
-        wait_conditions_page = cast(Any, client._client()).list_run_wait_conditions(
-            pipeline_run=run.id,
-            project=client._project,
-            status=status,
-            hydrate=True,
-            sort_by="asc:created",
-            size=200,
-        )
-    except AttributeError:
-        return []
-    except Exception as exc:
-        operation = (
-            "pending waits" if status == _WAIT_CONDITION_STATUS_PENDING else "waits"
-        )
-        raise KitaruBackendError(
-            f"Failed to list {operation} for execution {run.id}: {exc}"
-        ) from exc
-
-    return list(wait_conditions_page.items)
+    return client._backend.list_run_wait_conditions(
+        run_id=run.id,
+        status=status,
+    )
 
 
 def _list_pending_wait_conditions(

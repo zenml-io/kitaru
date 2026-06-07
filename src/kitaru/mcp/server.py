@@ -18,11 +18,11 @@ import kitaru._interface_stacks as stack_interface
 import kitaru.client as client_api
 import kitaru.inspection as inspection
 import kitaru.secrets as secrets_api
+from kitaru._client._backend_gateway import KitaruBackendGateway
 from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     resolve_deployment_exclusive,
 )
-from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
@@ -529,13 +529,21 @@ def kitaru_status() -> dict[str, Any]:
     return run_with_mcp_error_boundary(_status)
 
 
+def _mcp_backend_gateway() -> KitaruBackendGateway:
+    """Return the backend gateway used by MCP stack tools."""
+    return KitaruBackendGateway(
+        project=None,
+        client_factory=lambda: client_api.Client(),
+    )
+
+
 @tracked_mcp_tool
 def kitaru_stacks_list() -> list[dict[str, Any]]:
     """List available stacks from the active connection context."""
     return run_with_mcp_error_boundary(
         lambda: [
             inspection.serialize_stack(entry.stack, is_managed=entry.is_managed)
-            for entry in stack_ops._list_stack_entries()
+            for entry in _mcp_backend_gateway().list_stack_entries()
         ]
     )
 
@@ -588,12 +596,19 @@ def manage_stack(
             verify=verify,
         )
 
+        gateway = _mcp_backend_gateway()
         if isinstance(request, stack_interface.ManageStackCreateRequest):
-            result = stack_interface.execute_stack_create_request(request)
+            result = stack_interface.execute_stack_create_request(
+                request,
+                create_stack_operation=gateway.create_stack_operation,
+            )
             return inspection.serialize_stack_create_result(result)
 
         assert isinstance(request, stack_interface.ManageStackDeleteRequest)
-        result = stack_interface.execute_stack_delete_request(request)
+        result = stack_interface.execute_stack_delete_request(
+            request,
+            delete_stack_operation=gateway.delete_stack_operation,
+        )
         return inspection.serialize_stack_delete_result(result)
 
     return run_with_mcp_error_boundary(_manage_stack)

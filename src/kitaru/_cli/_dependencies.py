@@ -16,6 +16,7 @@ from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.login.credentials_store import get_credentials_store
 
+from kitaru._client._backend_gateway import KitaruBackendGateway
 from kitaru._interface_secrets import resolve_secret_exact as _resolve_secret_exact
 from kitaru._local_server import (
     start_or_connect_local_server,
@@ -101,6 +102,13 @@ class CLIDependencies:
         """Return the active Kitaru SDK client."""
         return self._legacy_attr("KitaruClient", KitaruClient)()
 
+    def backend_gateway(self) -> KitaruBackendGateway:
+        """Return the CLI backend gateway."""
+        return KitaruBackendGateway(
+            project=None,
+            client_factory=self.zenml_client,
+        )
+
     def auth_management_client(self) -> Any:
         """Return the SDK client configured for auth-management commands."""
         return self._legacy_attr("KitaruClient", KitaruClient).for_auth_management()
@@ -185,43 +193,52 @@ class CLIDependencies:
 
     def get_current_stack(self) -> Any:
         """Return the active stack."""
-        return self._legacy_attr("get_current_stack", get_current_stack)()
+        patched = self._legacy_attr("get_current_stack", _MISSING)
+        if patched is not _MISSING:
+            return patched()
+        return self.backend_gateway().current_stack()
 
     def get_available_stacks(self) -> Any:
         """Return all available stacks."""
-        return self._legacy_attr("get_available_stacks", get_available_stacks)()
+        patched = self._legacy_attr("get_available_stacks", _MISSING)
+        if patched is not _MISSING:
+            return patched()
+        return self.backend_gateway().list_stacks()
 
     def set_active_stack(self, *args: Any, **kwargs: Any) -> Any:
         """Set the active stack."""
-        return self._legacy_attr("set_active_stack", set_active_stack)(
-            *args,
-            **kwargs,
-        )
+        patched = self._legacy_attr("set_active_stack", _MISSING)
+        if patched is not _MISSING:
+            return patched(*args, **kwargs)
+        return self.backend_gateway().use_stack(*args, **kwargs)
 
     def list_stack_entries(self) -> Any:
         """Return stack list entries."""
-        return self._legacy_attr("_list_stack_entries", _list_stack_entries)()
+        patched = self._legacy_attr("_list_stack_entries", _MISSING)
+        if patched is not _MISSING:
+            return patched()
+        return self.backend_gateway().list_stack_entries()
 
     def show_stack_operation(self, *args: Any, **kwargs: Any) -> Any:
         """Return stack details for a stack name or ID."""
-        return self._legacy_attr("_show_stack_operation", _show_stack_operation)(
-            *args,
-            **kwargs,
-        )
+        patched = self._legacy_attr("_show_stack_operation", _MISSING)
+        if patched is not _MISSING:
+            return patched(*args, **kwargs)
+        return self.backend_gateway().show_stack_operation(*args, **kwargs)
 
     def create_stack_operation(self, *args: Any, **kwargs: Any) -> Any:
         """Create a stack from CLI inputs."""
-        return self._legacy_attr("_create_stack_operation", _create_stack_operation)(
-            *args,
-            **kwargs,
-        )
+        patched = self._legacy_attr("_create_stack_operation", _MISSING)
+        if patched is not _MISSING:
+            return patched(*args, **kwargs)
+        return self.backend_gateway().create_stack_operation(*args, **kwargs)
 
     def delete_stack_operation(self, *args: Any, **kwargs: Any) -> Any:
         """Delete a stack from CLI inputs."""
-        return self._legacy_attr("_delete_stack_operation", _delete_stack_operation)(
-            *args,
-            **kwargs,
-        )
+        patched = self._legacy_attr("_delete_stack_operation", _MISSING)
+        if patched is not _MISSING:
+            return patched(*args, **kwargs)
+        return self.backend_gateway().delete_stack_operation(*args, **kwargs)
 
     def register_model_alias(self, *args: Any, **kwargs: Any) -> Any:
         """Persist a model alias."""

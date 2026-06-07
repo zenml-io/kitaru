@@ -9,7 +9,6 @@ from __future__ import annotations
 import inspect
 import logging
 import sys
-import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -56,6 +55,9 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru._stack_binding import (
+    temporary_active_stack as _shared_temporary_active_stack,
+)
 from kitaru._telemetry import (
     deployment_metadata_for_stack as _deployment_metadata_for_stack,
 )
@@ -93,7 +95,6 @@ from kitaru.replay import build_replay_plan
 from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
-_STACK_BINDING_LOCK = threading.RLock()
 logger = logging.getLogger(__name__)
 
 
@@ -105,18 +106,11 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         stack_name_or_id: Optional stack name or ID. When ``None``, the
             currently active ZenML stack is used unchanged.
     """
-    with _STACK_BINDING_LOCK:
-        if not stack_name_or_id:
-            yield
-            return
-
-        client = Client()
-        old_stack_id = client.active_stack_model.id
-        client.activate_stack(stack_name_or_id)
-        try:
-            yield
-        finally:
-            client.activate_stack(old_stack_id)
+    with _shared_temporary_active_stack(
+        stack_name_or_id,
+        client_factory=Client,
+    ):
+        yield
 
 
 def _preflight_active_stack_implementation_hydration(

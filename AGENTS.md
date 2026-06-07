@@ -94,6 +94,22 @@ These require Node 22+ and pnpm.
 - Put helpers on the class when tied to its behavior; use standalone utils only for generic cross-module functions.
 - Prefer Pydantic models for data structures; checkpoint return values must be serializable.
 
+## Internal backend routing
+
+- `KitaruClient` creates a private `KitaruBackendGateway` at `client._backend`.
+  Client namespaces such as `executions`, `artifacts`, `deployments`, and
+  `auth` validate public inputs and map backend models to Kitaru DTOs. Backend
+  calls to ZenML clients, REST stores, logs, events, snapshots, stack
+  operations, and API-key local activation should go through the gateway.
+- CLI and MCP stack commands should route through their dependency gateway
+  methods while preserving the existing monkeypatch bridges in tests. Do not add
+  a public `KitaruClient().stacks` namespace.
+- `flow.py` and gateway retry/resume both use
+  `kitaru._stack_binding.temporary_active_stack(...)` for temporary stack
+  activation. If you need to activate a stack temporarily, reuse that helper so
+  concurrent submissions and retry/resume share the same lock and restore
+  behavior.
+
 ## CLI
 
 The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]`. `src/kitaru/cli.py` is the thin facade / entrypoint, while command implementations live in `src/kitaru/_cli/`. Add new subcommands in the appropriate `src/kitaru/_cli/_*.py` module and register them on the shared Cyclopts app there. When testing CLI commands, always pass an explicit arg list (`app(["--help"])`, not bare `app()`). CLI invocations raise `SystemExit(0)` on success.

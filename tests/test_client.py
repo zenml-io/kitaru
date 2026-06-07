@@ -598,7 +598,10 @@ def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> N
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
-        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch(
+            "kitaru._client._backend_gateway.get_credentials_store",
+            return_value=credentials_store,
+        ),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value
@@ -644,7 +647,10 @@ def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> N
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
-        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch(
+            "kitaru._client._backend_gateway.get_credentials_store",
+            return_value=credentials_store,
+        ),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value
@@ -692,7 +698,10 @@ def test_auth_api_key_create_set_key_failure_rolls_back_previous_key() -> None:
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
-        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch(
+            "kitaru._client._backend_gateway.get_credentials_store",
+            return_value=credentials_store,
+        ),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value
@@ -738,7 +747,10 @@ def test_auth_api_key_create_set_key_failure_reports_rollback_failure() -> None:
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
-        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch(
+            "kitaru._client._backend_gateway.get_credentials_store",
+            return_value=credentials_store,
+        ),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value

@@ -23,21 +23,22 @@ import threading
 import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
-from pydantic import ValidationError
 from zenml.client import Client
 from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
-from zenml.login.credentials_store import get_credentials_store
 from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+from kitaru._client._backend_gateway import (
+    KitaruBackendGateway,
+    LocalKeyActivationStatus,
+)
 from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     build_deployment_snapshot_name,
@@ -51,11 +52,7 @@ from kitaru._client._deployments import (
     validate_deployment_tag,
     validate_deployment_version,
 )
-from kitaru._client._events import (
-    StreamingStore,
-    open_rest_sse_stream,
-    watch_execution_events,
-)
+from kitaru._client._events import watch_execution_events
 from kitaru._client._logs import (
     _coerce_log_level,
     _coerce_log_lineno,
@@ -139,7 +136,6 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
-    KitaruWaitValidationError,
     classify_failure_origin,
     execution_error_from_failure,
 )
@@ -177,6 +173,7 @@ _CLIENT_FACADE_LINT_ANCHOR = (
     _first_pending_wait,
     _get_active_wait_condition,
     _is_empty_log_result_error,
+    _is_log_endpoint_version_skew_error,
     _is_otel_log_retrieval_error,
     _list_checkpoint_attempts_for_run,
     _list_run_wait_conditions,
@@ -274,175 +271,23 @@ def _map_auth_api_key_with_value(api_key: Any) -> AuthAPIKeyWithValue:
     )
 
 
-@dataclass(frozen=True)
-class _LocalCredentialSnapshot:
-    """Best-effort snapshot of the previous persisted API-key credential."""
-
-    server_url: str | None
-    previous_api_key: str | None = field(default=None, repr=False)
-    reason_unavailable: str | None = None
-
-    @property
-    def previous_api_key_available(self) -> bool:
-        """Whether this snapshot contains a rollback candidate."""
-        return bool(self.previous_api_key)
-
-
-def _redact_auth_error_text(text: str, *, secrets: list[str]) -> str:
-    """Return error text without leaking known sensitive credential values."""
-    redacted = text
-    for secret in secrets:
-        if secret:
-            redacted = redacted.replace(secret, "[redacted]")
-    return redacted
-
-
-def _sanitize_local_key_activation_error(
-    exc: Exception,
-    *,
-    raw_key: str,
-    previous_key: str | None = None,
-) -> str:
-    """Return local activation error text without leaking API-key values."""
-    message = str(exc) or type(exc).__name__
-    return _redact_auth_error_text(
-        message,
-        secrets=[raw_key, previous_key or ""],
-    )
-
-
-def _capture_previous_local_api_key(zenml_client: Any) -> _LocalCredentialSnapshot:
-    """Return the previous persisted API key if it can be restored safely."""
-    server_url = getattr(getattr(zenml_client, "zen_store", None), "url", None)
-    if not isinstance(server_url, str) or not server_url:
-        return _LocalCredentialSnapshot(
-            server_url=None,
-            reason_unavailable=(
-                "Kitaru could not determine the active remote server URL, so "
-                "there was no previous persisted credential to restore."
-            ),
-        )
-
-    try:
-        credentials_store = get_credentials_store()
-        previous_api_key = credentials_store.get_api_key(server_url=server_url)
-    except Exception as exc:
-        return _LocalCredentialSnapshot(
-            server_url=server_url,
-            reason_unavailable=(
-                "Kitaru could not read the previous persisted local API key for "
-                f"{server_url!r}, so rollback was not possible: {exc}"
-            ),
-        )
-
-    if not previous_api_key:
-        return _LocalCredentialSnapshot(
-            server_url=server_url,
-            reason_unavailable=(
-                "No previous persisted local API key was available to restore. "
-                "Environment credentials, if any, were not modified."
-            ),
-        )
-
-    return _LocalCredentialSnapshot(
-        server_url=server_url,
-        previous_api_key=previous_api_key,
-    )
-
-
 def _with_local_key_activation_status(
     result: AuthAPIKeyWithValue,
     *,
-    succeeded: bool,
-    error: str | None = None,
-    rollback_attempted: bool = False,
-    rollback_succeeded: bool | None = None,
-    rollback_error: str | None = None,
-    rollback_reason: str | None = None,
+    status: LocalKeyActivationStatus,
 ) -> AuthAPIKeyWithValue:
     """Return an API-key result annotated with local activation status."""
     return AuthAPIKeyWithValue(
         api_key=result.api_key,
         key=result.key,
         local_key_activation_requested=True,
-        local_key_activation_succeeded=succeeded,
-        local_key_activation_error=error,
-        local_key_rollback_attempted=rollback_attempted,
-        local_key_rollback_succeeded=rollback_succeeded,
-        local_key_rollback_error=rollback_error,
-        local_key_rollback_reason=rollback_reason,
+        local_key_activation_succeeded=status.succeeded,
+        local_key_activation_error=status.error,
+        local_key_rollback_attempted=status.rollback_attempted,
+        local_key_rollback_succeeded=status.rollback_succeeded,
+        local_key_rollback_error=status.rollback_error,
+        local_key_rollback_reason=status.rollback_reason,
     )
-
-
-def _attempt_local_key_activation(
-    result: AuthAPIKeyWithValue,
-    *,
-    zenml_client: Any,
-    operation: Literal["create", "rotate"],
-) -> AuthAPIKeyWithValue:
-    """Best-effort local activation that never discards the one-time key."""
-    previous_credential = _capture_previous_local_api_key(zenml_client)
-    try:
-        zenml_client.set_api_key(key=result.key)
-    except Exception as exc:
-        action = "created" if operation == "create" else "rotated"
-        sanitized_error = _sanitize_local_key_activation_error(
-            exc,
-            raw_key=result.key,
-            previous_key=previous_credential.previous_api_key,
-        )
-        base_error = (
-            f"API key was {action}, but Kitaru could not set it as the "
-            f"active local credential: {sanitized_error}."
-        )
-        if not previous_credential.previous_api_key_available:
-            rollback_reason = previous_credential.reason_unavailable or (
-                "No previous persisted local API key was available to restore."
-            )
-            return _with_local_key_activation_status(
-                result,
-                succeeded=False,
-                error=f"{base_error} Rollback was not possible: {rollback_reason}",
-                rollback_attempted=False,
-                rollback_succeeded=None,
-                rollback_reason=rollback_reason,
-            )
-
-        assert previous_credential.previous_api_key is not None
-        try:
-            zenml_client.set_api_key(key=previous_credential.previous_api_key)
-        except Exception as rollback_exc:
-            rollback_error = _sanitize_local_key_activation_error(
-                rollback_exc,
-                raw_key=result.key,
-                previous_key=previous_credential.previous_api_key,
-            )
-            return _with_local_key_activation_status(
-                result,
-                succeeded=False,
-                error=(
-                    f"{base_error} Kitaru also tried to restore the previous "
-                    "local credential, but that rollback failed. The server-side "
-                    f"API key was still {action}; local credentials may need "
-                    "manual repair."
-                ),
-                rollback_attempted=True,
-                rollback_succeeded=False,
-                rollback_error=rollback_error,
-            )
-
-        return _with_local_key_activation_status(
-            result,
-            succeeded=False,
-            error=(
-                f"{base_error} Kitaru restored the previous local credential, "
-                "so this machine should still be using the credential that was "
-                "active before the attempted activation."
-            ),
-            rollback_attempted=True,
-            rollback_succeeded=True,
-        )
-    return _with_local_key_activation_status(result, succeeded=True)
 
 
 @runtime_checkable
@@ -457,22 +302,6 @@ class _ReplayFlowLike(Protocol):
         overrides: dict[str, Any] | None = None,
         **flow_inputs: Any,
     ) -> Any: ...
-
-
-@contextmanager
-def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a stack while running an operation."""
-    if not stack_name_or_id:
-        yield
-        return
-
-    client = Client()
-    old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
-    try:
-        yield
-    finally:
-        client.activate_stack(old_stack_id)
 
 
 def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
@@ -730,31 +559,7 @@ def _restart_run_from_snapshot(
     operation_name: str,
 ) -> None:
     """Restart an execution from its stored snapshot metadata."""
-    snapshot = run.snapshot
-    if snapshot is None:
-        raise KitaruRuntimeError(
-            f"Unable to {operation_name} execution because snapshot metadata "
-            "is missing."
-        )
-    if snapshot.stack is None:
-        raise KitaruRuntimeError(
-            f"Unable to {operation_name} execution because snapshot stack "
-            "metadata is missing."
-        )
-
-    try:
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = client._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.resume_run(
-                snapshot=snapshot,
-                run=run,
-                stack=active_stack,
-            )
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to {operation_name} execution '{run.id}': {exc}"
-        ) from exc
+    client._backend.restart_run_from_snapshot(run=run, operation_name=operation_name)
 
 
 def _validate_event_filter_values(
@@ -821,10 +626,7 @@ class _ExecutionsAPI:
 
     def _require_rest_store(self, unavailable_error: Exception) -> RestZenStore:
         """Return the active REST store or raise the caller-specific error."""
-        zen_store = self._client_ref._client().zen_store
-        if isinstance(zen_store, RestZenStore):
-            return zen_store
-        raise unavailable_error
+        return self._client_ref._backend.require_rest_store(unavailable_error)
 
     def _rest_store(self) -> RestZenStore:
         """Return a REST-backed zen store required for runtime log retrieval."""
@@ -847,16 +649,7 @@ class _ExecutionsAPI:
 
     def _resolve_log_endpoint_hint(self) -> str | None:
         """Resolve a best-effort endpoint hint for log-retrieval errors."""
-        active_log_store = active_stack_log_store()
-        if active_log_store is not None and active_log_store.endpoint:
-            return active_log_store.endpoint
-
-        try:
-            preferred_log_store = resolve_log_store()
-        except ValueError:
-            return None
-
-        return preferred_log_store.endpoint
+        return self._client_ref._backend.resolve_log_endpoint_hint()
 
     def _fetch_log_payload(
         self,
@@ -865,54 +658,11 @@ class _ExecutionsAPI:
         source: str,
     ) -> builtins.list[Mapping[str, Any]]:
         """Call a log endpoint and normalize the response payload shape."""
-        store = self._rest_store()
-
-        try:
-            payload = store.get(path, params={"source": source})
-        except Exception as exc:
-            error_message = str(exc)
-            if _is_empty_log_result_error(error_message):
-                return []
-
-            if _is_otel_log_retrieval_error(error_message):
-                endpoint_hint = self._resolve_log_endpoint_hint()
-                message = (
-                    "Logs for this execution are stored in an OTEL backend and "
-                    "cannot be fetched via the Kitaru log retrieval API."
-                )
-                if endpoint_hint:
-                    message += f" View them in your OTEL backend at: {endpoint_hint}."
-                raise KitaruLogRetrievalError(message) from exc
-
-            if _is_log_endpoint_version_skew_error(error_message):
-                raise KitaruLogRetrievalError(
-                    "Unable to retrieve runtime logs because the server log "
-                    "endpoint is incompatible with this Kitaru client. This "
-                    "usually means the client and server are running different "
-                    "Kitaru versions. Upgrade the server runtime or align the "
-                    "client and server versions, then retry `kitaru executions "
-                    "logs`."
-                ) from exc
-
-            raise KitaruLogRetrievalError(
-                f"Failed to retrieve runtime logs for source '{source}': {exc}"
-            ) from exc
-
-        if not isinstance(payload, list):
-            raise KitaruLogRetrievalError(
-                "Unexpected response while retrieving runtime logs: "
-                "expected a list payload."
-            )
-
-        normalized_payload: builtins.list[Mapping[str, Any]] = []
-        for entry in payload:
-            if not isinstance(entry, Mapping):
-                raise KitaruLogRetrievalError(
-                    "Unexpected log entry payload type returned by the server."
-                )
-            normalized_payload.append(entry)
-
-        return normalized_payload
+        return self._client_ref._backend.fetch_log_payload(
+            path=path,
+            source=source,
+            store=self._rest_store(),
+        )
 
     def logs(
         self,
@@ -1043,16 +793,12 @@ class _ExecutionsAPI:
 
         path = f"/runs/{run.id}/events/stream"
 
-        def _open_stream(last_event_id: str | None) -> Any:
-            return open_rest_sse_stream(
-                cast(StreamingStore, store),
+        return watch_execution_events(
+            open_stream=self._client_ref._backend.execution_event_stream_factory(
+                store=store,
                 path=path,
                 params=params,
-                last_event_id=last_event_id,
-            )
-
-        return watch_execution_events(
-            open_stream=_open_stream,
+            ),
             fallback_exec_id=str(run.id),
             checkpoint=normalized_checkpoint,
             reconnect=reconnect,
@@ -1092,22 +838,13 @@ class _ExecutionsAPI:
             pending_conditions=pending_conditions,
         )
 
-        try:
-            cast(Any, self._client_ref._client()).resolve_run_wait_condition(
-                run_wait_condition_id=condition.id,
-                resolution=cast(Any, resolution),
-                result=value,
-            )
-        except (ValidationError, TypeError, ValueError) as exc:
-            raise KitaruWaitValidationError(
-                "Wait input failed validation for "
-                f"'{condition.name}' on execution '{exec_id}': {exc}"
-            ) from exc
-        except Exception as exc:
-            raise KitaruBackendError(
-                "Failed to resolve wait condition "
-                f"'{condition.name}' for execution '{exec_id}': {exc}"
-            ) from exc
+        self._client_ref._backend.resolve_run_wait_condition(
+            run_wait_condition_id=condition.id,
+            resolution=cast(Any, resolution),
+            result=value,
+            wait_name=condition.name,
+            exec_id=exec_id,
+        )
 
         track(
             AnalyticsEvent.WAIT_RESOLVED,
@@ -1341,12 +1078,9 @@ class _ExecutionsAPI:
             page_size = 50
 
         while True:
-            run_page = self._client_ref._client().list_pipeline_runs(
-                sort_by="desc:created",
+            run_page = self._client_ref._backend.list_pipeline_runs(
                 page=backend_page,
                 size=page_size,
-                project=self._client_ref._project,
-                hydrate=True,
             )
             runs = list(run_page.items)
             if not runs:
@@ -1398,7 +1132,7 @@ class _ExecutionsAPI:
     def cancel(self, exec_id: str) -> Execution:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
-        stop_run(run=run, graceful=False)
+        self._client_ref._backend.cancel_run(run, stop_run_fn=stop_run)
         track(AnalyticsEvent.EXECUTION_CANCELLED, {})
         return self.get(exec_id)
 
@@ -1449,7 +1183,7 @@ class _ArtifactsAPI:
 
         producing_call: str | None = None
         if artifact.producer_step_run_id is not None:
-            step = self._client_ref._client().get_run_step(
+            step = self._client_ref._backend.get_run_step(
                 artifact.producer_step_run_id,
                 hydrate=True,
             )
@@ -1470,31 +1204,7 @@ class _DeploymentsAPI:
 
     def _list_snapshots(self) -> builtins.list[Any]:
         """List all snapshots visible to the active project."""
-        client = self._client_ref._client()
-        snapshots: builtins.list[Any] = []
-        page = 1
-        page_size = 100
-        try:
-            while True:
-                snapshot_page = client.list_snapshots(
-                    sort_by="asc:created",
-                    page=page,
-                    size=page_size,
-                    project=self._client_ref._project,
-                    named_only=True,
-                    hydrate=True,
-                )
-                items = list(snapshot_page.items)
-                snapshots.extend(items)
-                if len(items) < page_size:
-                    break
-                page += 1
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to list deployment snapshots: {exc}"
-            ) from exc
-
-        return snapshots
+        return self._client_ref._backend.list_deployment_snapshots()
 
     def _update_snapshot_tags(
         self,
@@ -1504,29 +1214,17 @@ class _DeploymentsAPI:
         remove_tags: builtins.list[str] | None = None,
     ) -> Any:
         """Apply native tag updates to a snapshot."""
-        try:
-            return self._client_ref._client().update_snapshot(
-                name_id_or_prefix=deployment.deployment_id,
-                project=self._client_ref._project,
-                add_tags=add_tags or None,
-                remove_tags=remove_tags or None,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to update deployment '{deployment.deployment_id}': {exc}"
-            ) from exc
+        return self._client_ref._backend.update_snapshot_tags(
+            deployment_id=deployment.deployment_id,
+            add_tags=add_tags,
+            remove_tags=remove_tags,
+        )
 
     def _delete_snapshot(self, deployment: DeploymentRecord) -> None:
         """Delete a snapshot through the backend."""
-        try:
-            self._client_ref._client().delete_snapshot(
-                name_id_or_prefix=deployment.deployment_id,
-                project=self._client_ref._project,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to delete deployment '{deployment.deployment_id}': {exc}"
-            ) from exc
+        self._client_ref._backend.delete_snapshot(
+            deployment_id=deployment.deployment_id,
+        )
 
     def _name_source_snapshot(
         self,
@@ -1536,13 +1234,10 @@ class _DeploymentsAPI:
         tags: Mapping[str, bool] | None,
     ) -> Any:
         """Name an existing ZenML snapshot as the requested deployment snapshot."""
-        source_snapshot_id = getattr(source_snapshot, "id", source_snapshot)
-        return self._client_ref._client().update_snapshot(
-            name_id_or_prefix=source_snapshot_id,
-            project=self._client_ref._project,
+        return self._client_ref._backend.name_source_snapshot(
+            source_snapshot=source_snapshot,
             name=name,
-            replace=False,
-            add_tags=deployment_native_tags(tags),
+            tags=deployment_native_tags(tags),
         )
 
     def _list_records(
@@ -1648,21 +1343,11 @@ class _DeploymentsAPI:
             build = getattr(snapshot, "build", None)
             stack = getattr(build, "stack", None) if build is not None else None
         if stack is None and deployment_record.stack is not None:
-            try:
-                stack = self._client_ref._client().get_stack(
-                    name_id_or_prefix=deployment_record.stack,
-                    allow_name_prefix_match=False,
-                    hydrate=True,
-                )
-            except Exception as exc:
-                raise KitaruStateError(
-                    f"Deployment {deployment_record.flow!r} "
-                    f"v{deployment_record.version} references stack "
-                    f"{deployment_record.stack!r}, but Kitaru could not load "
-                    "that stack to verify whether the server can execute it remotely. "
-                    "Rebuild the deployment using a stack the Kitaru server can "
-                    "execute remotely and try again."
-                ) from exc
+            stack = self._client_ref._backend.get_deployment_stack(
+                stack_name_or_id=deployment_record.stack,
+                flow=deployment_record.flow,
+                version=deployment_record.version,
+            )
         if stack is None:
             raise KitaruStateError(
                 f"Deployment {deployment_record.flow!r} "
@@ -1683,7 +1368,7 @@ class _DeploymentsAPI:
         deployment_record = self._unwrap_deployment_record(deployment)
         stack = self._resolve_deployment_stack(deployment_record)
         ensure_stack_is_server_runnable(
-            zen_store=self._client_ref._client().zen_store,
+            zen_store=self._client_ref._backend.zen_store(),
             stack=stack,
             operation=operation,
             flow=deployment_record.flow,
@@ -1749,36 +1434,16 @@ class _DeploymentsAPI:
         )
         deployment_metadata = deployment_metadata_for_stack_model(deployment_stack)
 
-        zenml_client = self._client_ref._client()
-        trigger_pipeline = getattr(zenml_client, "trigger_pipeline", None)
-        if not callable(trigger_pipeline):
-            raise KitaruBackendError(
-                "This ZenML backend does not expose snapshot invocation via "
-                "Client.trigger_pipeline(...). Upgrade ZenML or invoke the "
-                "snapshot through a backend-supported route."
-            )
-
         run_inputs = dict(inputs or {})
         run_configuration = (
             PipelineRunConfiguration(parameters=run_inputs) if run_inputs else None
         )
-        try:
-            run = trigger_pipeline(
-                snapshot_name_or_id=deployment.deployment_id,
-                run_configuration=run_configuration,
-                project=self._client_ref._project,
-                synchronous=False,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                "Failed to invoke deployment "
-                f"{deployment.flow!r} v{deployment.version}: {exc}"
-            ) from exc
-
-        if run is None:
-            raise KitaruBackendError(
-                "Deployment invocation did not produce a pipeline run."
-            )
+        run = self._client_ref._backend.trigger_deployment(
+            deployment_id=deployment.deployment_id,
+            flow=deployment.flow,
+            version=deployment.version,
+            run_configuration=run_configuration,
+        )
         return FlowHandle(
             run,
             analytics_metadata=deployment_metadata,
@@ -2050,16 +1715,11 @@ class _ServiceAccountsAPI:
     ) -> AuthServiceAccount:
         """Create a service account."""
         validated_name = _validate_non_empty_auth_value(name, name="name")
-        try:
-            service_account = self._client_ref._client().create_service_account(
-                name=validated_name,
-                full_name=full_name,
-                description=description,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to create service account {validated_name!r}: {exc}"
-            ) from exc
+        service_account = self._client_ref._backend.create_service_account(
+            name=validated_name,
+            full_name=full_name,
+            description=description,
+        )
         return _map_auth_service_account(service_account)
 
     def get(self, name_or_id: str) -> AuthServiceAccount:
@@ -2068,16 +1728,9 @@ class _ServiceAccountsAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            service_account = self._client_ref._client().get_service_account(
-                name_id_or_prefix=validated_name_or_id,
-                allow_name_prefix_match=False,
-                hydrate=True,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load service account {validated_name_or_id!r}: {exc}"
-            ) from exc
+        service_account = self._client_ref._backend.get_service_account(
+            name_or_id=validated_name_or_id,
+        )
         return _map_auth_service_account(service_account)
 
     def list(
@@ -2095,16 +1748,12 @@ class _ServiceAccountsAPI:
             page=page,
             size=size,
         )
-        try:
-            service_accounts = self._client_ref._client().list_service_accounts(
-                name=name,
-                active=active,
-                page=backend_page,
-                size=backend_size,
-                hydrate=True,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(f"Failed to list service accounts: {exc}") from exc
+        service_accounts = self._client_ref._backend.list_service_accounts(
+            name=name,
+            active=active,
+            page=backend_page,
+            size=backend_size,
+        )
         return [_map_auth_service_account(item) for item in service_accounts.items]
 
     def update(
@@ -2120,17 +1769,12 @@ class _ServiceAccountsAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            service_account = self._client_ref._client().update_service_account(
-                name_id_or_prefix=validated_name_or_id,
-                updated_name=name,
-                description=description,
-                active=active,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to update service account {validated_name_or_id!r}: {exc}"
-            ) from exc
+        service_account = self._client_ref._backend.update_service_account(
+            name_or_id=validated_name_or_id,
+            name=name,
+            description=description,
+            active=active,
+        )
         return _map_auth_service_account(service_account)
 
     def delete(self, name_or_id: str) -> None:
@@ -2139,14 +1783,9 @@ class _ServiceAccountsAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            self._client_ref._client().delete_service_account(
-                name_id_or_prefix=validated_name_or_id
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to delete service account {validated_name_or_id!r}: {exc}"
-            ) from exc
+        self._client_ref._backend.delete_service_account(
+            name_or_id=validated_name_or_id,
+        )
 
 
 class _APIKeysAPI:
@@ -2169,26 +1808,18 @@ class _APIKeysAPI:
             name="service_account",
         )
         validated_name = _validate_non_empty_auth_value(name, name="name")
-        try:
-            zenml_client = self._client_ref._client()
-            api_key = zenml_client.create_api_key(
-                service_account_name_id_or_prefix=validated_service_account,
-                name=validated_name,
-                description=description,
-                set_key=False,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to create API key {validated_name!r} for service "
-                f"account {validated_service_account!r}: {exc}"
-            ) from exc
+        backend_result = self._client_ref._backend.create_api_key(
+            service_account=validated_service_account,
+            name=validated_name,
+            description=description,
+            set_key=set_key,
+        )
 
-        result = _map_auth_api_key_with_value(api_key)
-        if set_key:
-            return _attempt_local_key_activation(
+        result = _map_auth_api_key_with_value(backend_result.api_key)
+        if backend_result.local_key_activation is not None:
+            return _with_local_key_activation_status(
                 result,
-                zenml_client=zenml_client,
-                operation="create",
+                status=backend_result.local_key_activation,
             )
         return result
 
@@ -2202,18 +1833,10 @@ class _APIKeysAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            api_key = self._client_ref._client().get_api_key(
-                service_account_name_id_or_prefix=validated_service_account,
-                name_id_or_prefix=validated_name_or_id,
-                allow_name_prefix_match=False,
-                hydrate=True,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load API key {validated_name_or_id!r} for service "
-                f"account {validated_service_account!r}: {exc}"
-            ) from exc
+        api_key = self._client_ref._backend.get_api_key(
+            service_account=validated_service_account,
+            name_or_id=validated_name_or_id,
+        )
         return _map_auth_api_key(api_key)
 
     def list(
@@ -2236,20 +1859,13 @@ class _APIKeysAPI:
             service_account,
             name="service_account",
         )
-        try:
-            api_keys = self._client_ref._client().list_api_keys(
-                service_account_name_id_or_prefix=validated_service_account,
-                name=name,
-                active=active,
-                page=backend_page,
-                size=backend_size,
-                hydrate=True,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to list API keys for service account "
-                f"{validated_service_account!r}: {exc}"
-            ) from exc
+        api_keys = self._client_ref._backend.list_api_keys(
+            service_account=validated_service_account,
+            name=name,
+            active=active,
+            page=backend_page,
+            size=backend_size,
+        )
         return [_map_auth_api_key(item) for item in api_keys.items]
 
     def update(
@@ -2270,19 +1886,13 @@ class _APIKeysAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            api_key = self._client_ref._client().update_api_key(
-                service_account_name_id_or_prefix=validated_service_account,
-                name_id_or_prefix=validated_name_or_id,
-                name=name,
-                description=description,
-                active=active,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to update API key {validated_name_or_id!r} for service "
-                f"account {validated_service_account!r}: {exc}"
-            ) from exc
+        api_key = self._client_ref._backend.update_api_key(
+            service_account=validated_service_account,
+            name_or_id=validated_name_or_id,
+            name=name,
+            description=description,
+            active=active,
+        )
         return _map_auth_api_key(api_key)
 
     def rotate(
@@ -2304,26 +1914,18 @@ class _APIKeysAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            zenml_client = self._client_ref._client()
-            api_key = zenml_client.rotate_api_key(
-                service_account_name_id_or_prefix=validated_service_account,
-                name_id_or_prefix=validated_name_or_id,
-                retain_period_minutes=retain_period_minutes,
-                set_key=False,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to rotate API key {validated_name_or_id!r} for service "
-                f"account {validated_service_account!r}: {exc}"
-            ) from exc
+        backend_result = self._client_ref._backend.rotate_api_key(
+            service_account=validated_service_account,
+            name_or_id=validated_name_or_id,
+            retain_period_minutes=retain_period_minutes,
+            set_key=set_key,
+        )
 
-        result = _map_auth_api_key_with_value(api_key)
-        if set_key:
-            return _attempt_local_key_activation(
+        result = _map_auth_api_key_with_value(backend_result.api_key)
+        if backend_result.local_key_activation is not None:
+            return _with_local_key_activation_status(
                 result,
-                zenml_client=zenml_client,
-                operation="rotate",
+                status=backend_result.local_key_activation,
             )
         return result
 
@@ -2337,16 +1939,10 @@ class _APIKeysAPI:
             name_or_id,
             name="name_or_id",
         )
-        try:
-            self._client_ref._client().delete_api_key(
-                service_account_name_id_or_prefix=validated_service_account,
-                name_id_or_prefix=validated_name_or_id,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to delete API key {validated_name_or_id!r} for service "
-                f"account {validated_service_account!r}: {exc}"
-            ) from exc
+        self._client_ref._backend.delete_api_key(
+            service_account=validated_service_account,
+            name_or_id=validated_name_or_id,
+        )
 
 
 class KitaruClient:
@@ -2393,6 +1989,12 @@ class KitaruClient:
             require_project=_require_project,
         )
         self._project = resolved_connection.project
+        self._backend = KitaruBackendGateway(
+            project=self._project,
+            client_factory=lambda: Client(),
+            active_stack_log_store_getter=active_stack_log_store,
+            resolve_log_store_getter=resolve_log_store,
+        )
 
         self.auth = _AuthAPI(self)
         self.executions = _ExecutionsAPI(self)
@@ -2412,7 +2014,7 @@ class KitaruClient:
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""
-        return Client()
+        return cast(Client, self._backend.zenml_client())
 
     def _get_pipeline_run(
         self,
@@ -2421,17 +2023,7 @@ class KitaruClient:
         hydrate: bool,
     ) -> PipelineRunResponse:
         """Fetch a run by execution ID with strict ID matching."""
-        try:
-            return self._client().get_pipeline_run(
-                name_id_or_prefix=exec_id,
-                allow_name_prefix_match=False,
-                project=self._project,
-                hydrate=hydrate,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load execution '{exec_id}': {exc}"
-            ) from exc
+        return self._backend.get_pipeline_run(exec_id, hydrate=hydrate)
 
     def _get_snapshot(
         self,
@@ -2440,17 +2032,7 @@ class KitaruClient:
         hydrate: bool,
     ) -> Any:
         """Fetch a snapshot by ID with strict ID matching."""
-        try:
-            return self._client().get_snapshot(
-                name_id_or_prefix=snapshot_id,
-                allow_prefix_match=False,
-                project=self._project,
-                hydrate=hydrate,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load deployment snapshot '{snapshot_id}': {exc}"
-            ) from exc
+        return self._backend.get_snapshot(snapshot_id, hydrate=hydrate)
 
     def _get_artifact_version(
         self,
@@ -2459,16 +2041,7 @@ class KitaruClient:
         hydrate: bool,
     ) -> ArtifactVersionResponse:
         """Fetch an artifact version by ID."""
-        try:
-            return self._client().get_artifact_version(
-                name_id_or_prefix=artifact_id,
-                project=self._project,
-                hydrate=hydrate,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load artifact '{artifact_id}': {exc}"
-            ) from exc
+        return self._backend.get_artifact_version(artifact_id, hydrate=hydrate)
 
 
 __all__ = [
