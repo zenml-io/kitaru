@@ -173,6 +173,104 @@ def test_zero_token_values_are_preserved_as_present_values() -> None:
     assert record["usage"]["reasoning_tokens"] == 0
 
 
+def test_gemini_snake_case_usage_fields_are_normalized() -> None:
+    record = build_usage_record(
+        adapter="gemini_interactions",
+        surface="gemini_interaction",
+        usage={
+            "prompt_token_count": 10,
+            "candidates_token_count": 4,
+            "total_token_count": 17,
+            "cached_content_token_count": 3,
+            "thoughts_token_count": 2,
+            "tool_use_prompt_token_count": 1,
+        },
+    )
+
+    assert record["usage"]["input_tokens"] == 10
+    assert record["usage"]["output_tokens"] == 4
+    assert record["usage"]["total_tokens"] == 17
+    assert record["usage"]["cached_input_tokens"] == 3
+    assert record["usage"]["reasoning_tokens"] == 2
+    assert record["usage"]["raw"]["tool_use_prompt_token_count"] == 1
+
+
+def test_gemini_camel_case_usage_fields_are_normalized() -> None:
+    record = build_usage_record(
+        adapter="gemini_interactions",
+        surface="gemini_interaction",
+        usage={
+            "promptTokenCount": 12,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 20,
+            "cachedContentTokenCount": 4,
+            "thoughtsTokenCount": 3,
+            "toolUsePromptTokenCount": 2,
+        },
+    )
+
+    assert record["usage"]["input_tokens"] == 12
+    assert record["usage"]["output_tokens"] == 5
+    assert record["usage"]["total_tokens"] == 20
+    assert record["usage"]["cached_input_tokens"] == 4
+    assert record["usage"]["reasoning_tokens"] == 3
+    assert record["usage"]["raw"]["toolUsePromptTokenCount"] == 2
+
+
+def test_gemini_explicit_zero_usage_values_are_preserved() -> None:
+    record = build_usage_record(
+        adapter="gemini_interactions",
+        surface="gemini_interaction",
+        usage={
+            "prompt_token_count": 0,
+            "promptTokenCount": 99,
+            "candidates_token_count": 0,
+            "candidatesTokenCount": 88,
+            "total_token_count": 0,
+            "totalTokenCount": 77,
+            "cached_content_token_count": 0,
+            "cachedContentTokenCount": 66,
+            "thoughts_token_count": 0,
+            "thoughtsTokenCount": 55,
+        },
+    )
+
+    assert record["usage"]["input_tokens"] == 0
+    assert record["usage"]["output_tokens"] == 0
+    assert record["usage"]["total_tokens"] == 0
+    assert record["usage"]["cached_input_tokens"] == 0
+    assert record["usage"]["reasoning_tokens"] == 0
+
+
+def test_gemini_token_only_record_aggregates_without_cost() -> None:
+    record = build_usage_record(
+        adapter="gemini_interactions",
+        surface="gemini_interaction",
+        record_id="gemini-call",
+        model="gemini-test",
+        usage={
+            "promptTokenCount": 8,
+            "candidatesTokenCount": 6,
+            "totalTokenCount": 14,
+        },
+        cost_source="none",
+    )
+
+    summary = aggregate_usage_records([record])
+
+    assert summary["call_count"] == 1
+    assert summary["incurred_call_count"] == 1
+    assert summary["input_tokens"] == 8
+    assert summary["output_tokens"] == 6
+    assert summary["total_tokens"] == 14
+    assert summary["actual_cost_usd"] == 0.0
+    assert summary["estimated_cost_usd"] == 0.0
+    assert summary["display_cost_usd"] == 0.0
+    assert summary["records_without_cost_count"] == 1
+    assert summary["adapters"] == ["gemini_interactions"]
+    assert summary["models"] == ["gemini-test"]
+
+
 @pytest.mark.parametrize("invalid_cost", [True, -0.01, math.nan, math.inf, "bad"])
 def test_invalid_cost_values_are_omitted(invalid_cost: object) -> None:
     record = build_usage_record(

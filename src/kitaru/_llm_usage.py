@@ -134,6 +134,7 @@ LLMAdapter = Literal[
     "openai_agents",
     "claude_agent_sdk",
     "langgraph",
+    "gemini_interactions",
 ]
 LLMSurface = Literal[
     "direct_llm",
@@ -141,6 +142,7 @@ LLMSurface = Literal[
     "runner_call",
     "agent_invocation",
     "graph_call",
+    "gemini_interaction",
 ]
 LLMCostSource = Literal[
     "provider_reported",
@@ -269,6 +271,8 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
             "request_tokens",
             "tokens_input",
             "input_token_count",
+            "prompt_token_count",
+            "promptTokenCount",
         )
     )
     output_tokens = _int_or_none(
@@ -279,10 +283,18 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
             "response_tokens",
             "tokens_output",
             "output_token_count",
+            "candidates_token_count",
+            "candidatesTokenCount",
         )
     )
     total_tokens = _int_or_none(
-        _first_present(mapping, "total_tokens", "tokens_total", "total_token_count")
+        _first_present(
+            mapping,
+            "total_tokens",
+            "tokens_total",
+            "total_token_count",
+            "totalTokenCount",
+        )
     )
     if total_tokens is None and (input_tokens is not None or output_tokens is not None):
         total_tokens = (input_tokens or 0) + (output_tokens or 0)
@@ -293,8 +305,15 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
         mapping,
         "cached_input_tokens",
         "cached_prompt_tokens",
+        "cached_content_token_count",
+        "cachedContentTokenCount",
     )
-    reasoning_value = _first_present(mapping, "reasoning_tokens")
+    reasoning_value = _first_present(
+        mapping,
+        "reasoning_tokens",
+        "thoughts_token_count",
+        "thoughtsTokenCount",
+    )
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
