@@ -122,6 +122,7 @@ def _execution_stub(
         original_exec_id=None,
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
+        llm_usage_records=[],
     )
 
 
@@ -2307,6 +2308,73 @@ def test_executions_get_renders_execution_details(
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
     assert "LLM usage: 2 calls (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_malformed_llm_usage_summary_honestly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed LLM usage summary numbers should not render as real zeroes."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "call_count": "not-an-int",
+            "incurred_call_count": True,
+            "reused_call_count": None,
+            "total_tokens": "not-an-int",
+            "display_cost_usd": "not-a-number",
+            "actual_cost_usd": float("nan"),
+            "estimated_cost_usd": None,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: summary metadata is malformed" in output
+    assert "0 calls (0 incurred, 0 reused), 0 tokens" not in output
+    assert "display cost $0.000000" not in output
+
+
+def test_executions_get_renders_valid_zero_llm_usage_summary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A complete zero summary should still render as real zero usage."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "call_count": 0,
+            "incurred_call_count": 0,
+            "reused_call_count": 0,
+            "total_tokens": 0,
+            "display_cost_usd": 0.0,
+            "actual_cost_usd": 0.0,
+            "estimated_cost_usd": 0.0,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: 0 calls (0 incurred, 0 reused), 0 tokens" in output
+    assert "display cost $0.000000" in output
 
 
 def test_executions_list_applies_filters(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -9,7 +10,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from kitaru._llm_usage import (
     LLM_USAGE_SUMMARY_METADATA_KEY,
+    cache_status_for_checkpoint_status,
     parse_usage_summary,
+    strip_usage_record_bookkeeping,
     usage_records_from_metadata,
 )
 from kitaru.config import FrozenExecutionSpec
@@ -17,6 +20,18 @@ from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
+
+
+def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
+    """Return the stable identity used to avoid duplicate usage records."""
+    record_id = record.get("record_id")
+    event_id = record.get("event_id")
+    if record_id is None and event_id is None:
+        return None
+    return (
+        str(record_id) if record_id is not None else None,
+        str(event_id) if event_id is not None else None,
+    )
 
 
 class ExecutionStatus(StrEnum):
@@ -386,14 +401,23 @@ class CheckpointAttempt:
     ended_at: datetime | None
     metadata: dict[str, Any]
     failure: FailureInfo | None
+    _raw_status: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def llm_usage_records(self) -> list[dict[str, Any]]:
         """Canonical LLM usage records persisted on this attempt."""
-        return usage_records_from_metadata(
-            self.metadata,
-            source_attempt_id=self.attempt_id,
+        cache_status = cache_status_for_checkpoint_status(
+            self._raw_status or self.status
         )
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in usage_records_from_metadata(
+                self.metadata,
+                source_attempt_id=self.attempt_id,
+                reused=cache_status is not None,
+                reused_cache_status=cache_status or "checkpoint_cache_hit",
+            )
+        ]
 
 
 @dataclass(frozen=True)
@@ -443,8 +467,11 @@ class CheckpointCall:
         for attempt in self.attempts:
             records.extend(attempt.llm_usage_records)
         if records:
-            return records
-        return usage_records_from_metadata(self.metadata)
+            return [strip_usage_record_bookkeeping(record) for record in records]
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in usage_records_from_metadata(self.metadata)
+        ]
 
 
 @dataclass(frozen=True)
@@ -475,11 +502,30 @@ class Execution:
 
     @property
     def llm_usage_records(self) -> list[dict[str, Any]]:
-        """Canonical LLM usage records from all checkpoint attempts."""
-        records: list[dict[str, Any]] = []
+        """Canonical LLM usage records from execution and checkpoint metadata."""
+        checkpoint_records: list[dict[str, Any]] = []
+        checkpoint_identities: set[tuple[str | None, str | None]] = set()
         for checkpoint in self.checkpoints:
-            records.extend(checkpoint.llm_usage_records)
-        return records
+            checkpoint_records.extend(checkpoint.llm_usage_records)
+        for record in checkpoint_records:
+            identity = _record_identity(record)
+            if identity is not None:
+                checkpoint_identities.add(identity)
+
+        run_records = usage_records_from_metadata(
+            self.metadata,
+            source_attempt_id=f"run:{self.exec_id}",
+        )
+        unique_run_records = [
+            record
+            for record in run_records
+            if (identity := _record_identity(record)) is None
+            or identity not in checkpoint_identities
+        ]
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in [*unique_run_records, *checkpoint_records]
+        ]
 
     def refresh(self) -> Execution:
         """Fetch the latest execution state."""

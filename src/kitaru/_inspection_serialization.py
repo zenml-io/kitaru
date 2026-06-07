@@ -223,6 +223,10 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
             fallback_repr=True,
         ),
         "original_exec_id": execution.original_exec_id,
+        "llm_usage_records": to_jsonable(
+            execution.llm_usage_records,
+            fallback_repr=True,
+        ),
         "checkpoints": [
             serialize_checkpoint_call(checkpoint)
             for checkpoint in execution.checkpoints

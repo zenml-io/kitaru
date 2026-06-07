@@ -593,9 +593,11 @@ class EventTracker:
             )
         usage_records = []
         for event in ordered_events:
-            if not isinstance(event, ModelEvent) or event.usage is None:
+            if not isinstance(event, ModelEvent):
                 continue
-            usage_payload = _request_usage_payload(event.usage)
+            usage_payload = (
+                _request_usage_payload(event.usage) if event.usage is not None else None
+            )
             usage_records.append(
                 build_usage_record(
                     adapter="pydantic_ai",

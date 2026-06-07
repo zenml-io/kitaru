@@ -1437,6 +1437,164 @@ def test_flow_return_coercion_rejects_mixed_tuple_subclasses() -> None:
         _coerce_flow_return_for_zenml(Pair(handle, 1))
 
 
+def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
+    """One handle should not fetch attempts again after successful aggregation."""
+    flow_module = sys.modules["kitaru.flow"]
+    calls: list[str] = []
+
+    def fake_safe(run: PipelineRunResponse) -> bool:
+        calls.append(str(run.id))
+        return True
+
+    monkeypatch.setattr(
+        flow_module, "_safe_persist_terminal_llm_usage_metadata", fake_safe
+    )
+
+    handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
+    run = _as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-1"))
+
+    handle._persist_terminal_llm_usage_once(run)
+    handle._persist_terminal_llm_usage_once(run)
+
+    assert calls == ["run-1"]
+
+
+def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
+    monkeypatch,
+) -> None:
+    """A terminal run that already has a summary should not fetch attempts."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        empty_usage_summary,
+        serialize_summary_for_metadata,
+        summary_to_flat_metadata,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    flow_module = sys.modules["kitaru.flow"]
+
+    def fail_fetch(*, run: PipelineRunResponse, client: object) -> object:
+        raise AssertionError("attempt fetch should not run")
+
+    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fail_fetch)
+    monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: (_ for _ in ()).throw(
+            AssertionError("metadata write should not run")
+        ),
+    )
+
+    summary = empty_usage_summary()
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={
+                    LLM_USAGE_SUMMARY_METADATA_KEY: serialize_summary_for_metadata(
+                        summary
+                    ),
+                    **summary_to_flat_metadata(summary),
+                },
+            ),
+        )
+    )
+
+    assert persisted is True
+
+
+def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(
+    monkeypatch,
+) -> None:
+    """A schema marker alone is not enough to trust terminal aggregation."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+        serialize_summary_for_metadata,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    flow_module = sys.modules["kitaru.flow"]
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="after-partial-summary",
+        total_tokens=9,
+    )
+    fetch_calls = 0
+    written: dict[str, Any] = {}
+
+    def fake_fetch(*, run: PipelineRunResponse, client: object) -> object:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return {}
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        written.update(metadata)
+
+    monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
+    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fake_fetch)
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={
+                    LLM_USAGE_METADATA_KEY: {"call": record},
+                    LLM_USAGE_SUMMARY_METADATA_KEY: serialize_summary_for_metadata(
+                        {"schema_version": 1}
+                    ),
+                },
+            ),
+        )
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert persisted is True
+    assert fetch_calls == 1
+    assert summary is not None
+    assert summary["call_count"] == 1
+    assert summary["total_tokens"] == 9
+
+
+def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
+    monkeypatch,
+) -> None:
+    """A no-LLM run should not be retried forever by the same handle."""
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    flow_module = sys.modules["kitaru.flow"]
+    fetch_calls = 0
+
+    def fake_fetch(*, run: PipelineRunResponse, client: object) -> object:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return {}
+
+    monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
+    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fake_fetch)
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: (_ for _ in ()).throw(
+            AssertionError("no metadata should be written")
+        ),
+    )
+
+    handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
+    run = cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
+
+    handle._persist_terminal_llm_usage_once(run)
+    handle._persist_terminal_llm_usage_once(run)
+
+    assert fetch_calls == 1
+    assert _persist_terminal_llm_usage_metadata(run) is True
+
+
 def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
     """Terminal aggregation counts separate retry attempts for the same call."""
     from kitaru._llm_usage import (
@@ -1553,6 +1711,57 @@ def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) ->
     assert summary["incurred_total_tokens"] == 42
     assert written[LLM_FLAT_INCURRED_CALL_COUNT_KEY] == 1
     assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 42
+
+
+def test_terminal_llm_usage_metadata_is_idempotent(monkeypatch) -> None:
+    """Repeated terminal aggregation writes the same serialized summary."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="flow-level-call",
+        input_tokens=3,
+        output_tokens=4,
+        estimated_cost_usd=0.01,
+    )
+    written: list[dict[str, Any]] = []
+
+    flow_module = sys.modules["kitaru.flow"]
+    monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        flow_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: {},
+    )
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        written.append(dict(metadata))
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(
+            id="run-1",
+            run_metadata={LLM_USAGE_METADATA_KEY: {"flow-level-call": record}},
+        ),
+    )
+
+    _persist_terminal_llm_usage_metadata(run)
+    _persist_terminal_llm_usage_metadata(run)
+
+    assert len(written) == 2
+    assert written[0] == written[1]
+    assert isinstance(written[0][LLM_USAGE_SUMMARY_METADATA_KEY], str)
+    assert parse_usage_summary(
+        written[0][LLM_USAGE_SUMMARY_METADATA_KEY]
+    ) == parse_usage_summary(written[1][LLM_USAGE_SUMMARY_METADATA_KEY])
 
 
 def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -> None:

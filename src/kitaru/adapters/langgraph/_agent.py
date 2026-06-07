@@ -7,7 +7,12 @@ from functools import lru_cache
 from importlib import metadata
 from typing import Any, cast
 
-from kitaru._llm_usage import build_usage_record, log_usage_record
+from kitaru._llm_usage import (
+    build_usage_record,
+    estimate_calculated_cost_usd,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -696,20 +701,24 @@ class KitaruGraphRunner:
 
         usage = self._usage_from_output(output) if self._capture.save_usage else None
         estimated_cost = (
-            self._cost_calculator(usage)
-            if self._cost_calculator is not None and usage is not None
+            estimate_calculated_cost_usd(
+                calculator=self._cost_calculator,
+                usage=usage,
+                warnings=warnings,
+                adapter_name="LangGraph",
+            )
+            if self._capture.save_usage
             else None
         )
-        usage_record = None
-        if usage is not None:
+        if self._capture.save_usage:
             usage_record = build_usage_record(
                 adapter="langgraph",
                 surface="graph_call",
                 call_name=self._name,
                 event_id=tracker.run_label,
                 record_id=tracker.run_label,
-                usage=usage.model_dump(mode="json"),
-                model=usage.model_name,
+                usage=usage.model_dump(mode="json") if usage is not None else None,
+                model=usage.model_name if usage is not None else None,
                 estimated_cost_usd=estimated_cost,
                 cost_source="calculator" if estimated_cost is not None else "none",
                 cost_source_label="langgraph.cost_calculator",
@@ -1522,18 +1531,11 @@ class KitaruGraphRunner:
         usage_json = to_json_safe(usage)
         if not isinstance(usage_json, dict):
             return LangGraphUsageSummary(raw={"value": usage_json})
+        token_usage = token_usage_from_mapping(usage_json)
         return LangGraphUsageSummary(
-            input_tokens=_int_or_none(
-                usage_json.get("input_tokens")
-                or usage_json.get("prompt_tokens")
-                or usage_json.get("input_token_count")
-            ),
-            output_tokens=_int_or_none(
-                usage_json.get("output_tokens")
-                or usage_json.get("completion_tokens")
-                or usage_json.get("output_token_count")
-            ),
-            total_tokens=_int_or_none(usage_json.get("total_tokens")),
+            input_tokens=token_usage["input_tokens"],
+            output_tokens=token_usage["output_tokens"],
+            total_tokens=token_usage["total_tokens"],
             raw=usage_json,
         )
 
@@ -1686,6 +1688,37 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+_USAGE_TOKEN_KEYS = frozenset(
+    {
+        "input_tokens",
+        "prompt_tokens",
+        "request_tokens",
+        "tokens_input",
+        "input_token_count",
+        "output_tokens",
+        "completion_tokens",
+        "response_tokens",
+        "tokens_output",
+        "output_token_count",
+        "total_tokens",
+        "tokens_total",
+        "total_token_count",
+    }
+)
+_USAGE_CONTAINER_KEYS = ("usage", "token_usage", "usage_metadata")
+
+
+def _looks_like_usage(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            key in value and _int_or_none(value[key]) is not None
+            for key in _USAGE_TOKEN_KEYS
+        )
+    return any(
+        _int_or_none(getattr(value, key, None)) is not None for key in _USAGE_TOKEN_KEYS
+    )
+
+
 def _len_or_count(value: Any) -> int:
     try:
         return len(value)
@@ -1734,9 +1767,11 @@ def _type_label(value: Any) -> str:
 def _find_usage(value: Any, *, max_depth: int, _depth: int = 0) -> Any | None:
     if value is None or _depth > max_depth:
         return None
+    if _looks_like_usage(value):
+        return value
     if isinstance(value, Mapping):
-        for key in ("usage", "token_usage", "usage_metadata"):
-            if key in value:
+        for key in _USAGE_CONTAINER_KEYS:
+            if key in value and _looks_like_usage(value[key]):
                 return value[key]
         for nested in value.values():
             found = _find_usage(nested, max_depth=max_depth, _depth=_depth + 1)
@@ -1747,7 +1782,8 @@ def _find_usage(value: Any, *, max_depth: int, _depth: int = 0) -> Any | None:
             found = _find_usage(item, max_depth=max_depth, _depth=_depth + 1)
             if found is not None:
                 return found
-    usage = getattr(value, "usage_metadata", None) or getattr(value, "usage", None)
-    if usage is not None:
-        return usage
+    for key in ("usage_metadata", "usage"):
+        usage = getattr(value, key, None)
+        if _looks_like_usage(usage):
+            return usage
     return None

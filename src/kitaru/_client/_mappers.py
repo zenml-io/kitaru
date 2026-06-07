@@ -234,6 +234,7 @@ def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
         ended_at=step.end_time,
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
+        _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
     )
 
 

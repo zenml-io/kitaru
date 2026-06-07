@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -180,21 +181,52 @@ def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
     return ", ".join(entries)
 
 
+def _display_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _display_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        float_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(float_value):
+        return None
+    return float_value
+
+
 def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
     """Render a compact LLM usage summary for execution details."""
     if not summary:
         return "none"
-    call_count = summary.get("call_count", 0)
-    incurred = summary.get("incurred_call_count", 0)
-    reused = summary.get("reused_call_count", 0)
-    total_tokens = summary.get("total_tokens", 0)
-    display_cost = summary.get("display_cost_usd", 0.0)
-    actual_cost = summary.get("actual_cost_usd", 0.0)
-    estimated_cost = summary.get("estimated_cost_usd", 0.0)
+    call_count = _display_int(summary.get("call_count"))
+    incurred = _display_int(summary.get("incurred_call_count"))
+    reused = _display_int(summary.get("reused_call_count"))
+    total_tokens = _display_int(summary.get("total_tokens"))
+    display_cost = _display_float(summary.get("display_cost_usd"))
+    actual_cost = _display_float(summary.get("actual_cost_usd"))
+    estimated_cost = _display_float(summary.get("estimated_cost_usd"))
+    if None in (
+        call_count,
+        incurred,
+        reused,
+        total_tokens,
+        display_cost,
+        actual_cost,
+        estimated_cost,
+    ):
+        return "summary metadata is malformed"
     return (
         f"{call_count} calls ({incurred} incurred, {reused} reused), "
-        f"{total_tokens} tokens, display cost ${float(display_cost):.6f} "
-        f"(actual ${float(actual_cost):.6f}, estimated ${float(estimated_cost):.6f})"
+        f"{total_tokens} tokens, display cost ${display_cost:.6f} "
+        f"(actual ${actual_cost:.6f}, estimated ${estimated_cost:.6f})"
     )
 
 

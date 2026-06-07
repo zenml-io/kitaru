@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal, cast
@@ -116,6 +117,14 @@ _FLAT_METADATA_FIELDS: tuple[tuple[str, str, _FlatSummaryCoercer], ...] = (
     ),
 )
 LLM_FLAT_METADATA_KEYS = tuple(key for key, _, _ in _FLAT_METADATA_FIELDS)
+_SUMMARY_FLOAT_FIELDS = frozenset(
+    {
+        "actual_cost_usd",
+        "estimated_cost_usd",
+        "display_cost_usd",
+    }
+)
+_SUMMARY_LIST_FIELDS = ("adapters", "models", "warnings")
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +156,20 @@ LLMCacheStatus = Literal[
     "replay_reused",
     "unknown",
 ]
+_REUSED_CHECKPOINT_STATUSES = frozenset({"cached", "skipped"})
+_REPLAY_REUSED_CHECKPOINT_STATUSES = frozenset(
+    {"replay_reused", "reused", "reused_not_incurred"}
+)
+
+
+def cache_status_for_checkpoint_status(status: Any) -> LLMCacheStatus | None:
+    """Return the LLM cache status implied by a raw checkpoint status."""
+    raw_status = str(getattr(status, "value", status)).strip().lower()
+    if raw_status in _REPLAY_REUSED_CHECKPOINT_STATUSES:
+        return "replay_reused"
+    if raw_status in _REUSED_CHECKPOINT_STATUSES:
+        return "checkpoint_cache_hit"
+    return None
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -162,9 +185,61 @@ def _float_or_none(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        float_value = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(float_value):
+        return None
+    return float_value
+
+
+def coerce_cost_usd(value: Any) -> float | None:
+    """Return a valid non-negative USD cost, or ``None`` when invalid."""
+    cost = _float_or_none(value)
+    if cost is None or cost < 0:
+        return None
+    return cost
+
+
+def estimate_calculated_cost_usd(
+    *,
+    calculator: Callable[[Any], Any] | None,
+    usage: Any | None,
+    warnings: list[str],
+    adapter_name: str,
+) -> float | None:
+    """Run and validate an adapter cost calculator without failing the LLM call."""
+    if calculator is None or usage is None:
+        return None
+    try:
+        raw_cost = calculator(usage)
+    except Exception as exc:
+        warnings.append(
+            f"{adapter_name} cost calculator failed; estimated cost was not "
+            f"recorded: {type(exc).__name__}: {exc}"
+        )
+        return None
+    cost = coerce_cost_usd(raw_cost)
+    if cost is None:
+        warnings.append(
+            f"{adapter_name} cost calculator returned an invalid estimated cost; "
+            "estimated cost was not recorded."
+        )
+    return cost
+
+
+def strip_usage_record_bookkeeping(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a public usage record without internal aggregation bookkeeping."""
+    return {
+        str(key): item for key, item in record.items() if not str(key).startswith("_")
+    }
+
+
+def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
 
 
 def _mapping_or_none(value: Any) -> dict[str, Any] | None:
@@ -187,40 +262,52 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
     """Normalize common provider usage shapes into the canonical token block."""
     mapping = _mapping_or_none(value) or {}
     input_tokens = _int_or_none(
-        mapping.get("input_tokens")
-        or mapping.get("prompt_tokens")
-        or mapping.get("request_tokens")
-        or mapping.get("tokens_input")
-        or mapping.get("input_token_count")
+        _first_present(
+            mapping,
+            "input_tokens",
+            "prompt_tokens",
+            "request_tokens",
+            "tokens_input",
+            "input_token_count",
+        )
     )
     output_tokens = _int_or_none(
-        mapping.get("output_tokens")
-        or mapping.get("completion_tokens")
-        or mapping.get("response_tokens")
-        or mapping.get("tokens_output")
-        or mapping.get("output_token_count")
+        _first_present(
+            mapping,
+            "output_tokens",
+            "completion_tokens",
+            "response_tokens",
+            "tokens_output",
+            "output_token_count",
+        )
     )
     total_tokens = _int_or_none(
-        mapping.get("total_tokens")
-        or mapping.get("tokens_total")
-        or mapping.get("total_token_count")
+        _first_present(mapping, "total_tokens", "tokens_total", "total_token_count")
     )
     if total_tokens is None and (input_tokens is not None or output_tokens is not None):
         total_tokens = (input_tokens or 0) + (output_tokens or 0)
 
     details = _mapping_or_none(mapping.get("details")) or {}
     output_details = _mapping_or_none(mapping.get("output_tokens_details")) or {}
+    cached_input_value = _first_present(
+        mapping,
+        "cached_input_tokens",
+        "cached_prompt_tokens",
+    )
+    reasoning_value = _first_present(mapping, "reasoning_tokens")
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_input_tokens": _int_or_none(
-            mapping.get("cached_input_tokens")
-            or mapping.get("cached_prompt_tokens")
-            or details.get("cached_tokens")
+            cached_input_value
+            if cached_input_value is not None
+            else _first_present(details, "cached_tokens")
         ),
         "reasoning_tokens": _int_or_none(
-            mapping.get("reasoning_tokens") or output_details.get("reasoning_tokens")
+            reasoning_value
+            if reasoning_value is not None
+            else _first_present(output_details, "reasoning_tokens")
         ),
         "raw": _jsonable_mapping(value),
     }
@@ -281,8 +368,8 @@ def build_usage_record(
     if raw_usage is not None:
         usage_block["raw"] = _jsonable_mapping(raw_usage)
 
-    actual_cost = _float_or_none(actual_cost_usd)
-    estimated_cost = _float_or_none(estimated_cost_usd)
+    actual_cost = coerce_cost_usd(actual_cost_usd)
+    estimated_cost = coerce_cost_usd(estimated_cost_usd)
     if cost_source is None:
         if actual_cost is not None:
             cost_source = "provider_reported"
@@ -367,6 +454,10 @@ def log_usage_record_best_effort(record: Mapping[str, Any]) -> None:
 log_usage_record = log_usage_record_best_effort
 
 
+_VALID_BILLING_EFFECTS = {"incurred", "reused_not_incurred", "unknown"}
+_VALID_CACHE_STATUSES = {"executed", "checkpoint_cache_hit", "replay_reused", "unknown"}
+
+
 def _coerce_record(value: Any) -> dict[str, Any] | None:
     record = _mapping_or_none(value)
     if record is None or record.get("schema_version") != LLM_USAGE_SCHEMA_VERSION:
@@ -375,7 +466,25 @@ def _coerce_record(value: Any) -> dict[str, Any] | None:
     cost = _mapping_or_none(record.get("cost"))
     if usage is None or cost is None:
         return None
-    return record
+
+    normalized = dict(record)
+    normalized["usage"] = usage
+    normalized["cost"] = cost
+
+    billing_effect = normalized.get("billing_effect")
+    if billing_effect not in _VALID_BILLING_EFFECTS:
+        normalized["billing_effect"] = "incurred"
+
+    cache_status = normalized.get("cache_status")
+    if cache_status not in _VALID_CACHE_STATUSES:
+        normalized["cache_status"] = "executed"
+
+    raw_warnings = normalized.get("warnings")
+    if isinstance(raw_warnings, list | tuple):
+        normalized["warnings"] = [str(warning) for warning in raw_warnings]
+    else:
+        normalized["warnings"] = []
+    return normalized
 
 
 def parse_usage_records(
@@ -442,15 +551,18 @@ def usage_records_from_metadata(
     )
 
 
-def _token(record: Mapping[str, Any], key: str) -> int:
+def _token_or_none(record: Mapping[str, Any], key: str) -> int | None:
     usage = _mapping_or_none(record.get("usage")) or {}
-    value = _int_or_none(usage.get(key))
-    return value or 0
+    return _int_or_none(usage.get(key))
+
+
+def _token(record: Mapping[str, Any], key: str) -> int:
+    return _token_or_none(record, key) or 0
 
 
 def _record_cost(record: Mapping[str, Any], key: str) -> float | None:
     cost = _mapping_or_none(record.get("cost")) or {}
-    return _float_or_none(cost.get(key))
+    return coerce_cost_usd(cost.get(key))
 
 
 def _round_money(value: float) -> float:
@@ -477,7 +589,6 @@ def empty_usage_summary() -> dict[str, Any]:
         "estimated_cost_usd": 0.0,
         "display_cost_usd": 0.0,
         "records_without_cost_count": 0,
-        "malformed_record_count": 0,
         "adapters": [],
         "models": [],
         "cost_policy": (
@@ -506,7 +617,6 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
     for raw_record in records:
         record = _coerce_record(raw_record)
         if record is None:
-            summary["malformed_record_count"] += 1
             continue
         dedup_key = (
             cast(str | None, raw_record.get("_source_attempt_id")),
@@ -529,8 +639,8 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
 
         input_tokens = _token(record, "input_tokens")
         output_tokens = _token(record, "output_tokens")
-        total_tokens = _token(record, "total_tokens")
-        if total_tokens == 0:
+        total_tokens = _token_or_none(record, "total_tokens")
+        if total_tokens is None:
             total_tokens = input_tokens + output_tokens
 
         summary["input_tokens"] += input_tokens
@@ -604,6 +714,36 @@ def parse_usage_summary(value: Any) -> dict[str, Any] | None:
     if summary is None or summary.get("schema_version") != LLM_USAGE_SCHEMA_VERSION:
         return None
     return summary
+
+
+def _valid_summary_number(value: Any, *, is_float: bool) -> bool:
+    if is_float:
+        number = _float_or_none(value)
+        return number is not None and number >= 0
+    number = _int_or_none(value)
+    return number is not None and number >= 0
+
+
+def metadata_has_complete_usage_summary(metadata: Mapping[str, Any]) -> bool:
+    """Return whether terminal LLM aggregation metadata is complete enough to trust."""
+    summary = parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+    if summary is None:
+        return False
+
+    for metadata_key, summary_key, _coerce in _FLAT_METADATA_FIELDS:
+        is_float = summary_key in _SUMMARY_FLOAT_FIELDS
+        if not _valid_summary_number(summary.get(summary_key), is_float=is_float):
+            return False
+        if metadata_key not in metadata or not _valid_summary_number(
+            metadata.get(metadata_key),
+            is_float=is_float,
+        ):
+            return False
+
+    if any(not isinstance(summary.get(key), list) for key in _SUMMARY_LIST_FIELDS):
+        return False
+    cost_policy = summary.get("cost_policy")
+    return isinstance(cost_policy, str) and bool(cost_policy.strip())
 
 
 def execution_metadata_from_records(

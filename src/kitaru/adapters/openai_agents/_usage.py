@@ -37,6 +37,13 @@ def _detail_value(raw: Any, detail_key: str, value_key: str) -> Any:
     return _get_value(details, value_key)
 
 
+def _first_non_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _raw_mapping(raw: Any) -> dict[str, Any] | None:
     if raw is None:
         return None
@@ -62,14 +69,18 @@ def normalize_usage(raw: Any, *, model_name: str | None = None) -> OpenAIUsageSu
         total_tokens = (input_tokens or 0) + (output_tokens or 0)
 
     cached_input_tokens = _int_or_none(
-        _first_value(raw, "cached_input_tokens", "cached_prompt_tokens")
-        or _detail_value(raw, "input_tokens_details", "cached_tokens")
-        or _detail_value(raw, "prompt_tokens_details", "cached_tokens")
+        _first_non_none(
+            _first_value(raw, "cached_input_tokens", "cached_prompt_tokens"),
+            _detail_value(raw, "input_tokens_details", "cached_tokens"),
+            _detail_value(raw, "prompt_tokens_details", "cached_tokens"),
+        )
     )
     reasoning_tokens = _int_or_none(
-        _first_value(raw, "reasoning_tokens")
-        or _detail_value(raw, "output_tokens_details", "reasoning_tokens")
-        or _detail_value(raw, "completion_tokens_details", "reasoning_tokens")
+        _first_non_none(
+            _first_value(raw, "reasoning_tokens"),
+            _detail_value(raw, "output_tokens_details", "reasoning_tokens"),
+            _detail_value(raw, "completion_tokens_details", "reasoning_tokens"),
+        )
     )
 
     return OpenAIUsageSummary(

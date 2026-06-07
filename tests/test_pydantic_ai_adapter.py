@@ -30,6 +30,41 @@ from kitaru.adapters.pydantic_ai._utils import (
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
+def test_pydantic_ai_tracker_records_model_call_without_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+    from kitaru.adapters.pydantic_ai import _tracking
+
+    logged: dict[str, Any] = {}
+
+    def fake_log(**metadata: Any) -> None:
+        logged.update(metadata)
+
+    monkeypatch.setattr(_tracking.kitaru, "log", fake_log)
+
+    tracker = _tracking.EventTracker(agent_name="agent")
+    event_id, context = tracker.start_model_event()
+    tracker.record_model_event(
+        event_id,
+        context,
+        status="completed",
+        duration_ms=1.0,
+        artifacts={},
+        model_name="test-model",
+        usage=None,
+    )
+
+    tracker.persist()
+
+    usage_records = logged[LLM_USAGE_METADATA_KEY]
+    assert len(usage_records) == 1
+    record = next(iter(usage_records.values()))
+    assert record["model"] == "test-model"
+    assert record["usage"]["total_tokens"] is None
+    assert record["cost"]["source"] == "none"
+
+
 def test_synthetic_checkpoint_marks_flow_result_non_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

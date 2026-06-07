@@ -811,6 +811,139 @@ def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(
     assert summary_metadata["thread_id"] == "thread-1"
 
 
+def test_find_usage_ignores_application_usage_dict_without_token_fields(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    assert (
+        agent_module._find_usage(
+            {"usage": {"feature": "beta"}},
+            max_depth=3,
+        )
+        is None
+    )
+
+
+def test_find_usage_accepts_zero_token_usage(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    usage = agent_module._find_usage(
+        {"message": {"usage_metadata": {"input_tokens": 0, "output_tokens": 1}}},
+        max_depth=3,
+    )
+
+    assert usage == {"input_tokens": 0, "output_tokens": 1}
+
+
+def test_graph_call_counts_request_response_token_aliases(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "usage": {
+                    "request_tokens": 4,
+                    "response_tokens": 6,
+                    "tokens_total": 10,
+                },
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 4
+    assert result.usage.output_tokens == 6
+    assert result.usage.total_tokens == 10
+    assert logged[0]["usage"]["input_tokens"] == 4
+    assert logged[0]["usage"]["output_tokens"] == 6
+    assert logged[0]["usage"]["total_tokens"] == 10
+
+
+def test_graph_call_keeps_successful_run_when_cost_calculator_fails(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"input_tokens": 1, "output_tokens": 2}, "echo": input}
+
+    def fail_cost(_usage: object) -> float:
+        raise RuntimeError("pricing service down")
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        cost_calculator=fail_cost,
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.estimated_cost_usd is None
+    assert any("cost calculator failed" in warning for warning in result.warnings)
+    assert len(logged) == 1
+    assert logged[0]["cost"]["estimated_cost_usd"] is None
+    assert logged[0]["warnings"] == result.warnings
+
+
+def test_graph_call_logs_one_record_without_usage(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"feature": "beta"}, "echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is None
+    assert len(logged) == 1
+    assert logged[0]["usage"]["total_tokens"] is None
+
+
 def test_failed_graph_call_saves_event_artifacts_in_checkpoint_scope(
     langgraph_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,

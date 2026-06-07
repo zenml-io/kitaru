@@ -193,18 +193,18 @@ CLI metric specs use this format:
 - `<name>:<source>:<avg|sum|min|max>` for built-in sources
 - `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for metadata
 
-<Callout type="warn">
-  Grouping by `metadata:<key>` includes the matching metadata values in the
-  statistics output. Only use it for metadata keys whose values are safe to show
-  to whoever can read the CLI, SDK, or MCP response.
-</Callout>
+{% hint style="warning" %}
+Grouping by `metadata:<key>` includes the matching metadata values in the
+statistics output. Only use it for metadata keys whose values are safe to show
+to whoever can read the CLI, SDK, or MCP response.
+{% endhint %}
 
-<Callout type="warn">
-  Metadata metrics read numeric execution metadata. If the metadata value is
-  stored as text or as a nested object, the server cannot aggregate it as a
-  number. Store the value as an integer or float when you want to use it in
-  statistics.
-</Callout>
+{% hint style="warning" %}
+Metadata metrics read numeric execution metadata. If the metadata value is
+stored as text or as a nested object, the server cannot aggregate it as a
+number. Store the value as an integer or float when you want to use it in
+statistics.
+{% endhint %}
 
 ### LLM usage and cost metadata
 
@@ -218,8 +218,9 @@ execution-level views:
   Python client parse it into `execution.llm_usage_summary`. It tells you what
   happened in one execution.
 - Flat numeric metadata keys such as `kitaru_llm_display_cost_usd_v1` and
-  `kitaru_llm_total_tokens_v1` are the statistics view. ZenML statistics can sum
-  or average these because they are top-level numbers, not nested objects.
+  `kitaru_llm_total_tokens_v1` are the statistics view. Kitaru execution
+  statistics can sum or average these because they are top-level numbers, not
+  nested objects.
 
 Cost fields are intentionally split:
 
@@ -253,30 +254,30 @@ kitaru executions statistics \
   --metric llm_reused_calls:metadata:kitaru_llm_reused_call_count_v1:sum
 ```
 
-<Callout type="warn">
-  In v1, terminal LLM summaries are written when the SDK observes completion via
-  `FlowHandle.wait()` or `FlowHandle.get()`. A remote execution that finishes but
-  is never observed through those paths can still have per-checkpoint
-  `llm_usage_v1` records, but it may not have `llm_usage_summary_v1` or the flat
-  `kitaru_llm_*_v1` statistics keys yet. `executions.get` stays read-only and
-  does not backfill missing summaries.
-</Callout>
+{% hint style="warning" %}
+In v1, terminal LLM summaries are written when the SDK observes completion via
+`FlowHandle.wait()` or `FlowHandle.get()`. A remote execution that finishes but
+is never observed through those paths can still have per-checkpoint
+`llm_usage_v1` records, but it may not have `llm_usage_summary_v1` or the flat
+`kitaru_llm_*_v1` statistics keys yet. `executions.get` stays read-only and does
+not backfill missing summaries.
+{% endhint %}
 
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
 Multiple tag filters mean "executions that have all of these tags".
 
-<Callout type="info">
-  `flow` and `stack` groupings currently return IDs (`flow_id` and `stack_id`),
-  not display names. This avoids guessing when a flow or stack has been renamed
-  or deleted. You can still filter by a flow or stack name.
-</Callout>
+{% hint style="info" %}
+`flow` and `stack` groupings currently return IDs (`flow_id` and `stack_id`),
+not display names. This avoids guessing when a flow or stack has been renamed or
+deleted. You can still filter by a flow or stack name.
+{% endhint %}
 
-<Callout type="info">
-  v1 supports grouping by time and metadata, but not filtering by time range or
-  metadata values yet. If you need "last 7 days" or "only executions where
-  `customer_tier=enterprise`", fetch/list those executions separately or add a
-  stable tag for that cohort before querying statistics.
-</Callout>
+{% hint style="info" %}
+v1 supports grouping by time and metadata, but not filtering by time range or
+metadata values yet. If you need "last 7 days" or "only executions where
+`customer_tier=enterprise`", fetch/list those executions separately or add a
+stable tag for that cohort before querying statistics.
+{% endhint %}
 
 Agent and operations summaries should use this same general surface. For
 example, an assistant can ask for daily volume first, then drill into only the

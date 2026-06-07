@@ -387,6 +387,32 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert usage_record["cost"]["source"] == "none"
 
 
+def test_llm_preserves_zero_openai_usage_tokens() -> None:
+    """Direct OpenAI usage logging should keep provider-reported zero tokens."""
+    fake_result = _ProviderCallResult(
+        response_text="empty usage",
+        usage=_LLMUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+    )
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log") as mock_log,
+    ):
+        output = llm("Say nothing", name="zero_call")
+
+    assert output == "empty usage"
+    logged_payload = mock_log.call_args.kwargs["llm_calls"]["zero_call"]
+    assert logged_payload["tokens_input"] == 0
+    assert logged_payload["tokens_output"] == 0
+    assert logged_payload["total_tokens"] == 0
+    usage_record = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]["zero_call"]
+    assert usage_record["usage"]["input_tokens"] == 0
+    assert usage_record["usage"]["output_tokens"] == 0
+    assert usage_record["usage"]["total_tokens"] == 0
+
+
 # ---------------------------------------------------------------------------
 # Anthropic call path
 # ---------------------------------------------------------------------------

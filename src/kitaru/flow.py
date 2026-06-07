@@ -52,8 +52,9 @@ from kitaru._interface_deployments import (
     validate_deployment_selector,
 )
 from kitaru._llm_usage import (
-    LLMCacheStatus,
+    cache_status_for_checkpoint_status,
     execution_metadata_from_records,
+    metadata_has_complete_usage_summary,
     usage_records_from_metadata,
 )
 from kitaru._source_aliases import (
@@ -1084,35 +1085,24 @@ def _checkpoint_count_from_run(run: PipelineRunResponse) -> int | None:
     return None
 
 
-_REUSED_CHECKPOINT_STATUSES = frozenset({"cached", "skipped"})
-_REPLAY_REUSED_CHECKPOINT_STATUSES = frozenset(
-    {"replay_reused", "reused", "reused_not_incurred"}
-)
-
-
 def _metadata_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return {str(key): item for key, item in value.items()}
     return {}
 
 
-def _raw_status_value(status: Any) -> str:
-    return str(getattr(status, "value", status)).strip().lower()
+def _run_has_llm_usage_summary(run: PipelineRunResponse) -> bool:
+    metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    return metadata_has_complete_usage_summary(metadata)
 
 
-def _reuse_cache_status_for_step(step: Any) -> LLMCacheStatus | None:
-    raw_status = _raw_status_value(getattr(step, "status", None))
-    if raw_status in _REPLAY_REUSED_CHECKPOINT_STATUSES:
-        return "replay_reused"
-    if raw_status in _REUSED_CHECKPOINT_STATUSES:
-        return "checkpoint_cache_hit"
-    return None
-
-
-def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> None:
+def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
     """Aggregate LLM usage records and write execution-level metadata."""
     from kitaru.client import KitaruClient
     from kitaru.logging import log_to_execution
+
+    if _run_has_llm_usage_summary(run):
+        return True
 
     client = KitaruClient()
     try:
@@ -1123,7 +1113,7 @@ def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> None:
             "attempts could not be fetched.",
             exc_info=True,
         )
-        return
+        return False
 
     records: list[dict[str, Any]] = []
     execution_id = str(run.id)
@@ -1135,7 +1125,9 @@ def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> None:
     )
     for attempts in attempts_by_lineage.values():
         for step in attempts:
-            cache_status = _reuse_cache_status_for_step(step)
+            cache_status = cache_status_for_checkpoint_status(
+                getattr(step, "status", None)
+            )
             records.extend(
                 usage_records_from_metadata(
                     _metadata_mapping(getattr(step, "run_metadata", None)),
@@ -1149,19 +1141,21 @@ def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> None:
             )
     metadata = execution_metadata_from_records(records)
     if not metadata:
-        return
+        return True
     log_to_execution(str(run.id), **metadata)
+    return True
 
 
-def _safe_persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> None:
+def _safe_persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
     """Best-effort terminal LLM usage aggregation."""
     try:
-        _persist_terminal_llm_usage_metadata(run)
+        return _persist_terminal_llm_usage_metadata(run)
     except Exception:
         logger.debug(
             "Failed to persist terminal LLM usage metadata.",
             exc_info=True,
         )
+        return False
 
 
 def _raise_for_unsuccessful_run(
@@ -1219,6 +1213,7 @@ class FlowHandle:
         self._run = run
         self._run_id = run.id
         self._terminal_event_emitted = False
+        self._terminal_llm_usage_metadata_persisted = False
         self._observed_started_at = (
             observed_started_at
             if observed_started_at is not None
@@ -1278,6 +1273,12 @@ class FlowHandle:
 
         track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
+    def _persist_terminal_llm_usage_once(self, run: PipelineRunResponse) -> None:
+        if self._terminal_llm_usage_metadata_persisted:
+            return
+        if _safe_persist_terminal_llm_usage_metadata(run):
+            self._terminal_llm_usage_metadata_persisted = True
+
     def wait(self) -> Any:
         """Block until execution finishes and return its result.
 
@@ -1294,10 +1295,10 @@ class FlowHandle:
                 if not run.status.is_successful:
                     origin = _safe_classify_run_failure(run)
                     self._track_terminal_once(run, failure_origin=origin)
-                    _safe_persist_terminal_llm_usage_metadata(run)
+                    self._persist_terminal_llm_usage_once(run)
                     _raise_for_unsuccessful_run(run, failure_origin=origin)
                 self._track_terminal_once(run)
-                _safe_persist_terminal_llm_usage_metadata(run)
+                self._persist_terminal_llm_usage_once(run)
                 return _extract_flow_result(run)
             time.sleep(1)
 
@@ -1320,10 +1321,10 @@ class FlowHandle:
         if not run.status.is_successful:
             origin = _safe_classify_run_failure(run)
             self._track_terminal_once(run, failure_origin=origin)
-            _safe_persist_terminal_llm_usage_metadata(run)
+            self._persist_terminal_llm_usage_once(run)
             _raise_for_unsuccessful_run(run, failure_origin=origin)
         self._track_terminal_once(run)
-        _safe_persist_terminal_llm_usage_metadata(run)
+        self._persist_terminal_llm_usage_once(run)
         return _extract_flow_result(run)
 
     def _refresh(self) -> PipelineRunResponse:

@@ -621,6 +621,7 @@ def test_serialize_execution_contract() -> None:
         "artifact_count",
         "llm_usage_summary",
         "frozen_execution_spec",
+        "llm_usage_records",
         "original_exec_id",
         "checkpoints",
         "artifacts",
