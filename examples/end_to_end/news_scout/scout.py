@@ -55,7 +55,7 @@ DEFAULT_INTERESTS: list[str] = [
 # values are resolved at step runtime and never enter Docker image metadata,
 # logs, or the frozen execution spec. Create the secret once with:
 #   kitaru secrets set news-scout-keys \
-#       --ANTHROPIC_API_KEY=sk-ant-... \
+#       --ANTHROPIC_API_KEY=<your-anthropic-api-key> \
 #       --XAI_API_KEY=xai-...          # optional, unlocks search_twitter
 SECRET_NAME = "news-scout-keys"
 

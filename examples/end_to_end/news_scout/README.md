@@ -69,7 +69,7 @@ For a local run, drop your provider API keys in `.env` — the example loads
 them with `python-dotenv` before PydanticAI touches the environment:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
 XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 ```
 
@@ -144,7 +144,7 @@ secret whenever the active stack is remote:
 
 ```bash
 kitaru secrets set news-scout-keys \
-  --ANTHROPIC_API_KEY=sk-ant-... \
+  --ANTHROPIC_API_KEY=<your-anthropic-api-key> \
   --XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 
 kitaru stack use my-k8s-stack

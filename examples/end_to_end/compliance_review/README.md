@@ -14,7 +14,7 @@ This example walks through that idea in three runnable stages, each adding one d
 
 Each stage builds on the previous one. The Claude boundary is the same from Stage 1 onwards: every Claude-running checkpoint returns a `ClaudeAgentResult` Pydantic model, and every later stage reuses that shape rather than inventing a new one.
 
-If you want the generic adapter rather than this domain-specific teaching helper, see `examples/integrations/claude_agent_sdk_agent/` and the [Claude Agent SDK Adapter](https://kitaru.ai/docs/adapters/claude-agent-sdk/) guide. The generic adapter has the same honest v0.1 boundary: one Claude SDK invocation becomes one Kitaru checkpoint. Neither this example nor the generic adapter claims granular replay of Claude-internal model calls, Bash commands, built-in tools, MCP calls, hooks, or file edits.
+If you want the generic adapter rather than this domain-specific teaching helper, see `examples/integrations/claude_agent_sdk_agent/` and the [Claude Agent SDK Adapter](https://docs.zenml.io/kitaru/adapters/claude-agent-sdk/) guide. The generic adapter has the same honest v0.1 boundary: one Claude SDK invocation becomes one Kitaru checkpoint. Neither this example nor the generic adapter claims granular replay of Claude-internal model calls, Bash commands, built-in tools, MCP calls, hooks, or file edits.
 
 ## Quick start
 
@@ -23,7 +23,7 @@ From the repository root:
 ```bash
 uv sync --extra local --extra claude-agent-sdk
 kitaru init
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=<your-anthropic-api-key>
 ```
 
 Pick a stage and run it:
@@ -35,7 +35,7 @@ Pick a stage and run it:
 | 4 | `stage_4_conversational.py` | Wait/resume conversational loop over a single Claude session. |
 
 ```bash
-uv run examples/end_to_end/compliance_review/stage_1_single_turn.py
+uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
 ```
 
 ### Re-running the examples costs real money
@@ -52,10 +52,10 @@ A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_AP
 kitaru stack use <your_remote_stack>
 zenml integration install s3          # or kubernetes, vertex, gcp, azure, …
 
-kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-...
+kitaru secrets set anthropic --ANTHROPIC_API_KEY=<your-anthropic-api-key>
 export KITARU_IMAGE='{"secret_environment_from":["anthropic"]}'
 
-uv run examples/end_to_end/compliance_review/stage_2_multi_domain.py
+uv run python examples/end_to_end/compliance_review/stage_2_multi_domain.py
 ```
 
 This example also keeps a `kitaru.get_secret("anthropic")` fallback for known remote stacks when `ANTHROPIC_API_KEY` is still missing at runtime, so the existing local quickstart and guarded tests keep working.

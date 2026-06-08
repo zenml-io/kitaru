@@ -55,6 +55,42 @@ uv run python claude_agent_sdk_adapter.py \
   --prompt "Explain Kitaru checkpoints using a simple cooking metaphor."
 ```
 
+## Live streaming example
+
+Use `claude_agent_sdk_streaming.py` when you want to watch live Claude stream
+updates while the Kitaru checkpoint is still running.
+
+From the repository root:
+
+```bash
+uv sync --extra local --extra claude-agent-sdk
+uv run kitaru init
+export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
+uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py
+```
+
+The script submits a Kitaru flow, starts a watcher for
+`claude_agent_sdk.stream.*` events, and then waits for the final durable
+`ClaudeRunResult`.
+
+A few details are worth knowing before you run it:
+
+- Live watching requires a REST-backed Kitaru backend with stream-event support.
+  If that support is unavailable, the script still reads the saved result with
+  `.wait()` and prints a friendly explanation.
+- The example uses `allowed_tools=[]` and `max_turns=1`, so it is safe and
+  predictable.
+- The example disables checkpoint caching for the demo. In normal code, a
+  repeated stream call can hit the stream cache; if that happens, Kitaru reuses
+  the saved `ClaudeRunResult` and there may be no fresh live events.
+- Text deltas are hidden from live event payloads by default. If you deliberately
+  want clipped live text deltas, configure
+  `ClaudeCapturePolicy(include_stream_text_deltas=True)`. Prompts, full tool
+  input JSON, full options, raw SDK events, final result text, and structured
+  output are not sent as live event payloads by default.
+- The final `ClaudeRunResult` is the durable record. Treat live events as
+  progress updates, like a radio feed while the checkpoint is running.
+
 ## What to look for in Kitaru UI
 
 The flow contains one adapter-created checkpoint named like
@@ -92,6 +128,6 @@ captured audit envelope. It does not automatically replay or restore every
 internal side effect.
 
 For the concept walkthrough, see
-[Claude Agent SDK Adapter](https://kitaru.ai/docs/adapters/claude-agent-sdk/).
+[Claude Agent SDK Adapter](https://docs.zenml.io/kitaru/adapters/claude-agent-sdk/).
 
 For the full catalog, see [../../README.md](../../README.md).

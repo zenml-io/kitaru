@@ -204,21 +204,34 @@ Never push without that explicit confirmation — the release workflow reads `CH
 
 Expected runtime: 3-5 minutes. The script:
 
-- Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `langgraph`)
+- Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `gemini`, `langgraph`)
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
-- Exercises CLI, SDK flows (including replay), MCP tools, the four adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK), and an end-to-end LLM flow
+- Exercises CLI, SDK flows (including replay), MCP tools, the five adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions), and an end-to-end LLM flow
 - Tears down the server
 
-**Set credentials before running, or most of the meaningful work is SKIPPED.** The four adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a release-grade run, export the full set first:
+**Set credentials before running, or most of the meaningful work is SKIPPED.** The five adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a release-grade run, export the full set first:
 
 ```bash
 export OPENAI_API_KEY=...        # OpenAI Agents real run, LangGraph `calls`, research bot
 export ANTHROPIC_API_KEY=...     # Claude Agent SDK real run (or CLAUDE_CODE_USE_BEDROCK=1 / _VERTEX=1)
-export KITARU_SMOKE_RESEARCH_BOT=1  # opt in to the real web-search research-bot test
+export GEMINI_API_KEY=...        # Gemini Interactions raw `--mode model` real run (GOOGLE_API_KEY also works)
+export KITARU_SMOKE_RESEARCH_BOT=1     # opt in to the real web-search research-bot test
+export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1  # opt in to the Gemini `--mode antigravity` managed-agent run
 ./scripts/smoke-test.sh
 ```
 
+**Gemini has two credential paths and they unlock different tests** — this is easy to get wrong. The smoke test checks for `GEMINI_API_KEY`/`GOOGLE_API_KEY` (the direct API path) *separately* from Vertex ADC config (`GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`):
+
+| Gemini test | Direct API key (`GEMINI_API_KEY`/`GOOGLE_API_KEY`) | Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI` + project + location) |
+|---|---|---|
+| `--mode model` (raw response) | ✅ runs a real call automatically | ❌ **skipped** — Vertex ADC is *not* accepted on this path |
+| `--mode antigravity` (managed-agent preset) | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` |
+
+So if the release machine authenticates Gemini through **Vertex** (common for `zenml-core`-style setups), `--mode model` will skip no matter what, and the *only* way to get a real Gemini round-trip is to set `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` so the antigravity test runs against Vertex ADC. Don't report "Gemini covered" off a Vertex run unless you opted into antigravity. (Vertex ADC must actually be available — `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS` — or the antigravity test will fail rather than skip.)
+
 Parse the final summary and **tell the user exactly which checks were SKIPPED and why** (which key was unset), so they can decide whether a partial run is good enough or they want to re-run with the missing key. A bare run with no keys is a weak release gate — flag that explicitly rather than reporting "all passed" when half the adapter suite was skipped.
+
+**Watch for stale `VIRTUAL_ENV` contamination.** If the shell has a leftover `VIRTUAL_ENV` from a different worktree/venv, `uv` prints a "does not match the project environment path" warning **to stderr**, and the few smoke checks that capture `... 2>&1` and parse JSON (e.g. `analytics disabled in smoke test`, `executions get <latest>`) will choke on the warning glued to the front of the JSON and report a spurious `<parse error>` failure/skip. This is environment noise, not a regression — confirm by re-running the affected command with `unset VIRTUAL_ENV` before treating it as a release blocker.
 
 The script uses `set -uo pipefail` **without `-e`** deliberately — it continues past failures to collect all results and prints a final `Passed: N  Failed: M  Skipped: K` summary.
 
@@ -238,13 +251,15 @@ just UI_TAG=kitaru-ui-v<X.Y.Z> ui-smoke     # runs the smoke test with that UI a
 
 ## Step 8: ★ Pause — verify smoke test
 
-Parse the final summary. **Any non-zero `Failed:` count = STOP.**
+Parse the final summary. **Any non-zero `Failed:` count = STOP and investigate — do not auto-proceed.**
 
 - Surface the failing check names to the user
-- Do NOT proceed to the release trigger
+- Do NOT proceed to the release trigger on an unexplained failure
 - Offer to investigate individual failures
 
-Only when `Failed: 0` and the user confirms, proceed.
+Before treating a failure as a hard blocker, **rule out spurious environment noise** — most commonly the stale `VIRTUAL_ENV` contamination described in Step 7. If a failing check captures `2>&1` and parses JSON, re-run that exact command with `unset VIRTUAL_ENV` (and from a clean shell, not a worktree with a different venv). If it then passes cleanly, the failure is an environment artifact, not a regression: say so explicitly, show the clean re-run as evidence, and you may proceed once the user confirms. A genuine `Failed:` with no environmental explanation still blocks the release.
+
+Only when every failure is either `Failed: 0` or provably spurious, and the user confirms, proceed.
 
 ## Step 9: Trigger release workflow
 

@@ -6,19 +6,6 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const docsRoot = path.resolve(scriptDir, "..");
 const outDir = path.join(docsRoot, "out");
 const hiddenDocsDir = path.join(outDir, "llms.mdx", "docs");
-const DOCS_APP_ROOT_SEGMENTS = new Set([
-  "adapters",
-  "agent-native",
-  "changelog",
-  "cli",
-  "concepts",
-  "contributing",
-  "deploy",
-  "getting-started",
-  "guides",
-  "reference",
-  "stacks",
-]);
 
 async function fileExists(filePath) {
   try {
@@ -74,39 +61,10 @@ function looksLikeMarkdown(content) {
   );
 }
 
-function shouldRewriteDocsRootHref(href) {
-  const firstSegment = href.split("/", 1)[0];
-  return DOCS_APP_ROOT_SEGMENTS.has(firstSegment);
-}
-
-function rewriteMarkdownLinksOutsideCode(content) {
-  return content
-    .replace(
-      /(!?\[[\s\S]*?\]\()\/([^\s)#][^\s)]*)/g,
-      (match, prefix, href) => {
-        if (!shouldRewriteDocsRootHref(href)) {
-          return match;
-        }
-
-        return `${prefix}/docs/${href}`;
-      },
-    )
-    .replace(/(\bhref=["'])\/([^"'\s#][^"']*)(["'])/g, (match, prefix, href, quote) => {
-      if (!shouldRewriteDocsRootHref(href)) {
-        return match;
-      }
-
-      return `${prefix}/docs/${href}${quote}`;
-    });
-}
-
 function rewritePublicMarkdownLinks(content) {
-  return content
-    .split(/(```[\s\S]*?```)/g)
-    .map((segment) =>
-      segment.startsWith("```") ? segment : rewriteMarkdownLinksOutsideCode(segment),
-    )
-    .join("");
+  // The site is served at the domain root (no /docs basePath), so root-relative
+  // links in the materialized markdown are already correct — no rewriting.
+  return content;
 }
 
 async function copyMarkdownFile(sourcePath, destinationPath) {
@@ -137,9 +95,12 @@ async function copyAlias(aliasPath, candidatePaths) {
     }
   }
 
-  throw new Error(
-    `Could not create ${aliasPath}; none of these candidates exist: ${candidatePaths.join(", ")}`,
+  // Legacy aliases are best-effort: their target pages may no longer exist
+  // (e.g. on the reference-only site). Skip rather than fail the build.
+  console.warn(
+    `skipped ${aliasPath}; none of these candidates exist: ${candidatePaths.join(", ")}`,
   );
+  return { aliasPath, sourcePath: undefined, skipped: true };
 }
 
 async function main() {

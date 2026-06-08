@@ -7,22 +7,7 @@ from uuid import uuid4
 
 from pydantic_core import to_jsonable_python
 
-
-def to_json_safe(value: Any) -> Any:
-    """Best-effort conversion for observability payloads.
-
-    This helper is deliberately forgiving so telemetry capture does not break
-    user code. It may include ``repr(...)`` fallback text, so do not use it for
-    cache keys.
-    """
-    try:
-        return to_jsonable_python(value, serialize_unknown=True)
-    except ValueError as exc:
-        return {
-            "repr": repr(value),
-            "python_type": type(value).__name__,
-            "serialization_error": str(exc),
-        }
+from kitaru._serialization import to_json_safe as to_json_safe
 
 
 def to_cache_identity(value: Any) -> Any:

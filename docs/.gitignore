@@ -33,3 +33,8 @@ yarn-error.log*
 .env*.local
 .vercel
 next-env.d.ts
+
+# Rendered GitBook diagram PNGs are hosted on Cloudflare R2 (assets.kitaru.ai),
+# not committed. Regenerate locally with scripts/render-diagrams.mjs, then
+# upload to the kitaru-assets bucket (see that script's header).
+book/.gitbook/assets/

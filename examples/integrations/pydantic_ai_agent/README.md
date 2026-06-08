@@ -7,15 +7,26 @@ durability and observability around it — no rewrite needed.
 
 ```bash
 cd examples/integrations/pydantic_ai_agent
-uv pip install 'kitaru[local,pydantic-ai]'   # Install Kitaru with local runtime + PydanticAI
-kitaru init                                  # Initialize a Kitaru project
+uv sync --extra local --extra pydantic-ai --extra openai
+uv run kitaru init
 ```
 
-Then run the example:
+Then run the no-key adapter example:
 
 ```bash
-python pydantic_ai_adapter.py       # wrap an agent, keep replay boundary
+uv run python pydantic_ai_adapter.py       # wrap an agent, keep replay boundary
 ```
+
+To watch real PydanticAI stream events, set provider credentials and run the
+streaming example:
+
+```bash
+export OPENAI_API_KEY=sk-...
+uv run python pydantic_ai_streaming.py
+```
+
+You can override the streaming model with `PYDANTIC_AI_MODEL`; it defaults to
+`openai:gpt-5-nano`.
 
 These examples use your current Kitaru connection context. If you want the run
 to use a deployed Kitaru server, connect first with `kitaru login <server>`
@@ -31,7 +42,18 @@ you full observability without changing the agent's control flow.
 
 Uses `TestModel` so no API keys are needed to run it.
 
+## `pydantic_ai_streaming.py` — Watch live PydanticAI events
+
+Runs a small customer-support agent against a real provider and watches
+`pydantic_ai.stream.*` events with `KitaruClient().executions.events(...)` while
+the flow is running. The live events are best-effort progress updates; the final
+answer printed after `.wait()` is the durable Kitaru result.
+
+This example requires `OPENAI_API_KEY` because it uses a real OpenAI-backed
+PydanticAI model. Set `PYDANTIC_AI_MODEL` to choose a different PydanticAI model
+label.
+
 For the concept walkthrough, see
-[PydanticAI Adapter](https://kitaru.ai/docs/adapters/pydantic-ai/).
+[PydanticAI Adapter](https://docs.zenml.io/kitaru/adapters/pydantic-ai/).
 
 For the full catalog, see [../../README.md](../../README.md).
