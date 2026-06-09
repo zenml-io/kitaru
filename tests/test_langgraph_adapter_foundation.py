@@ -1027,6 +1027,77 @@ def test_request_durability_is_not_forwarded_without_checkpointer(
     assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
+@pytest.mark.parametrize(
+    ("checkpointer", "expected_forwarded_durability"),
+    [(None, None), (object(), "sync")],
+)
+def test_metadata_records_forwarded_durability(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpointer: object | None,
+    expected_forwarded_durability: str | None,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    saved: list[tuple[str, object, str]] = []
+    track_calls: list[tuple[object, dict[str, object]]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer: object | None
+
+        def __init__(self, checkpointer: object | None) -> None:
+            self.checkpointer = checkpointer
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(
+        tracking.kitaru,
+        "save",
+        lambda name, value, *, type: saved.append((name, value, type)),
+    )
+    monkeypatch.setattr(tracking.kitaru, "log", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph(checkpointer))
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    event_log = cast(list[dict[str, object]], saved[0][1])
+    run_summary = cast(dict[str, object], saved[1][1])
+    analytics_metadata = next(
+        metadata
+        for _event, metadata in track_calls
+        if metadata.get("method") == "invoke"
+    )
+
+    assert run_summary["durability"] == "sync"
+    assert run_summary["forwarded_durability"] == expected_forwarded_durability
+    assert event_log[0]["metadata"] == {
+        "kind": "start",
+        "durability": "sync",
+        "forwarded_durability": expected_forwarded_durability,
+        "has_checkpointer": checkpointer is not None,
+        "has_store": False,
+        "thread_id_present": True,
+        "configurable_keys": ["thread_id"],
+    }
+    assert analytics_metadata["durability"] == "sync"
+    assert analytics_metadata["forwarded_durability"] == expected_forwarded_durability
+
+
 @pytest.mark.parametrize("checkpointer", [False, True])
 def test_default_durability_is_not_forwarded_for_boolean_checkpointer_sentinel(
     langgraph_adapter: types.ModuleType,

@@ -1431,6 +1431,7 @@ class KitaruGraphRunner:
             "checkpointer_type": self._checkpointer_label(),
             "store_type": self._store_label(),
             "durability": self._resolved_durability(request),
+            "forwarded_durability": self._forwarded_durability(request),
             "capture": self._capture_summary,
             "config": redact_config(config) if self._capture.save_config else None,
             "context": redact_config(context) if self._capture.save_context else None,
@@ -1468,6 +1469,7 @@ class KitaruGraphRunner:
         return {
             "kind": request.kind,
             "durability": self._resolved_durability(request),
+            "forwarded_durability": self._forwarded_durability(request),
             "has_checkpointer": self._checkpointer_label() is not None,
             "has_store": self._store_label() is not None,
             "thread_id_present": bool(request.thread_id),
@@ -1488,6 +1490,7 @@ class KitaruGraphRunner:
             "method": method,
             "status": status,
             "durability": self._resolved_durability(request),
+            "forwarded_durability": self._forwarded_durability(request),
             "has_checkpointer": self._checkpointer_label() is not None,
             "has_store": self._store_label() is not None,
             "captured_state": captured_state,
