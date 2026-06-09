@@ -63,12 +63,12 @@ body {{
     radial-gradient(circle at 88% 95%, rgba(45, 106, 79, 0.05), transparent 45%);
   color: {_INK};
   font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
-  margin: 0;
+  max-width: 1020px;
+  margin: 0 auto;
   padding: 3rem clamp(1rem, 5vw, 3rem) 4rem;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }}
-body > * {{ max-width: 980px; margin-left: auto; margin-right: auto; }}
 .mono {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.8rem;
@@ -156,6 +156,12 @@ details.case-row > summary {{
   border-radius: 9px;
 }}
 details.case-row > summary:hover {{ background: rgba(33, 29, 24, 0.04); }}
+details.case-row > summary:focus {{ outline: none; }}
+details.case-row > summary:focus-visible {{
+  outline: 2px solid rgba(33, 29, 24, 0.45);
+  outline-offset: 1px;
+}}
+details.case-row > summary::marker {{ color: rgba(33, 29, 24, 0.45); }}
 details.case-row[open] > summary {{
   border-bottom: 1px dashed rgba(33, 29, 24, 0.2);
   border-bottom-left-radius: 0;
