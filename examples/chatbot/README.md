@@ -24,7 +24,7 @@ There is one important implementation detail. `say_and_wait` is intentionally no
 
 In this paradigm — where the runtime is smart enough to release compute during the human's turn — every chatbot is a long-horizon agent. A session can last months until the user is satisfied, and you only pay for the seconds the model is actually thinking.
 
-## Quick start
+## Quick start: deployed UI
 
 ```bash
 cd examples/chatbot
@@ -56,11 +56,52 @@ uv run python ui.py
 
 Open `http://127.0.0.1:7860`, click **Start a new chat**, and start talking. Close the browser, restart the UI, click your session in the sidebar — the conversation is right where you left it.
 
+## Choose the right driver
+
+There are three useful ways to run this example:
+
+1. **Deployed Gradio UI — recommended production-shaped path.**
+   Deploy `chatbot.py:chatbot`, run `ui.py`, and let the UI call
+   `client.deployments.invoke(...)` to start the session. Each user message goes
+   back through `client.executions.input(...)`. This is the path to copy if you
+   are building a real frontend.
+2. **Direct terminal run — quick local interactive smoke test only.**
+   `uv run python chatbot.py` runs the flow in one foreground process. That is
+   fine when your terminal can answer the prompt inline. It is not a
+   non-interactive driver: the process may block until the whole conversation
+   finishes.
+3. **Local non-interactive automation — scripted driver.**
+   `uv run python drive_local.py` starts `chatbot.run(...)` in a background
+   thread, finds the matching pending wait by its session metadata, and submits
+   scripted messages with `client.executions.input(...)` from the foreground
+   thread.
+
+Avoid this shape in one foreground thread:
+
+```python
+handle = chatbot.run()
+handle.wait()
+pending = client.executions.pending_waits(handle.exec_id)
+client.executions.input(handle.exec_id, wait=pending[0].wait_id, value="hello")
+```
+
+The story is: the flow reaches `wait_for_input(...)` and waits for a user
+message. `handle.wait()` waits for the *entire* execution to finish. So the code
+after `handle.wait()` cannot be the code that sends the user message — it never
+gets its turn while the execution is still waiting. Use the deployed UI, the CLI
+from another terminal, or `drive_local.py` so a separate foreground action can
+answer the wait.
+
+`client.executions.input(...)` is the normal next step after a wait appears. Use
+`resume` only as recovery if the runner paused or timed out and did not continue
+automatically after all pending waits were answered.
+
 ## What's in the box
 
 | File | What it does |
 | --- | --- |
-| [`chatbot.py`](chatbot.py) | One `@flow` containing one `KitaruAgent` with one `say_and_wait` tool. ~120 lines. |
+| [`chatbot.py`](chatbot.py) | One `@flow` containing one `KitaruAgent` with one `say_and_wait` tool. |
+| [`drive_local.py`](drive_local.py) | Local scripted driver: starts the flow in a background thread, finds this session's pending wait, and submits messages with `executions.input(...)`. |
 | [`ui.py`](ui.py) | Gradio UI: invokes the deployment, polls for waits, pipes the user's text back via `executions.input(...)`. |
 | [`history_artifacts.py`](history_artifacts.py) | Small pure helpers that load candidate `history` artifacts and choose the longest usable transcript. |
 
