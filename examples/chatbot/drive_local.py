@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from kitaru.client import ExecutionStatus, KitaruClient
+from kitaru.client import Execution, ExecutionStatus, KitaruClient
 
 try:
     from .chatbot import (
@@ -68,71 +68,26 @@ class BackgroundRunState:
     error: BaseException | None = None
 
 
-def _coerce_execution_status(status: Any) -> ExecutionStatus | None:
-    """Return STATUS as an ExecutionStatus when possible."""
-    if isinstance(status, ExecutionStatus):
-        return status
-    try:
-        return ExecutionStatus(str(getattr(status, "value", status)).lower())
-    except ValueError:
-        return None
-
-
-def _status_value(status: Any) -> str:
-    """Return a public status value from a string or enum-like object."""
-    coerced = _coerce_execution_status(status)
-    if coerced is not None:
-        return coerced.value
-    return str(getattr(status, "value", status)).lower()
-
-
-def _is_terminal_execution(execution: Any) -> bool:
+def _is_terminal_execution(execution: Execution) -> bool:
     """Return whether EXECUTION has finished and cannot produce another wait."""
-    status = _coerce_execution_status(getattr(execution, "status", None))
-    return bool(status is not None and status.is_finished)
-
-
-def _pending_wait_metadata(pending_wait: Any) -> dict[str, Any]:
-    """Return pending-wait metadata as a plain dict."""
-    metadata = getattr(pending_wait, "metadata", {})
-    if isinstance(metadata, dict):
-        return metadata
-    return {}
-
-
-def _pending_wait_has_session_metadata(pending_wait: Any) -> bool:
-    """Return whether the wait metadata can identify a chatbot session."""
-    metadata = _pending_wait_metadata(pending_wait)
-    return CHATBOT_SESSION_LABEL_METADATA_KEY in metadata
-
-
-def _execution_needs_pending_wait_hydration(execution: Any) -> bool:
-    """Return whether list output lacks enough wait data for session matching."""
-    pending_wait = getattr(execution, "pending_wait", None)
-    if pending_wait is None:
-        return True
-    return not _pending_wait_has_session_metadata(pending_wait)
+    return execution.status.is_finished
 
 
 def _fallback_execution_from_recent_list(
     *,
     client: KitaruClient,
     exec_id: str,
-    flow: str = FLOW_NAME,
     limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
-    status: str | None = ExecutionStatus.WAITING.value,
-) -> Any | None:
+) -> Execution | None:
     """Return EXEC_ID from recent list data when detailed get fails.
 
-    ``executions.get`` hydrates extra details and can fail while the lighter list
-    endpoint still reports enough information for local polling. This scan stays
-    deliberately bounded so a permanently broken ``get`` does not trigger broad
-    backend reads forever.
+    ``executions.get`` hydrates extra details and can fail while the lighter
+    list endpoint still reports enough information for local polling. The list
+    is not filtered by status so terminal executions stay visible, and the scan
+    stays deliberately bounded so a permanently broken ``get`` does not trigger
+    broad backend reads forever.
     """
-    list_kwargs: dict[str, Any] = {"flow": flow, "limit": limit}
-    if status is not None:
-        list_kwargs["status"] = status
-    executions = client.executions.list(**list_kwargs)
+    executions = client.executions.list(flow=FLOW_NAME, limit=limit)
     return next(
         (execution for execution in executions if execution.exec_id == exec_id),
         None,
@@ -143,10 +98,8 @@ def _try_get_execution(
     *,
     client: KitaruClient,
     exec_id: str,
-    flow: str = FLOW_NAME,
     list_limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
-    list_status: str | None = ExecutionStatus.WAITING.value,
-) -> tuple[Any | None, BaseException | None]:
+) -> tuple[Execution | None, BaseException | None]:
     """Fetch EXEC_ID, using bounded list data if detailed hydration fails."""
     try:
         return client.executions.get(exec_id), None
@@ -154,38 +107,32 @@ def _try_get_execution(
         fallback = _fallback_execution_from_recent_list(
             client=client,
             exec_id=exec_id,
-            flow=flow,
             limit=list_limit,
-            status=list_status,
         )
         return fallback, exc
 
 
 def _match_pending_wait(
     *,
-    execution: Any,
+    execution: Execution,
     session_label: str,
     ignored_wait_ids: set[str] | None = None,
 ) -> PendingWaitMatch | None:
     """Return the pending wait on EXECUTION if its metadata matches this session."""
-    pending_wait = getattr(execution, "pending_wait", None)
+    pending_wait = execution.pending_wait
     if pending_wait is None:
         return None
-
-    wait_id = pending_wait.wait_id
-    if ignored_wait_ids is not None and wait_id in ignored_wait_ids:
+    if ignored_wait_ids is not None and pending_wait.wait_id in ignored_wait_ids:
+        return None
+    if pending_wait.metadata.get(CHATBOT_SESSION_LABEL_METADATA_KEY) != session_label:
         return None
 
-    metadata = _pending_wait_metadata(pending_wait)
-    if metadata.get(CHATBOT_SESSION_LABEL_METADATA_KEY) != session_label:
-        return None
-
-    turn = metadata.get(CHATBOT_TURN_METADATA_KEY)
+    turn = pending_wait.metadata.get(CHATBOT_TURN_METADATA_KEY)
     return PendingWaitMatch(
         exec_id=execution.exec_id,
-        wait_id=wait_id,
-        wait_name=getattr(pending_wait, "name", "<unnamed>"),
-        question=getattr(pending_wait, "question", None),
+        wait_id=pending_wait.wait_id,
+        wait_name=pending_wait.name,
+        question=pending_wait.question,
         turn=turn if isinstance(turn, int) else None,
     )
 
@@ -193,7 +140,7 @@ def _match_pending_wait(
 def _hydrate_pending_wait_match_if_needed(
     *,
     client: KitaruClient,
-    execution: Any,
+    execution: Execution,
     session_label: str,
     ignored_wait_ids: set[str] | None = None,
 ) -> PendingWaitMatch | None:
@@ -205,7 +152,13 @@ def _hydrate_pending_wait_match_if_needed(
     )
     if match is not None:
         return match
-    if not _execution_needs_pending_wait_hydration(execution):
+
+    pending_wait = execution.pending_wait
+    if (
+        pending_wait is not None
+        and CHATBOT_SESSION_LABEL_METADATA_KEY in pending_wait.metadata
+    ):
+        # List data already identifies this wait's session; it is just not ours.
         return None
 
     # The caller already has a bounded list result for this execution. Try the
@@ -214,8 +167,6 @@ def _hydrate_pending_wait_match_if_needed(
     try:
         hydrated_execution = client.executions.get(execution.exec_id)
     except Exception:
-        return None
-    if hydrated_execution is None:
         return None
 
     return _match_pending_wait(
@@ -229,14 +180,13 @@ def find_pending_wait_for_session(
     *,
     client: KitaruClient,
     session_label: str,
-    flow: str = FLOW_NAME,
     limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
     ignored_wait_ids: set[str] | None = None,
 ) -> PendingWaitMatch | None:
     """Find the single pending chatbot wait with metadata for SESSION_LABEL."""
     matches: list[PendingWaitMatch] = []
     executions = client.executions.list(
-        flow=flow,
+        flow=FLOW_NAME,
         status=ExecutionStatus.WAITING.value,
         limit=limit,
     )
@@ -273,7 +223,6 @@ def _find_pending_wait_on_execution(
         client=client,
         exec_id=exec_id,
         list_limit=list_limit,
-        list_status=None,
     )
     if execution is None:
         return None, lookup_error
@@ -288,8 +237,7 @@ def _find_pending_wait_on_execution(
     if _is_terminal_execution(execution):
         raise RuntimeError(
             f"Execution {exec_id} reached terminal status "
-            f"{_status_value(getattr(execution, 'status', None))!r} before "
-            "another chatbot wait appeared."
+            f"{execution.status.value!r} before another chatbot wait appeared."
         )
     return None, lookup_error
 
@@ -314,41 +262,12 @@ def _validate_positive_seconds(value: float, *, name: str) -> None:
         raise ValueError(f"{name} {_POSITIVE_SECONDS_MESSAGE}.")
 
 
-def _validate_drive_chatbot_inputs(
-    *,
-    messages: Sequence[str],
-    wait_timeout_seconds: float,
-    finish_timeout_seconds: float,
-    poll_interval_seconds: float,
-) -> None:
-    """Validate public ``drive_chatbot`` inputs before starting the run."""
-    if not messages:
-        raise ValueError("messages must contain at least one scripted message.")
-    _validate_positive_seconds(
-        wait_timeout_seconds,
-        name="wait_timeout_seconds",
-    )
-    _validate_positive_seconds(
-        finish_timeout_seconds,
-        name="finish_timeout_seconds",
-    )
-    _validate_positive_seconds(
-        poll_interval_seconds,
-        name="poll_interval_seconds",
-    )
-
-
-def _raise_extra_wait_after_messages(match: PendingWaitMatch) -> None:
-    """Tell the user the scripted driver ran out of messages."""
-    raise RuntimeError(
-        "Submitted all configured messages, but the chatbot asked for another "
-        f"input at {match.wait_name} ({match.wait_id}) on execution "
-        f"{match.exec_id}. Add another scripted message and rerun the driver. "
-        "If you answer from another terminal instead, run "
-        f"kitaru executions input {match.exec_id} --value '\"hello\"'. "
-        "If the local driver process exits before the run continues, you may "
-        "also need to resume the execution after providing input."
-    )
+def _positive_seconds_arg(raw: str) -> float:
+    """argparse type for durations: a finite number of seconds greater than 0."""
+    value = float(raw)
+    if not _is_positive_finite_seconds(value):
+        raise argparse.ArgumentTypeError(_POSITIVE_SECONDS_MESSAGE)
+    return value
 
 
 def wait_for_pending_wait(
@@ -442,7 +361,6 @@ def wait_for_completion_or_extra_wait(
             execution, lookup_error = _try_get_execution(
                 client=client,
                 exec_id=exec_id,
-                list_status=None,
             )
             if lookup_error is not None:
                 last_lookup_error = lookup_error
@@ -454,7 +372,17 @@ def wait_for_completion_or_extra_wait(
                     ignored_wait_ids=answered_wait_ids,
                 )
                 if match is not None:
-                    _raise_extra_wait_after_messages(match)
+                    raise RuntimeError(
+                        "Submitted all configured messages, but the chatbot "
+                        f"asked for another input at {match.wait_name} "
+                        f"({match.wait_id}) on execution {match.exec_id}. Add "
+                        "another scripted message and rerun the driver. If you "
+                        "answer from another terminal instead, run "
+                        f"kitaru executions input {match.exec_id} "
+                        "--value '\"hello\"'. If the local driver process "
+                        "exits before the run continues, you may also need to "
+                        "resume the execution after providing input."
+                    )
                 if _is_terminal_execution(execution) and not runner_thread.is_alive():
                     return
         elif not runner_thread.is_alive():
@@ -499,16 +427,6 @@ def _start_chatbot_run(
     return state, runner_thread
 
 
-def submit_message(
-    *,
-    client: KitaruClient,
-    match: PendingWaitMatch,
-    message: str,
-) -> None:
-    """Submit MESSAGE to the matched pending wait."""
-    client.executions.input(match.exec_id, wait=match.wait_id, value=message)
-
-
 def drive_chatbot(
     messages: Sequence[str] = DEFAULT_MESSAGES,
     *,
@@ -519,12 +437,14 @@ def drive_chatbot(
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> Any:
     """Run the chatbot locally and feed it scripted messages."""
-    _validate_drive_chatbot_inputs(
-        messages=messages,
-        wait_timeout_seconds=wait_timeout_seconds,
-        finish_timeout_seconds=finish_timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-    )
+    if not messages:
+        raise ValueError("messages must contain at least one scripted message.")
+    for name, value in (
+        ("wait_timeout_seconds", wait_timeout_seconds),
+        ("finish_timeout_seconds", finish_timeout_seconds),
+        ("poll_interval_seconds", poll_interval_seconds),
+    ):
+        _validate_positive_seconds(value, name=name)
     client = client or KitaruClient()
     session_label = session_label or f"chatbot-local-{uuid4().hex}"
     state, runner_thread = _start_chatbot_run(session_label)
@@ -552,7 +472,7 @@ def drive_chatbot(
         else:
             print(f"\nAssistant is waiting at {match.wait_name} ({match.wait_id}).")
         print(f"User: {message}")
-        submit_message(client=client, match=match, message=message)
+        client.executions.input(match.exec_id, wait=match.wait_id, value=message)
         answered_wait_ids.add(match.wait_id)
 
     wait_for_completion_or_extra_wait(
@@ -590,30 +510,23 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--wait-timeout",
-        type=float,
+        type=_positive_seconds_arg,
         default=DEFAULT_WAIT_TIMEOUT_SECONDS,
         help="Seconds to wait for each pending chatbot turn.",
     )
     parser.add_argument(
         "--finish-timeout",
-        type=float,
+        type=_positive_seconds_arg,
         default=DEFAULT_FINISH_TIMEOUT_SECONDS,
         help="Seconds to wait for the chatbot run to finish after all messages.",
     )
     parser.add_argument(
         "--poll-interval",
-        type=float,
+        type=_positive_seconds_arg,
         default=DEFAULT_POLL_INTERVAL_SECONDS,
         help="Seconds between pending-wait polling attempts. Must be greater than 0.",
     )
-    args = parser.parse_args()
-    if not _is_positive_finite_seconds(args.wait_timeout):
-        parser.error(f"--wait-timeout {_POSITIVE_SECONDS_MESSAGE}")
-    if not _is_positive_finite_seconds(args.finish_timeout):
-        parser.error(f"--finish-timeout {_POSITIVE_SECONDS_MESSAGE}")
-    if not _is_positive_finite_seconds(args.poll_interval):
-        parser.error(f"--poll-interval {_POSITIVE_SECONDS_MESSAGE}")
-    return args
+    return parser.parse_args()
 
 
 def main() -> None:

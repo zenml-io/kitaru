@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import builtins
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -13,22 +13,14 @@ from examples.chatbot.chatbot import (
     chatbot_wait_metadata,
 )
 
-from kitaru.client import ExecutionStatus
-
-
-@dataclass
-class FakePendingWait:
-    wait_id: str
-    name: str
-    question: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+from kitaru.client import ExecutionStatus, PendingWait
 
 
 @dataclass
 class FakeExecution:
     exec_id: str
     status: ExecutionStatus = ExecutionStatus.WAITING
-    pending_wait: FakePendingWait | None = None
+    pending_wait: PendingWait | None = None
 
 
 class FakeExecutionsAPI:
@@ -41,8 +33,6 @@ class FakeExecutionsAPI:
     ) -> None:
         self._list_snapshots = list_snapshots or []
         self._get_sequences = get_sequences or {}
-        self._list_calls = 0
-        self._get_calls: dict[str, int] = {}
         self._last_snapshot = self._list_snapshots[0] if self._list_snapshots else []
         self.list_calls: builtins.list[dict[str, Any]] = []
         self.get_calls: builtins.list[str] = []
@@ -51,17 +41,15 @@ class FakeExecutionsAPI:
     def list(self, **kwargs: Any) -> builtins.list[FakeExecution]:
         self.list_calls.append(kwargs)
         if self._list_snapshots:
-            index = min(self._list_calls, len(self._list_snapshots) - 1)
+            index = min(len(self.list_calls) - 1, len(self._list_snapshots) - 1)
             self._last_snapshot = self._list_snapshots[index]
-        self._list_calls += 1
         return self._last_snapshot
 
     def get(self, exec_id: str) -> FakeExecution:
         self.get_calls.append(exec_id)
         if exec_id in self._get_sequences:
             sequence = self._get_sequences[exec_id]
-            index = min(self._get_calls.get(exec_id, 0), len(sequence) - 1)
-            self._get_calls[exec_id] = index + 1
+            index = min(self.get_calls.count(exec_id) - 1, len(sequence) - 1)
             item = sequence[index]
             if isinstance(item, BaseException):
                 raise item
@@ -100,14 +88,31 @@ class FakeThread:
         return self._alive
 
 
+def _pending_wait(
+    *,
+    wait_id: str,
+    name: str,
+    question: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> PendingWait:
+    return PendingWait(
+        wait_id=wait_id,
+        name=name,
+        question=question,
+        schema=None,
+        metadata=metadata or {},
+        entered_waiting_at=None,
+    )
+
+
 def _wait(
     *,
     wait_id: str,
     session_label: str,
     turn: int,
     question: str | None = "Assistant question?",
-) -> FakePendingWait:
-    return FakePendingWait(
+) -> PendingWait:
+    return _pending_wait(
         wait_id=wait_id,
         name=f"user_turn_{turn}",
         question=question,
@@ -239,7 +244,7 @@ def test_find_pending_wait_for_session_hydrates_list_result_missing_metadata() -
                 ),
                 FakeExecution(
                     "exec-target",
-                    pending_wait=FakePendingWait(
+                    pending_wait=_pending_wait(
                         wait_id="wait-target",
                         name="user_turn_2",
                         question="Assistant question?",
@@ -284,7 +289,7 @@ def test_find_pending_wait_for_session_continues_after_get_backend_error() -> No
             [
                 FakeExecution(
                     "exec-needs-hydration",
-                    pending_wait=FakePendingWait(
+                    pending_wait=_pending_wait(
                         wait_id="wait-needs-hydration",
                         name="user_turn_0",
                     ),
@@ -474,6 +479,48 @@ def test_wait_for_pending_wait_stops_on_terminal_execution() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "status",
+    [ExecutionStatus.RUNNING, ExecutionStatus.WAITING],
+)
+def test_wait_for_pending_wait_keeps_polling_non_terminal_without_wait(
+    status: ExecutionStatus,
+) -> None:
+    # Regression guard: between turns the execution can be RUNNING (or WAITING
+    # without hydrated wait data) with no pending wait yet. The driver must keep
+    # polling instead of treating those statuses as terminal.
+    session_label = "chatbot-local-between-turns"
+    state = drive_local.BackgroundRunState(handle=FakeHandle("exec-between"))
+    executions = FakeExecutionsAPI(
+        get_sequences={
+            "exec-between": [
+                FakeExecution("exec-between", status=status),
+                FakeExecution(
+                    "exec-between",
+                    pending_wait=_wait(
+                        wait_id="wait-next",
+                        session_label=session_label,
+                        turn=1,
+                    ),
+                ),
+            ]
+        }
+    )
+    client: Any = FakeClient(executions)
+
+    match = drive_local.wait_for_pending_wait(
+        client=client,
+        session_label=session_label,
+        state=state,
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+    )
+
+    assert match.exec_id == "exec-between"
+    assert match.wait_id == "wait-next"
+    assert executions.get_calls == ["exec-between", "exec-between"]
+
+
 def test_wait_for_pending_wait_surfaces_background_thread_errors() -> None:
     state = drive_local.BackgroundRunState(error=ValueError("model exploded"))
     client: Any = FakeClient(FakeExecutionsAPI())
@@ -562,50 +609,24 @@ def test_completion_uses_list_fallback_for_completed_status() -> None:
     ]
 
 
-def test_drive_chatbot_rejects_non_positive_public_wait_timeout() -> None:
+@pytest.mark.parametrize(
+    ("timing_kwargs", "match"),
+    [
+        ({"wait_timeout_seconds": 0.0}, "wait_timeout_seconds"),
+        ({"finish_timeout_seconds": 0.0}, "finish_timeout_seconds"),
+        ({"poll_interval_seconds": 0.0}, "poll_interval_seconds"),
+        ({"wait_timeout_seconds": float("nan")}, "finite number greater than 0"),
+        ({"finish_timeout_seconds": float("inf")}, "finite number greater than 0"),
+        ({"poll_interval_seconds": float("-inf")}, "finite number greater than 0"),
+    ],
+)
+def test_drive_chatbot_rejects_invalid_timing_values(
+    timing_kwargs: dict[str, Any], match: str
+) -> None:
     client: Any = FakeClient(FakeExecutionsAPI())
 
-    with pytest.raises(ValueError, match="wait_timeout_seconds"):
-        drive_local.drive_chatbot(
-            ("hello",),
-            client=client,
-            wait_timeout_seconds=0.0,
-        )
-
-
-def test_drive_chatbot_rejects_non_positive_public_finish_timeout() -> None:
-    client: Any = FakeClient(FakeExecutionsAPI())
-
-    with pytest.raises(ValueError, match="finish_timeout_seconds"):
-        drive_local.drive_chatbot(
-            ("hello",),
-            client=client,
-            finish_timeout_seconds=0.0,
-        )
-
-
-def test_drive_chatbot_rejects_non_finite_public_timing_values() -> None:
-    client: Any = FakeClient(FakeExecutionsAPI())
-
-    timing_kwargs: list[dict[str, Any]] = [
-        {"wait_timeout_seconds": float("nan")},
-        {"finish_timeout_seconds": float("inf")},
-        {"poll_interval_seconds": float("-inf")},
-    ]
-    for kwargs in timing_kwargs:
-        with pytest.raises(ValueError, match="finite number greater than 0"):
-            drive_local.drive_chatbot(("hello",), client=client, **kwargs)
-
-
-def test_drive_chatbot_rejects_non_positive_public_poll_interval() -> None:
-    client: Any = FakeClient(FakeExecutionsAPI())
-
-    with pytest.raises(ValueError, match="poll_interval_seconds"):
-        drive_local.drive_chatbot(
-            ("hello",),
-            client=client,
-            poll_interval_seconds=0.0,
-        )
+    with pytest.raises(ValueError, match=match):
+        drive_local.drive_chatbot(("hello",), client=client, **timing_kwargs)
 
 
 def test_parse_args_rejects_non_finite_cli_timing_values(monkeypatch) -> None:
@@ -619,19 +640,32 @@ def test_parse_args_rejects_non_finite_cli_timing_values(monkeypatch) -> None:
         drive_local._parse_args()
 
 
-def test_drive_chatbot_submits_messages_to_matched_wait_ids(monkeypatch) -> None:
-    session_label = "chatbot-local-scripted"
-    handle = FakeHandle("exec-scripted", result="finished")
-    fake_thread = FakeThread(alive=False)
-    state = drive_local.BackgroundRunState(handle=handle)
-
+def _patch_start_chatbot_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    expected_label: str,
+    state: drive_local.BackgroundRunState,
+    thread: FakeThread,
+) -> None:
     def fake_start_chatbot_run(
         label: str,
     ) -> tuple[drive_local.BackgroundRunState, FakeThread]:
-        assert label == session_label
-        return state, fake_thread
+        assert label == expected_label
+        return state, thread
 
     monkeypatch.setattr(drive_local, "_start_chatbot_run", fake_start_chatbot_run)
+
+
+def test_drive_chatbot_submits_messages_to_matched_wait_ids(monkeypatch) -> None:
+    session_label = "chatbot-local-scripted"
+    handle = FakeHandle("exec-scripted", result="finished")
+    state = drive_local.BackgroundRunState(handle=handle)
+    _patch_start_chatbot_run(
+        monkeypatch,
+        expected_label=session_label,
+        state=state,
+        thread=FakeThread(alive=False),
+    )
 
     executions = FakeExecutionsAPI(
         get_sequences={
@@ -680,16 +714,13 @@ def test_drive_chatbot_raises_if_messages_run_out_before_completion(
 ) -> None:
     session_label = "chatbot-local-needs-more-input"
     handle = FakeHandle("exec-needs-more", result="finished")
-    fake_thread = FakeThread(alive=False)
     state = drive_local.BackgroundRunState(handle=handle)
-
-    def fake_start_chatbot_run(
-        label: str,
-    ) -> tuple[drive_local.BackgroundRunState, FakeThread]:
-        assert label == session_label
-        return state, fake_thread
-
-    monkeypatch.setattr(drive_local, "_start_chatbot_run", fake_start_chatbot_run)
+    _patch_start_chatbot_run(
+        monkeypatch,
+        expected_label=session_label,
+        state=state,
+        thread=FakeThread(alive=False),
+    )
 
     executions = FakeExecutionsAPI(
         get_sequences={
