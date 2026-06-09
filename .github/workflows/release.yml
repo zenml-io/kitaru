@@ -75,7 +75,7 @@ jobs:
       # --- Checkout ---
       - name: Checkout (dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
@@ -83,7 +83,7 @@ jobs:
           persist-credentials: false
       - name: Checkout tagged commit (tag push)
         if: github.event_name == 'push'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -257,7 +257,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@7b04f660f4ee4f048d18fd341887cf28dfbedfe2  # v1.46.3
+        uses: crate-ci/typos@44e2070e6017f834bf069503acb35ca0ca0b75f2  # v1.47.1
       - name: Lint
         run: |
           uv run ruff check .
@@ -576,7 +576,7 @@ jobs:
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5  # v6.1.2
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
