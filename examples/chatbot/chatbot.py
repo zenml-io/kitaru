@@ -6,9 +6,10 @@ the whole conversation: every time it wants to talk to the user it calls
 returns whatever the user typed back. The agent stops calling the tool when
 the conversation is over.
 
-No turn loop, no manual checkpoint boundaries, no per-turn bookkeeping — the
-KitaruAgent adapter wraps each model + tool call in a synthetic checkpoint
-for replay, and the tool body saves the running ``history`` artifact so any
+No turn loop, no manual per-turn bookkeeping — the KitaruAgent adapter
+wraps model calls in checkpoints for replay. The ``say_and_wait`` tool itself
+stays at flow scope because waits must be created outside checkpoints, and a
+small explicit checkpoint helper saves the running ``history`` artifact so any
 UI can rehydrate a session by loading the latest one.
 
 Recommended workflow:
@@ -32,6 +33,11 @@ import kitaru
 from kitaru import ImageSettings, flow
 from kitaru.adapters.pydantic_ai import KitaruAgent, wait_for_input
 
+try:
+    from .history_artifacts import HISTORY_ARTIFACT_NAME
+except ImportError:  # pragma: no cover - direct ``python chatbot.py`` execution
+    from history_artifacts import HISTORY_ARTIFACT_NAME
+
 CHATBOT_IMAGE = ImageSettings(
     requirements=["pydantic-ai", "openai"],
     # Injects the secret's keys (here: ``OPENAI_API_KEY``) into the runtime
@@ -50,6 +56,12 @@ SYSTEM_PROMPT = (
 )
 
 Message = dict[str, str]  # {"role": "user" | "assistant", "content": ...}
+
+
+@kitaru.checkpoint(cache=False)
+def persist_history(history: list[Message]) -> None:
+    """Save a snapshot of the conversation history as a versioned artifact."""
+    kitaru.save(HISTORY_ARTIFACT_NAME, history)
 
 
 @dataclass
@@ -80,7 +92,7 @@ def chatbot() -> str:
         """
         conv = ctx.deps
         conv.history.append({"role": "assistant", "content": message})
-        kitaru.save("history", list(conv.history))
+        persist_history(list(conv.history))
 
         user_reply = wait_for_input(
             schema=str,
@@ -90,7 +102,7 @@ def chatbot() -> str:
         )
         conv.turn += 1
         conv.history.append({"role": "user", "content": user_reply})
-        kitaru.save("history", list(conv.history))
+        persist_history(list(conv.history))
         return user_reply
 
     # ``say_and_wait`` opts out of the adapter's synthetic tool checkpoint so
