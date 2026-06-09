@@ -280,14 +280,16 @@ class KitaruGraphRunner:
 
     def _invoke_graph_sync(self, request: LangGraphRunRequest) -> LangGraphRunResult:
         config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name="invoke",
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
 
         with tracker_scope(
             self._name,
@@ -341,14 +343,16 @@ class KitaruGraphRunner:
             )
 
         config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name="ainvoke",
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
 
         with tracker_scope(
             self._name,
@@ -398,15 +402,17 @@ class KitaruGraphRunner:
         options: LangGraphStreamOptions,
     ) -> LangGraphRunResult:
         config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
+            config=config,
             context=context,
             method_name="stream",
             options=options,
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
         publisher, stats = self._new_stream_publisher(request, options)
 
         with tracker_scope(self._name) as tracker:
@@ -472,15 +478,17 @@ class KitaruGraphRunner:
             )
 
         config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
+            config=config,
             context=context,
             method_name="astream",
             options=options,
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
         publisher, stats = self._new_stream_publisher(request, options)
 
         with tracker_scope(self._name) as tracker:
@@ -905,8 +913,13 @@ class KitaruGraphRunner:
     def _resolved_durability(self, request: LangGraphRunRequest) -> str:
         return request.durability or self._durability.mode
 
-    def _forwarded_durability(self, request: LangGraphRunRequest) -> str | None:
-        if not self._has_checkpointer_saver():
+    def _forwarded_durability(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        config: Mapping[str, Any] | None = None,
+    ) -> str | None:
+        if not self._has_effective_checkpointer_saver(config):
             return None
         return self._resolved_durability(request)
 
@@ -914,11 +927,12 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: Mapping[str, Any],
         context: Any | None,
         method_name: str,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
-        forwarded_durability = self._forwarded_durability(request)
+        forwarded_durability = self._forwarded_durability(request, config=config)
         if forwarded_durability is not None:
             kwargs["durability"] = forwarded_durability
         if context is not None:
@@ -929,12 +943,14 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: Mapping[str, Any],
         context: Any | None,
         method_name: str,
         options: LangGraphStreamOptions,
     ) -> dict[str, Any]:
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name=method_name,
         )
@@ -1065,10 +1081,15 @@ class KitaruGraphRunner:
             raise KitaruUsageError(
                 f"Wrapped LangGraph object does not expose `{required_method}(...)`."
             )
-        if self._durability.require_checkpointer and not self._has_checkpointer_saver():
+
+    def _validate_checkpointer_requirement(self, config: Mapping[str, Any]) -> None:
+        if (
+            self._durability.require_checkpointer
+            and not self._has_effective_checkpointer_saver(config)
+        ):
             raise KitaruUsageError(
                 "LangGraph durability policy requires a graph checkpointer, but "
-                "none was detected on the wrapped graph."
+                "none was detected on the wrapped graph or prepared config."
             )
 
     def _effective_call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
@@ -1162,6 +1183,36 @@ class KitaruGraphRunner:
     def _has_checkpointer_saver(self) -> bool:
         return self._checkpointer_saver_value is not None
 
+    def _config_checkpointer_saver(
+        self, config: Mapping[str, Any] | None
+    ) -> Any | None:
+        configurable = (
+            _mapping_get(config, "configurable") if config is not None else None
+        )
+        checkpointer = _mapping_get(configurable, "__pregel_checkpointer")
+        if checkpointer is None or isinstance(checkpointer, bool):
+            return None
+        return checkpointer
+
+    def _has_effective_checkpointer_saver(
+        self, config: Mapping[str, Any] | None = None
+    ) -> bool:
+        return (
+            self._has_checkpointer_saver()
+            or self._config_checkpointer_saver(config) is not None
+        )
+
+    def _effective_checkpointer_label(
+        self, config: Mapping[str, Any] | None = None
+    ) -> str | None:
+        graph_label = self._checkpointer_label()
+        if graph_label is not None:
+            return graph_label
+        config_checkpointer = self._config_checkpointer_saver(config)
+        if config_checkpointer is None:
+            return None
+        return _type_label(config_checkpointer)
+
     def _resolve_checkpointer_saver(self) -> Any | None:
         checkpointer = getattr(self._graph, "checkpointer", None)
         if checkpointer is None or isinstance(checkpointer, bool):
@@ -1177,9 +1228,11 @@ class KitaruGraphRunner:
             return None
         return _type_label(store)
 
-    def _checkpointer_warnings(self) -> list[str]:
+    def _checkpointer_warnings(
+        self, *, config: Mapping[str, Any] | None = None
+    ) -> list[str]:
         warnings: list[str] = []
-        checkpointer_label = self._checkpointer_label()
+        checkpointer_label = self._effective_checkpointer_label(config)
         if checkpointer_label is None:
             if self._durability.warn_without_checkpointer:
                 warnings.append(
@@ -1428,10 +1481,10 @@ class KitaruGraphRunner:
             "graph_name": self._name,
             "thread_id": request.thread_id,
             "thread_id_present": bool(request.thread_id),
-            "checkpointer_type": self._checkpointer_label(),
+            "checkpointer_type": self._effective_checkpointer_label(config),
             "store_type": self._store_label(),
             "durability": self._resolved_durability(request),
-            "forwarded_durability": self._forwarded_durability(request),
+            "forwarded_durability": self._forwarded_durability(request, config=config),
             "capture": self._capture_summary,
             "config": redact_config(config) if self._capture.save_config else None,
             "context": redact_config(context) if self._capture.save_context else None,
@@ -1469,8 +1522,8 @@ class KitaruGraphRunner:
         return {
             "kind": request.kind,
             "durability": self._resolved_durability(request),
-            "forwarded_durability": self._forwarded_durability(request),
-            "has_checkpointer": self._checkpointer_label() is not None,
+            "forwarded_durability": self._forwarded_durability(request, config=config),
+            "has_checkpointer": self._has_effective_checkpointer_saver(config),
             "has_store": self._store_label() is not None,
             "thread_id_present": bool(request.thread_id),
             "configurable_keys": _safe_key_labels(

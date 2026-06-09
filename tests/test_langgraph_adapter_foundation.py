@@ -1027,6 +1027,73 @@ def test_request_durability_is_not_forwarded_without_checkpointer(
     assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
+def test_request_durability_is_forwarded_for_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+    config_checkpointer = object()
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: {
+            "configurable": {"__pregel_checkpointer": config_checkpointer}
+        },
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert seen["durability"] == "sync"
+    assert not any(
+        "No LangGraph checkpointer" in warning for warning in result.warnings
+    )
+
+
+def test_strict_durability_policy_accepts_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    config_checkpointer = object()
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: {
+            "configurable": {"__pregel_checkpointer": config_checkpointer}
+        },
+        durability=langgraph_adapter.LangGraphDurabilityPolicy(
+            require_checkpointer=True
+        ),
+    )
+
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+
+
 @pytest.mark.parametrize(
     ("checkpointer", "expected_forwarded_durability"),
     [(None, None), (object(), "sync")],
