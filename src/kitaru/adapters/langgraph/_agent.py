@@ -11,6 +11,7 @@ from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
+from ._constants import LANGGRAPH_CONFIG_CHECKPOINTER_KEY
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import (
     LangGraphCallCheckpointPolicy,
@@ -160,8 +161,11 @@ class KitaruGraphRunner:
         """Invoke the wrapped graph synchronously."""
         self._validate_request(request, required_method="invoke")
 
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
+
         def _body() -> LangGraphRunResult:
-            return self._invoke_graph_sync(request)
+            return self._invoke_graph_sync(request, config=config)
 
         if self._checkpoint_strategy == "calls":
             result = _body()
@@ -175,15 +179,18 @@ class KitaruGraphRunner:
         else:
             result = _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("invoke", result, request=request)
+        self._track_result("invoke", result, request=request, config=config)
         return result
 
     async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
         """Invoke the wrapped graph asynchronously when the graph supports it."""
         self._validate_request(request, required_method="ainvoke")
 
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
+
         async def _body() -> LangGraphRunResult:
-            return await self._invoke_graph_async(request)
+            return await self._invoke_graph_async(request, config=config)
 
         if self._checkpoint_strategy == "calls":
             result = await _body()
@@ -197,7 +204,7 @@ class KitaruGraphRunner:
         else:
             result = await _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("ainvoke", result, request=request)
+        self._track_result("ainvoke", result, request=request, config=config)
         return result
 
     def stream(
@@ -215,9 +222,11 @@ class KitaruGraphRunner:
             policy=self._stream_policy,
             subgraphs=subgraphs,
         )
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
 
         def _body() -> LangGraphRunResult:
-            return self._stream_graph_sync(request, options=options)
+            return self._stream_graph_sync(request, config=config, options=options)
 
         if is_inside_flow() and not is_inside_checkpoint():
             result = run_sync_in_checkpoint(
@@ -236,7 +245,7 @@ class KitaruGraphRunner:
         else:
             result = _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("stream", result, request=request)
+        self._track_result("stream", result, request=request, config=config)
         return result
 
     async def astream(
@@ -254,9 +263,13 @@ class KitaruGraphRunner:
             policy=self._stream_policy,
             subgraphs=subgraphs,
         )
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
 
         async def _body() -> LangGraphRunResult:
-            return await self._stream_graph_async(request, options=options)
+            return await self._stream_graph_async(
+                request, config=config, options=options
+            )
 
         if is_inside_flow() and not is_inside_checkpoint():
             result = await run_async_in_checkpoint(
@@ -275,12 +288,12 @@ class KitaruGraphRunner:
         else:
             result = await _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("astream", result, request=request)
+        self._track_result("astream", result, request=request, config=config)
         return result
 
-    def _invoke_graph_sync(self, request: LangGraphRunRequest) -> LangGraphRunResult:
-        config = self._prepared_config(request)
-        self._validate_checkpointer_requirement(config)
+    def _invoke_graph_sync(
+        self, request: LangGraphRunRequest, *, config: dict[str, Any]
+    ) -> LangGraphRunResult:
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
@@ -333,7 +346,7 @@ class KitaruGraphRunner:
             return result
 
     async def _invoke_graph_async(
-        self, request: LangGraphRunRequest
+        self, request: LangGraphRunRequest, *, config: dict[str, Any]
     ) -> LangGraphRunResult:
         ainvoke = getattr(self._graph, "ainvoke", None)
         if not callable(ainvoke):
@@ -342,8 +355,6 @@ class KitaruGraphRunner:
                 "`invoke(...)` or wrap a graph that supports async invocation."
             )
 
-        config = self._prepared_config(request)
-        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
@@ -399,10 +410,9 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: dict[str, Any],
         options: LangGraphStreamOptions,
     ) -> LangGraphRunResult:
-        config = self._prepared_config(request)
-        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
@@ -468,6 +478,7 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: dict[str, Any],
         options: LangGraphStreamOptions,
     ) -> LangGraphRunResult:
         astream = getattr(self._graph, "astream", None)
@@ -477,8 +488,6 @@ class KitaruGraphRunner:
                 "`stream(...)` or wrap a graph that supports async streaming."
             )
 
-        config = self._prepared_config(request)
-        self._validate_checkpointer_requirement(config)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
@@ -1189,7 +1198,7 @@ class KitaruGraphRunner:
         configurable = (
             _mapping_get(config, "configurable") if config is not None else None
         )
-        checkpointer = _mapping_get(configurable, "__pregel_checkpointer")
+        checkpointer = _mapping_get(configurable, LANGGRAPH_CONFIG_CHECKPOINTER_KEY)
         if checkpointer is None or isinstance(checkpointer, bool):
             return None
         return checkpointer
@@ -1536,6 +1545,7 @@ class KitaruGraphRunner:
         method: str,
         *,
         request: LangGraphRunRequest,
+        config: Mapping[str, Any],
         status: str,
         captured_state: bool,
     ) -> dict[str, object]:
@@ -1543,8 +1553,8 @@ class KitaruGraphRunner:
             "method": method,
             "status": status,
             "durability": self._resolved_durability(request),
-            "forwarded_durability": self._forwarded_durability(request),
-            "has_checkpointer": self._checkpointer_label() is not None,
+            "forwarded_durability": self._forwarded_durability(request, config=config),
+            "has_checkpointer": self._has_effective_checkpointer_saver(config),
             "has_store": self._store_label() is not None,
             "captured_state": captured_state,
         }
@@ -1555,10 +1565,12 @@ class KitaruGraphRunner:
         result: LangGraphRunResult,
         *,
         request: LangGraphRunRequest,
+        config: Mapping[str, Any],
     ) -> None:
         metadata = self._analytics_metadata(
             method,
             request=request,
+            config=config,
             status=result.status,
             captured_state=result.state_summary is not None,
         )

@@ -19,6 +19,15 @@ from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
+def _config_with_injected_checkpointer(
+    checkpointer: object,
+) -> dict[str, dict[str, object]]:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    return {
+        "configurable": {agent_module.LANGGRAPH_CONFIG_CHECKPOINTER_KEY: checkpointer}
+    }
+
+
 @pytest.fixture
 def langgraph_adapter(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     """Import the adapter with a fake optional SDK module installed."""
@@ -1027,6 +1036,32 @@ def test_request_durability_is_not_forwarded_without_checkpointer(
     assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
+def test_request_durability_is_not_forwarded_for_explicit_none_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
 def test_request_durability_is_forwarded_for_config_injected_checkpointer(
     langgraph_adapter: types.ModuleType,
 ) -> None:
@@ -1043,9 +1078,9 @@ def test_request_durability_is_forwarded_for_config_injected_checkpointer(
 
     runner = langgraph_adapter.KitaruGraphRunner(
         FakeGraph(),
-        config_factory=lambda _request: {
-            "configurable": {"__pregel_checkpointer": config_checkpointer}
-        },
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
     )
     result = runner.invoke(
         langgraph_adapter.LangGraphRunRequest.start(
@@ -1076,9 +1111,9 @@ def test_strict_durability_policy_accepts_config_injected_checkpointer(
 
     runner = langgraph_adapter.KitaruGraphRunner(
         FakeGraph(),
-        config_factory=lambda _request: {
-            "configurable": {"__pregel_checkpointer": config_checkpointer}
-        },
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
         durability=langgraph_adapter.LangGraphDurabilityPolicy(
             require_checkpointer=True
         ),
@@ -1092,6 +1127,51 @@ def test_strict_durability_policy_accepts_config_injected_checkpointer(
     )
 
     assert result.status == "completed"
+
+
+def test_analytics_metadata_records_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    config_checkpointer = object()
+    track_calls: list[tuple[object, dict[str, object]]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    analytics_metadata = next(
+        metadata
+        for _event, metadata in track_calls
+        if metadata.get("method") == "invoke"
+    )
+    assert analytics_metadata["forwarded_durability"] == "sync"
+    assert analytics_metadata["has_checkpointer"] is True
 
 
 @pytest.mark.parametrize(
