@@ -20,11 +20,15 @@ Recommended workflow:
     from kitaru.client import KitaruClient
     KitaruClient().deployments.invoke(flow="chatbot", tag="prod")
 
-For quick local testing without deploying, ``python chatbot.py`` runs the
-flow against the active stack.
+For quick local interactive terminal testing without deploying,
+``python chatbot.py`` runs the flow against the active stack. This direct mode
+may block until the conversation finishes. For local non-interactive automation,
+use ``drive_local.py`` so one actor runs the flow while another actor answers
+pending waits.
 """
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from pydantic_ai import Agent, RunContext
 
@@ -50,6 +54,8 @@ SYSTEM_PROMPT = (
 )
 
 Message = dict[str, str]  # {"role": "user" | "assistant", "content": ...}
+CHATBOT_SESSION_LABEL_METADATA_KEY = "chatbot_session_label"
+CHATBOT_TURN_METADATA_KEY = "chatbot_turn"
 
 
 @dataclass
@@ -60,9 +66,18 @@ class Conversation:
     turn: int = 0
 
 
+def chatbot_wait_metadata(*, session_label: str, turn: int) -> dict[str, str | int]:
+    """Return metadata that lets local drivers find this session's pending wait."""
+    return {
+        CHATBOT_SESSION_LABEL_METADATA_KEY: session_label,
+        CHATBOT_TURN_METADATA_KEY: turn,
+    }
+
+
 @flow(image=CHATBOT_IMAGE)
-def chatbot() -> str:
+def chatbot(session_label: str | None = None) -> str:
     """Durable chatbot: the agent runs until it stops calling ``say_and_wait``."""
+    session_label = session_label or f"chatbot-{uuid4().hex}"
     agent: Agent[Conversation, str] = Agent(
         MODEL,
         name="chatbot",
@@ -87,6 +102,10 @@ def chatbot() -> str:
             question=message,
             name=f"user_turn_{conv.turn}",
             timeout=3600,
+            metadata=chatbot_wait_metadata(
+                session_label=session_label,
+                turn=conv.turn,
+            ),
         )
         conv.turn += 1
         conv.history.append({"role": "user", "content": user_reply})
@@ -111,6 +130,13 @@ def chatbot() -> str:
 
 
 def main() -> None:
+    print(
+        "\nStarting chatbot.py in direct interactive mode. "
+        "This process waits until the conversation finishes.\n"
+        "For local non-interactive automation, run drive_local.py instead; "
+        "that script starts the flow in the background and submits input "
+        "from the foreground process.\n"
+    )
     handle = chatbot.run()
     handle.wait()
     print("\nConversation ended.")
