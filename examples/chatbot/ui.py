@@ -99,15 +99,19 @@ def _load_history(
     arts: list[ArtifactRef] | None = None,
     retries: int = 1,
     retry_sleep: float = 0.5,
+    min_length: int = 0,
 ) -> list[dict[str, str]]:
     """Load the best usable ``history`` artifact for an execution.
 
     Pass ``arts`` when the caller already has a hydrated Execution (saves a
     ~1.5s artifacts.list roundtrip). Otherwise pass ``exec_id`` and we fetch.
     Use ``retries`` > 1 right after a flow first transitions to WAITING — the
-    artifact list can briefly trail the status update.
+    artifact list can briefly trail the status update. Pass ``min_length`` when
+    the caller already knows the shortest acceptable transcript length; this
+    prevents a stale non-empty artifact from replacing a locally pending turn.
     """
     current_arts = arts
+    best_short_history: list[dict[str, str]] = []
     for attempt in range(retries):
         if current_arts is None:
             try:
@@ -122,8 +126,10 @@ def _load_history(
         history_arts = [a for a in current_arts if a.name == HISTORY_ARTIFACT_NAME]
         if history_arts:
             history = load_longest_usable_history(history_arts)
-            if history:
+            if len(history) >= min_length and history:
                 return history
+            if len(history) > len(best_short_history):
+                best_short_history = history
 
         # If the hydrated Execution had a stale artifact list, fetch a fresh
         # list on the next attempt. If the caller only supplied artifact refs,
@@ -132,7 +138,7 @@ def _load_history(
         current_arts = None if exec_id else current_arts
         if attempt + 1 < retries:
             time.sleep(retry_sleep)
-    return []
+    return [] if min_length else best_short_history
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +374,16 @@ def respond(message: str, history: list[dict], state: dict):
         new_history, next_wait_id = pending, None
     else:
         next_wait_id = ex.pending_wait.wait_id if ex.pending_wait else None
+        min_history_length = (
+            len(pending) + 1 if next_wait_id is not None else len(pending)
+        )
         new_history = (
             _load_history(
                 exec_id=ex.exec_id,
                 arts=ex.artifacts,
                 retries=3,
                 retry_sleep=0.3,
+                min_length=min_history_length,
             )
             or pending
         )

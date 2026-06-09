@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any, Protocol
 
 HISTORY_ARTIFACT_NAME = "history"
+_ALLOWED_ROLES = {"assistant", "user"}
 Message = dict[str, str]
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,8 +53,9 @@ def load_longest_usable_history(artifacts: Iterable[HistoryArtifact]) -> list[Me
     """Load history artifacts and return the longest usable transcript.
 
     Unloadable artifacts and malformed loaded values are ignored. When two
-    usable histories have the same length, the later candidate wins so a newer
-    equal-length retry/replay can replace an older candidate without metadata.
+    usable histories have the same length, the first encountered candidate wins.
+    ``ArtifactRef`` does not expose reliable freshness metadata, so equal-length
+    candidates are treated as ties rather than "newer" or "older" versions.
     """
     best: list[Message] = []
     for artifact in artifacts:
@@ -68,7 +70,7 @@ def load_longest_usable_history(artifacts: Iterable[HistoryArtifact]) -> list[Me
         if history is None:
             _LOGGER.debug("Skipping malformed history artifact.")
             continue
-        if len(history) >= len(best):
+        if len(history) > len(best):
             best = history
     return best
 
@@ -76,7 +78,7 @@ def load_longest_usable_history(artifacts: Iterable[HistoryArtifact]) -> list[Me
 def _normalize_message(item: Any) -> Message | None:
     role = _read_message_value(item, "role")
     content = _read_message_value(item, "content")
-    if role is None or content is None:
+    if role is None or content is None or role not in _ALLOWED_ROLES:
         return None
     return {"role": role, "content": content}
 

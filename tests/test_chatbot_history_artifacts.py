@@ -38,18 +38,37 @@ def test_selects_longest_loaded_history_without_length_metadata() -> None:
     assert result == longer_history
 
 
-def test_equal_length_history_candidates_prefer_later_artifact() -> None:
-    earlier_history = [{"role": "assistant", "content": "older"}]
-    later_history = [{"role": "assistant", "content": "newer"}]
+def test_equal_length_history_candidates_keep_first_artifact() -> None:
+    first_history = [{"role": "assistant", "content": "first"}]
+    second_history = [{"role": "assistant", "content": "second"}]
 
     result = load_longest_usable_history(
         [
-            FakeArtifact("history", earlier_history),
-            FakeArtifact("history", later_history),
+            FakeArtifact("history", first_history),
+            FakeArtifact("history", second_history),
         ]
     )
 
-    assert result == later_history
+    assert result == first_history
+
+
+def test_skips_history_candidate_with_unsupported_message_role() -> None:
+    usable_history = [{"role": "assistant", "content": "What can I help with?"}]
+
+    result = load_longest_usable_history(
+        [
+            FakeArtifact(
+                "history",
+                [
+                    {"role": "assistant", "content": "Valid start."},
+                    {"role": "system", "content": "Not usable by Gradio chat."},
+                ],
+            ),
+            FakeArtifact("history", usable_history),
+        ]
+    )
+
+    assert result == usable_history
 
 
 def test_skips_unloadable_and_malformed_history_candidates() -> None:
@@ -111,3 +130,12 @@ def test_normalize_history_accepts_generator_input() -> None:
 def test_normalize_history_rejects_message_missing_role_or_content() -> None:
     assert normalize_history([{"role": "assistant"}]) is None
     assert normalize_history([SimpleNamespace(role="user")]) is None
+
+
+def test_normalize_history_rejects_unsupported_roles() -> None:
+    assert (
+        normalize_history([{"role": "system", "content": "hidden instruction"}]) is None
+    )
+    assert (
+        normalize_history([SimpleNamespace(role="tool", content="raw output")]) is None
+    )
