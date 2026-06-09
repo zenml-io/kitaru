@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from kitaru._replay_verify_imported_models import (
@@ -15,7 +16,10 @@ from kitaru._replay_verify_imported_models import (
     TenantContext,
     imported_case_from_mapping,
 )
-from kitaru._replay_verify_imported_validation import validate_imported_case
+from kitaru._replay_verify_imported_validation import (
+    NO_TOOL_REGISTRY_EXPECTATION,
+    validate_imported_case,
+)
 
 RUNNER_ENTRYPOINT = "run_support_copilot_case"
 
@@ -461,6 +465,113 @@ def test_stale_rag_metadata_and_permission_mismatch_stop_candidate() -> None:
     assert "stale_corpus_index_version" in result.fidelity.reasons
     assert "permission_mismatch_cross_tenant_document" in result.fidelity.reasons
     assert "permission_scope_mismatch" in result.fidelity.reasons
+    assert result.candidate_execution_allowed is False
+
+
+def test_no_registry_mode_skips_unknown_tool_reasons() -> None:
+    result = validate_imported_case(
+        _case(
+            root_input={"user_message": "Look up order ORD-7."},
+            observed_output=_observed_output(tool_names=["lookup_custom_order"]),
+            available_tools=["lookup_custom_order"],
+            recorded_calls=[_tool_call("lookup_custom_order")],
+        ),
+        allowed_tool_names=NO_TOOL_REGISTRY_EXPECTATION,
+    )
+
+    assert not any(
+        reason.startswith("unknown_tool:") for reason in result.fidelity.reasons
+    )
+    assert result.fidelity.eligibility == "eligible"
+    assert result.candidate_execution_allowed is True
+
+
+def test_none_allowed_tools_keeps_default_registry_behavior() -> None:
+    result = validate_imported_case(
+        _case(
+            root_input={"user_message": "Look up order ORD-7."},
+            observed_output=_observed_output(tool_names=["lookup_custom_order"]),
+            available_tools=["lookup_custom_order"],
+            recorded_calls=[_tool_call("lookup_custom_order")],
+        ),
+        allowed_tool_names=None,
+    )
+
+    assert "unknown_tool:lookup_custom_order" in result.fidelity.reasons
+    assert result.candidate_execution_allowed is False
+
+
+def test_no_registry_mode_still_flags_uncontrolled_write_like_tool() -> None:
+    result = validate_imported_case(
+        _case(
+            root_input={"user_message": "Send the welcome email."},
+            observed_output=_observed_output(tool_names=["send_welcome_email"]),
+            available_tools=["send_welcome_email"],
+            recorded_calls=[
+                RecordedCall(
+                    kind="tool",
+                    name="send_welcome_email",
+                    output_payload={"delivery_status": "queued"},
+                )
+            ],
+        ),
+        allowed_tool_names=NO_TOOL_REGISTRY_EXPECTATION,
+    )
+
+    assert "ambiguous_side_effect_status_write_like_tool" in result.fidelity.reasons
+    assert not any(
+        reason.startswith("unknown_tool:") for reason in result.fidelity.reasons
+    )
+    assert "unsafe_or_unknown_write_like_tool_blocked" not in result.fidelity.reasons
+    assert result.fidelity.eligibility == "unsafe_ineligible"
+    assert result.candidate_execution_allowed is False
+
+
+def test_corpus_version_check_skipped_when_expected_is_none() -> None:
+    older_corpus_rag = replace(
+        _valid_rag_metadata(),
+        corpus_index_version="support-kb-2025-12-01-z",
+    )
+
+    result = validate_imported_case(
+        _case(
+            root_input={"user_message": "How do I rotate an API key?"},
+            observed_output={
+                **_observed_output(tool_names=["search_knowledge_base"]),
+                "retrieval_document_ids": ["doc-1", "doc-2"],
+            },
+            available_tools=["search_knowledge_base"],
+            recorded_calls=[_tool_call("search_knowledge_base", kind="retrieval")],
+            retrieval_context=older_corpus_rag,
+        ),
+        expected_corpus_index_version=None,
+    )
+
+    assert "stale_corpus_index_version" not in result.fidelity.reasons
+    assert result.fidelity.eligibility == "eligible"
+    assert result.candidate_execution_allowed is True
+
+
+def test_default_corpus_version_check_still_flags_stale_index() -> None:
+    older_corpus_rag = replace(
+        _valid_rag_metadata(),
+        corpus_index_version="support-kb-2025-12-01-z",
+    )
+
+    result = validate_imported_case(
+        _case(
+            root_input={"user_message": "How do I rotate an API key?"},
+            observed_output={
+                **_observed_output(tool_names=["search_knowledge_base"]),
+                "retrieval_document_ids": ["doc-1", "doc-2"],
+            },
+            available_tools=["search_knowledge_base"],
+            recorded_calls=[_tool_call("search_knowledge_base", kind="retrieval")],
+            retrieval_context=older_corpus_rag,
+        )
+    )
+
+    assert "stale_corpus_index_version" in result.fidelity.reasons
     assert result.candidate_execution_allowed is False
 
 

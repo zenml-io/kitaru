@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from kitaru._replay_verify_imported_models import to_plain_data
+from kitaru._replay_verify_imported_reporting import render_fidelity_checklist
 from kitaru._replay_verify_imported_sources.jsonl import (
     validate_imported_cases_jsonl,
     write_imported_cases_jsonl,
@@ -14,9 +15,25 @@ from kitaru._replay_verify_imported_sources.jsonl import (
 from kitaru._replay_verify_imported_sources.langfuse import (
     cases_from_langfuse_observations,
 )
+from kitaru._replay_verify_imported_sources.scan import scan_langfuse_observations
 from kitaru._replay_verify_imported_validation import validate_imported_case
 
 RUNNER_ENTRYPOINT = "run_support_copilot_case"
+UNINSTRUMENTED_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "replay_verify_imported_cases"
+    / "fixtures"
+    / "uninstrumented_observations.jsonl"
+)
+
+
+def _read_observation_rows(path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _observed_output(tool_names: list[str] | None = None) -> dict[str, Any]:
@@ -378,6 +395,113 @@ def test_langfuse_rows_without_trace_id_become_held_cases() -> None:
     assert validation.fidelity.eligibility == "ineligible"
     assert "missing_trace_id" in validation.fidelity.reasons
     assert validation.candidate_execution_allowed is False
+
+
+def test_langfuse_other_kind_rows_surface_ignored_observation_count() -> None:
+    rows = [
+        _root_row(
+            trace_id="trace-ignored-rows",
+            case_id="case-ignored-rows",
+            available_tools=["lookup_invoice"],
+            output=_observed_output(["lookup_invoice"]),
+        ),
+        _tool_row(trace_id="trace-ignored-rows", name="lookup_invoice"),
+        {
+            "id": "event-1",
+            "traceId": "trace-ignored-rows",
+            "parentObservationId": "root-1",
+            "name": "user-feedback",
+            "type": "EVENT",
+            "startTime": "2026-06-07T10:03:00Z",
+            "output": json.dumps({"thumbs": "up"}),
+        },
+    ]
+
+    [case] = cases_from_langfuse_observations(rows)
+
+    import_summary = case.raw_source_payload["source_import_summary"]
+    assert import_summary["ignored_observation_count"] == 1
+    assert [call.name for call in case.recorded_calls] == ["lookup_invoice"]
+
+
+def test_scan_uninstrumented_fixture_yields_zero_verifiable_cases() -> None:
+    rows = _read_observation_rows(UNINSTRUMENTED_FIXTURE)
+
+    result = scan_langfuse_observations(rows, source_ref=str(UNINSTRUMENTED_FIXTURE))
+
+    assert len(result.cases) == 5
+    assert result.summary["case_count"] == 5
+    assert result.summary["candidate_allowed_count"] == 0
+    # Scan mode must not drown arbitrary traces in registry noise.
+    all_reasons = [
+        reason
+        for validation in result.validations
+        for reason in validation.fidelity.reasons
+    ]
+    assert not any(reason.startswith("unknown_tool:") for reason in all_reasons)
+    assert "stale_corpus_index_version" not in all_reasons
+    # Every uninstrumented case is missing the contract fields.
+    assert result.summary["top_reasons"]["missing_available_tools"] == 5
+    assert result.summary["top_reasons"]["missing_local_runner"] == 5
+    # The write-like span without a controlled side-effect status is the one
+    # fidelity signal that must survive registry-free scanning.
+    welcome = next(
+        validation
+        for validation in result.validations
+        if validation.case_id == "welcome-flow"
+    )
+    assert welcome.fidelity.eligibility == "unsafe_ineligible"
+    assert "ambiguous_side_effect_status_write_like_tool" in welcome.fidelity.reasons
+    # The trace without an output degrades, it does not error.
+    timeout = next(
+        validation
+        for validation in result.validations
+        if validation.case_id == "billing-question-timeout"
+    )
+    assert "missing_observed_output_or_evaluator_signal" in timeout.fidelity.reasons
+    # EVENT / guardrail spans resolve to 'other' and are counted, not dropped
+    # silently.
+    assert result.source_import_summary["ignored_observation_count"] == 2
+    assert result.summary["ignored_observation_count"] == 2
+    assert result.source_import_summary["source_system_counts"] == {"langfuse": 5}
+
+
+def test_fidelity_checklist_renders_scan_results_without_retrieval_noise() -> None:
+    rows = _read_observation_rows(UNINSTRUMENTED_FIXTURE)
+    result = scan_langfuse_observations(rows, source_ref=str(UNINSTRUMENTED_FIXTURE))
+
+    checklist = render_fidelity_checklist(
+        result.validations,
+        summary=result.summary,
+    )
+
+    assert "- Cases scanned: 5" in checklist
+    assert "- Verifiable today: 0" in checklist
+    assert "- Observations ignored (no replayable call kind): 2" in checklist
+    assert "`local_runner` — missing in 5 of 5 cases" in checklist
+    assert "`available_tools` — missing in 5 of 5 cases" in checklist
+    assert "## Case `welcome-flow`" in checklist
+    assert "- [ ] missing_available_tools" in checklist
+    # Non-RAG chat traces must not be penalized for retrieval metadata.
+    assert "retrieval" not in checklist
+    assert "unknown_tool" not in checklist
+
+
+def test_scan_with_explicit_registry_restores_unknown_tool_reasons() -> None:
+    rows = [
+        _root_row(
+            trace_id="trace-scan-registry",
+            case_id="case-scan-registry",
+            available_tools=["lookup_invoice"],
+            output=_observed_output(["lookup_invoice"]),
+        ),
+        _tool_row(trace_id="trace-scan-registry", name="lookup_invoice"),
+    ]
+
+    result = scan_langfuse_observations(rows, allowed_tool_names=set())
+
+    assert "unknown_tool:lookup_invoice" in result.validations[0].fidelity.reasons
+    assert result.summary["candidate_allowed_count"] == 0
 
 
 def test_explicit_empty_allowed_tool_set_is_not_replaced_by_defaults() -> None:

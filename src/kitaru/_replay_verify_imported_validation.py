@@ -28,6 +28,23 @@ from kitaru._replay_verify_imported_models import (
     TenantContext,
 )
 
+
+class NoToolRegistryExpectation:
+    """Marker for scan mode: validate without any tool-registry allowlist.
+
+    ``allowed_tool_names=None`` already means "use the support-copilot demo
+    registry", so arbitrary (uninstrumented) traces need an explicit way to
+    opt out of registry comparison entirely. In this mode no ``unknown_tool``
+    reasons are emitted; write-like tools without a controlled side-effect
+    status are still flagged because that signal comes from the trace itself,
+    not from a registry.
+    """
+
+    __slots__ = ()
+
+
+NO_TOOL_REGISTRY_EXPECTATION = NoToolRegistryExpectation()
+
 EXPECTED_CURRENT_CORPUS_INDEX_VERSION = "support-kb-2026-06-06-a"
 DEFAULT_ALLOWED_TOOL_NAMES = {
     "get_account_profile",
@@ -74,10 +91,15 @@ def validate_imported_case(
     case: ImportedReplayCase,
     *,
     expected_runner_entrypoint: str | None = None,
-    expected_corpus_index_version: str = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
-    allowed_tool_names: set[str] | None = None,
+    expected_corpus_index_version: str | None = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
+    allowed_tool_names: set[str] | NoToolRegistryExpectation | None = None,
 ) -> ImportedCaseValidation:
-    """Validate one imported case and decide whether a candidate may run."""
+    """Validate one imported case and decide whether a candidate may run.
+
+    Pass ``allowed_tool_names=NO_TOOL_REGISTRY_EXPECTATION`` to validate
+    traces from applications without a known tool registry, and
+    ``expected_corpus_index_version=None`` to skip the stale-corpus check.
+    """
     allowed_tools = _allowed_tool_names(allowed_tool_names)
     is_rag = case_is_rag(case)
     recorded_tools = observed_tool_names(case.recorded_calls)
@@ -201,7 +223,7 @@ def validate_imported_case(
 def assess_case_safety(
     case: ImportedReplayCase,
     *,
-    allowed_tool_names: set[str] | None = None,
+    allowed_tool_names: set[str] | NoToolRegistryExpectation | None = None,
     extra_unsafe_reasons: Sequence[str] = (),
 ) -> SafetyAssessment:
     """Classify side-effect safety for observed tool and retrieval calls."""
@@ -227,7 +249,10 @@ def assess_case_safety(
         executed_live = bool(executed_live_raw)
         live_execution_seen = live_execution_seen or executed_live
         write_like = is_write_like_tool_name(call.name)
-        if (call.name not in allowed_tools and write_like) or executed_live:
+        unknown_write_like = write_like and not _tool_in_registry(
+            call.name, allowed_tools
+        )
+        if unknown_write_like or executed_live:
             unsafe_tools.append(call.name)
         elif (
             (write_like and not side_effect_status_raw)
@@ -277,7 +302,7 @@ def validate_retrieval_context(
     retrieval: RetrievalContext | None,
     *,
     tenant_context: TenantContext | None,
-    expected_corpus_index_version: str = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
+    expected_corpus_index_version: str | None = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
     case_is_rag: bool,
 ) -> list[str]:
     """Return explicit RAG downgrade reasons for a case."""
@@ -296,7 +321,10 @@ def validate_retrieval_context(
             reasons.append(f"missing_rag_metadata:{field_name}")
     if retrieval is None:
         return reasons
-    if retrieval.corpus_index_version != expected_corpus_index_version:
+    if (
+        expected_corpus_index_version is not None
+        and retrieval.corpus_index_version != expected_corpus_index_version
+    ):
         reasons.append("stale_corpus_index_version")
     if tenant_context is not None:
         if retrieval.tenant_id and retrieval.tenant_id != tenant_context.tenant_id:
@@ -324,8 +352,8 @@ def validate_imported_cases(
     cases: Sequence[ImportedReplayCase],
     *,
     expected_runner_entrypoint: str | None = None,
-    expected_corpus_index_version: str = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
-    allowed_tool_names: set[str] | None = None,
+    expected_corpus_index_version: str | None = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
+    allowed_tool_names: set[str] | NoToolRegistryExpectation | None = None,
 ) -> list[ImportedCaseValidation]:
     """Validate multiple imported cases."""
     return [
@@ -388,10 +416,21 @@ def dedupe(items: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
 
-def _allowed_tool_names(allowed_tool_names: set[str] | None) -> set[str]:
+def _allowed_tool_names(
+    allowed_tool_names: set[str] | NoToolRegistryExpectation | None,
+) -> set[str] | NoToolRegistryExpectation:
     if allowed_tool_names is None:
         return DEFAULT_ALLOWED_TOOL_NAMES
     return allowed_tool_names
+
+
+def _tool_in_registry(
+    tool_name: str,
+    allowed_tools: set[str] | NoToolRegistryExpectation,
+) -> bool:
+    if isinstance(allowed_tools, NoToolRegistryExpectation):
+        return True
+    return tool_name in allowed_tools
 
 
 def _source_import_reasons(case: ImportedReplayCase) -> list[str]:
@@ -410,9 +449,11 @@ def _availability_errors(available_tools: list[str] | None) -> list[str]:
 def _registry_errors(
     available_tools: list[str] | None,
     *,
-    allowed_tool_names: set[str],
+    allowed_tool_names: set[str] | NoToolRegistryExpectation,
 ) -> list[str]:
-    if available_tools is None:
+    if available_tools is None or isinstance(
+        allowed_tool_names, NoToolRegistryExpectation
+    ):
         return []
     errors: list[str] = []
     for tool_name in available_tools:

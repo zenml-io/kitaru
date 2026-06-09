@@ -79,11 +79,9 @@ def _case_from_trace_rows(
     partial_trace_ids: set[str],
 ) -> ImportedReplayCase:
     out_of_order = _was_out_of_order(rows)
-    deduped_rows, duplicate_ids = _deduplicate_rows(rows)
-    sorted_rows = cast(
-        list[dict[str, Any]],
-        sorted(deduped_rows, key=_observation_sort_key),
-    )
+    sorted_rows, duplicate_ids = _deduplicate_rows(rows)
+    # _deduplicate_rows returns a fresh list, so sorting in place is safe.
+    sorted_rows.sort(key=_observation_sort_key)
     root = _root_observation(sorted_rows)
     root_metadata = _metadata_from_row(root)
     partial_ingestion = trace_id in partial_trace_ids or _metadata_marks_partial(rows)
@@ -92,7 +90,7 @@ def _case_from_trace_rows(
         out_of_order=out_of_order,
         partial_ingestion=partial_ingestion,
     )
-    recorded_calls = _recorded_calls(sorted_rows, root)
+    recorded_calls, ignored_observation_count = _recorded_calls(sorted_rows, root)
     available_tools = _available_tool_names(root_metadata)
     metadata_application_tool_names = _application_tool_names(root_metadata)
     recorded_application_tool_names = [
@@ -112,6 +110,7 @@ def _case_from_trace_rows(
             "duplicate_observation_ids": duplicate_ids,
             "out_of_order_observations": out_of_order,
             "partial_ingestion": partial_ingestion,
+            "ignored_observation_count": ignored_observation_count,
             "observation_ids": _observation_ids(sorted_rows),
         },
     }
@@ -235,6 +234,7 @@ def _case_from_missing_trace_row(
             "source_import_summary": {
                 "raw_observation_count": 1,
                 "deduplicated_observation_count": 1,
+                "ignored_observation_count": 0,
                 "observation_ids": [observation_id] if observation_id else [],
             },
         },
@@ -244,8 +244,10 @@ def _case_from_missing_trace_row(
 def _recorded_calls(
     sorted_rows: Sequence[dict[str, Any]],
     root: dict[str, Any],
-) -> list[RecordedCall]:
+) -> tuple[list[RecordedCall], int]:
+    """Return recorded calls plus the count of ignored 'other'-kind rows."""
     calls: list[RecordedCall] = []
+    ignored_observation_count = 0
     root_id = _observation_id(root)
     for row in sorted_rows:
         row_id = _observation_id(row)
@@ -253,6 +255,7 @@ def _recorded_calls(
             continue
         kind = _call_kind(row)
         if kind == "other":
+            ignored_observation_count += 1
             continue
         metadata = _metadata_from_row(row)
         calls.append(
@@ -297,7 +300,7 @@ def _recorded_calls(
                 latency=_optional_float(row.get("latency")),
             )
         )
-    return calls
+    return calls, ignored_observation_count
 
 
 def _call_kind(row: Mapping[str, Any]) -> str:
