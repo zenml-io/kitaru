@@ -55,71 +55,113 @@ _COUNT_STRIP_METRICS: tuple[tuple[str, str], ...] = (
 HONESTY_LINE = "imported-input fresh execution, not deterministic checkpoint replay"
 
 _CSS = f"""
+* {{ box-sizing: border-box; }}
 body {{
   background: {_PAPER};
+  background-image:
+    radial-gradient(circle at 15% 8%, rgba(179, 83, 9, 0.05), transparent 40%),
+    radial-gradient(circle at 88% 95%, rgba(45, 106, 79, 0.05), transparent 45%);
   color: {_INK};
   font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
   margin: 0;
-  padding: 2.5rem clamp(1rem, 6vw, 4rem);
-  line-height: 1.5;
+  padding: 3rem clamp(1rem, 5vw, 3rem) 4rem;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }}
+body > * {{ max-width: 980px; margin-left: auto; margin-right: auto; }}
 .mono {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.8rem;
 }}
-h1 {{ font-size: 1.4rem; margin: 0 0 1.25rem; }}
+h1 {{
+  font-size: 1.65rem;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 3px double rgba(33, 29, 24, 0.25);
+}}
 .verdict-banner {{
-  border: 1px solid rgba(33, 29, 24, 0.25);
+  border: 1.5px solid rgba(33, 29, 24, 0.2);
   border-left-width: 10px;
-  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  padding: 1.1rem 1.4rem;
   margin-bottom: 1.5rem;
-  background: rgba(255, 255, 255, 0.45);
+  background: #fffdf8;
+  box-shadow: 5px 5px 0 rgba(33, 29, 24, 0.07);
 }}
 .verdict-word {{
-  font-size: 2.2rem;
+  font-size: 2.4rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.6rem;
 }}
-.mode-line {{ margin: 0.15rem 0; color: rgba(33, 29, 24, 0.85); }}
-.mode-line strong {{ color: {_INK}; }}
+.mode-line {{ margin: 0.2rem 0; color: rgba(33, 29, 24, 0.75); }}
+.mode-line strong {{ color: {_INK}; font-weight: 600; }}
 .count-strip {{
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
 }}
 .count {{
-  border: 1px solid rgba(33, 29, 24, 0.25);
-  background: rgba(255, 255, 255, 0.45);
-  padding: 0.6rem 0.9rem;
-  min-width: 7.5rem;
+  flex: 1 1 8.5rem;
+  border: 1.5px solid rgba(33, 29, 24, 0.18);
+  border-radius: 10px;
+  background: #fffdf8;
+  padding: 0.75rem 0.95rem 0.65rem;
+  box-shadow: 3px 3px 0 rgba(33, 29, 24, 0.06);
 }}
-.count-value {{ display: block; font-size: 1.5rem; font-weight: 700; }}
+.count-value {{
+  display: block;
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.1;
+}}
 .count-label {{
   display: block;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(33, 29, 24, 0.7);
+  letter-spacing: 0.07em;
+  line-height: 1.4;
+  margin-top: 0.25rem;
+  color: rgba(33, 29, 24, 0.6);
 }}
 h2 {{
-  font-size: 1.05rem;
-  border-bottom: 1px solid rgba(33, 29, 24, 0.3);
-  padding-bottom: 0.3rem;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(33, 29, 24, 0.6);
+  border-bottom: 1.5px solid rgba(33, 29, 24, 0.2);
+  padding-bottom: 0.4rem;
+  margin: 2rem 0 0.9rem;
 }}
 .case-row {{
-  border: 1px solid rgba(33, 29, 24, 0.2);
-  background: rgba(255, 255, 255, 0.45);
-  margin-bottom: 0.5rem;
-  padding: 0.55rem 0.8rem;
+  border: 1.5px solid rgba(33, 29, 24, 0.16);
+  border-radius: 9px;
+  background: #fffdf8;
+  margin-bottom: 0.6rem;
+  padding: 0.65rem 0.95rem;
 }}
 .case-row.held {{
-  background: rgba(155, 44, 44, 0.08);
-  border-color: {_DRIFT_RED};
+  background: rgba(155, 44, 44, 0.07);
+  border-color: rgba(155, 44, 44, 0.45);
 }}
-details.case-row > summary {{ cursor: pointer; }}
+details.case-row > summary {{
+  cursor: pointer;
+  margin: -0.65rem -0.95rem;
+  padding: 0.65rem 0.95rem;
+  border-radius: 9px;
+}}
+details.case-row > summary:hover {{ background: rgba(33, 29, 24, 0.04); }}
+details.case-row[open] > summary {{
+  border-bottom: 1px dashed rgba(33, 29, 24, 0.2);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-bottom: 0;
+}}
 .case-id {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.85rem;
@@ -127,42 +169,57 @@ details.case-row > summary {{ cursor: pointer; }}
 }}
 .label-chip {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.7rem;
-  border: 1px solid rgba(33, 29, 24, 0.3);
-  border-radius: 0.6rem;
-  padding: 0.05rem 0.45rem;
-  margin-left: 0.35rem;
-  color: rgba(33, 29, 24, 0.8);
+  font-size: 0.68rem;
+  border: 1px solid rgba(33, 29, 24, 0.22);
+  border-radius: 999px;
+  background: rgba(33, 29, 24, 0.03);
+  padding: 0.08rem 0.5rem;
+  margin-left: 0.4rem;
+  color: rgba(33, 29, 24, 0.7);
+  white-space: nowrap;
 }}
 .badge {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: {_PAPER};
-  padding: 0.15rem 0.5rem;
+  padding: 0.18rem 0.6rem;
   margin-left: 0.5rem;
-  border-radius: 0.2rem;
+  border-radius: 999px;
+  float: right;
 }}
 .stop-reasons {{
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.75rem;
+  line-height: 1.6;
   color: {_DRIFT_RED};
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
 }}
 table.fields {{
   border-collapse: collapse;
-  margin: 0.7rem 0 0.3rem;
+  margin: 0.85rem 0 0.3rem;
   width: 100%;
 }}
 table.fields th, table.fields td {{
-  border: 1px solid rgba(33, 29, 24, 0.25);
-  padding: 0.3rem 0.55rem;
+  border: 1px solid rgba(33, 29, 24, 0.15);
+  padding: 0.4rem 0.65rem;
   text-align: left;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }}
+table.fields thead th {{
+  background: rgba(33, 29, 24, 0.05);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(33, 29, 24, 0.65);
+}}
+table.fields tbody tr:nth-child(even) td {{ background: rgba(33, 29, 24, 0.025); }}
+table.fields td.cell-field {{ font-weight: 700; }}
 table.fields th.observed-head {{ color: {_SOURCE_ORANGE}; }}
 td.cell-result.match {{ color: {_PASS_GREEN}; font-weight: 700; }}
 td.cell-result.drift {{ color: {_DRIFT_RED}; font-weight: 700; }}
@@ -177,12 +234,13 @@ td.cell-candidate.candidate-drift {{
   font-weight: 700;
 }}
 footer {{
-  margin-top: 2rem;
-  border-top: 1px solid rgba(33, 29, 24, 0.3);
-  padding-top: 0.8rem;
+  margin-top: 2.5rem;
+  border-top: 3px double rgba(33, 29, 24, 0.25);
+  padding-top: 0.9rem;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.75rem;
-  color: rgba(33, 29, 24, 0.8);
+  font-size: 0.73rem;
+  line-height: 1.7;
+  color: rgba(33, 29, 24, 0.65);
 }}
 footer p {{ margin: 0.25rem 0; }}
 .honesty {{ color: {_SOURCE_ORANGE}; font-weight: 700; }}
