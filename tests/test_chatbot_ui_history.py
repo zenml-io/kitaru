@@ -16,7 +16,8 @@ class FakeArtifact:
 
 class _FakeComponent:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def __enter__(self) -> "_FakeComponent":
         return self
@@ -158,7 +159,7 @@ def test_load_history_returns_empty_instead_of_short_stale_history(
     assert result == []
 
 
-def test_respond_expects_next_assistant_message_when_next_wait_exists(
+def test_respond_renders_wait_question_when_next_history_is_missing(
     monkeypatch: Any,
 ) -> None:
     ui: Any = _import_ui_with_fakes(monkeypatch)
@@ -173,7 +174,10 @@ def test_respond_expects_next_assistant_message_when_next_wait_exists(
     ui._poll_until_ready = lambda exec_id: SimpleNamespace(
         exec_id=exec_id,
         artifacts=[],
-        pending_wait=SimpleNamespace(wait_id="next-wait"),
+        pending_wait=SimpleNamespace(
+            wait_id="next-wait",
+            question="What should I do next?",
+        ),
     )
 
     updates = list(
@@ -184,7 +188,32 @@ def test_respond_expects_next_assistant_message_when_next_wait_exists(
     assert updates[-1][0] == [
         *history,
         {"role": "user", "content": "Can you help?"},
+        {"role": "assistant", "content": "What should I do next?"},
     ]
+    assert updates[-1][2].interactive is True
+
+
+def test_respond_falls_back_to_pending_when_next_wait_has_no_question(
+    monkeypatch: Any,
+) -> None:
+    ui: Any = _import_ui_with_fakes(monkeypatch)
+    history = [{"role": "assistant", "content": "Hello."}]
+    ui._load_history = lambda *args, **kwargs: []
+    ui._poll_until_ready = lambda exec_id: SimpleNamespace(
+        exec_id=exec_id,
+        artifacts=[],
+        pending_wait=SimpleNamespace(wait_id="next-wait"),
+    )
+
+    updates = list(
+        ui.respond("Can you help?", history, {"exec_id": "exec-1", "wait_id": "wait-1"})
+    )
+
+    assert updates[-1][0] == [
+        *history,
+        {"role": "user", "content": "Can you help?"},
+    ]
+    assert updates[-1][2].interactive is True
 
 
 def test_respond_accepts_pending_history_length_when_conversation_ended(

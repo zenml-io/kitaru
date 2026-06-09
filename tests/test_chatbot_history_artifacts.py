@@ -21,6 +21,19 @@ class FakeArtifact:
         return self.value
 
 
+class BadIterator:
+    def __iter__(self) -> "BadIterator":
+        return self
+
+    def __next__(self) -> Any:
+        raise RuntimeError("iterator broke")
+
+
+class BadString:
+    def __str__(self) -> str:
+        raise RuntimeError("string conversion broke")
+
+
 def test_selects_longest_loaded_history_without_length_metadata() -> None:
     short_history = [{"role": "assistant", "content": "hello"}]
     longer_history = [
@@ -81,6 +94,8 @@ def test_skips_unloadable_and_malformed_history_candidates() -> None:
         [
             FakeArtifact("history", error=RuntimeError("not ready yet")),
             FakeArtifact("history", [{"role": "assistant"}]),
+            FakeArtifact("history", BadIterator()),
+            FakeArtifact("history", [{"role": "assistant", "content": BadString()}]),
             FakeArtifact(
                 "not-history", [{"role": "assistant", "content": "ignore me"}]
             ),
@@ -127,6 +142,10 @@ def test_normalize_history_accepts_generator_input() -> None:
     ]
 
 
+def test_normalize_history_rejects_iterator_that_raises() -> None:
+    assert normalize_history(BadIterator()) is None
+
+
 def test_normalize_history_rejects_message_missing_role_or_content() -> None:
     assert normalize_history([{"role": "assistant"}]) is None
     assert normalize_history([SimpleNamespace(role="user")]) is None
@@ -139,3 +158,7 @@ def test_normalize_history_rejects_unsupported_roles() -> None:
     assert (
         normalize_history([SimpleNamespace(role="tool", content="raw output")]) is None
     )
+
+
+def test_normalize_history_rejects_value_when_string_conversion_raises() -> None:
+    assert normalize_history([{"role": "assistant", "content": BadString()}]) is None

@@ -377,16 +377,24 @@ def respond(message: str, history: list[dict], state: dict):
         min_history_length = (
             len(pending) + 1 if next_wait_id is not None else len(pending)
         )
-        new_history = (
-            _load_history(
-                exec_id=ex.exec_id,
-                arts=ex.artifacts,
-                retries=3,
-                retry_sleep=0.3,
-                min_length=min_history_length,
-            )
-            or pending
+        loaded_history = _load_history(
+            exec_id=ex.exec_id,
+            arts=ex.artifacts,
+            retries=3,
+            retry_sleep=0.3,
+            min_length=min_history_length,
         )
+        if loaded_history:
+            new_history = loaded_history
+        else:
+            wait_question = getattr(ex.pending_wait, "question", None)
+            if next_wait_id is not None and wait_question:
+                new_history = [
+                    *pending,
+                    {"role": "assistant", "content": wait_question},
+                ]
+            else:
+                new_history = pending
 
     yield (
         new_history,

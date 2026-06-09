@@ -37,11 +37,18 @@ def normalize_history(raw: Any) -> list[Message] | None:
 
     try:
         iterator = iter(raw)
-    except TypeError:
+    except Exception:
         return None
 
     normalized: list[Message] = []
-    for item in iterator:
+    while True:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            break
+        except Exception:
+            return None
+
         message = _normalize_message(item)
         if message is None:
             return None
@@ -96,4 +103,7 @@ def _read_message_value(item: Any, field: str) -> str | None:
 
     if value is None:
         return None
-    return str(value)
+    try:
+        return str(value)
+    except Exception:
+        return None
