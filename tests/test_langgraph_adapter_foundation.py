@@ -978,6 +978,118 @@ def test_durability_policy_supplies_default_graph_durability(
     assert seen["durability"] == "exit"
 
 
+def test_default_durability_is_not_forwarded_without_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_request_durability_is_not_forwarded_without_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("checkpointer", [False, True])
+def test_default_durability_is_not_forwarded_for_boolean_checkpointer_sentinel(
+    langgraph_adapter: types.ModuleType,
+    checkpointer: bool,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer: bool
+
+        def __init__(self, checkpointer: bool) -> None:
+            self.checkpointer = checkpointer
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph(checkpointer)).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_strict_durability_policy_requires_actual_checkpointer_before_execution(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class FakeGraph:
+        name = "fake"
+        checkpointer = False
+
+        def __init__(self) -> None:
+            self.executed = False
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            self.executed = True
+            return input
+
+    graph = FakeGraph()
+    runner = langgraph_adapter.KitaruGraphRunner(
+        graph,
+        durability=langgraph_adapter.LangGraphDurabilityPolicy(
+            require_checkpointer=True
+        ),
+    )
+
+    with pytest.raises(KitaruUsageError, match="requires a graph checkpointer"):
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"count": 1},
+                thread_id="thread-1",
+            )
+        )
+
+    assert graph.executed is False
+
+
 def test_capture_policy_can_disable_state_snapshot_inspection(
     langgraph_adapter: types.ModuleType,
 ) -> None:

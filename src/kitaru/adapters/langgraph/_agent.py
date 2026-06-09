@@ -112,6 +112,7 @@ class KitaruGraphRunner:
         self._config_factory = config_factory
         self._context_factory = context_factory
         self._cost_calculator = cost_calculator
+        self._checkpointer_saver_value = self._resolve_checkpointer_saver()
         self._checkpointer_label_value = self._resolve_checkpointer_label()
         self._store_label_value = self._resolve_store_label()
         self._graph_identity_value = self._build_graph_identity()
@@ -904,6 +905,11 @@ class KitaruGraphRunner:
     def _resolved_durability(self, request: LangGraphRunRequest) -> str:
         return request.durability or self._durability.mode
 
+    def _forwarded_durability(self, request: LangGraphRunRequest) -> str | None:
+        if not self._has_checkpointer_saver():
+            return None
+        return self._resolved_durability(request)
+
     def _graph_call_kwargs(
         self,
         request: LangGraphRunRequest,
@@ -911,7 +917,10 @@ class KitaruGraphRunner:
         context: Any | None,
         method_name: str,
     ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"durability": self._resolved_durability(request)}
+        kwargs: dict[str, Any] = {}
+        forwarded_durability = self._forwarded_durability(request)
+        if forwarded_durability is not None:
+            kwargs["durability"] = forwarded_durability
         if context is not None:
             kwargs["context"] = context
         return self._filter_kwargs_for_graph_method(method_name, kwargs)
@@ -1056,7 +1065,7 @@ class KitaruGraphRunner:
             raise KitaruUsageError(
                 f"Wrapped LangGraph object does not expose `{required_method}(...)`."
             )
-        if self._durability.require_checkpointer and self._checkpointer_label() is None:
+        if self._durability.require_checkpointer and not self._has_checkpointer_saver():
             raise KitaruUsageError(
                 "LangGraph durability policy requires a graph checkpointer, but "
                 "none was detected on the wrapped graph."
@@ -1145,10 +1154,19 @@ class KitaruGraphRunner:
         return self._checkpointer_label_value
 
     def _resolve_checkpointer_label(self) -> str | None:
-        checkpointer = getattr(self._graph, "checkpointer", None)
+        checkpointer = self._checkpointer_saver_value
         if checkpointer is None:
             return None
         return _type_label(checkpointer)
+
+    def _has_checkpointer_saver(self) -> bool:
+        return self._checkpointer_saver_value is not None
+
+    def _resolve_checkpointer_saver(self) -> Any | None:
+        checkpointer = getattr(self._graph, "checkpointer", None)
+        if checkpointer is None or isinstance(checkpointer, bool):
+            return None
+        return checkpointer
 
     def _store_label(self) -> str | None:
         return self._store_label_value
