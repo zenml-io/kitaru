@@ -48,7 +48,7 @@ class CountState(TypedDict):
     count: int
 
 
-def _count_graph():
+def _count_graph(*, with_checkpointer: bool = True):
     builder = StateGraph(cast(Any, CountState))
 
     def add_one(state: CountState) -> CountState:
@@ -57,6 +57,8 @@ def _count_graph():
     builder.add_node("add_one", add_one)
     builder.add_edge(START, "add_one")
     builder.add_edge("add_one", END)
+    if not with_checkpointer:
+        return builder.compile()
     return builder.compile(checkpointer=InMemorySaver())
 
 
@@ -75,6 +77,19 @@ def test_invoke_runs_deterministic_local_graph_with_thread_id() -> None:
     assert result.state_summary is not None
     assert result.state_summary.values is None
     assert any("InMemorySaver" in warning for warning in result.warnings)
+
+
+def test_invoke_runs_graph_without_langgraph_checkpointer() -> None:
+    graph = _count_graph(with_checkpointer=False)
+    runner = KitaruGraphRunner(graph, name="counter")
+
+    result = runner.invoke(
+        LangGraphRunRequest.start({"count": 1}, thread_id="counter-no-checkpointer")
+    )
+
+    assert result.status == "completed"
+    assert result.output == {"count": 2}
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
 def test_full_state_values_are_opt_in() -> None:

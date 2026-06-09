@@ -8,15 +8,19 @@
 This example takes that idea literally. We model the entire conversation as **one PydanticAI agent** with one human-in-the-loop tool. When the agent wants to talk to the user, it calls the tool. The tool calls `kitaru.wait(...)` under the hood, the underlying compute is freed, and the run sleeps. When the user replies, Kitaru spins the pod back up and the agent picks up exactly where it left off.
 
 ```python
+@kitaru.checkpoint(cache=False)
+def persist_history(history: list[Message]) -> None:
+    kitaru.save("history", history)
+
+
 @agent.tool
 def say_and_wait(ctx: RunContext[Conversation], message: str) -> str:
-    """Send MESSAGE to the user and return whatever they reply.
-
-    Internally: kitaru.save("history", …) → kitaru.wait(...) → save → return.
-    """
+    """Send MESSAGE to the user and return whatever they reply."""
 ```
 
 That's the whole loop. Greeting, every assistant turn, and "goodbye" are all the LLM choosing to call `say_and_wait`. When it stops calling it, the conversation ends.
+
+There is one important implementation detail. `say_and_wait` is intentionally not wrapped in the adapter's synthetic tool checkpoint because `wait_for_input()` must run at flow scope. So the tool appends the assistant message, calls `persist_history(...)` to save the `history` artifact inside a small explicit checkpoint, returns to flow scope, waits for the user, appends the reply, and calls `persist_history(...)` again.
 
 In this paradigm — where the runtime is smart enough to release compute during the human's turn — every chatbot is a long-horizon agent. A session can last months until the user is satisfied, and you only pay for the seconds the model is actually thinking.
 
@@ -99,15 +103,16 @@ automatically after all pending waits were answered.
 | [`chatbot.py`](chatbot.py) | One `@flow` containing one `KitaruAgent` with one `say_and_wait` tool. |
 | [`drive_local.py`](drive_local.py) | Local scripted driver: starts the flow in a background thread, finds this session's pending wait, and submits messages with `executions.input(...)`. |
 | [`ui.py`](ui.py) | Gradio UI: invokes the deployment, polls for waits, pipes the user's text back via `executions.input(...)`. |
+| [`history_artifacts.py`](history_artifacts.py) | Small pure helpers that load candidate `history` artifacts and choose the longest usable transcript. |
 
-The flow stores the full message list as a single `history` artifact, updated on every turn. The UI rehydrates a session by loading the latest one — no exec-ID pasting, no clever bookkeeping.
+The flow stores the full message list as a single versioned `history` artifact, updated on every turn through `persist_history(...)`. The UI rehydrates a session by loading usable `history` artifacts and choosing the longest transcript — no exec-ID pasting, no metadata assumptions, no clever bookkeeping.
 
 ## What to look for
 
 After a few turns, open the Kitaru dashboard for the execution:
 
-- **The agent's synthetic checkpoint per LLM call** — `KitaruAgent` wraps every model request, tool call, and wait under its own replay boundary.
-- **The `history` artifact, versioned per turn** — every `say_and_wait` body call appends and saves; replay reuses the latest one.
+- **The agent's synthetic checkpoints around LLM work** — `KitaruAgent` wraps model requests for replay, while `say_and_wait` opts out so it can create waits at flow scope.
+- **The `history` artifact, versioned per turn** — every `say_and_wait` body call appends a message and then calls `persist_history(...)`, which saves from checkpoint scope.
 - **Multiple completed `wait`s** — one per user turn, each with the question the LLM asked and the user's reply.
 
 If you kill the pod between turns, the execution stays `WAITING` indefinitely. When the user finally sends another message, the server schedules a fresh pod and the run resumes from the wait — same checkpoints, same artifacts, no replay of completed turns.
@@ -121,3 +126,5 @@ The agent loop is generic. To make this a real product:
 3. **Plug in a real frontend.** The UI here is Gradio for demo speed; in production the contract is just `client.deployments.invoke(...)` to start a session and `client.executions.input(...)` to feed each user message.
 
 That's the whole pattern. One agent, one HITL tool, durable runtime — chat sessions that live as long as your users care to keep them.
+
+This example does not change the public `kitaru.save()` rule: artifact writes still happen inside checkpoints. Broader flow-scope `kitaru.save()` support would need product decisions about where execution-level artifacts live, how clients list them, how replay treats them, and how the dashboard displays them.
