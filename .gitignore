@@ -285,6 +285,14 @@ examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/*
 !examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.json
 !examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.html
 
+# Replay Verify imported-input demo generated reports
+examples/replay_verify_imported_cases/reports/*
+!examples/replay_verify_imported_cases/reports/.gitkeep
+/replay-verify-reports/
+/replay-verify-reports-live/
+/replay-verify-live-reports/
+/replay-verify-scan-reports/
+
 # Local PR review screenshots
 .pr-screenshots/
 

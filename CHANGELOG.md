@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Replay Verify imported-input demo** at `examples/replay_verify_imported_cases/`: load recorded agent runs as neutral imported cases, validate evidence fail-closed, run eligible cases through fresh local baseline/candidate execution with write-like tools mocked, and report `ship`/`caution`/`hold` verdicts. Includes a live mode (`--runner live`) that runs a real PydanticAI support-copilot agent (baseline `gpt-5-mini` vs candidate `gpt-5-nano`) against a calibrated 15-case cohort with a deliberately planted permission regression.
+- Self-contained HTML verification report (`verification_report.html`): verdict banner, headline counts, and a per-case grid with expandable observed/baseline/candidate field comparisons and stop reasons. Written alongside the JSON and Markdown reports.
+- Scan mode for uninstrumented Langfuse traces: `run_scan_demo.py` plus a standalone observation exporter apply the verifier's validators to arbitrary observation rows and emit a fidelity checklist (verifiable cases, ranked missing fields) instead of erroring.
+- Imported-verification report enrichment: `overall_verdict`, per-case cohort/labels/trace-contract version, failed-case reasons, and populated `report_paths` in the serialized report.
+
 ## [0.13.1] - 2026-05-21
 
 ### Added

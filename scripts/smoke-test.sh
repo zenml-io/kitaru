@@ -414,6 +414,19 @@ else
             --fail-on-search-error
 fi
 
+section_header "Replay Verify imported-input demo"
+
+# Both run offline against checked-in fixtures; no credentials required.
+run_test "examples/replay_verify_imported_cases deterministic demo" \
+    $UV_RUN python examples/replay_verify_imported_cases/run_langfuse_pydanticai_demo.py \
+        --source jsonl \
+        --case-file examples/replay_verify_imported_cases/fixtures/support_copilot_imported_cases.jsonl \
+        --report-dir "$(mktemp -d)/replay-verify-reports"
+
+run_test "examples/replay_verify_imported_cases scan demo" \
+    $UV_RUN python examples/replay_verify_imported_cases/run_scan_demo.py \
+        --report-dir "$(mktemp -d)/replay-verify-scan-reports"
+
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run

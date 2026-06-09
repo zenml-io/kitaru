@@ -36,6 +36,9 @@ exclude_path = [
     ".venv",
     "design",
     "prompt-exports",
+    # Generated docs static export (gitignored); its links are rewritten for
+    # the public domain and never resolve against the local filesystem.
+    "docs/out",
 ]
 
 #############################  Checking  ############################
