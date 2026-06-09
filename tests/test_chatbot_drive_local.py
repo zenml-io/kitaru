@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,7 +36,8 @@ class FakeExecutionsAPI:
         self,
         *,
         list_snapshots: builtins.list[builtins.list[FakeExecution]] | None = None,
-        get_sequences: dict[str, builtins.list[FakeExecution]] | None = None,
+        get_sequences: dict[str, builtins.list[FakeExecution | BaseException]]
+        | None = None,
     ) -> None:
         self._list_snapshots = list_snapshots or []
         self._get_sequences = get_sequences or {}
@@ -60,7 +62,10 @@ class FakeExecutionsAPI:
             sequence = self._get_sequences[exec_id]
             index = min(self._get_calls.get(exec_id, 0), len(sequence) - 1)
             self._get_calls[exec_id] = index + 1
-            return sequence[index]
+            item = sequence[index]
+            if isinstance(item, BaseException):
+                raise item
+            return item
 
         for execution in self._last_snapshot:
             if execution.exec_id == exec_id:
@@ -164,9 +169,59 @@ def test_find_pending_wait_for_session_matches_wait_metadata_without_get() -> No
         turn=2,
     )
     assert executions.list_calls == [
-        {"flow": "chatbot", "status": ExecutionStatus.WAITING.value, "limit": 20}
+        {
+            "flow": "chatbot",
+            "status": ExecutionStatus.WAITING.value,
+            "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT,
+        }
     ]
     assert executions.get_calls == []
+
+
+def test_find_pending_wait_for_session_searches_beyond_twenty_stale_waits() -> None:
+    target_label = "chatbot-local-after-stale-waits"
+    stale_waits = [
+        FakeExecution(
+            f"exec-stale-{index}",
+            pending_wait=_wait(
+                wait_id=f"wait-stale-{index}",
+                session_label=f"stale-session-{index}",
+                turn=index,
+            ),
+        )
+        for index in range(25)
+    ]
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [
+                *stale_waits,
+                FakeExecution(
+                    "exec-target",
+                    pending_wait=_wait(
+                        wait_id="wait-target",
+                        session_label=target_label,
+                        turn=0,
+                    ),
+                ),
+            ]
+        ]
+    )
+    client: Any = FakeClient(executions)
+
+    match = drive_local.find_pending_wait_for_session(
+        client=client,
+        session_label=target_label,
+    )
+
+    assert match is not None
+    assert match.exec_id == "exec-target"
+    assert executions.list_calls == [
+        {
+            "flow": "chatbot",
+            "status": ExecutionStatus.WAITING.value,
+            "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT,
+        }
+    ]
 
 
 def test_find_pending_wait_for_session_hydrates_list_result_missing_metadata() -> None:
@@ -220,6 +275,51 @@ def test_find_pending_wait_for_session_hydrates_list_result_missing_metadata() -
         turn=2,
     )
     assert executions.get_calls == ["exec-target"]
+
+
+def test_find_pending_wait_for_session_continues_after_get_backend_error() -> None:
+    target_label = "chatbot-local-after-get-error"
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [
+                FakeExecution(
+                    "exec-needs-hydration",
+                    pending_wait=FakePendingWait(
+                        wait_id="wait-needs-hydration",
+                        name="user_turn_0",
+                    ),
+                ),
+                FakeExecution(
+                    "exec-target",
+                    pending_wait=_wait(
+                        wait_id="wait-target",
+                        session_label=target_label,
+                        turn=1,
+                    ),
+                ),
+            ]
+        ],
+        get_sequences={
+            "exec-needs-hydration": [RuntimeError("backend hydration failed")]
+        },
+    )
+    client: Any = FakeClient(executions)
+
+    match = drive_local.find_pending_wait_for_session(
+        client=client,
+        session_label=target_label,
+    )
+
+    assert match is not None
+    assert match.exec_id == "exec-target"
+    assert executions.get_calls == ["exec-needs-hydration"]
+    assert executions.list_calls == [
+        {
+            "flow": "chatbot",
+            "status": ExecutionStatus.WAITING.value,
+            "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT,
+        }
+    ]
 
 
 def test_find_pending_wait_for_session_rejects_multiple_matches() -> None:
@@ -288,18 +388,76 @@ def test_wait_for_pending_wait_polls_until_metadata_match_appears() -> None:
     assert match.wait_id == "wait-later"
 
 
+def test_wait_for_pending_wait_uses_list_fallback_when_get_fails() -> None:
+    session_label = "chatbot-local-list-fallback"
+    state = drive_local.BackgroundRunState(handle=FakeHandle("exec-target"))
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [
+                FakeExecution(
+                    "exec-target",
+                    pending_wait=_wait(
+                        wait_id="wait-target",
+                        session_label=session_label,
+                        turn=0,
+                    ),
+                )
+            ]
+        ],
+        get_sequences={"exec-target": [RuntimeError("hydration race")]},
+    )
+    client: Any = FakeClient(executions)
+
+    match = drive_local.wait_for_pending_wait(
+        client=client,
+        session_label=session_label,
+        state=state,
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+    )
+
+    assert match.exec_id == "exec-target"
+    assert match.wait_id == "wait-target"
+    assert executions.get_calls == ["exec-target"]
+    assert executions.list_calls == [
+        {"flow": "chatbot", "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT}
+    ]
+
+
+def test_wait_for_pending_wait_timeout_mentions_search_limit_and_lookup_error() -> None:
+    state = drive_local.BackgroundRunState(handle=FakeHandle("exec-missing"))
+    executions = FakeExecutionsAPI(
+        list_snapshots=[[]],
+        get_sequences={"exec-missing": [RuntimeError("backend still hydrating")]},
+    )
+    client: Any = FakeClient(executions)
+
+    with pytest.raises(TimeoutError) as exc_info:
+        drive_local.wait_for_pending_wait(
+            client=client,
+            session_label="chatbot-local-timeout",
+            state=state,
+            timeout_seconds=0.01,
+            poll_interval_seconds=0.01,
+            wait_search_limit=7,
+        )
+
+    message = str(exc_info.value)
+    assert "most recent 7 waiting chatbot executions" in message
+    assert "stale waiting executions" in message
+    assert "backend still hydrating" in message
+
+
 def test_wait_for_pending_wait_stops_on_terminal_execution() -> None:
     session_label = "chatbot-local-finished"
     state = drive_local.BackgroundRunState(handle=FakeHandle("exec-finished"))
-    client: Any = FakeClient(
-        FakeExecutionsAPI(
-            get_sequences={
-                "exec-finished": [
-                    FakeExecution("exec-finished", status=ExecutionStatus.COMPLETED)
-                ]
-            }
-        )
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [FakeExecution("exec-finished", status=ExecutionStatus.COMPLETED)]
+        ],
+        get_sequences={"exec-finished": [RuntimeError("hydration race")]},
     )
+    client: Any = FakeClient(executions)
 
     with pytest.raises(RuntimeError, match="terminal status"):
         drive_local.wait_for_pending_wait(
@@ -309,6 +467,11 @@ def test_wait_for_pending_wait_stops_on_terminal_execution() -> None:
             timeout_seconds=1.0,
             poll_interval_seconds=0.01,
         )
+
+    assert executions.get_calls == ["exec-finished"]
+    assert executions.list_calls == [
+        {"flow": "chatbot", "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT}
+    ]
 
 
 def test_wait_for_pending_wait_surfaces_background_thread_errors() -> None:
@@ -334,6 +497,71 @@ def test_drive_chatbot_rejects_empty_messages() -> None:
         drive_local.drive_chatbot((), client=client)
 
 
+def test_wait_for_completion_or_extra_wait_uses_list_fallback_for_extra_wait() -> None:
+    session_label = "chatbot-local-extra-fallback"
+    state = drive_local.BackgroundRunState()
+    runner_thread: Any = FakeThread(alive=False)
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [
+                FakeExecution(
+                    "exec-extra",
+                    pending_wait=_wait(
+                        wait_id="wait-extra",
+                        session_label=session_label,
+                        turn=1,
+                    ),
+                )
+            ]
+        ],
+        get_sequences={"exec-extra": [RuntimeError("hydration race")]},
+    )
+    client: Any = FakeClient(executions)
+
+    with pytest.raises(RuntimeError, match="asked for another input"):
+        drive_local.wait_for_completion_or_extra_wait(
+            client=client,
+            session_label=session_label,
+            state=state,
+            exec_id="exec-extra",
+            runner_thread=runner_thread,
+            answered_wait_ids={"wait-one"},
+            timeout_seconds=1.0,
+            poll_interval_seconds=0.01,
+        )
+
+    assert executions.get_calls == ["exec-extra"]
+    assert executions.list_calls == [
+        {"flow": "chatbot", "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT}
+    ]
+
+
+def test_completion_uses_list_fallback_for_completed_status() -> None:
+    state = drive_local.BackgroundRunState()
+    runner_thread: Any = FakeThread(alive=False)
+    executions = FakeExecutionsAPI(
+        list_snapshots=[[FakeExecution("exec-done", status=ExecutionStatus.COMPLETED)]],
+        get_sequences={"exec-done": [RuntimeError("hydration race")]},
+    )
+    client: Any = FakeClient(executions)
+
+    drive_local.wait_for_completion_or_extra_wait(
+        client=client,
+        session_label="chatbot-local-completed-fallback",
+        state=state,
+        exec_id="exec-done",
+        runner_thread=runner_thread,
+        answered_wait_ids={"wait-one"},
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+    )
+
+    assert executions.get_calls == ["exec-done"]
+    assert executions.list_calls == [
+        {"flow": "chatbot", "limit": drive_local.DEFAULT_WAIT_SEARCH_LIMIT}
+    ]
+
+
 def test_drive_chatbot_rejects_non_positive_public_wait_timeout() -> None:
     client: Any = FakeClient(FakeExecutionsAPI())
 
@@ -356,6 +584,19 @@ def test_drive_chatbot_rejects_non_positive_public_finish_timeout() -> None:
         )
 
 
+def test_drive_chatbot_rejects_non_finite_public_timing_values() -> None:
+    client: Any = FakeClient(FakeExecutionsAPI())
+
+    timing_kwargs: list[dict[str, Any]] = [
+        {"wait_timeout_seconds": float("nan")},
+        {"finish_timeout_seconds": float("inf")},
+        {"poll_interval_seconds": float("-inf")},
+    ]
+    for kwargs in timing_kwargs:
+        with pytest.raises(ValueError, match="finite number greater than 0"):
+            drive_local.drive_chatbot(("hello",), client=client, **kwargs)
+
+
 def test_drive_chatbot_rejects_non_positive_public_poll_interval() -> None:
     client: Any = FakeClient(FakeExecutionsAPI())
 
@@ -365,6 +606,17 @@ def test_drive_chatbot_rejects_non_positive_public_poll_interval() -> None:
             client=client,
             poll_interval_seconds=0.0,
         )
+
+
+def test_parse_args_rejects_non_finite_cli_timing_values(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["drive_local.py", "--wait-timeout", "nan", "hello"],
+    )
+
+    with pytest.raises(SystemExit):
+        drive_local._parse_args()
 
 
 def test_drive_chatbot_submits_messages_to_matched_wait_ids(monkeypatch) -> None:

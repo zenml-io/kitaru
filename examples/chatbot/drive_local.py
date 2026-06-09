@@ -13,6 +13,7 @@ finish. It does not return just because the flow is waiting for human input.
 from __future__ import annotations
 
 import argparse
+import math
 import threading
 import time
 from collections.abc import Sequence
@@ -44,6 +45,8 @@ DEFAULT_MESSAGES = (
 DEFAULT_WAIT_TIMEOUT_SECONDS = 300.0
 DEFAULT_FINISH_TIMEOUT_SECONDS = 120.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+DEFAULT_WAIT_SEARCH_LIMIT = 50
+_POSITIVE_SECONDS_MESSAGE = "must be a finite number greater than 0"
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,53 @@ def _execution_needs_pending_wait_hydration(execution: Any) -> bool:
     return not _pending_wait_has_session_metadata(pending_wait)
 
 
+def _fallback_execution_from_recent_list(
+    *,
+    client: KitaruClient,
+    exec_id: str,
+    flow: str = FLOW_NAME,
+    limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
+    status: str | None = ExecutionStatus.WAITING.value,
+) -> Any | None:
+    """Return EXEC_ID from recent list data when detailed get fails.
+
+    ``executions.get`` hydrates extra details and can fail while the lighter list
+    endpoint still reports enough information for local polling. This scan stays
+    deliberately bounded so a permanently broken ``get`` does not trigger broad
+    backend reads forever.
+    """
+    list_kwargs: dict[str, Any] = {"flow": flow, "limit": limit}
+    if status is not None:
+        list_kwargs["status"] = status
+    executions = client.executions.list(**list_kwargs)
+    return next(
+        (execution for execution in executions if execution.exec_id == exec_id),
+        None,
+    )
+
+
+def _try_get_execution(
+    *,
+    client: KitaruClient,
+    exec_id: str,
+    flow: str = FLOW_NAME,
+    list_limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
+    list_status: str | None = ExecutionStatus.WAITING.value,
+) -> tuple[Any | None, BaseException | None]:
+    """Fetch EXEC_ID, using bounded list data if detailed hydration fails."""
+    try:
+        return client.executions.get(exec_id), None
+    except Exception as exc:
+        fallback = _fallback_execution_from_recent_list(
+            client=client,
+            exec_id=exec_id,
+            flow=flow,
+            limit=list_limit,
+            status=list_status,
+        )
+        return fallback, exc
+
+
 def _match_pending_wait(
     *,
     execution: Any,
@@ -158,12 +208,14 @@ def _hydrate_pending_wait_match_if_needed(
     if not _execution_needs_pending_wait_hydration(execution):
         return None
 
-    # This fallback is bounded by the caller's small waiting-chatbot list. Do
-    # not cap it further here, because the matching session may be late in that
-    # already-limited result set.
+    # The caller already has a bounded list result for this execution. Try the
+    # detailed endpoint once, but do not immediately repeat the same list query
+    # for this candidate.
     try:
         hydrated_execution = client.executions.get(execution.exec_id)
-    except ValueError:
+    except Exception:
+        return None
+    if hydrated_execution is None:
         return None
 
     return _match_pending_wait(
@@ -178,7 +230,7 @@ def find_pending_wait_for_session(
     client: KitaruClient,
     session_label: str,
     flow: str = FLOW_NAME,
-    limit: int = 20,
+    limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
     ignored_wait_ids: set[str] | None = None,
 ) -> PendingWaitMatch | None:
     """Find the single pending chatbot wait with metadata for SESSION_LABEL."""
@@ -214,23 +266,32 @@ def _find_pending_wait_on_execution(
     exec_id: str,
     session_label: str,
     ignored_wait_ids: set[str] | None = None,
-) -> PendingWaitMatch | None:
+    list_limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
+) -> tuple[PendingWaitMatch | None, BaseException | None]:
     """Inspect one execution for the next pending wait in this session."""
-    execution = client.executions.get(exec_id)
+    execution, lookup_error = _try_get_execution(
+        client=client,
+        exec_id=exec_id,
+        list_limit=list_limit,
+        list_status=None,
+    )
+    if execution is None:
+        return None, lookup_error
+
     match = _match_pending_wait(
         execution=execution,
         session_label=session_label,
         ignored_wait_ids=ignored_wait_ids,
     )
     if match is not None:
-        return match
+        return match, lookup_error
     if _is_terminal_execution(execution):
         raise RuntimeError(
             f"Execution {exec_id} reached terminal status "
             f"{_status_value(getattr(execution, 'status', None))!r} before "
             "another chatbot wait appeared."
         )
-    return None
+    return None, lookup_error
 
 
 def _raise_background_error(state: BackgroundRunState) -> None:
@@ -242,10 +303,15 @@ def _raise_background_error(state: BackgroundRunState) -> None:
         ) from state.error
 
 
+def _is_positive_finite_seconds(value: float) -> bool:
+    """Return whether VALUE is safe to use as a public duration."""
+    return math.isfinite(value) and value > 0
+
+
 def _validate_positive_seconds(value: float, *, name: str) -> None:
-    """Reject non-positive durations at the public driver entrypoint."""
-    if value <= 0:
-        raise ValueError(f"{name} must be greater than 0.")
+    """Reject non-finite and non-positive durations at the public entrypoint."""
+    if not _is_positive_finite_seconds(value):
+        raise ValueError(f"{name} {_POSITIVE_SECONDS_MESSAGE}.")
 
 
 def _validate_drive_chatbot_inputs(
@@ -295,10 +361,12 @@ def wait_for_pending_wait(
     ignored_wait_ids: set[str] | None = None,
     timeout_seconds: float = DEFAULT_WAIT_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    wait_search_limit: int = DEFAULT_WAIT_SEARCH_LIMIT,
 ) -> PendingWaitMatch:
     """Poll until this local chatbot session reaches a pending wait."""
     deadline = time.monotonic() + timeout_seconds
     exec_id = known_exec_id
+    last_lookup_error: BaseException | None = None
 
     while time.monotonic() < deadline:
         _raise_background_error(state)
@@ -307,17 +375,21 @@ def wait_for_pending_wait(
             exec_id = getattr(state.handle, "exec_id", None)
 
         if exec_id is not None:
-            match = _find_pending_wait_on_execution(
+            match, lookup_error = _find_pending_wait_on_execution(
                 client=client,
                 exec_id=exec_id,
                 session_label=session_label,
                 ignored_wait_ids=ignored_wait_ids,
+                list_limit=wait_search_limit,
             )
+            if lookup_error is not None:
+                last_lookup_error = lookup_error
         else:
             match = find_pending_wait_for_session(
                 client=client,
                 session_label=session_label,
                 ignored_wait_ids=ignored_wait_ids,
+                limit=wait_search_limit,
             )
 
         if match is not None:
@@ -336,10 +408,16 @@ def wait_for_pending_wait(
         time.sleep(poll_interval_seconds)
 
     _raise_background_error(state)
-    raise TimeoutError(
+    message = (
         f"Timed out after {timeout_seconds:.0f}s waiting for chatbot session "
-        f"{session_label!r} to reach a pending wait."
+        f"{session_label!r} to reach a pending wait. The driver searched the "
+        f"most recent {wait_search_limit} waiting chatbot executions on each "
+        "poll; stale waiting executions can hide a new local run if that limit "
+        "is too low."
     )
+    if last_lookup_error is not None:
+        message += f" Last execution lookup failed with: {last_lookup_error}"
+    raise TimeoutError(message)
 
 
 def wait_for_completion_or_extra_wait(
@@ -355,15 +433,19 @@ def wait_for_completion_or_extra_wait(
 ) -> None:
     """Wait until the run finishes, or fail if it reaches another wait."""
     deadline = time.monotonic() + timeout_seconds
+    last_lookup_error: BaseException | None = None
 
     while time.monotonic() < deadline:
         _raise_background_error(state)
 
         if exec_id is not None:
-            try:
-                execution = client.executions.get(exec_id)
-            except ValueError:
-                execution = None
+            execution, lookup_error = _try_get_execution(
+                client=client,
+                exec_id=exec_id,
+                list_status=None,
+            )
+            if lookup_error is not None:
+                last_lookup_error = lookup_error
 
             if execution is not None:
                 match = _match_pending_wait(
@@ -387,10 +469,13 @@ def wait_for_completion_or_extra_wait(
             "running. It may need another user message soon; inspect pending "
             "waits with `kitaru executions list`."
         )
-    raise TimeoutError(
+    message = (
         f"Timed out after {timeout_seconds:.0f}s waiting for chatbot session "
         f"{session_label!r} to finish after the final scripted message."
     )
+    if last_lookup_error is not None:
+        message += f" Last execution lookup failed with: {last_lookup_error}"
+    raise TimeoutError(message)
 
 
 def _start_chatbot_run(
@@ -522,12 +607,12 @@ def _parse_args() -> argparse.Namespace:
         help="Seconds between pending-wait polling attempts. Must be greater than 0.",
     )
     args = parser.parse_args()
-    if args.wait_timeout <= 0:
-        parser.error("--wait-timeout must be greater than 0")
-    if args.finish_timeout <= 0:
-        parser.error("--finish-timeout must be greater than 0")
-    if args.poll_interval <= 0:
-        parser.error("--poll-interval must be greater than 0")
+    if not _is_positive_finite_seconds(args.wait_timeout):
+        parser.error(f"--wait-timeout {_POSITIVE_SECONDS_MESSAGE}")
+    if not _is_positive_finite_seconds(args.finish_timeout):
+        parser.error(f"--finish-timeout {_POSITIVE_SECONDS_MESSAGE}")
+    if not _is_positive_finite_seconds(args.poll_interval):
+        parser.error(f"--poll-interval {_POSITIVE_SECONDS_MESSAGE}")
     return args
 
 
