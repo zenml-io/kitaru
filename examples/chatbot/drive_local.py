@@ -97,6 +97,20 @@ def _pending_wait_metadata(pending_wait: Any) -> dict[str, Any]:
     return {}
 
 
+def _pending_wait_has_session_metadata(pending_wait: Any) -> bool:
+    """Return whether the wait metadata can identify a chatbot session."""
+    metadata = _pending_wait_metadata(pending_wait)
+    return CHATBOT_SESSION_LABEL_METADATA_KEY in metadata
+
+
+def _execution_needs_pending_wait_hydration(execution: Any) -> bool:
+    """Return whether list output lacks enough wait data for session matching."""
+    pending_wait = getattr(execution, "pending_wait", None)
+    if pending_wait is None:
+        return True
+    return not _pending_wait_has_session_metadata(pending_wait)
+
+
 def _match_pending_wait(
     *,
     execution: Any,
@@ -126,6 +140,39 @@ def _match_pending_wait(
     )
 
 
+def _hydrate_pending_wait_match_if_needed(
+    *,
+    client: KitaruClient,
+    execution: Any,
+    session_label: str,
+    ignored_wait_ids: set[str] | None = None,
+) -> PendingWaitMatch | None:
+    """Hydrate one list result only when list data cannot identify the session."""
+    match = _match_pending_wait(
+        execution=execution,
+        session_label=session_label,
+        ignored_wait_ids=ignored_wait_ids,
+    )
+    if match is not None:
+        return match
+    if not _execution_needs_pending_wait_hydration(execution):
+        return None
+
+    # This fallback is bounded by the caller's small waiting-chatbot list. Do
+    # not cap it further here, because the matching session may be late in that
+    # already-limited result set.
+    try:
+        hydrated_execution = client.executions.get(execution.exec_id)
+    except ValueError:
+        return None
+
+    return _match_pending_wait(
+        execution=hydrated_execution,
+        session_label=session_label,
+        ignored_wait_ids=ignored_wait_ids,
+    )
+
+
 def find_pending_wait_for_session(
     *,
     client: KitaruClient,
@@ -142,7 +189,8 @@ def find_pending_wait_for_session(
         limit=limit,
     )
     for execution in executions:
-        match = _match_pending_wait(
+        match = _hydrate_pending_wait_match_if_needed(
+            client=client,
             execution=execution,
             session_label=session_label,
             ignored_wait_ids=ignored_wait_ids,
@@ -194,10 +242,34 @@ def _raise_background_error(state: BackgroundRunState) -> None:
         ) from state.error
 
 
-def _validate_public_poll_interval(poll_interval_seconds: float) -> None:
-    """Reject poll intervals that would create a tight user-facing loop."""
-    if poll_interval_seconds <= 0:
-        raise ValueError("poll_interval_seconds must be greater than 0.")
+def _validate_positive_seconds(value: float, *, name: str) -> None:
+    """Reject non-positive durations at the public driver entrypoint."""
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than 0.")
+
+
+def _validate_drive_chatbot_inputs(
+    *,
+    messages: Sequence[str],
+    wait_timeout_seconds: float,
+    finish_timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> None:
+    """Validate public ``drive_chatbot`` inputs before starting the run."""
+    if not messages:
+        raise ValueError("messages must contain at least one scripted message.")
+    _validate_positive_seconds(
+        wait_timeout_seconds,
+        name="wait_timeout_seconds",
+    )
+    _validate_positive_seconds(
+        finish_timeout_seconds,
+        name="finish_timeout_seconds",
+    )
+    _validate_positive_seconds(
+        poll_interval_seconds,
+        name="poll_interval_seconds",
+    )
 
 
 def _raise_extra_wait_after_messages(match: PendingWaitMatch) -> None:
@@ -362,7 +434,12 @@ def drive_chatbot(
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> Any:
     """Run the chatbot locally and feed it scripted messages."""
-    _validate_public_poll_interval(poll_interval_seconds)
+    _validate_drive_chatbot_inputs(
+        messages=messages,
+        wait_timeout_seconds=wait_timeout_seconds,
+        finish_timeout_seconds=finish_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
     client = client or KitaruClient()
     session_label = session_label or f"chatbot-local-{uuid4().hex}"
     state, runner_thread = _start_chatbot_run(session_label)
@@ -445,6 +522,10 @@ def _parse_args() -> argparse.Namespace:
         help="Seconds between pending-wait polling attempts. Must be greater than 0.",
     )
     args = parser.parse_args()
+    if args.wait_timeout <= 0:
+        parser.error("--wait-timeout must be greater than 0")
+    if args.finish_timeout <= 0:
+        parser.error("--finish-timeout must be greater than 0")
     if args.poll_interval <= 0:
         parser.error("--poll-interval must be greater than 0")
     return args

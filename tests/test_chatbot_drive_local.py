@@ -43,6 +43,7 @@ class FakeExecutionsAPI:
         self._get_calls: dict[str, int] = {}
         self._last_snapshot = self._list_snapshots[0] if self._list_snapshots else []
         self.list_calls: builtins.list[dict[str, Any]] = []
+        self.get_calls: builtins.list[str] = []
         self.input_calls: builtins.list[dict[str, Any]] = []
 
     def list(self, **kwargs: Any) -> builtins.list[FakeExecution]:
@@ -54,6 +55,7 @@ class FakeExecutionsAPI:
         return self._last_snapshot
 
     def get(self, exec_id: str) -> FakeExecution:
+        self.get_calls.append(exec_id)
         if exec_id in self._get_sequences:
             sequence = self._get_sequences[exec_id]
             index = min(self._get_calls.get(exec_id, 0), len(sequence) - 1)
@@ -123,7 +125,7 @@ def test_chatbot_wait_metadata_contains_driver_discovery_fields() -> None:
     }
 
 
-def test_find_pending_wait_for_session_matches_wait_metadata() -> None:
+def test_find_pending_wait_for_session_matches_wait_metadata_without_get() -> None:
     target_label = "chatbot-local-target"
     executions = FakeExecutionsAPI(
         list_snapshots=[
@@ -164,6 +166,60 @@ def test_find_pending_wait_for_session_matches_wait_metadata() -> None:
     assert executions.list_calls == [
         {"flow": "chatbot", "status": ExecutionStatus.WAITING.value, "limit": 20}
     ]
+    assert executions.get_calls == []
+
+
+def test_find_pending_wait_for_session_hydrates_list_result_missing_metadata() -> None:
+    target_label = "chatbot-local-hydrated"
+    executions = FakeExecutionsAPI(
+        list_snapshots=[
+            [
+                FakeExecution(
+                    "exec-other",
+                    pending_wait=_wait(
+                        wait_id="wait-other",
+                        session_label="other-session",
+                        turn=0,
+                    ),
+                ),
+                FakeExecution(
+                    "exec-target",
+                    pending_wait=FakePendingWait(
+                        wait_id="wait-target",
+                        name="user_turn_2",
+                        question="Assistant question?",
+                    ),
+                ),
+            ]
+        ],
+        get_sequences={
+            "exec-target": [
+                FakeExecution(
+                    "exec-target",
+                    pending_wait=_wait(
+                        wait_id="wait-target",
+                        session_label=target_label,
+                        turn=2,
+                    ),
+                )
+            ]
+        },
+    )
+    client: Any = FakeClient(executions)
+
+    match = drive_local.find_pending_wait_for_session(
+        client=client,
+        session_label=target_label,
+    )
+
+    assert match == drive_local.PendingWaitMatch(
+        exec_id="exec-target",
+        wait_id="wait-target",
+        wait_name="user_turn_2",
+        question="Assistant question?",
+        turn=2,
+    )
+    assert executions.get_calls == ["exec-target"]
 
 
 def test_find_pending_wait_for_session_rejects_multiple_matches() -> None:
@@ -269,6 +325,35 @@ def test_wait_for_pending_wait_surfaces_background_thread_errors() -> None:
         )
 
     assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_drive_chatbot_rejects_empty_messages() -> None:
+    client: Any = FakeClient(FakeExecutionsAPI())
+
+    with pytest.raises(ValueError, match="messages"):
+        drive_local.drive_chatbot((), client=client)
+
+
+def test_drive_chatbot_rejects_non_positive_public_wait_timeout() -> None:
+    client: Any = FakeClient(FakeExecutionsAPI())
+
+    with pytest.raises(ValueError, match="wait_timeout_seconds"):
+        drive_local.drive_chatbot(
+            ("hello",),
+            client=client,
+            wait_timeout_seconds=0.0,
+        )
+
+
+def test_drive_chatbot_rejects_non_positive_public_finish_timeout() -> None:
+    client: Any = FakeClient(FakeExecutionsAPI())
+
+    with pytest.raises(ValueError, match="finish_timeout_seconds"):
+        drive_local.drive_chatbot(
+            ("hello",),
+            client=client,
+            finish_timeout_seconds=0.0,
+        )
 
 
 def test_drive_chatbot_rejects_non_positive_public_poll_interval() -> None:
