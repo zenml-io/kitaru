@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from kitaru._replay_verify_imported_html import render_html_report
 from kitaru._replay_verify_imported_models import (
     FIXTURE_HARNESS_EXECUTION_MODE,
+    FidelityReport,
+    ImportedCaseValidation,
     ImportedVerificationReport,
     execution_mode_detail,
 )
@@ -30,6 +36,7 @@ def render_markdown_report(report: ImportedVerificationReport) -> str:
         f"# Imported Replay Verify Report: {report.name}",
         "",
         f"Generated: {report.created_at}",
+        f"Overall verdict: `{summary.get('overall_verdict', 'unknown')}`",
         f"Source system: {report.source_system}",
         f"Execution mode: `{report.execution_mode}`",
         f"Mode detail: {mode_detail}",
@@ -131,18 +138,128 @@ def render_markdown_report(report: ImportedVerificationReport) -> str:
     return "\n".join(lines)
 
 
+def render_fidelity_checklist(
+    validations: Sequence[ImportedCaseValidation],
+    *,
+    summary: Mapping[str, Any] | None = None,
+) -> str:
+    """Render a Markdown fidelity checklist for scanned imported cases.
+
+    Built for scan mode over arbitrary (often uninstrumented) traces: each
+    case lists what was recovered, what is missing, and the reasons as a
+    checklist of what to add before the case becomes verifiable. The
+    ``retrieval`` row is suppressed for non-RAG cases so generic chat traces
+    are not penalized for metadata they never needed.
+    """
+    verifiable = [item for item in validations if item.candidate_execution_allowed]
+    missing_counts = Counter(
+        field_name
+        for item in validations
+        for field_name in _checklist_missing_fields(item.fidelity)
+    )
+    lines = [
+        "# Imported Trace Fidelity Checklist",
+        "",
+        f"- Cases scanned: {len(validations)}",
+        f"- Verifiable today: {len(verifiable)}",
+    ]
+    if summary is not None:
+        ignored = summary.get("ignored_observation_count")
+        if isinstance(ignored, int):
+            lines.append(f"- Observations ignored (no replayable call kind): {ignored}")
+    lines.extend(["", "## Top missing fields", ""])
+    if missing_counts:
+        for rank, (field_name, count) in enumerate(
+            missing_counts.most_common(), start=1
+        ):
+            lines.append(
+                f"{rank}. `{field_name}` — missing in {count} of "
+                f"{len(validations)} cases"
+            )
+    else:
+        lines.append("All scanned cases recovered every checked field.")
+    for item in validations:
+        fidelity = item.fidelity
+        rag_relevant = _rag_fields_relevant(fidelity)
+        lines.extend(
+            [
+                "",
+                f"## Case `{item.case_id}`",
+                "",
+                f"- Eligibility: `{fidelity.eligibility}` "
+                f"(confidence: {fidelity.level})",
+                f"- Verdict: `{fidelity.verdict}`",
+                f"- Fidelity score: {fidelity.score}",
+                f"- Verifiable today: {_format_bool(item.candidate_execution_allowed)}",
+                "",
+                "### Recovered fields",
+                "",
+            ]
+        )
+        for field_name, present in fidelity.recovered_fields.items():
+            if field_name == "retrieval" and not rag_relevant:
+                continue
+            marker = "x" if present else " "
+            lines.append(f"- [{marker}] {field_name}")
+        lines.extend(["", "### To make this case verifiable, add", ""])
+        if item.candidate_execution_allowed:
+            lines.append("Nothing — this case is verifiable as imported.")
+        else:
+            lines.extend(f"- [ ] {reason}" for reason in fidelity.reasons)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _rag_fields_relevant(fidelity: FidelityReport) -> bool:
+    """Return whether the retrieval row carries signal for this case.
+
+    For non-RAG cases the validator always reports ``retrieval`` as missing;
+    showing that row in a checklist for a plain chat trace is noise. Retrieval
+    is relevant only when it was recovered or when RAG-specific reasons exist.
+    """
+    if fidelity.recovered_fields.get("retrieval", False):
+        return True
+    return any(
+        reason.startswith("missing_rag_metadata:")
+        or reason == "stale_corpus_index_version"
+        for reason in fidelity.reasons
+    )
+
+
+def _checklist_missing_fields(fidelity: FidelityReport) -> list[str]:
+    if _rag_fields_relevant(fidelity):
+        return list(fidelity.missing_fields)
+    return [
+        field_name
+        for field_name in fidelity.missing_fields
+        if field_name != "retrieval"
+    ]
+
+
 def write_report_files(
     report: ImportedVerificationReport,
     report_dir: str | Path,
 ) -> dict[str, str]:
-    """Write product-shaped JSON and Markdown report files."""
+    """Write product-shaped JSON, Markdown, and HTML report files."""
     output_dir = Path(report_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "verification_report.json"
     markdown_path = output_dir / "verification_report.md"
-    json_path.write_text(render_json_report(report), encoding="utf-8")
-    markdown_path.write_text(render_markdown_report(report), encoding="utf-8")
-    return {"json": str(json_path), "markdown": str(markdown_path)}
+    html_path = output_dir / "verification_report.html"
+    report_paths = {
+        "json": str(json_path),
+        "markdown": str(markdown_path),
+        "html": str(html_path),
+    }
+    # Assign paths before rendering so the serialized JSON itself records
+    # where the report files live (needed by downstream HTML rendering).
+    report_with_paths = replace(report, report_paths=report_paths)
+    json_path.write_text(render_json_report(report_with_paths), encoding="utf-8")
+    markdown_path.write_text(
+        render_markdown_report(report_with_paths), encoding="utf-8"
+    )
+    html_path.write_text(render_html_report(report_with_paths), encoding="utf-8")
+    return report_paths
 
 
 def _case_results(summary: dict[str, Any]) -> list[dict[str, Any]]:

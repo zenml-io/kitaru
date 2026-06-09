@@ -89,6 +89,11 @@ def test_rendered_reports_show_product_counts_and_limitations() -> None:
     assert payload["summary"]["stopped_case_reasons"] == {
         "stopped": ["missing_observed_output_or_evaluator_signal"]
     }
+    assert payload["summary"]["failed_case_reasons"] == {}
+    assert payload["summary"]["overall_verdict"] == "hold"
+    assert payload["summary"]["cohorts"] == []
+    assert payload["summary"]["trace_contract_versions"] == ["trace-contract-v1"]
+    assert "Overall verdict: `hold`" in markdown
     assert "Source system: langfuse" in markdown
     assert f"Execution mode: `{IMPORTED_INPUT_EXECUTION_MODE}`" in markdown
     assert "Recorded-response control: unavailable" in markdown
@@ -127,14 +132,14 @@ def test_write_report_files_uses_product_filenames(tmp_path: Path) -> None:
     assert paths == {
         "json": str(tmp_path / "verification_report.json"),
         "markdown": str(tmp_path / "verification_report.md"),
+        "html": str(tmp_path / "verification_report.html"),
     }
-    assert (
-        json.loads((tmp_path / "verification_report.json").read_text())["summary"][
-            "eligible_count"
-        ]
-        == 1
-    )
-    assert (
-        "# Imported Replay Verify Report"
-        in (tmp_path / "verification_report.md").read_text()
-    )
+    assert (tmp_path / "verification_report.html").exists()
+    written = json.loads((tmp_path / "verification_report.json").read_text())
+    assert written["summary"]["eligible_count"] == 1
+    # The serialized JSON must self-describe its own file locations so an
+    # HTML verdict page can be rendered from the JSON alone.
+    assert written["report_paths"] == paths
+    markdown = (tmp_path / "verification_report.md").read_text()
+    assert "# Imported Replay Verify Report" in markdown
+    assert "Overall verdict: `ship`" in markdown

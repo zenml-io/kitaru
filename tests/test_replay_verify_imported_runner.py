@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from kitaru._replay_verify_imported_models import (
     FIXTURE_HARNESS_EXECUTION_MODE,
     IMPORTED_INPUT_EXECUTION_MODE,
@@ -20,6 +22,7 @@ from kitaru._replay_verify_imported_runner import (
     ImportedRunnerOutput,
     verify_imported_cases,
 )
+from kitaru._replay_verify_imported_validation import NO_TOOL_REGISTRY_EXPECTATION
 
 RUNNER_ENTRYPOINT = "run_support_copilot_case"
 
@@ -49,6 +52,8 @@ def _case(
     retrieval_context: RetrievalContext | None = None,
     runner_entrypoint: str | None = RUNNER_ENTRYPOINT,
     raw_source_payload: dict[str, Any] | None = None,
+    cohort: str | None = None,
+    labels: dict[str, str] | None = None,
 ) -> ImportedReplayCase:
     return ImportedReplayCase(
         case_id=case_id,
@@ -78,6 +83,8 @@ def _case(
             permission_scope="tenant:tenant-alpha:member",
         ),
         retrieval_context=retrieval_context,
+        cohort=cohort,
+        labels=labels or {},
         raw_source_payload=raw_source_payload or {},
     )
 
@@ -124,6 +131,8 @@ def test_runner_validates_cases_and_does_not_call_candidate_for_stopped_cases() 
             root_input={"user_message": "What is the policy?"},
             observed_output=_observed_output(),
             available_tools=["lookup_invoice"],
+            cohort="support-emea",
+            labels={"team": "support", "priority": "p1"},
         ),
         _case(
             "missing-output",
@@ -231,6 +240,22 @@ def test_runner_validates_cases_and_does_not_call_candidate_for_stopped_cases() 
         "complete_case_ids": ["bad-rag"],
         "missing_or_incomplete_case_ids": [],
     }
+    assert report.summary["overall_verdict"] == "hold"
+    assert report.summary["failed_case_reasons"] == {}
+    assert report.summary["cohorts"] == ["support-emea"]
+    assert report.summary["trace_contract_versions"] == ["trace-contract-v1"]
+    case_results = {item["case_id"]: item for item in report.summary["case_results"]}
+    assert case_results["eligible"]["cohort"] == "support-emea"
+    assert case_results["eligible"]["labels"] == {
+        "team": "support",
+        "priority": "p1",
+    }
+    assert case_results["eligible"]["trace_contract_version"] == "trace-contract-v1"
+    assert case_results["missing-output"]["cohort"] is None
+    assert case_results["missing-output"]["labels"] == {}
+    assert (
+        case_results["missing-output"]["trace_contract_version"] == "trace-contract-v1"
+    )
 
 
 def test_runner_reports_structured_field_drift_and_unsafe_live_execution() -> None:
@@ -268,6 +293,7 @@ def test_runner_reports_structured_field_drift_and_unsafe_live_execution() -> No
     assert report.summary["candidate_vs_baseline_drift_case_ids"] == ["drift"]
     assert report.summary["unsafe_live_execution_count"] == 1
     assert report.summary["verdict_counts"] == {"hold": 1}
+    assert report.summary["overall_verdict"] == "hold"
 
 
 def test_baseline_unsafe_live_execution_stops_before_candidate_execution() -> None:
@@ -345,9 +371,234 @@ def test_baseline_failure_stops_before_candidate_execution() -> None:
     assert report.summary["stopped_case_reasons"] == {
         "baseline-fails": ["baseline_runner_failed"]
     }
+    assert report.summary["failed_case_reasons"] == {
+        "baseline-fails": ["baseline_runner_failed"]
+    }
     assert report.summary["case_results"][0]["error"] == (
         "RuntimeError: baseline unavailable"
     )
+
+
+def test_candidate_failure_recorded_in_failed_not_stopped_reasons() -> None:
+    case = _case(
+        "candidate-fails",
+        root_input={"user_message": "What is the policy?"},
+        observed_output=_observed_output(),
+        available_tools=[],
+    )
+
+    def baseline(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    def candidate(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        raise RuntimeError("candidate exploded")
+
+    report = verify_imported_cases(
+        [case],
+        baseline_runner=baseline,
+        candidate_runner=candidate,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+
+    # The candidate did execute, so the case is failed but not stopped.
+    assert report.summary["stopped_case_reasons"] == {}
+    assert report.summary["failed_case_reasons"] == {
+        "candidate-fails": ["candidate_runner_failed"]
+    }
+    assert report.summary["overall_verdict"] == "hold"
+
+
+def test_overall_verdict_prefers_hold_then_caution_then_ship() -> None:
+    def baseline(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    def candidate(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    ship_report = verify_imported_cases(
+        [
+            _case(
+                "clean",
+                root_input={"user_message": "What is the policy?"},
+                observed_output=_observed_output(),
+                available_tools=[],
+            )
+        ],
+        baseline_runner=baseline,
+        candidate_runner=candidate,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+    assert ship_report.summary["overall_verdict"] == "ship"
+
+    caution_report = verify_imported_cases(
+        [
+            _case(
+                "clean",
+                root_input={"user_message": "What is the policy?"},
+                observed_output=_observed_output(),
+                available_tools=[],
+            ),
+            _case(
+                "observed-drift",
+                root_input={"user_message": "What is the policy?"},
+                observed_output=_observed_output(risk_status="needs_review"),
+                available_tools=[],
+            ),
+        ],
+        baseline_runner=baseline,
+        candidate_runner=candidate,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+    assert caution_report.summary["verdict_counts"] == {"ship": 1, "caution": 1}
+    assert caution_report.summary["overall_verdict"] == "caution"
+
+
+def test_candidate_dataclass_output_with_live_tool_results_is_rescanned() -> None:
+    """The harness must not trust a runner-reported zero count.
+
+    A runner returning ImportedRunnerOutput whose payload contains live tool
+    results but whose unsafe_live_execution_count field says 0 must still be
+    detected and held.
+    """
+    case = _case(
+        "under-reported",
+        root_input={"user_message": "What is the policy?"},
+        observed_output=_observed_output(),
+        available_tools=[],
+    )
+
+    def baseline(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    def candidate(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> ImportedRunnerOutput:
+        return ImportedRunnerOutput(
+            payload={
+                **_observed_output(),
+                "tool_results": [
+                    {"tool_name": "send_live_email", "executed_live": True},
+                    {"tool_name": "lookup_invoice", "executed_live": False},
+                ],
+            },
+            unsafe_live_execution_count=0,
+        )
+
+    report = verify_imported_cases(
+        [case],
+        baseline_runner=baseline,
+        candidate_runner=candidate,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+
+    assert report.summary["unsafe_live_execution_count"] == 1
+    assert report.summary["verdict_counts"] == {"hold": 1}
+    assert report.summary["overall_verdict"] == "hold"
+
+
+def test_baseline_dataclass_output_with_live_tool_results_stops_candidate() -> None:
+    """Rescanning also applies to the baseline, before the candidate runs."""
+    candidate_calls: list[str] = []
+    case = _case(
+        "baseline-under-reported",
+        root_input={"user_message": "What is the policy?"},
+        observed_output=_observed_output(),
+        available_tools=[],
+    )
+
+    def baseline(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> ImportedRunnerOutput:
+        return ImportedRunnerOutput(
+            payload={
+                **_observed_output(),
+                "tool_results": [
+                    {"tool_name": "send_live_email", "executed_live": True}
+                ],
+            },
+            unsafe_live_execution_count=0,
+        )
+
+    def candidate(
+        case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        candidate_calls.append(case.case_id)
+        return _observed_output()
+
+    report = verify_imported_cases(
+        [case],
+        baseline_runner=baseline,
+        candidate_runner=candidate,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+
+    assert candidate_calls == []
+    assert report.summary["unsafe_live_execution_count"] == 1
+    assert report.summary["stopped_case_reasons"] == {
+        "baseline-under-reported": ["baseline_unsafe_live_execution_detected"]
+    }
+    assert report.summary["verdict_counts"] == {"hold": 1}
+
+
+def test_scan_mode_allowlist_is_rejected_for_candidate_execution() -> None:
+    def runner(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    with pytest.raises(ValueError, match="NO_TOOL_REGISTRY_EXPECTATION"):
+        verify_imported_cases(
+            [
+                _case(
+                    "scan-mode",
+                    root_input={"user_message": "What is the policy?"},
+                    observed_output=_observed_output(),
+                    available_tools=[],
+                )
+            ],
+            baseline_runner=runner,
+            candidate_runner=runner,
+            allowed_tool_names=NO_TOOL_REGISTRY_EXPECTATION,
+            created_at="2026-06-07T12:00:00+00:00",
+        )
+
+
+def test_empty_cohort_overall_verdict_is_hold() -> None:
+    def runner(
+        _case: ImportedReplayCase,
+        _invocation: ImportedRunnerInvocation,
+    ) -> dict[str, Any]:
+        return _observed_output()
+
+    report = verify_imported_cases(
+        [],
+        baseline_runner=runner,
+        candidate_runner=runner,
+        created_at="2026-06-07T12:00:00+00:00",
+    )
+
+    assert report.summary["case_count"] == 0
+    assert report.summary["verdict_counts"] == {}
+    assert report.summary["overall_verdict"] == "hold"
 
 
 def test_runner_distinguishes_fixture_harness_mode() -> None:

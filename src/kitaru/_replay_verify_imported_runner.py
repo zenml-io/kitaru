@@ -29,6 +29,7 @@ from kitaru._replay_verify_imported_models import (
 )
 from kitaru._replay_verify_imported_validation import (
     EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
+    NoToolRegistryExpectation,
     case_is_rag,
     dedupe,
     validate_imported_case,
@@ -88,6 +89,9 @@ class ImportedCaseRunResult:
     verdict: ImportedVerdictState
     validation: ImportedCaseValidation
     candidate_executed: bool
+    cohort: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    trace_contract_version: str | None = None
     baseline_output: Any = None
     candidate_output: Any = None
     observed_vs_baseline: list[FieldComparison] = field(default_factory=list)
@@ -108,7 +112,7 @@ def verify_imported_cases(
     execution_mode: str = IMPORTED_INPUT_EXECUTION_MODE,
     expected_runner_entrypoint: str | None = None,
     expected_corpus_index_version: str = EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
-    allowed_tool_names: set[str] | None = None,
+    allowed_tool_names: set[str] | NoToolRegistryExpectation | None = None,
     comparison_fields: Sequence[str] | None = None,
     created_at: str | None = None,
 ) -> ImportedVerificationReport:
@@ -118,6 +122,13 @@ def verify_imported_cases(
     validation has marked the case eligible and the baseline callable has returned
     successfully.
     """
+    if isinstance(allowed_tool_names, NoToolRegistryExpectation):
+        raise ValueError(
+            "Scan-mode NO_TOOL_REGISTRY_EXPECTATION is not allowed for candidate "
+            "execution: without a tool-registry allowlist there is no safety "
+            "check on which tools the candidate may run. Pass an explicit "
+            "allowed_tool_names set (or None for the default registry)."
+        )
     fields = tuple(comparison_fields or _comparison_fields_from_cases(cases))
     baseline_settings = dict(baseline_config or {})
     candidate_settings = dict(candidate_config or {})
@@ -210,6 +221,9 @@ def verify_imported_cases(
                 ),
                 validation=validation,
                 candidate_executed=True,
+                cohort=case.cohort,
+                labels=dict(case.labels),
+                trace_contract_version=case.trace_contract.trace_contract_version,
                 baseline_output=baseline_result.payload,
                 candidate_output=candidate_result.payload,
                 observed_vs_baseline=observed_vs_baseline,
@@ -293,9 +307,22 @@ def summarize_run_results(
         result.unsafe_live_execution_count for result in results
     )
     stopped_case_reasons = {result.case_id: result.stop_reasons for result in stopped}
+    failed_case_reasons = {
+        result.case_id: result.stop_reasons
+        for result in results
+        if result.status == "failed"
+    }
     verdict_counts = Counter(result.verdict for result in results)
     rag_coverage = _rag_metadata_coverage(cases, validations)
     per_case = [to_plain_data(result) for result in results]
+    cohorts = sorted({case.cohort for case in cases if case.cohort is not None})
+    trace_contract_versions = sorted(
+        {
+            case.trace_contract.trace_contract_version
+            for case in cases
+            if case.trace_contract.trace_contract_version is not None
+        }
+    )
     return {
         "source_system": _source_system(cases),
         "execution_mode": execution_mode,
@@ -325,8 +352,12 @@ def summarize_run_results(
         "eligibility_counts": dict(eligibility_counts),
         "safety_status_counts": dict(safety_counts),
         "verdict_counts": dict(verdict_counts),
+        "overall_verdict": _overall_verdict(results),
+        "cohorts": cohorts,
+        "trace_contract_versions": trace_contract_versions,
         "rag_metadata_coverage": rag_coverage,
         "stopped_case_reasons": stopped_case_reasons,
+        "failed_case_reasons": failed_case_reasons,
         "case_results": per_case,
     }
 
@@ -364,14 +395,24 @@ def _call_runner(
 
 def _normalize_runner_output(value: RunnerReturn) -> ImportedRunnerOutput:
     if isinstance(value, ImportedRunnerOutput):
-        return value
-    payload = dict(value) if isinstance(value, Mapping) else value
-    unsafe_live_count = _unsafe_live_execution_count(payload)
-    metadata = payload.get("metadata", {}) if isinstance(payload, Mapping) else {}
+        # Do not trust the runner-reported count: a runner under test could
+        # under-report live side effects, so rescan its payload and keep the
+        # larger of the two counts.
+        scanned_count = _unsafe_live_execution_count(value.payload)
+        unsafe_live_count = max(value.unsafe_live_execution_count, scanned_count)
+        if unsafe_live_count == value.unsafe_live_execution_count:
+            return value
+        return ImportedRunnerOutput(
+            payload=value.payload,
+            metadata=value.metadata,
+            unsafe_live_execution_count=unsafe_live_count,
+        )
+    payload = dict(value)
+    metadata = payload.get("metadata", {})
     return ImportedRunnerOutput(
         payload=payload,
         metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
-        unsafe_live_execution_count=unsafe_live_count,
+        unsafe_live_execution_count=_unsafe_live_execution_count(payload),
     )
 
 
@@ -403,6 +444,9 @@ def _stopped_result(
         verdict=IMPORTED_VERDICT_HOLD,
         validation=validation,
         candidate_executed=False,
+        cohort=case.cohort,
+        labels=dict(case.labels),
+        trace_contract_version=case.trace_contract.trace_contract_version,
         stop_reasons=list(validation.stop_reasons),
     )
 
@@ -419,6 +463,9 @@ def _baseline_failed_result(
         verdict=IMPORTED_VERDICT_HOLD,
         validation=validation,
         candidate_executed=False,
+        cohort=case.cohort,
+        labels=dict(case.labels),
+        trace_contract_version=case.trace_contract.trace_contract_version,
         stop_reasons=dedupe([*validation.stop_reasons, reason]),
         error=failure.message,
     )
@@ -435,6 +482,9 @@ def _baseline_unsafe_result(
         verdict=IMPORTED_VERDICT_HOLD,
         validation=validation,
         candidate_executed=False,
+        cohort=case.cohort,
+        labels=dict(case.labels),
+        trace_contract_version=case.trace_contract.trace_contract_version,
         baseline_output=baseline.payload,
         unsafe_live_execution_count=baseline.unsafe_live_execution_count,
         stop_reasons=["baseline_unsafe_live_execution_detected"],
@@ -455,6 +505,9 @@ def _candidate_failed_result(
         verdict=IMPORTED_VERDICT_HOLD,
         validation=validation,
         candidate_executed=True,
+        cohort=case.cohort,
+        labels=dict(case.labels),
+        trace_contract_version=case.trace_contract.trace_contract_version,
         baseline_output=baseline.payload,
         observed_vs_baseline=compare_structured_fields(
             case.observed_output,
@@ -478,6 +531,20 @@ def _completed_verdict(
     if _has_mismatch(candidate_vs_baseline):
         return IMPORTED_VERDICT_HOLD
     if _has_mismatch(observed_vs_baseline):
+        return IMPORTED_VERDICT_CAUTION
+    return IMPORTED_VERDICT_SHIP
+
+
+def _overall_verdict(
+    results: Sequence[ImportedCaseRunResult],
+) -> ImportedVerdictState:
+    # An empty cohort proves nothing, so fail closed instead of shipping.
+    if not results:
+        return IMPORTED_VERDICT_HOLD
+    verdicts = {result.verdict for result in results}
+    if IMPORTED_VERDICT_HOLD in verdicts:
+        return IMPORTED_VERDICT_HOLD
+    if IMPORTED_VERDICT_CAUTION in verdicts:
         return IMPORTED_VERDICT_CAUTION
     return IMPORTED_VERDICT_SHIP
 
