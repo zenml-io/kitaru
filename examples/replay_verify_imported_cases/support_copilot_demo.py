@@ -24,6 +24,24 @@ RUNNER_ENTRYPOINT = (
     "run_support_copilot_case"
 )
 
+# Single source of truth for the deterministic runner's output vocabulary.
+# The live runner's Literal types and the tests pin against these constants
+# instead of hand-copied string sets.
+DEFAULT_POLICY_LABEL = "support_policy"
+POLICY_LABELS_BY_INTENT = {
+    "model_only": "support_policy",
+    "subscription_lookup": "billing_policy",
+    "billing_lookup": "billing_policy",
+    "mocked_ticket": "escalation_policy",
+    "rag_policy_answer": "knowledge_base_policy",
+}
+POLICY_LABEL_VOCABULARY = frozenset(
+    {DEFAULT_POLICY_LABEL, *POLICY_LABELS_BY_INTENT.values()}
+)
+RISK_STATUS_SAFE = "safe"
+RISK_STATUS_NEEDS_REVIEW = "needs_review"
+RISK_STATUS_VOCABULARY = frozenset({RISK_STATUS_SAFE, RISK_STATUS_NEEDS_REVIEW})
+
 
 def run_baseline_support_copilot_case(
     case: ImportedReplayCase,
@@ -97,20 +115,13 @@ def _retrieval_document_ids(case: ImportedReplayCase, intent: str) -> list[str]:
 
 
 def _policy_label(intent: str) -> str:
-    labels = {
-        "model_only": "support_policy",
-        "subscription_lookup": "billing_policy",
-        "billing_lookup": "billing_policy",
-        "mocked_ticket": "escalation_policy",
-        "rag_policy_answer": "knowledge_base_policy",
-    }
-    return labels.get(intent, "support_policy")
+    return POLICY_LABELS_BY_INTENT.get(intent, DEFAULT_POLICY_LABEL)
 
 
 def _risk_status(intent: str) -> str:
     if intent == "mocked_ticket":
-        return "needs_review"
-    return "safe"
+        return RISK_STATUS_NEEDS_REVIEW
+    return RISK_STATUS_SAFE
 
 
 def _response_text(

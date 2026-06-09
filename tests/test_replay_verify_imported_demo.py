@@ -42,6 +42,7 @@ def test_demo_writes_reports_and_stopped_cases_do_not_execute_candidate(
         "fidelity_report.json",
         "verification_report.json",
         "verification_report.md",
+        "verification_report.html",
     }
     assert {path.name for path in result.paths.values()} == expected_files
     for path in result.paths.values():

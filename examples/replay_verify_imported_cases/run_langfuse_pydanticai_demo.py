@@ -12,6 +12,11 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from examples.replay_verify_imported_cases.live_prompt_config import (
+    BASELINE_LIVE_CONFIG,
+    CANDIDATE_LIVE_CONFIG,
+    LIVE_RUNNER_ENTRYPOINT,
+)
 from examples.replay_verify_imported_cases.prompt_config import (
     BASELINE_CONFIG,
     CANDIDATE_CONFIG,
@@ -42,6 +47,7 @@ from kitaru._replay_verify_imported_validation import (
 
 DEMO_DIR = Path(__file__).resolve().parent
 DEFAULT_CASE_FILE = DEMO_DIR / "fixtures" / "support_copilot_imported_cases.jsonl"
+DEFAULT_LIVE_CASE_FILE = DEMO_DIR / "fixtures" / "support_copilot_live_cases.jsonl"
 DEFAULT_REPORT_DIR = DEMO_DIR / "reports"
 
 
@@ -52,6 +58,70 @@ class DemoRunResult:
     report_dir: Path
     paths: dict[str, Path]
     summary: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _RunnerSelection:
+    """Resolved runner mode: case file, entrypoint, callables, and configs."""
+
+    case_file: Path
+    expected_runner_entrypoint: str
+    baseline_runner: ImportedRunnerCallable
+    candidate_runner: ImportedRunnerCallable
+    baseline_config: dict[str, Any]
+    candidate_config: dict[str, Any]
+    report_name: str
+
+
+def _select_runner(
+    runner: str,
+    *,
+    baseline: str,
+    candidate: str,
+    baseline_model: str | None,
+    candidate_model: str | None,
+) -> _RunnerSelection:
+    if runner == "deterministic":
+        if baseline_model or candidate_model:
+            msg = "--baseline-model/--candidate-model require --runner live."
+            raise ValueError(msg)
+        return _RunnerSelection(
+            case_file=DEFAULT_CASE_FILE,
+            expected_runner_entrypoint=RUNNER_ENTRYPOINT,
+            baseline_runner=run_baseline_support_copilot_case,
+            candidate_runner=run_candidate_support_copilot_case,
+            baseline_config={**BASELINE_CONFIG, "agent_id": baseline},
+            candidate_config={**CANDIDATE_CONFIG, "agent_id": candidate},
+            report_name="Support Copilot imported-input demo",
+        )
+    if runner == "live":
+        # Imported lazily so the deterministic path works without pydantic_ai.
+        from examples.replay_verify_imported_cases.support_copilot_live import (
+            run_baseline_support_copilot_case_live,
+            run_candidate_support_copilot_case_live,
+        )
+
+        return _RunnerSelection(
+            case_file=DEFAULT_LIVE_CASE_FILE,
+            expected_runner_entrypoint=LIVE_RUNNER_ENTRYPOINT,
+            baseline_runner=run_baseline_support_copilot_case_live,
+            candidate_runner=run_candidate_support_copilot_case_live,
+            baseline_config={
+                "agent_id": baseline,
+                "prompt_version": BASELINE_LIVE_CONFIG.prompt_version,
+                "prompt_hash": BASELINE_LIVE_CONFIG.prompt_hash,
+                "model": baseline_model or BASELINE_LIVE_CONFIG.model,
+            },
+            candidate_config={
+                "agent_id": candidate,
+                "prompt_version": CANDIDATE_LIVE_CONFIG.prompt_version,
+                "prompt_hash": CANDIDATE_LIVE_CONFIG.prompt_hash,
+                "model": candidate_model or CANDIDATE_LIVE_CONFIG.model,
+            },
+            report_name="Support Copilot imported-input live demo",
+        )
+    msg = f"Unknown runner {runner!r}; use 'deterministic' or 'live'."
+    raise ValueError(msg)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -66,8 +136,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--case-file",
         type=Path,
-        default=DEFAULT_CASE_FILE,
-        help="Neutral imported-case JSONL file to validate and run.",
+        default=None,
+        help=(
+            "Neutral imported-case JSONL file to validate and run. Defaults to "
+            "the deterministic fixture, or the live fixture with --runner live."
+        ),
+    )
+    parser.add_argument(
+        "--runner",
+        choices=["deterministic", "live"],
+        default="deterministic",
+        help=(
+            "deterministic: credential-free local runner (default). "
+            "live: real PydanticAI agent calls (requires OPENAI_API_KEY)."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-model",
+        default=None,
+        help="Override the baseline model for --runner live.",
+    )
+    parser.add_argument(
+        "--candidate-model",
+        default=None,
+        help="Override the candidate model for --runner live.",
     )
     parser.add_argument(
         "--report-dir",
@@ -91,26 +183,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def run_demo(
     *,
     source: str = "jsonl",
-    case_file: Path = DEFAULT_CASE_FILE,
+    case_file: Path | None = None,
     report_dir: Path = DEFAULT_REPORT_DIR,
+    runner: str = "deterministic",
     baseline: str = "support-copilot-v1",
     candidate: str = "support-copilot-v2",
-    baseline_runner: ImportedRunnerCallable = run_baseline_support_copilot_case,
-    candidate_runner: ImportedRunnerCallable = run_candidate_support_copilot_case,
+    baseline_model: str | None = None,
+    candidate_model: str | None = None,
+    baseline_runner: ImportedRunnerCallable | None = None,
+    candidate_runner: ImportedRunnerCallable | None = None,
 ) -> DemoRunResult:
     """Run validation, imported-input execution, and report writing."""
     if source != "jsonl":
         msg = "This demo currently supports --source jsonl only."
         raise ValueError(msg)
+    selection = _select_runner(
+        runner,
+        baseline=baseline,
+        candidate=candidate,
+        baseline_model=baseline_model,
+        candidate_model=candidate_model,
+    )
+    resolved_case_file = case_file if case_file is not None else selection.case_file
 
-    cases = read_imported_cases_jsonl(case_file)
+    cases = read_imported_cases_jsonl(resolved_case_file)
     report_dir.mkdir(parents=True, exist_ok=True)
     imported_cases_path = report_dir / "imported_cases.jsonl"
     write_imported_cases_jsonl(cases, imported_cases_path)
 
     fidelity = validate_imported_cases_jsonl(
         imported_cases_path,
-        expected_runner_entrypoint=RUNNER_ENTRYPOINT,
+        expected_runner_entrypoint=selection.expected_runner_entrypoint,
         expected_corpus_index_version=EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
         allowed_tool_names=SAFE_TOOL_NAMES,
     )
@@ -121,7 +224,7 @@ def run_demo(
                 "name": "Replay Verify imported-case fidelity report",
                 "source": source,
                 "cohort_kind": "curated_jsonl_fixture",
-                "case_file": str(case_file),
+                "case_file": str(resolved_case_file),
                 "summary": fidelity.summary,
                 "cases": [to_plain_data(item) for item in fidelity.validations],
             },
@@ -131,17 +234,15 @@ def run_demo(
         encoding="utf-8",
     )
 
-    baseline_config = {**BASELINE_CONFIG, "agent_id": baseline}
-    candidate_config = {**CANDIDATE_CONFIG, "agent_id": candidate}
     verification_report = verify_imported_cases(
         fidelity.cases,
-        baseline_runner=baseline_runner,
-        candidate_runner=candidate_runner,
-        baseline_config=baseline_config,
-        candidate_config=candidate_config,
-        report_name="Support Copilot imported-input demo",
+        baseline_runner=baseline_runner or selection.baseline_runner,
+        candidate_runner=candidate_runner or selection.candidate_runner,
+        baseline_config=selection.baseline_config,
+        candidate_config=selection.candidate_config,
+        report_name=selection.report_name,
         execution_mode=IMPORTED_INPUT_EXECUTION_MODE,
-        expected_runner_entrypoint=RUNNER_ENTRYPOINT,
+        expected_runner_entrypoint=selection.expected_runner_entrypoint,
         expected_corpus_index_version=EXPECTED_CURRENT_CORPUS_INDEX_VERSION,
         allowed_tool_names=SAFE_TOOL_NAMES,
     )
@@ -151,6 +252,7 @@ def run_demo(
         "fidelity_json": fidelity_report_path,
         "verification_json": Path(verification_paths["json"]),
         "verification_markdown": Path(verification_paths["markdown"]),
+        "verification_html": Path(verification_paths["html"]),
     }
     return DemoRunResult(
         report_dir=report_dir,
@@ -166,8 +268,11 @@ def main(argv: list[str] | None = None) -> int:
         source=args.source,
         case_file=args.case_file,
         report_dir=args.report_dir,
+        runner=args.runner,
         baseline=args.baseline,
         candidate=args.candidate,
+        baseline_model=args.baseline_model,
+        candidate_model=args.candidate_model,
     )
     print("Imported-input Replay Verify demo complete.")
     for name, path in sorted(result.paths.items()):
