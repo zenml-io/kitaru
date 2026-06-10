@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -180,6 +181,55 @@ def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
     return ", ".join(entries)
 
 
+def _display_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _display_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        float_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(float_value):
+        return None
+    return float_value
+
+
+def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
+    """Render a compact LLM usage summary for execution details."""
+    if not summary:
+        return "none"
+    usage_record_count = _display_int(summary.get("usage_record_count"))
+    incurred = _display_int(summary.get("incurred_usage_record_count"))
+    reused = _display_int(summary.get("reused_usage_record_count"))
+    total_tokens = _display_int(summary.get("total_tokens"))
+    display_cost = _display_float(summary.get("display_cost_usd"))
+    actual_cost = _display_float(summary.get("actual_cost_usd"))
+    estimated_cost = _display_float(summary.get("estimated_cost_usd"))
+    if None in (
+        usage_record_count,
+        incurred,
+        reused,
+        total_tokens,
+        display_cost,
+        actual_cost,
+        estimated_cost,
+    ):
+        return "summary metadata is malformed"
+    return (
+        f"{usage_record_count} usage records ({incurred} incurred, {reused} reused), "
+        f"{total_tokens} tokens, display cost ${display_cost:.6f} "
+        f"(actual ${actual_cost:.6f}, estimated ${estimated_cost:.6f})"
+    )
+
+
 def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
     """Build label/value rows for execution details output."""
     pending_wait_name = "none"
@@ -203,6 +253,7 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
         ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
+        ("LLM usage", _format_llm_usage_summary(execution.llm_usage_summary)),
     ]
 
 

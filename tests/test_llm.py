@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection, register_model_alias
 from kitaru.errors import (
@@ -377,10 +378,89 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert logged_payload["total_tokens"] == 30
     # cost_usd should be absent (not provided by direct SDK calls)
     assert "cost_usd" not in logged_payload
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    usage_key, usage_record = next(iter(usage_records.items()))
+    assert usage_key.startswith("summary_call:")
+    assert usage_record["record_id"] == usage_key
+    assert usage_record["call_name"] == "summary_call"
+    assert usage_record["adapter"] == "kitaru.llm"
+    assert usage_record["usage"]["input_tokens"] == 10
+    assert usage_record["usage"]["output_tokens"] == 20
+    assert usage_record["usage"]["total_tokens"] == 30
+    assert usage_record["cost"]["source"] == "none"
+
+
+def test_llm_preserves_zero_openai_usage_tokens() -> None:
+    """Direct OpenAI usage logging should keep provider-reported zero tokens."""
+    fake_result = _ProviderCallResult(
+        response_text="empty usage",
+        usage=_LLMUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+    )
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log") as mock_log,
+    ):
+        output = llm("Say nothing", name="zero_call")
+
+    assert output == "empty usage"
+    logged_payload = mock_log.call_args.kwargs["llm_calls"]["zero_call"]
+    assert logged_payload["tokens_input"] == 0
+    assert logged_payload["tokens_output"] == 0
+    assert logged_payload["total_tokens"] == 0
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    usage_key, usage_record = next(iter(usage_records.items()))
+    assert usage_key.startswith("zero_call:")
+    assert usage_record["record_id"] == usage_key
+    assert usage_record["call_name"] == "zero_call"
+    assert usage_record["usage"]["input_tokens"] == 0
+    assert usage_record["usage"]["output_tokens"] == 0
+    assert usage_record["usage"]["total_tokens"] == 0
+
+
+def test_repeated_named_llm_calls_get_distinct_usage_record_ids() -> None:
+    """Repeated display names should not overwrite canonical usage records."""
+    first_result = _ProviderCallResult(
+        response_text="first",
+        usage=_LLMUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+    )
+    second_result = _ProviderCallResult(
+        response_text="second",
+        usage=_LLMUsage(prompt_tokens=4, completion_tokens=5, total_tokens=9),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (
+            _mock_save,
+            mock_log,
+        ),
+        patch("kitaru.llm._call_openai", side_effect=[first_result, second_result]),
+    ):
+        assert llm("Summarize this", name="summarize") == "first"
+        assert llm("Summarize that", name="summarize") == "second"
+
+    first_metadata = mock_log.call_args_list[0].kwargs[LLM_USAGE_METADATA_KEY]
+    second_metadata = mock_log.call_args_list[1].kwargs[LLM_USAGE_METADATA_KEY]
+    first_key, first_record = next(iter(first_metadata.items()))
+    second_key, second_record = next(iter(second_metadata.items()))
+
+    assert first_key != second_key
+    assert first_key.startswith("summarize:")
+    assert second_key.startswith("summarize:")
+    assert first_record["record_id"] == first_key
+    assert second_record["record_id"] == second_key
+    assert first_record["call_name"] == "summarize"
+    assert second_record["call_name"] == "summarize"
+    assert first_record["usage"]["total_tokens"] == 3
+    assert second_record["usage"]["total_tokens"] == 9
 
 
 # ---------------------------------------------------------------------------
-# Anthropic call path
+# Provider dispatch and parsing
 # ---------------------------------------------------------------------------
 
 
@@ -437,6 +517,15 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     assert logged_payload["tokens_output"] == 15
     assert logged_payload["total_tokens"] == 20
     assert "cost_usd" not in logged_payload
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    usage_key, usage_record = next(iter(usage_records.items()))
+    assert usage_key.startswith("translate_call:")
+    assert usage_record["record_id"] == usage_key
+    assert usage_record["call_name"] == "translate_call"
+    assert usage_record["provider"] == "anthropic"
+    assert usage_record["usage"]["input_tokens"] == 5
+    assert usage_record["usage"]["output_tokens"] == 15
+    assert usage_record["cost"]["source"] == "none"
 
 
 # ---------------------------------------------------------------------------

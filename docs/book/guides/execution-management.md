@@ -206,6 +206,67 @@ it as a number. Store the value as an integer or float when you want to use it
 in statistics.
 {% endhint %}
 
+### LLM usage and cost metadata
+
+When an execution makes LLM calls through `kitaru.llm()` or the supported agent
+adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
+that made or reused the provider work. One usage record usually means one
+provider interaction or one adapter-level graph/agent invocation, depending on
+which adapter produced it. When `FlowHandle.wait()` or `FlowHandle.get()`
+observes the execution finishing, Kitaru reads those checkpoint records and
+writes two execution-level views:
+
+- `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
+  Python client parse it into `execution.llm_usage_summary`. It tells you what
+  happened in one execution. Its `usage_record_count`,
+  `incurred_usage_record_count`, and `reused_usage_record_count` fields count
+  Kitaru usage records, not raw provider API calls.
+- Flat numeric metadata keys such as `kitaru_llm_display_cost_usd_v1` and
+  `kitaru_llm_total_tokens_v1` are the statistics view. Kitaru execution
+  statistics can sum or average these because they are top-level numbers, not
+  nested objects.
+
+Cost fields are intentionally split:
+
+- `actual_cost_usd` means the provider reported a cost. Claude Agent SDK exposes
+  this via `total_cost_usd`.
+- `estimated_cost_usd` means Kitaru used an adapter cost calculator. OpenAI
+  Agents and LangGraph can report this when you configure their calculator hook.
+- `display_cost_usd` uses actual cost for a record when present, otherwise
+  estimated cost. Treat it as observability, not as a billing invoice.
+
+Direct `kitaru.llm()` records token counts and latency, but it does not invent a
+cost number. If the provider call does not return a real cost source, cost stays
+empty and the execution summary increments `records_without_cost_count`.
+
+Useful statistics queries:
+
+```bash
+# Sum display cost by flow. This is an observability number, not an invoice.
+kitaru executions statistics \
+  --group-by flow \
+  --metric llm_display_cost_sum:metadata:kitaru_llm_display_cost_usd_v1:sum
+
+# Sum incurred token volume by day.
+kitaru executions statistics \
+  --group-by time:day \
+  --metric llm_tokens_sum:metadata:kitaru_llm_incurred_total_tokens_v1:sum
+
+# Count usage records that reused checkpoint metadata instead of incurring new usage.
+kitaru executions statistics \
+  --group-by flow \
+  --metric llm_reused_usage_records:metadata:kitaru_llm_reused_usage_record_count_v1:sum
+```
+
+{% hint style="warning" %}
+In v1, terminal LLM summaries are written when the SDK observes completion via
+`FlowHandle.wait()` or `FlowHandle.get()`. A remote execution that finishes but
+is never observed through those paths can still have per-checkpoint
+`llm_usage_v1` records, but it may not have `llm_usage_summary_v1` or the flat
+`kitaru_llm_*_v1` statistics keys yet. `executions.get` stays read-only and does
+not backfill missing summaries.
+{% endhint %}
+
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
 Multiple tag filters mean "executions that have all of these tags". When
 `max_groups` truncates a time-grouped result, Kitaru keeps the newest time rows

@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -101,6 +102,7 @@ def _execution_stub(
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
     checkpoints: list[SimpleNamespace] | None = None,
+    llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
@@ -119,6 +121,8 @@ def _execution_stub(
         frozen_execution_spec=None,
         original_exec_id=None,
         checkpoints=checkpoints or [],
+        llm_usage_summary=llm_usage_summary,
+        llm_usage_records=[],
     )
 
 
@@ -2274,6 +2278,15 @@ def test_executions_get_renders_execution_details(
             SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
             SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
         ],
+        llm_usage_summary={
+            "usage_record_count": 2,
+            "incurred_usage_record_count": 1,
+            "reused_usage_record_count": 1,
+            "total_tokens": 42,
+            "display_cost_usd": 0.125,
+            "actual_cost_usd": 0.1,
+            "estimated_cost_usd": 0.025,
+        },
     )
     fake_client = Mock()
     fake_client.executions.get.return_value = execution
@@ -2294,6 +2307,74 @@ def test_executions_get_renders_execution_details(
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
+    assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_malformed_llm_usage_summary_honestly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed LLM usage summary numbers should not render as real zeroes."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": "not-an-int",
+            "incurred_usage_record_count": True,
+            "reused_usage_record_count": None,
+            "total_tokens": "not-an-int",
+            "display_cost_usd": "not-a-number",
+            "actual_cost_usd": float("nan"),
+            "estimated_cost_usd": None,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: summary metadata is malformed" in output
+    assert "0 calls (0 incurred, 0 reused), 0 tokens" not in output
+    assert "display cost $0.000000" not in output
+
+
+def test_executions_get_renders_valid_zero_llm_usage_summary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A complete zero summary should still render as real zero usage."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": 0,
+            "incurred_usage_record_count": 0,
+            "reused_usage_record_count": 0,
+            "total_tokens": 0,
+            "display_cost_usd": 0.0,
+            "actual_cost_usd": 0.0,
+            "estimated_cost_usd": 0.0,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: 0 usage records (0 incurred, 0 reused), 0 tokens" in output
+    assert "display cost $0.000000" in output
 
 
 def test_executions_list_applies_filters(
