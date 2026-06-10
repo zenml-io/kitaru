@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 _FIXTURE = Path(
     "examples/replay_verify_imported_cases/fixtures/"
     "support_copilot_imported_cases.jsonl"
@@ -187,3 +189,14 @@ def test_second_run_with_changed_candidate_reuses_baseline_lanes(
         status == ExecutionStatus.CACHED for status in candidate_statuses.values()
     ), f"candidate lanes unexpectedly cached: {candidate_statuses}"
     assert first["summary"]["overall_verdict"] == second["summary"]["overall_verdict"]
+
+
+def test_durable_cli_parses_args_and_rejects_unknown_mode() -> None:
+    from examples.replay_verify_imported_cases.run_durable_demo import parse_args
+
+    args = parse_args(["--runner", "deterministic"])
+    assert args.runner == "deterministic"
+    assert args.baseline_model is None
+
+    with pytest.raises(SystemExit):
+        parse_args(["--runner", "nonsense"])
