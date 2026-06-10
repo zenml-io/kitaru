@@ -11,7 +11,7 @@
 
 ## Agent Harness Platform
 
-* [Agent Harness Platform](agent-harness-platform/README.md)
+* [Overview](agent-harness-platform/README.md)
 
 ## Core Concepts
 
