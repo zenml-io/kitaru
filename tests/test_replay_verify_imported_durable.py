@@ -156,3 +156,34 @@ def test_durable_flow_creates_no_lane_checkpoints_for_stopped_cases(
     # Eligible cases get both lanes.
     assert any(name.endswith("baseline_rv_model_only_eligible") for name in step_names)
     assert any(name.endswith("candidate_rv_model_only_eligible") for name in step_names)
+
+
+def test_second_run_with_changed_candidate_reuses_baseline_lanes(
+    primed_zenml,
+) -> None:
+    from examples.replay_verify_imported_cases.durable_verify_flow import (
+        run_durable_demo,
+    )
+    from zenml.client import Client
+    from zenml.enums import ExecutionStatus
+
+    first = run_durable_demo(candidate="support-copilot-v2")
+    second = run_durable_demo(candidate="support-copilot-v3")
+
+    run = Client().get_pipeline_run(second["exec_id"], allow_name_prefix_match=False)
+    steps = run.get_hydrated_version().steps
+    baseline_statuses = {
+        name: step.status for name, step in steps.items() if "baseline_rv_" in name
+    }
+    candidate_statuses = {
+        name: step.status for name, step in steps.items() if "candidate_rv_" in name
+    }
+
+    assert baseline_statuses, "expected baseline lane steps in the second run"
+    assert all(
+        status == ExecutionStatus.CACHED for status in baseline_statuses.values()
+    ), f"baseline lanes were not cached: {baseline_statuses}"
+    assert candidate_statuses and not any(
+        status == ExecutionStatus.CACHED for status in candidate_statuses.values()
+    ), f"candidate lanes unexpectedly cached: {candidate_statuses}"
+    assert first["summary"]["overall_verdict"] == second["summary"]["overall_verdict"]
