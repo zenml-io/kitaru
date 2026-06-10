@@ -427,6 +427,10 @@ run_test "examples/replay_verify_imported_cases scan demo" \
     $UV_RUN python examples/replay_verify_imported_cases/run_scan_demo.py \
         --report-dir "$(mktemp -d)/replay-verify-scan-reports"
 
+# Runs as a Kitaru flow, so it needs the .kitaru/ created by kitaru init above.
+run_test "examples/replay_verify_imported_cases durable demo" \
+    $UV_RUN python examples/replay_verify_imported_cases/run_durable_demo.py
+
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run

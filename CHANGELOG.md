@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Self-contained HTML verification report (`verification_report.html`): verdict banner, headline counts, and a per-case grid with expandable observed/baseline/candidate field comparisons and stop reasons. Written alongside the JSON and Markdown reports.
 - Scan mode for uninstrumented Langfuse traces: `run_scan_demo.py` plus a standalone observation exporter apply the verifier's validators to arbitrary observation rows and emit a fidelity checklist (verifiable cases, ranked missing fields) instead of erroring.
 - Imported-verification report enrichment: `overall_verdict`, per-case cohort/labels/trace-contract version, failed-case reasons, and populated `report_paths` in the serialized report.
+- Durable mode for the imported-input verifier demo: `run_durable_demo.py` runs verification as a Kitaru flow with each baseline/candidate lane as a cached checkpoint (baseline lanes are reused across candidate iterations) and persists the cohort, fidelity report, and verification reports (including the HTML verdict page) as execution artifacts.
 
 ## [0.13.1] - 2026-05-21
 

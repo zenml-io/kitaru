@@ -165,6 +165,42 @@ uv run python examples/replay_verify_imported_cases/generate_live_cohort.py
 uv run python examples/replay_verify_imported_cases/generate_live_cohort.py --observed live
 ```
 
+## Durable mode: run it as a Kitaru flow
+
+The plain script above runs and exits; close the terminal and the results
+live only in the report files. Durable mode runs the same verification as a
+Kitaru flow, which changes three things:
+
+1. **The run is an execution.** It shows up in `kitaru executions list`, has
+   a status, and can be inspected later.
+2. **The cohort and reports are artifacts.** `imported_cases`,
+   `fidelity_report`, `verification_report`, and `verification_report_html`
+   are saved on the execution, so the verdict has an address instead of a
+   file path.
+3. **Baseline runs are cached.** Each baseline/candidate lane is a
+   checkpoint. Re-run with a different candidate and the baseline lanes are
+   reused from cache instead of re-executing (in live mode, that means no
+   repeated baseline model spend while you iterate on a candidate).
+
+It needs an initialized Kitaru project first:
+
+```bash
+uv run kitaru init   # once per project
+uv run python examples/replay_verify_imported_cases/run_durable_demo.py
+```
+
+Then inspect the run and its artifacts:
+
+```bash
+kitaru executions list
+kitaru executions get <exec-id>
+```
+
+Live mode works here too (`--runner live`, needs `OPENAI_API_KEY`), with the
+same planted-regression cohort as above. Scan mode intentionally stays a
+plain script: its whole point is producing a first answer before you have
+initialized anything.
+
 ## Scan mode: what can your own traces prove?
 
 Verification needs well-instrumented traces. Most existing Langfuse projects
