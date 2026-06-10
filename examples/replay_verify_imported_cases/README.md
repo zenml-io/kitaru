@@ -180,7 +180,10 @@ Kitaru flow, which changes three things:
 3. **Baseline runs are cached.** Each baseline/candidate lane is a
    checkpoint. Re-run with a different candidate and the baseline lanes are
    reused from cache instead of re-executing (in live mode, that means no
-   repeated baseline model spend while you iterate on a candidate).
+   repeated baseline model spend while you iterate on a candidate). Caching
+   applies to failures too: a lane that failed replays from cache on
+   identical inputs, and changing any lane input (for example a config
+   value) forces re-execution.
 
 It needs an initialized Kitaru project first:
 

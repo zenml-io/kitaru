@@ -72,6 +72,18 @@ def lane_runner(runner_mode: str, role: str) -> ImportedRunnerCallable:
     raise ValueError(msg)
 
 
+def ensure_unique_case_ids(case_ids: list[str]) -> None:
+    """Reject cohorts with duplicate case ids before any lane runs.
+
+    Duplicate ids would silently mis-map case payloads in the row lookup and
+    collide on checkpoint invocation ids, so a custom cohort must fail loudly.
+    """
+    duplicates = sorted({cid for cid in case_ids if case_ids.count(cid) > 1})
+    if duplicates:
+        msg = f"Duplicate case_id values in cohort: {', '.join(duplicates)}"
+        raise ValueError(msg)
+
+
 def execute_lane_payload(
     *,
     role: str,
@@ -190,6 +202,7 @@ def replay_verify_cohort(
         if line.strip()
     ]
     cases = [imported_case_from_mapping(row) for row in rows]
+    ensure_unique_case_ids([case.case_id for case in cases])
     row_by_id = {case.case_id: row for case, row in zip(cases, rows, strict=True)}
 
     # Kitaru has no native run tags yet; metadata is the labeling mechanism.

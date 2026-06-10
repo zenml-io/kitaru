@@ -200,3 +200,14 @@ def test_durable_cli_parses_args_and_rejects_unknown_mode() -> None:
 
     with pytest.raises(SystemExit):
         parse_args(["--runner", "nonsense"])
+
+
+def test_duplicate_case_ids_are_rejected() -> None:
+    from examples.replay_verify_imported_cases.durable_verify_flow import (
+        ensure_unique_case_ids,
+    )
+
+    ensure_unique_case_ids(["rv-a", "rv-b"])
+
+    with pytest.raises(ValueError, match="rv-dup"):
+        ensure_unique_case_ids(["rv-dup", "rv-b", "rv-dup"])
