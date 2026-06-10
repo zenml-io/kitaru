@@ -50,6 +50,21 @@ response, tokens, and latency per call.
 See the [Quickstart](getting-started/quickstart.md) to install and run this
 yourself.
 
+## Where ZenML fits
+
+Kitaru is built by the team behind [ZenML](https://docs.zenml.io), the
+open-source framework for production ML and LLM pipelines, and runs on the same
+foundations. Each project works on its own — you can use Kitaru without ever
+touching ZenML. If you use both, they compose rather than coexist: a Kitaru flow
+is a dynamic ZenML pipeline under the hood, so your agents and pipelines run on
+the same [stacks](stacks/README.md), persist artifacts to the same stores, and
+show up in the same server and dashboard. If your work is ML pipelines rather
+than agents, start with the [ZenML docs](https://docs.zenml.io) — and if you
+want the narrative tutorial for agents, the
+[Agents guide](https://docs.zenml.io/user-guides/agents-guide) sits alongside
+ZenML's Starter, Production, and LLMOps guides in the shared
+[Learn](https://docs.zenml.io/user-guides) section.
+
 ## What your agent can do with Kitaru
 
 These are the runtime primitives Kitaru adds on top of your existing Python agent
