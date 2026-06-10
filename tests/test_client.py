@@ -2725,6 +2725,67 @@ def test_map_run_statistics_response_preserves_time_order() -> None:
     ]
 
 
+def test_map_run_statistics_response_trims_oldest_time_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"day": "2026-03-15"}, run_count=20),
+            SimpleNamespace(group_keys={"day": "2026-03-13"}, run_count=99),
+            SimpleNamespace(group_keys={"day": "2026-03-14"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"day": "2026-03-14"}, execution_count=1),
+        ExecutionStatisticsGroup(keys={"day": "2026-03-15"}, execution_count=20),
+    ]
+    assert statistics.truncated is True
+
+
+def test_map_run_statistics_response_trims_oldest_time_status_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"day": "2026-03-13", "status": "completed"},
+                run_count=99,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-14", "status": "failed"},
+                run_count=1,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-15", "status": "completed"},
+                run_count=20,
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day", "status"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-14", "status": "failed"},
+            execution_count=1,
+        ),
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-15", "status": "completed"},
+            execution_count=20,
+        ),
+    ]
+    assert statistics.truncated is True
+
+
 def test_map_run_statistics_response_sorts_counts_before_trimming() -> None:
     response = SimpleNamespace(
         groups=[

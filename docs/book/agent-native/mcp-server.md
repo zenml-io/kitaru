@@ -282,13 +282,14 @@ names. Optional metrics use the same string format as the CLI:
 `<name>:<source>:<avg|sum|min|max>` for built-in numeric sources such as
 `duration`, or `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for numeric
 execution metadata. The tool does not yet filter by time range or metadata
-value.
+value. When `max_groups` truncates a time-grouped result, Kitaru keeps the
+newest time rows and still returns them from oldest to newest.
 
-<Callout type="warn">
-  Grouping by `metadata:<key>` includes the matching metadata values in the MCP
-  response. Only use it for metadata keys whose values are safe for the MCP
-  client and transcript to see.
-</Callout>
+{% hint style="warning" %}
+Grouping by `metadata:<key>` includes the matching metadata values in the MCP
+response. Only use it for metadata keys whose values are safe for the MCP
+client and transcript to see.
+{% endhint %}
 
 ## Starting executions with `kitaru_executions_run`
 

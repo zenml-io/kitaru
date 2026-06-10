@@ -730,7 +730,10 @@ def _map_run_statistics_group_entries(
     )
 
     if len(groups) > max_groups:
-        groups = groups[:max_groups]
+        if time_grouping_name is not None:
+            groups = groups[-max_groups:]
+        else:
+            groups = groups[:max_groups]
         truncated = True
 
     return ExecutionStatistics(groups=groups, truncated=truncated)
