@@ -11,14 +11,7 @@
 
 ## Agent Harness Platform
 
-* [Overview](agent-harness-platform/README.md)
-* [Durable Agent](agent-harness-platform/01-durable-agent.md)
-* [Sandbox](agent-harness-platform/02-sandbox.md)
-* [Skills](agent-harness-platform/03-skills.md)
-* [Credential Proxy](agent-harness-platform/04-credential-proxy.md)
-* [Typed Services](agent-harness-platform/05-typed-services.md)
-* [Human in the Loop](agent-harness-platform/06-hitl.md)
-* [Production Notes](agent-harness-platform/production-notes.md)
+* [Agent Harness Platform](agent-harness-platform/README.md)
 
 ## Core Concepts
 
