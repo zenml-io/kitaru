@@ -1,15 +1,17 @@
 ---
-description: The runtime layer underneath your agent stack.
+description: Every agent run, recorded and replayable.
 icon: hand-wave
 ---
 
 # Welcome to Kitaru
 
-Kitaru is the runtime layer underneath your agent stack. It gives you durable
-execution for Python agents — checkpoints, replay, resume, `wait()`, versioned
-deployments — while the harness you already picked (Pydantic AI, Deep Agents,
-LangGraph, Claude Agent SDK, raw Python) keeps owning how the agent thinks, and
-your existing platform keeps owning auth, observability, and policy.
+Kitaru is the runtime layer underneath your agent stack. It records every step
+of your agents' runs — each model call, tool call, and decision — as replayable
+checkpoints, so you can diagnose failures, replay runs with a different model or
+input, and ship agent updates with confidence. The harness you already picked
+(Pydantic AI, Deep Agents, LangGraph, Claude Agent SDK, raw Python) keeps owning
+how the agent thinks, and your existing platform keeps owning auth,
+observability, and policy.
 
 Kitaru is self-host-first: a single-service server on your own Kubernetes,
 artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in the
@@ -17,7 +19,7 @@ path of your agent's data. See
 [Harness, Runtime, Platform](concepts/harness-runtime-platform.md) for the full
 picture of where Kitaru fits.
 
-## Create a durable agent
+## Create your first agent
 
 ```python
 import kitaru
@@ -51,12 +53,15 @@ yourself.
 ## What your agent can do with Kitaru
 
 These are the runtime primitives Kitaru adds on top of your existing Python agent
-code. You keep your harness and your control flow; Kitaru makes the run durable.
+code. You keep your harness and your control flow; Kitaru records the run and
+makes it replayable.
 
+* **Replay and what-if:** Re-run any execution from any checkpoint — to recover
+  from a failure, or with [overrides](guides/replay-and-overrides.md) (a
+  different model, parameter, or injected output) to see what would have
+  happened before you ship a change
 * **Durable execution:** Wrap steps in [`@checkpoint`](concepts/checkpoints.md)
   and your agent picks up where it left off without re-running expensive work
-* **Replay from failure:** Re-run only the failed part of a flow by replaying
-  from a checkpoint instead of starting from scratch
 * **Wait and resume:** Add [`kitaru.wait()`](guides/wait-and-resume.md) and let
   agents pause for a human, another system, or later input; after the polling
   timeout, compute is released and the run resumes when input lands

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Repositioned user-facing messaging (README, PyPI description, CLI `--help`, docs welcome page) around recording, replaying, and improving agents in production; durable execution is now described as the underlying mechanism rather than the headline.
+
 ### Fixed
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 

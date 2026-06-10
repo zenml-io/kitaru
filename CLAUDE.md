@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's runtime for **recording, replaying, and improving AI agents in production**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that record every step of an agent run as a replayable checkpoint — without requiring users to learn a graph DSL or change their Python control flow. Durable execution is the underlying mechanism, not the headline: positioning surfaces (README, docs leads, PyPI, marketing) lead with record → replay → improve (diagnose failures, test model/prompt swaps via replay overrides, compare cost and quality, ship updates with confidence).
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
