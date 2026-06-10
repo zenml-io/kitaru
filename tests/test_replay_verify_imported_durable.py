@@ -202,12 +202,10 @@ def test_durable_cli_parses_args_and_rejects_unknown_mode() -> None:
         parse_args(["--runner", "nonsense"])
 
 
-def test_duplicate_case_ids_are_rejected() -> None:
-    from examples.replay_verify_imported_cases.durable_verify_flow import (
-        ensure_unique_case_ids,
+def test_unknown_runner_mode_is_rejected_by_shared_resolver() -> None:
+    from examples.replay_verify_imported_cases.run_langfuse_pydanticai_demo import (
+        runner_callable,
     )
 
-    ensure_unique_case_ids(["rv-a", "rv-b"])
-
-    with pytest.raises(ValueError, match="rv-dup"):
-        ensure_unique_case_ids(["rv-dup", "rv-b", "rv-dup"])
+    with pytest.raises(ValueError, match="no-such-mode"):
+        runner_callable("no-such-mode", "baseline")

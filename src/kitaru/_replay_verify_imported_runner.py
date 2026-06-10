@@ -134,6 +134,19 @@ def verify_imported_cases(
             "check on which tools the candidate may run. Pass an explicit "
             "allowed_tool_names set (or None for the default registry)."
         )
+    duplicate_ids = sorted(
+        case_id
+        for case_id, count in Counter(case.case_id for case in cases).items()
+        if count > 1
+    )
+    if duplicate_ids:
+        raise ValueError(
+            "Duplicate case_id values in cohort: "
+            + ", ".join(duplicate_ids)
+            + ". Each imported case must have a unique case_id; duplicates "
+            "would silently double-count results and collide in downstream "
+            "per-case lookups."
+        )
     fields = tuple(comparison_fields or _comparison_fields_from_cases(cases))
     baseline_settings = dict(baseline_config or {})
     candidate_settings = dict(candidate_config or {})

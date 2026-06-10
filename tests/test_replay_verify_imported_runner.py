@@ -700,3 +700,22 @@ def test_lane_executor_exception_fails_the_case_closed() -> None:
     assert failed["verdict"] == "hold"
     assert "candidate_runner_failed" in failed["stop_reasons"]
     assert "lane exploded" in (failed["error"] or "")
+
+
+def test_duplicate_case_ids_are_rejected_before_any_lane() -> None:
+    cases = read_imported_cases_jsonl(_FIXTURE)
+    seen: list[str] = []
+
+    def executor(runner, case, invocation):
+        seen.append(case.case_id)
+        return runner(case, invocation)
+
+    with pytest.raises(ValueError, match="rv-model-only-eligible"):
+        verify_imported_cases(
+            [*cases, cases[0]],
+            baseline_runner=run_baseline_support_copilot_case,
+            candidate_runner=run_candidate_support_copilot_case,
+            expected_runner_entrypoint=SUPPORT_COPILOT_RUNNER_ENTRYPOINT,
+            lane_executor=executor,
+        )
+    assert seen == []

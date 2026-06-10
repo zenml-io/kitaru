@@ -73,6 +73,31 @@ class RunnerSelection:
     report_name: str
 
 
+def runner_callable(runner: str, role: str) -> ImportedRunnerCallable:
+    """Resolve the baseline/candidate callable for one runner mode.
+
+    Single source of truth for mode-to-callable resolution, shared by
+    `select_runner` and the durable flow's lane checkpoints (which must
+    re-resolve callables from serializable strings).
+    """
+    if runner == "deterministic":
+        if role == "baseline":
+            return run_baseline_support_copilot_case
+        return run_candidate_support_copilot_case
+    if runner == "live":
+        # Imported lazily so the deterministic path works without pydantic_ai.
+        from examples.replay_verify_imported_cases.support_copilot_live import (
+            run_baseline_support_copilot_case_live,
+            run_candidate_support_copilot_case_live,
+        )
+
+        if role == "baseline":
+            return run_baseline_support_copilot_case_live
+        return run_candidate_support_copilot_case_live
+    msg = f"Unknown runner {runner!r}; use 'deterministic' or 'live'."
+    raise ValueError(msg)
+
+
 def select_runner(
     runner: str,
     *,
@@ -88,24 +113,18 @@ def select_runner(
         return RunnerSelection(
             case_file=DEFAULT_CASE_FILE,
             expected_runner_entrypoint=RUNNER_ENTRYPOINT,
-            baseline_runner=run_baseline_support_copilot_case,
-            candidate_runner=run_candidate_support_copilot_case,
+            baseline_runner=runner_callable(runner, "baseline"),
+            candidate_runner=runner_callable(runner, "candidate"),
             baseline_config={**BASELINE_CONFIG, "agent_id": baseline},
             candidate_config={**CANDIDATE_CONFIG, "agent_id": candidate},
             report_name="Support Copilot imported-input demo",
         )
     if runner == "live":
-        # Imported lazily so the deterministic path works without pydantic_ai.
-        from examples.replay_verify_imported_cases.support_copilot_live import (
-            run_baseline_support_copilot_case_live,
-            run_candidate_support_copilot_case_live,
-        )
-
         return RunnerSelection(
             case_file=DEFAULT_LIVE_CASE_FILE,
             expected_runner_entrypoint=LIVE_RUNNER_ENTRYPOINT,
-            baseline_runner=run_baseline_support_copilot_case_live,
-            candidate_runner=run_candidate_support_copilot_case_live,
+            baseline_runner=runner_callable(runner, "baseline"),
+            candidate_runner=runner_callable(runner, "candidate"),
             baseline_config={
                 "agent_id": baseline,
                 "prompt_version": BASELINE_LIVE_CONFIG.prompt_version,

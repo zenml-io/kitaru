@@ -19,6 +19,7 @@ if __package__ in {None, ""}:
 
 import kitaru
 from examples.replay_verify_imported_cases.run_langfuse_pydanticai_demo import (
+    runner_callable,
     select_runner,
 )
 from examples.replay_verify_imported_cases.tool_registry import SAFE_TOOL_NAMES
@@ -43,47 +44,6 @@ def lane_id(role: str, case_id: str) -> str:
     return f"{role}_{safe}"
 
 
-def lane_runner(runner_mode: str, role: str) -> ImportedRunnerCallable:
-    """Resolve the runner callable for one lane.
-
-    Resolved inside the lane (from serializable strings) because checkpoint
-    inputs must be data, not callables.
-    """
-    if runner_mode == "deterministic":
-        from examples.replay_verify_imported_cases.support_copilot_demo import (
-            run_baseline_support_copilot_case,
-            run_candidate_support_copilot_case,
-        )
-
-        if role == "baseline":
-            return run_baseline_support_copilot_case
-        return run_candidate_support_copilot_case
-    if runner_mode == "live":
-        # Imported lazily so the deterministic path works without pydantic_ai.
-        from examples.replay_verify_imported_cases.support_copilot_live import (
-            run_baseline_support_copilot_case_live,
-            run_candidate_support_copilot_case_live,
-        )
-
-        if role == "baseline":
-            return run_baseline_support_copilot_case_live
-        return run_candidate_support_copilot_case_live
-    msg = f"Unknown runner_mode {runner_mode!r}; use 'deterministic' or 'live'."
-    raise ValueError(msg)
-
-
-def ensure_unique_case_ids(case_ids: list[str]) -> None:
-    """Reject cohorts with duplicate case ids before any lane runs.
-
-    Duplicate ids would silently mis-map case payloads in the row lookup and
-    collide on checkpoint invocation ids, so a custom cohort must fail loudly.
-    """
-    duplicates = sorted({cid for cid in case_ids if case_ids.count(cid) > 1})
-    if duplicates:
-        msg = f"Duplicate case_id values in cohort: {', '.join(duplicates)}"
-        raise ValueError(msg)
-
-
 def execute_lane_payload(
     *,
     role: str,
@@ -91,14 +51,21 @@ def execute_lane_payload(
     case_payload: dict[str, Any],
     invocation_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run one lane and return an output/error envelope.
+    """Run one lane and return an ``{"output": ...}`` or ``{"error": ...}`` envelope.
 
-    Never raises: a raising checkpoint would mark the ZenML step failed even
-    though the engine handles lane failures. The flow-side executor re-raises
-    from the error envelope so the engine's fail-closed path records it.
+    Both arms are enveloped on purpose. The checkpoint must never raise (a
+    raising checkpoint marks the ZenML step failed even though the engine
+    handles lane failures), so errors travel as data; successes are wrapped
+    the same way so the checkpoint output has one uniform shape and the
+    flow-side executor distinguishes the arms by key, not by exception
+    control flow. The executor re-raises from the error envelope so the
+    engine's fail-closed path records the failure.
+
+    The runner callable is re-resolved here from serializable strings
+    (checkpoint inputs must be data, not callables).
     """
     try:
-        runner = lane_runner(runner_mode, role)
+        runner = runner_callable(runner_mode, role)
         case = imported_case_from_mapping(case_payload)
         invocation = ImportedRunnerInvocation(
             case_id=str(invocation_payload["case_id"]),
@@ -181,14 +148,17 @@ def persist_verification_report(
 
 @flow
 def replay_verify_cohort(
-    case_file: str,
+    case_file: str | None = None,
     runner_mode: str = "deterministic",
     baseline: str = "support-copilot-v1",
     candidate: str = "support-copilot-v2",
     baseline_model: str | None = None,
     candidate_model: str | None = None,
 ) -> dict[str, Any]:
-    """Verify an imported cohort as a durable Kitaru execution."""
+    """Verify an imported cohort as a durable Kitaru execution.
+
+    With no ``case_file``, the runner mode's default cohort fixture is used.
+    """
     selection = select_runner(
         runner_mode,
         baseline=baseline,
@@ -196,13 +166,13 @@ def replay_verify_cohort(
         baseline_model=baseline_model,
         candidate_model=candidate_model,
     )
+    resolved_case_file = case_file or str(selection.case_file)
     rows = [
         json.loads(line)
-        for line in Path(case_file).read_text().splitlines()
+        for line in Path(resolved_case_file).read_text().splitlines()
         if line.strip()
     ]
     cases = [imported_case_from_mapping(row) for row in rows]
-    ensure_unique_case_ids([case.case_id for case in cases])
     row_by_id = {case.case_id: row for case, row in zip(cases, rows, strict=True)}
 
     # Kitaru has no native run tags yet; metadata is the labeling mechanism.
@@ -273,16 +243,8 @@ def run_durable_demo(
     candidate_model: str | None = None,
 ) -> dict[str, Any]:
     """Run the durable verifier flow and return exec_id plus the summary."""
-    selection = select_runner(
-        runner_mode,
-        baseline=baseline,
-        candidate=candidate,
-        baseline_model=baseline_model,
-        candidate_model=candidate_model,
-    )
-    resolved_case_file = case_file or str(selection.case_file)
     handle = replay_verify_cohort.run(
-        resolved_case_file,
+        case_file,
         runner_mode=runner_mode,
         baseline=baseline,
         candidate=candidate,
