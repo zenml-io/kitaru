@@ -2725,6 +2725,67 @@ def test_map_run_statistics_response_preserves_time_order() -> None:
     ]
 
 
+def test_map_run_statistics_response_trims_oldest_time_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"day": "2026-03-15"}, run_count=20),
+            SimpleNamespace(group_keys={"day": "2026-03-13"}, run_count=99),
+            SimpleNamespace(group_keys={"day": "2026-03-14"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"day": "2026-03-14"}, execution_count=1),
+        ExecutionStatisticsGroup(keys={"day": "2026-03-15"}, execution_count=20),
+    ]
+    assert statistics.truncated is True
+
+
+def test_map_run_statistics_response_trims_oldest_time_status_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"day": "2026-03-13", "status": "completed"},
+                run_count=99,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-14", "status": "failed"},
+                run_count=1,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-15", "status": "completed"},
+                run_count=20,
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day", "status"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-14", "status": "failed"},
+            execution_count=1,
+        ),
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-15", "status": "completed"},
+            execution_count=20,
+        ),
+    ]
+    assert statistics.truncated is True
+
+
 def test_map_run_statistics_response_sorts_counts_before_trimming() -> None:
     response = SimpleNamespace(
         groups=[
@@ -2949,6 +3010,34 @@ def test_statistics_fetches_global_count_from_zen_store() -> None:
     )
 
 
+def test_statistics_preserves_global_zero_without_grouping() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=0)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics()
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert request.groupings == []
+    assert statistics == ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=0)],
+        truncated=False,
+    )
+
+
 def test_statistics_fetches_metrics_from_zen_store() -> None:
     response = SimpleNamespace(
         groups=[
@@ -3002,6 +3091,67 @@ def _raw_statuses_from_backend_filter(filter_value: str) -> tuple[str, ...]:
     if filter_value.startswith("oneof:"):
         return tuple(json.loads(filter_value.removeprefix("oneof:")))
     return (filter_value,)
+
+
+def test_status_grouping_skips_global_zero_placeholders_before_max_groups() -> None:
+    responses_by_status = {
+        ExecutionStatus.RUNNING: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=0)],
+            truncated=False,
+        ),
+        ExecutionStatus.WAITING: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=3)],
+            truncated=False,
+        ),
+        ExecutionStatus.COMPLETED: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=5)],
+            truncated=False,
+        ),
+        ExecutionStatus.FAILED: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=0)],
+            truncated=False,
+        ),
+        ExecutionStatus.CANCELLED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(
+                    group_keys={},
+                    run_count=0,
+                    metrics={"duration_avg": None},
+                )
+            ],
+            truncated=False,
+        ),
+    }
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(
+                side_effect=[
+                    responses_by_status[public_status]
+                    for public_status in ExecutionStatus
+                ]
+            )
+        )
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(group_by=["status"], max_groups=2)
+
+    assert all(group.execution_count > 0 for group in statistics.groups)
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=5),
+            ExecutionStatisticsGroup(keys={"status": "waiting"}, execution_count=3),
+        ],
+        truncated=False,
+    )
 
 
 def test_status_grouping_without_status_filter_splits_by_public_status() -> None:
@@ -3080,6 +3230,38 @@ def test_statistics_status_filter_uses_one_backend_request() -> None:
     assert statistics.groups == [
         ExecutionStatisticsGroup(keys={"status": "cancelled"}, execution_count=4)
     ]
+
+
+def test_status_grouping_with_status_filter_skips_global_zero_placeholder() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=0)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status"],
+            status=ExecutionStatus.CANCELLED,
+            max_groups=5,
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert zen_store.get_run_statistics.call_count == 1
+    assert request.filter.status == 'oneof:["cancelled","stopped"]'
+    assert request.groupings == []
+    assert request.max_groups == 5
+    assert statistics == ExecutionStatistics(groups=[], truncated=False)
 
 
 def test_statistics_status_grouping_does_not_undercount_raw_status_truncation() -> None:

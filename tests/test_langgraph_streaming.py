@@ -54,7 +54,7 @@ class CountState(TypedDict):
     count: int
 
 
-def _count_graph():
+def _count_graph(*, with_checkpointer: bool = True):
     builder = StateGraph(cast(Any, CountState))
 
     def add_one(state: CountState) -> CountState:
@@ -63,6 +63,8 @@ def _count_graph():
     builder.add_node("add_one", add_one)
     builder.add_edge(START, "add_one")
     builder.add_edge("add_one", END)
+    if not with_checkpointer:
+        return builder.compile()
     return builder.compile(checkpointer=InMemorySaver())
 
 
@@ -202,6 +204,22 @@ def test_stream_returns_result_from_final_values_and_extracts_usage() -> None:
 
     assert result.status == "completed"
     assert result.output == {"count": 2}
+
+
+def test_stream_runs_graph_without_langgraph_checkpointer() -> None:
+    runner = KitaruGraphRunner(_count_graph(with_checkpointer=False), name="counter")
+
+    result = runner.stream(
+        LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="stream-no-checkpointer-thread",
+        ),
+        stream_mode="updates",
+    )
+
+    assert result.status == "completed"
+    assert result.output == {"count": 2}
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
 class UsageGraph:

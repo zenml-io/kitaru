@@ -69,10 +69,10 @@ latest = client.executions.latest(flow="content_pipeline")
 Use execution statistics when you want counts, trends, or health checks without
 fetching every individual execution first. This is the difference between asking
 "show me the last 20 executions" and asking "how many executions failed this
-week?" Kitaru sends the aggregate question to the active server and returns a
-small grouped result. Each group always includes an execution count. You can
-also ask for numeric metrics, such as average duration or the sum of a numeric
-execution metadata key.
+week?" Kitaru sends the aggregate question to the active Kitaru runtime and
+returns a small grouped result. Each group always includes an execution count.
+You can also ask for numeric metrics, such as average duration or the sum of a
+numeric execution metadata key.
 
 ```python
 from kitaru import KitaruClient
@@ -201,9 +201,9 @@ to whoever can read the CLI, SDK, or MCP response.
 
 {% hint style="warning" %}
 Metadata metrics read numeric execution metadata. If the metadata value is
-stored as text or as a nested object, the server cannot aggregate it as a
-number. Store the value as an integer or float when you want to use it in
-statistics.
+stored as text or as a nested object, the active Kitaru runtime cannot aggregate
+it as a number. Store the value as an integer or float when you want to use it
+in statistics.
 {% endhint %}
 
 ### LLM usage and cost metadata
@@ -264,19 +264,21 @@ not backfill missing summaries.
 {% endhint %}
 
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
-Multiple tag filters mean "executions that have all of these tags".
+Multiple tag filters mean "executions that have all of these tags". When
+`max_groups` truncates a time-grouped result, Kitaru keeps the newest time rows
+and still displays the rows from oldest to newest.
 
 {% hint style="info" %}
 `flow` and `stack` groupings currently return IDs (`flow_id` and `stack_id`),
-not display names. This avoids guessing when a flow or stack has been renamed or
-deleted. You can still filter by a flow or stack name.
+not display names. This avoids guessing when a flow or stack has been renamed
+or deleted. You can still filter by a flow or stack name.
 {% endhint %}
 
 {% hint style="info" %}
-v1 supports grouping by time and metadata, but not filtering by time range or
-metadata values yet. If you need "last 7 days" or "only executions where
-`customer_tier=enterprise`", fetch/list those executions separately or add a
-stable tag for that cohort before querying statistics.
+The current statistics surface supports grouping by time and metadata, but not
+filtering by time range or metadata values yet. If you need "last 7 days" or
+"only executions where `customer_tier=enterprise`", fetch/list those executions
+separately or add a stable tag for that cohort before querying statistics.
 {% endhint %}
 
 Agent and operations summaries should use this same general surface. For

@@ -401,6 +401,8 @@ fi
 # ---------------------------------------------------------------------------
 section_header "PydanticAI adapter"
 
+run_test "examples/chatbot/drive_local.py --help" \
+    $UV_RUN python examples/chatbot/drive_local.py --help
 run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 

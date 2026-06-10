@@ -48,7 +48,7 @@ right checkpoint strategy and human-in-the-loop guardrails. See
 
 ### Zero-config
 
-Wrap the agent and call it directly. The adapter auto-opens a flow and per-call checkpoints with the default `checkpoint_strategy="calls"` when you're outside of one.
+Wrap the agent and call it directly. The adapter auto-opens a flow and per-call checkpoints with the default `checkpoint_strategy="calls"` when you're outside of one. If you already have an explicit `@kitaru.flow`, call the agent directly from the flow body — not from inside another `@kitaru.checkpoint` — when you want model/tool calls to become separate checkpoint rows.
 
 ```python
 from pydantic_ai import Agent
@@ -70,11 +70,11 @@ isn't visible — wrap the call in an explicit `@kitaru.flow` there.
 
 ### Explicit boundaries
 
-For multi-turn workflows, named replay boundaries, or coordinated waits across turns, use `@kitaru.flow` and `@kitaru.checkpoint` yourself. Inside a checkpoint, `KitaruAgent` is a straight passthrough.
+For multi-turn workflows, named replay boundaries, or coordinated waits across turns, use `@kitaru.flow` and `@kitaru.checkpoint` yourself. Inside a checkpoint, `KitaruAgent` is a straight passthrough: the whole agent call belongs to the enclosing checkpoint, and internal PydanticAI model/tool activity is recorded as events and artifacts under that checkpoint instead of opening nested `*_tool` checkpoints.
 
 ### Checkpoint an agent turn
 
-This example shows explicit flow/checkpoint boundaries. Human approval waits are covered in the next sections.
+This example shows explicit flow/checkpoint boundaries. It creates one checkpoint per `ask(...)` call. Human approval waits are covered in the next sections.
 
 ```python
 import kitaru
@@ -98,6 +98,17 @@ print(handle.wait())
 ```
 
 Replay the flow with the original run ID to serve cached outputs for completed checkpoints and re-execute only what changed. See [Replay and overrides](../guides/replay-and-overrides.md).
+
+{% hint style="warning" %}
+This pattern checkpoints the whole agent turn. If the agent calls a tool, Kitaru stores that tool activity under the `ask` checkpoint as adapter events/artifacts; it does not create nested checkpoints such as `search_tool` or `lookup_price_tool`. To see ordinary PydanticAI model/tool calls as separate checkpoint rows, call the agent directly from flow scope:
+
+```python
+@kitaru.flow
+def research(topic: str) -> str:
+    result = durable_agent.run_sync(f"Open questions in {topic}")
+    return result.output
+```
+{% endhint %}
 
 ### Ask the human from a tool body
 
@@ -228,10 +239,12 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 
 | Strategy | How it maps | Replay unit | Best for |
 |---|---|---|---|
-| `"calls"` (default) | No turn checkpoint; each model/tool/MCP call becomes its own checkpoint | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
-| `"turn"` | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | Agents where one aggregated checkpoint and checkpoint artifacts like `event_log` / `run_summary` are more useful than per-call boundaries |
+| `"calls"` (default) | No turn checkpoint; each replay-safe model/tool/MCP call becomes its own checkpoint when the agent runs at flow scope outside any existing checkpoint | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
+| `"turn"` | One checkpoint per agent run; model/tool/MCP calls are child events and artifacts under that checkpoint | The full turn | Agents where one aggregated checkpoint and checkpoint artifacts like `event_log` / `run_summary` are more useful than per-call boundaries |
 
-**Replay semantics in one sentence.** If a flow crashes on the 8th model call of a turn, `"turn"` re-runs the whole turn; `"calls"` gives the earlier calls their own completed checkpoint boundaries. If you set `cache=True` on adapter-created checkpoint configs, repeated runs can reuse completed checkpoints when the logical inputs are the same; changed prompts, message history, model settings, tool arguments, tool call IDs, or behavior-changing run options produce different cache keys and should miss cache.
+**Replay semantics in one sentence.** If a flow crashes on the 8th model call of a turn, `"turn"` re-runs the whole turn; `"calls"` gives the earlier calls their own completed checkpoint boundaries when Kitaru is allowed to create those boundaries. If you set `cache=True` on adapter-created checkpoint configs, repeated runs can reuse completed checkpoints when the logical inputs are the same; changed prompts, message history, model settings, tool arguments, tool call IDs, or behavior-changing run options produce different cache keys and should miss cache.
+
+`checkpoint_strategy="calls"` cannot create nested checkpoints inside your own `@kitaru.checkpoint` body. If you wrap `durable_agent.run_sync(...)` in a checkpoint, the outer checkpoint wins and model/tool calls are recorded as adapter events/artifacts under that checkpoint.
 
 `checkpoint_strategy="calls"` is the default. It is shown here for clarity when setting per-call checkpoint configs:
 
@@ -454,6 +467,7 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 - **Auto-flow fails on a remote stack** — the in-process registry doesn't cross process boundaries. Use `@kitaru.flow` explicitly.
 - **Too many per-call checkpoints** — pass `checkpoint_strategy="turn"` to group a whole agent run into one turn checkpoint. Existing `granular_checkpoints=False` code still works as a compatibility alias.
 - **Replay cost control** — `checkpoint_strategy="calls"` gives per-call checkpoint boundaries, not a billing guarantee. Pair it with provider-side caching or idempotency for expensive calls.
+- **Tool calls show up only under artifacts or metadata** — check whether `durable_agent.run(...)` / `run_sync(...)` is inside your own `@kitaru.checkpoint`. That checkpoints the whole agent turn, so model/tool activity is recorded under that checkpoint instead of as separate `*_tool` rows. Move the agent call directly into a `@kitaru.flow` body to get per-call checkpoints.
 - **Checkpoints not appearing in the dashboard** — verify `kitaru status` shows a running server and that `kitaru init` has been run in the project root.
 
 ## Runnable examples
