@@ -206,15 +206,15 @@ def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
     """Render a compact LLM usage summary for execution details."""
     if not summary:
         return "none"
-    call_count = _display_int(summary.get("call_count"))
-    incurred = _display_int(summary.get("incurred_call_count"))
-    reused = _display_int(summary.get("reused_call_count"))
+    usage_record_count = _display_int(summary.get("usage_record_count"))
+    incurred = _display_int(summary.get("incurred_usage_record_count"))
+    reused = _display_int(summary.get("reused_usage_record_count"))
     total_tokens = _display_int(summary.get("total_tokens"))
     display_cost = _display_float(summary.get("display_cost_usd"))
     actual_cost = _display_float(summary.get("actual_cost_usd"))
     estimated_cost = _display_float(summary.get("estimated_cost_usd"))
     if None in (
-        call_count,
+        usage_record_count,
         incurred,
         reused,
         total_tokens,
@@ -224,7 +224,7 @@ def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
     ):
         return "summary metadata is malformed"
     return (
-        f"{call_count} calls ({incurred} incurred, {reused} reused), "
+        f"{usage_record_count} usage records ({incurred} incurred, {reused} reused), "
         f"{total_tokens} tokens, display cost ${display_cost:.6f} "
         f"(actual ${actual_cost:.6f}, estimated ${estimated_cost:.6f})"
     )

@@ -1558,7 +1558,7 @@ def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(
     assert persisted is True
     assert fetch_calls == 1
     assert summary is not None
-    assert summary["call_count"] == 1
+    assert summary["usage_record_count"] == 1
     assert summary["total_tokens"] == 9
 
 
@@ -1598,8 +1598,8 @@ def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
 def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
     """Terminal aggregation counts separate retry attempts for the same call."""
     from kitaru._llm_usage import (
-        LLM_FLAT_INCURRED_CALL_COUNT_KEY,
         LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
         LLM_USAGE_METADATA_KEY,
         LLM_USAGE_SUMMARY_METADATA_KEY,
         build_usage_record,
@@ -1656,16 +1656,16 @@ def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
 
     summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
     assert summary is not None
-    assert summary["call_count"] == 2
-    assert written[LLM_FLAT_INCURRED_CALL_COUNT_KEY] == 2
+    assert summary["usage_record_count"] == 2
+    assert written[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 2
     assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 25
 
 
 def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) -> None:
     """Terminal aggregation includes flow-level usage records."""
     from kitaru._llm_usage import (
-        LLM_FLAT_INCURRED_CALL_COUNT_KEY,
         LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
         LLM_USAGE_METADATA_KEY,
         LLM_USAGE_SUMMARY_METADATA_KEY,
         build_usage_record,
@@ -1707,9 +1707,9 @@ def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) ->
 
     summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
     assert summary is not None
-    assert summary["call_count"] == 1
+    assert summary["usage_record_count"] == 1
     assert summary["incurred_total_tokens"] == 42
-    assert written[LLM_FLAT_INCURRED_CALL_COUNT_KEY] == 1
+    assert written[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 1
     assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 42
 
 
@@ -1818,9 +1818,9 @@ def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -
 
     summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
     assert summary is not None
-    assert summary["call_count"] == 1
-    assert summary["incurred_call_count"] == 0
-    assert summary["reused_call_count"] == 1
+    assert summary["usage_record_count"] == 1
+    assert summary["incurred_usage_record_count"] == 0
+    assert summary["reused_usage_record_count"] == 1
     assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 0
     assert written[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 100
     assert written[LLM_FLAT_ACTUAL_COST_USD_KEY] == 0.0

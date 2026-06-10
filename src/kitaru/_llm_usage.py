@@ -20,9 +20,9 @@ LLM_USAGE_METADATA_KEY = "llm_usage_v1"
 LLM_USAGE_SUMMARY_METADATA_KEY = "llm_usage_summary_v1"
 LLM_USAGE_SCHEMA_VERSION = 1
 
-LLM_FLAT_CALL_COUNT_KEY = "kitaru_llm_call_count_v1"
-LLM_FLAT_INCURRED_CALL_COUNT_KEY = "kitaru_llm_incurred_call_count_v1"
-LLM_FLAT_REUSED_CALL_COUNT_KEY = "kitaru_llm_reused_call_count_v1"
+LLM_FLAT_USAGE_RECORD_COUNT_KEY = "kitaru_llm_usage_record_count_v1"
+LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY = "kitaru_llm_incurred_usage_record_count_v1"
+LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY = "kitaru_llm_reused_usage_record_count_v1"
 LLM_FLAT_TOTAL_TOKENS_KEY = "kitaru_llm_total_tokens_v1"
 LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY = "kitaru_llm_incurred_total_tokens_v1"
 LLM_FLAT_REUSED_TOTAL_TOKENS_KEY = "kitaru_llm_reused_total_tokens_v1"
@@ -39,15 +39,19 @@ LLM_FLAT_REUSED_OUTPUT_TOKENS_KEY = "kitaru_llm_reused_output_tokens_v1"
 
 _FlatSummaryCoercer = Callable[[Any], int | float]
 _FLAT_METADATA_FIELDS: tuple[tuple[str, str, _FlatSummaryCoercer], ...] = (
-    (LLM_FLAT_CALL_COUNT_KEY, "call_count", lambda value: _int_or_none(value) or 0),
     (
-        LLM_FLAT_INCURRED_CALL_COUNT_KEY,
-        "incurred_call_count",
+        LLM_FLAT_USAGE_RECORD_COUNT_KEY,
+        "usage_record_count",
         lambda value: _int_or_none(value) or 0,
     ),
     (
-        LLM_FLAT_REUSED_CALL_COUNT_KEY,
-        "reused_call_count",
+        LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
+        "incurred_usage_record_count",
+        lambda value: _int_or_none(value) or 0,
+    ),
+    (
+        LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
+        "reused_usage_record_count",
         lambda value: _int_or_none(value) or 0,
     ),
     (
@@ -258,6 +262,14 @@ def _jsonable_mapping(value: Any) -> dict[str, Any] | None:
     if isinstance(jsonable, Mapping):
         return {str(key): item for key, item in jsonable.items()}
     return {"value": jsonable}
+
+
+def add_optional_token_count(total: int | None, value: Any) -> int | None:
+    """Add one optional token count while preserving ``None`` for no data."""
+    token_count = _int_or_none(value)
+    if token_count is None:
+        return total
+    return (total or 0) + token_count
 
 
 def token_usage_from_mapping(value: Any) -> dict[str, Any]:
@@ -592,9 +604,9 @@ def empty_usage_summary() -> dict[str, Any]:
     """Return an empty v1 summary with every numeric field present."""
     return {
         "schema_version": LLM_USAGE_SCHEMA_VERSION,
-        "call_count": 0,
-        "incurred_call_count": 0,
-        "reused_call_count": 0,
+        "usage_record_count": 0,
+        "incurred_usage_record_count": 0,
+        "reused_usage_record_count": 0,
         "total_tokens": 0,
         "incurred_total_tokens": 0,
         "reused_total_tokens": 0,
@@ -650,11 +662,11 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
         is_reused = billing_effect == "reused_not_incurred"
         is_incurred = billing_effect == "incurred"
 
-        summary["call_count"] += 1
+        summary["usage_record_count"] += 1
         if is_incurred:
-            summary["incurred_call_count"] += 1
+            summary["incurred_usage_record_count"] += 1
         if is_reused:
-            summary["reused_call_count"] += 1
+            summary["reused_usage_record_count"] += 1
 
         input_tokens = _token(record, "input_tokens")
         output_tokens = _token(record, "output_tokens")
@@ -772,7 +784,7 @@ def execution_metadata_from_records(
 ) -> dict[str, Any]:
     """Build pipeline-run metadata from per-call records."""
     summary = aggregate_usage_records(records)
-    if not include_empty_summary and summary["call_count"] == 0:
+    if not include_empty_summary and summary["usage_record_count"] == 0:
         return {}
 
     metadata: dict[str, Any] = summary_to_flat_metadata(summary)

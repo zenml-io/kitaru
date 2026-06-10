@@ -16,12 +16,13 @@ from kitaru._llm_usage import (
     LLM_FLAT_ACTUAL_COST_USD_KEY,
     LLM_FLAT_DISPLAY_COST_USD_KEY,
     LLM_FLAT_ESTIMATED_COST_USD_KEY,
-    LLM_FLAT_INCURRED_CALL_COUNT_KEY,
     LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
-    LLM_FLAT_REUSED_CALL_COUNT_KEY,
+    LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
     LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+    LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
     LLM_USAGE_METADATA_KEY,
     LLM_USAGE_SUMMARY_METADATA_KEY,
+    add_optional_token_count,
     aggregate_usage_records,
     build_usage_record,
     execution_metadata_from_records,
@@ -29,6 +30,13 @@ from kitaru._llm_usage import (
     parse_usage_summary,
     usage_records_from_metadata,
 )
+
+
+def test_add_optional_token_count_preserves_missing_values() -> None:
+    assert add_optional_token_count(None, None) is None
+    assert add_optional_token_count(None, True) is None
+    assert add_optional_token_count(None, 0) == 0
+    assert add_optional_token_count(3, "4") == 7
 
 
 def test_aggregate_prefers_actual_cost_for_display() -> None:
@@ -51,8 +59,8 @@ def test_aggregate_prefers_actual_cost_for_display() -> None:
 
     summary = aggregate_usage_records([actual_record, estimated_record])
 
-    assert summary["call_count"] == 2
-    assert summary["incurred_call_count"] == 2
+    assert summary["usage_record_count"] == 2
+    assert summary["incurred_usage_record_count"] == 2
     assert summary["total_tokens"] == 25
     assert summary["actual_cost_usd"] == 0.25
     assert summary["estimated_cost_usd"] == 0.04
@@ -91,9 +99,9 @@ def test_reused_records_do_not_add_incurred_cost_or_tokens() -> None:
 
     summary = aggregate_usage_records([record])
 
-    assert summary["call_count"] == 1
-    assert summary["incurred_call_count"] == 0
-    assert summary["reused_call_count"] == 1
+    assert summary["usage_record_count"] == 1
+    assert summary["incurred_usage_record_count"] == 0
+    assert summary["reused_usage_record_count"] == 1
     assert summary["total_tokens"] == 120
     assert summary["reused_total_tokens"] == 120
     assert summary["incurred_total_tokens"] == 0
@@ -127,7 +135,7 @@ def test_retry_attempts_with_same_record_id_are_counted_separately() -> None:
 
     summary = aggregate_usage_records(records)
 
-    assert summary["call_count"] == 2
+    assert summary["usage_record_count"] == 2
     assert summary["incurred_total_tokens"] == 24
 
 
@@ -145,7 +153,7 @@ def test_duplicate_record_from_same_attempt_is_counted_once() -> None:
 
     summary = aggregate_usage_records(records)
 
-    assert summary["call_count"] == 1
+    assert summary["usage_record_count"] == 1
     assert summary["total_tokens"] == 11
 
 
@@ -258,8 +266,8 @@ def test_gemini_token_only_record_aggregates_without_cost() -> None:
 
     summary = aggregate_usage_records([record])
 
-    assert summary["call_count"] == 1
-    assert summary["incurred_call_count"] == 1
+    assert summary["usage_record_count"] == 1
+    assert summary["incurred_usage_record_count"] == 1
     assert summary["input_tokens"] == 8
     assert summary["output_tokens"] == 6
     assert summary["total_tokens"] == 14
@@ -327,7 +335,7 @@ def test_aggregate_skips_malformed_records_without_counting_them() -> None:
         [record, {"schema_version": 1, "record_id": "missing-blocks"}]
     )
 
-    assert summary["call_count"] == 1
+    assert summary["usage_record_count"] == 1
     assert "malformed_record_count" not in summary
 
 
@@ -402,9 +410,9 @@ def test_execution_metadata_uses_json_summary_and_flat_numeric_keys() -> None:
     summary = parse_usage_summary(metadata[LLM_USAGE_SUMMARY_METADATA_KEY])
 
     assert summary is not None
-    assert summary["call_count"] == 1
-    assert metadata[LLM_FLAT_INCURRED_CALL_COUNT_KEY] == 1
-    assert metadata[LLM_FLAT_REUSED_CALL_COUNT_KEY] == 0
+    assert summary["usage_record_count"] == 1
+    assert metadata[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 1
+    assert metadata[LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY] == 0
     assert metadata[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 42
     assert metadata[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 0
     assert metadata[LLM_FLAT_ACTUAL_COST_USD_KEY] == 0.0

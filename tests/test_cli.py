@@ -2279,9 +2279,9 @@ def test_executions_get_renders_execution_details(
             SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
         ],
         llm_usage_summary={
-            "call_count": 2,
-            "incurred_call_count": 1,
-            "reused_call_count": 1,
+            "usage_record_count": 2,
+            "incurred_usage_record_count": 1,
+            "reused_usage_record_count": 1,
             "total_tokens": 42,
             "display_cost_usd": 0.125,
             "actual_cost_usd": 0.1,
@@ -2307,7 +2307,7 @@ def test_executions_get_renders_execution_details(
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
-    assert "LLM usage: 2 calls (1 incurred, 1 reused), 42 tokens" in output
+    assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
 
 
 def test_executions_get_renders_malformed_llm_usage_summary_honestly(
@@ -2319,9 +2319,9 @@ def test_executions_get_renders_malformed_llm_usage_summary_honestly(
         flow_name="content_pipeline",
         status=ExecutionStatus.COMPLETED,
         llm_usage_summary={
-            "call_count": "not-an-int",
-            "incurred_call_count": True,
-            "reused_call_count": None,
+            "usage_record_count": "not-an-int",
+            "incurred_usage_record_count": True,
+            "reused_usage_record_count": None,
             "total_tokens": "not-an-int",
             "display_cost_usd": "not-a-number",
             "actual_cost_usd": float("nan"),
@@ -2353,9 +2353,9 @@ def test_executions_get_renders_valid_zero_llm_usage_summary(
         flow_name="content_pipeline",
         status=ExecutionStatus.COMPLETED,
         llm_usage_summary={
-            "call_count": 0,
-            "incurred_call_count": 0,
-            "reused_call_count": 0,
+            "usage_record_count": 0,
+            "incurred_usage_record_count": 0,
+            "reused_usage_record_count": 0,
             "total_tokens": 0,
             "display_cost_usd": 0.0,
             "actual_cost_usd": 0.0,
@@ -2373,7 +2373,7 @@ def test_executions_get_renders_valid_zero_llm_usage_summary(
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "LLM usage: 0 calls (0 incurred, 0 reused), 0 tokens" in output
+    assert "LLM usage: 0 usage records (0 incurred, 0 reused), 0 tokens" in output
     assert "display cost $0.000000" in output
 
 

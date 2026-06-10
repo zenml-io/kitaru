@@ -209,14 +209,18 @@ in statistics.
 ### LLM usage and cost metadata
 
 When an execution makes LLM calls through `kitaru.llm()` or the supported agent
-adapters, Kitaru records per-call `llm_usage_v1` metadata on the checkpoint that
-made or reused the call. When `FlowHandle.wait()` or `FlowHandle.get()` observes
-the execution finishing, Kitaru reads those checkpoint records and writes two
-execution-level views:
+adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
+that made or reused the provider work. One usage record usually means one
+provider interaction or one adapter-level graph/agent invocation, depending on
+which adapter produced it. When `FlowHandle.wait()` or `FlowHandle.get()`
+observes the execution finishing, Kitaru reads those checkpoint records and
+writes two execution-level views:
 
 - `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
   Python client parse it into `execution.llm_usage_summary`. It tells you what
-  happened in one execution.
+  happened in one execution. Its `usage_record_count`,
+  `incurred_usage_record_count`, and `reused_usage_record_count` fields count
+  Kitaru usage records, not raw provider API calls.
 - Flat numeric metadata keys such as `kitaru_llm_display_cost_usd_v1` and
   `kitaru_llm_total_tokens_v1` are the statistics view. Kitaru execution
   statistics can sum or average these because they are top-level numbers, not
@@ -248,10 +252,10 @@ kitaru executions statistics \
   --group-by time:day \
   --metric llm_tokens_sum:metadata:kitaru_llm_incurred_total_tokens_v1:sum
 
-# Count calls that reused checkpoint metadata instead of making a new provider call.
+# Count usage records that reused checkpoint metadata instead of incurring new usage.
 kitaru executions statistics \
   --group-by flow \
-  --metric llm_reused_calls:metadata:kitaru_llm_reused_call_count_v1:sum
+  --metric llm_reused_usage_records:metadata:kitaru_llm_reused_usage_record_count_v1:sum
 ```
 
 {% hint style="warning" %}

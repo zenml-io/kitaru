@@ -8,7 +8,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from kitaru._llm_usage import build_usage_record, log_usage_record
+from kitaru._llm_usage import (
+    add_optional_token_count,
+    build_usage_record,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -56,6 +61,52 @@ def _partial_messages_unavailable_warning() -> str:
         "not expose partial-message options. The invocation will still run, but "
         "live events may be coarse until the SDK yields complete messages."
     )
+
+
+def _canonical_usage_payload(
+    payload: ClaudeInvocationPayload,
+) -> Mapping[str, Any] | None:
+    if payload.usage is not None:
+        return payload.usage
+    model_usage = payload.model_usage
+    if model_usage is None:
+        return None
+    if any(
+        key in model_usage for key in ("input_tokens", "output_tokens", "total_tokens")
+    ):
+        return model_usage
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    saw_usage = False
+    for usage in model_usage.values():
+        if not isinstance(usage, Mapping):
+            continue
+        token_usage = token_usage_from_mapping(usage)
+        if not any(
+            token_usage[key] is not None
+            for key in ("input_tokens", "output_tokens", "total_tokens")
+        ):
+            continue
+        saw_usage = True
+        input_tokens = add_optional_token_count(
+            input_tokens, token_usage["input_tokens"]
+        )
+        output_tokens = add_optional_token_count(
+            output_tokens, token_usage["output_tokens"]
+        )
+        total_tokens = add_optional_token_count(
+            total_tokens, token_usage["total_tokens"]
+        )
+    if not saw_usage:
+        return model_usage
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "raw": model_usage,
+    }
 
 
 ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
@@ -482,6 +533,7 @@ class KitaruClaudeRunner:
         ]
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
+        canonical_usage = _canonical_usage_payload(payload)
         if self._capture.save_usage:
             usage_record = build_usage_record(
                 adapter="claude_agent_sdk",
@@ -489,7 +541,7 @@ class KitaruClaudeRunner:
                 call_name=self._name,
                 event_id=tracker.run_label,
                 record_id=tracker.run_label,
-                usage=payload.usage,
+                usage=canonical_usage,
                 actual_cost_usd=payload.cost_usd,
                 cost_source=(
                     "provider_reported" if payload.cost_usd is not None else "none"

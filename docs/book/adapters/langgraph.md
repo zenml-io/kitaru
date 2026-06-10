@@ -486,11 +486,13 @@ By default, event persistence is best-effort. A graph result should not disappea
 
 ## Usage and cost statistics
 
-When `save_usage=True` (the default), the graph-call adapter looks for credible token usage in the graph output and logs one canonical `llm_usage_v1` record for the graph call. The record is tied to the graph name and adapter run label, so the terminal execution summary can count it once.
+When `save_usage=True` (the default), the graph-call adapter logs one canonical `llm_usage_v1` record for the graph run. If calls-mode model events contain usage metadata, Kitaru sums those completed model-call usage payloads and uses that total for the graph-level record. In a concrete run with two model calls — 30 tokens, then 70 tokens — the final graph record reports 100 tokens rather than only the first message it happens to find.
 
-If the graph output does not expose token usage, Kitaru still records the graph call with empty token fields. That makes the summary’s call count mean “a graph call happened,” not “the adapter happened to find token metadata.” If you pass a `cost_calculator=` to `KitaruGraphRunner`, Kitaru stores the calculator result as `estimated_cost_usd`; calculator failures become warnings and do not fail the graph call. LangGraph records do not include provider-reported actual cost in this adapter path.
+If there is no usable event-level usage, Kitaru falls back to the graph output and looks for credible token usage there. It can aggregate multiple message-level usage payloads, but it does not combine event-derived usage and output-derived usage for the same graph run. That avoids the bad outcome where the same model response is counted once from a model event and a second time from the final graph state.
 
-`save_model_usage=True` is separate and narrower: in calls mode, it controls whether model-call event payloads include usage metadata when individual LangChain responses expose it. The execution-level LLM usage summary comes from the canonical `llm_usage_v1` records, which are written by the shared adapter finalization path and roll up after `FlowHandle.wait()` or `FlowHandle.get()` observes the terminal execution.
+If neither events nor the graph output expose token usage, Kitaru still records the graph call with empty token fields. That makes the summary’s `usage_record_count` mean “a Kitaru usage record exists for this graph call,” not “the adapter found token metadata.” If you pass a `cost_calculator=` to `KitaruGraphRunner`, Kitaru stores the calculator result as `estimated_cost_usd`; calculator failures become warnings and do not fail the graph call. LangGraph records do not include provider-reported actual cost in this adapter path.
+
+`save_model_usage=True` is separate and narrower: in calls mode, it controls whether model-call event payloads include usage metadata when individual LangChain responses expose it. If you set it to `False`, event-level usage is unavailable, so the graph-level record can only use the output fallback when `save_usage=True`. The execution-level LLM usage summary comes from the canonical `llm_usage_v1` records, which are written by the shared adapter finalization path and roll up after `FlowHandle.wait()` or `FlowHandle.get()` observes the terminal execution.
 
 ## What Kitaru does and does not do
 
