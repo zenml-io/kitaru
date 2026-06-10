@@ -679,6 +679,16 @@ def _group_sort_key(
     return (-group.execution_count, key_items)
 
 
+def _iter_run_statistics_group_entries(response: Any) -> Iterable[GroupEntry]:
+    """Yield normalized backend statistics group entries from a response."""
+    for group in getattr(response, "groups", []):
+        yield (
+            dict(getattr(group, "group_keys", None) or {}),
+            int(getattr(group, "run_count", 0)),
+            dict(getattr(group, "metrics", None) or {}),
+        )
+
+
 def _map_run_statistics_group_entries(
     group_entries: Iterable[GroupEntry],
     *,
@@ -748,14 +758,7 @@ def _map_run_statistics_response_with_groupings(
 ) -> ExecutionStatistics:
     """Map a run-statistics response using already-normalized groupings."""
     return _map_run_statistics_group_entries(
-        (
-            (
-                dict(getattr(group, "group_keys", {})),
-                int(getattr(group, "run_count", 0)),
-                dict(getattr(group, "metrics", {})),
-            )
-            for group in getattr(response, "groups", [])
-        ),
+        _iter_run_statistics_group_entries(response),
         normalized_groupings=normalized_groupings,
         normalized_metrics=normalized_metrics,
         max_groups=max_groups,
@@ -869,16 +872,13 @@ def get_execution_statistics(
         response = fetch_response(bucket_request)
         truncated = truncated or bool(getattr(response, "truncated", False))
 
-        for group in getattr(response, "groups", []):
-            raw_keys = dict(getattr(group, "group_keys", {}))
+        for raw_keys, run_count, raw_metrics in _iter_run_statistics_group_entries(
+            response
+        ):
+            if not request_parts.backend_groupings and not raw_keys and run_count == 0:
+                continue
             raw_keys[request_parts.status_grouping_name] = public_status.value
-            group_entries.append(
-                (
-                    raw_keys,
-                    int(getattr(group, "run_count", 0)),
-                    dict(getattr(group, "metrics", {})),
-                )
-            )
+            group_entries.append((raw_keys, run_count, raw_metrics))
 
     return _map_run_statistics_group_entries(
         group_entries,
