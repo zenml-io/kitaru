@@ -61,7 +61,7 @@ class DemoRunResult:
 
 
 @dataclass(frozen=True)
-class _RunnerSelection:
+class RunnerSelection:
     """Resolved runner mode: case file, entrypoint, callables, and configs."""
 
     case_file: Path
@@ -73,19 +73,19 @@ class _RunnerSelection:
     report_name: str
 
 
-def _select_runner(
+def select_runner(
     runner: str,
     *,
     baseline: str,
     candidate: str,
     baseline_model: str | None,
     candidate_model: str | None,
-) -> _RunnerSelection:
+) -> RunnerSelection:
     if runner == "deterministic":
         if baseline_model or candidate_model:
             msg = "--baseline-model/--candidate-model require --runner live."
             raise ValueError(msg)
-        return _RunnerSelection(
+        return RunnerSelection(
             case_file=DEFAULT_CASE_FILE,
             expected_runner_entrypoint=RUNNER_ENTRYPOINT,
             baseline_runner=run_baseline_support_copilot_case,
@@ -101,7 +101,7 @@ def _select_runner(
             run_candidate_support_copilot_case_live,
         )
 
-        return _RunnerSelection(
+        return RunnerSelection(
             case_file=DEFAULT_LIVE_CASE_FILE,
             expected_runner_entrypoint=LIVE_RUNNER_ENTRYPOINT,
             baseline_runner=run_baseline_support_copilot_case_live,
@@ -197,7 +197,7 @@ def run_demo(
     if source != "jsonl":
         msg = "This demo currently supports --source jsonl only."
         raise ValueError(msg)
-    selection = _select_runner(
+    selection = select_runner(
         runner,
         baseline=baseline,
         candidate=candidate,
