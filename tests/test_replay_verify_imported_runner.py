@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+from examples.replay_verify_imported_cases.prompt_config import (
+    BASELINE_CONFIG,
+    CANDIDATE_CONFIG,
+)
+from examples.replay_verify_imported_cases.support_copilot_demo import (
+    RUNNER_ENTRYPOINT as SUPPORT_COPILOT_RUNNER_ENTRYPOINT,
+)
+from examples.replay_verify_imported_cases.support_copilot_demo import (
+    run_baseline_support_copilot_case,
+    run_candidate_support_copilot_case,
+)
 
 from kitaru._replay_verify_imported_models import (
     FIXTURE_HARNESS_EXECUTION_MODE,
@@ -22,9 +34,16 @@ from kitaru._replay_verify_imported_runner import (
     ImportedRunnerOutput,
     verify_imported_cases,
 )
+from kitaru._replay_verify_imported_sources.jsonl import read_imported_cases_jsonl
 from kitaru._replay_verify_imported_validation import NO_TOOL_REGISTRY_EXPECTATION
 
 RUNNER_ENTRYPOINT = "run_support_copilot_case"
+
+_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "examples/replay_verify_imported_cases/fixtures"
+    / "support_copilot_imported_cases.jsonl"
+)
 
 
 def _observed_output(
@@ -628,3 +647,56 @@ def test_runner_distinguishes_fixture_harness_mode() -> None:
     assert report.summary["mode_detail"] == (
         "Fixture evidence; not a real-agent candidate comparison."
     )
+
+
+def _fixture_verify(lane_executor):
+    cases = read_imported_cases_jsonl(_FIXTURE)
+    return verify_imported_cases(
+        cases,
+        baseline_runner=run_baseline_support_copilot_case,
+        candidate_runner=run_candidate_support_copilot_case,
+        baseline_config={**BASELINE_CONFIG, "agent_id": "support-copilot-v1"},
+        candidate_config={**CANDIDATE_CONFIG, "agent_id": "support-copilot-v2"},
+        expected_runner_entrypoint=SUPPORT_COPILOT_RUNNER_ENTRYPOINT,
+        lane_executor=lane_executor,
+    )
+
+
+def test_lane_executor_runs_every_eligible_lane_and_no_stopped_case() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def executor(runner, case, invocation):
+        seen.append((invocation.role, case.case_id))
+        return runner(case, invocation)
+
+    report = _fixture_verify(executor)
+
+    assert report.summary["eligible_count"] == 4
+    assert sorted({role for role, _ in seen}) == ["baseline", "candidate"]
+    assert len([r for r, _ in seen if r == "baseline"]) == 4
+    assert len([r for r, _ in seen if r == "candidate"]) == 4
+    stopped_ids = {
+        result["case_id"]
+        for result in report.summary["case_results"]
+        if result["status"] == "stopped"
+    }
+    assert stopped_ids and all(cid not in stopped_ids for _, cid in seen)
+
+
+def test_lane_executor_exception_fails_the_case_closed() -> None:
+    def executor(runner, case, invocation):
+        if invocation.role == "candidate" and case.case_id == "rv-model-only-eligible":
+            raise RuntimeError("lane exploded")
+        return runner(case, invocation)
+
+    report = _fixture_verify(executor)
+
+    failed = next(
+        result
+        for result in report.summary["case_results"]
+        if result["case_id"] == "rv-model-only-eligible"
+    )
+    assert failed["status"] == "failed"
+    assert failed["verdict"] == "hold"
+    assert "candidate_runner_failed" in failed["stop_reasons"]
+    assert "lane exploded" in (failed["error"] or "")

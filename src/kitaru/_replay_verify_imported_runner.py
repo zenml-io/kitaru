@@ -68,6 +68,10 @@ RunnerReturn = Mapping[str, Any] | ImportedRunnerOutput
 ImportedRunnerCallable = Callable[
     [ImportedReplayCase, ImportedRunnerInvocation], RunnerReturn
 ]
+LaneExecutor = Callable[
+    [ImportedRunnerCallable, ImportedReplayCase, ImportedRunnerInvocation],
+    RunnerReturn,
+]
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,7 @@ def verify_imported_cases(
     allowed_tool_names: set[str] | NoToolRegistryExpectation | None = None,
     comparison_fields: Sequence[str] | None = None,
     created_at: str | None = None,
+    lane_executor: LaneExecutor | None = None,
 ) -> ImportedVerificationReport:
     """Validate and run imported cases through local baseline/candidate callables.
 
@@ -155,6 +160,7 @@ def verify_imported_cases(
             config=baseline_settings,
             comparison_fields=fields,
             execution_mode=execution_mode,
+            lane_executor=lane_executor,
         )
         if isinstance(baseline_result, _RunnerFailure):
             results.append(
@@ -183,6 +189,7 @@ def verify_imported_cases(
             config=candidate_settings,
             comparison_fields=fields,
             execution_mode=execution_mode,
+            lane_executor=lane_executor,
         )
         if isinstance(candidate_result, _RunnerFailure):
             results.append(
@@ -376,6 +383,7 @@ def _call_runner(
     config: Mapping[str, Any],
     comparison_fields: tuple[str, ...],
     execution_mode: str,
+    lane_executor: LaneExecutor | None = None,
 ) -> ImportedRunnerOutput | _RunnerFailure:
     invocation = ImportedRunnerInvocation(
         case_id=case.case_id,
@@ -388,7 +396,12 @@ def _call_runner(
         execution_mode=execution_mode,
     )
     try:
-        return _normalize_runner_output(runner(case, invocation))
+        raw = (
+            lane_executor(runner, case, invocation)
+            if lane_executor is not None
+            else runner(case, invocation)
+        )
+        return _normalize_runner_output(raw)
     except Exception as exc:  # pragma: no cover - exact exception type is app-owned.
         return _RunnerFailure(message=f"{type(exc).__name__}: {exc}")
 
