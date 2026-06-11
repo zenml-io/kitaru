@@ -140,11 +140,20 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
         fake_claude_sdk.__dict__["server_calls"][0]["tools"][0].name == "sandbox_exec"
     )
 
+    assert isinstance(server, dict)
+    assert sandbox_tool_module.KITARU_SANDBOX_MCP_METADATA_KEY not in server
+    cli_mcp_config = {key: value for key, value in server.items() if key != "instance"}
+    assert sandbox_tool_module.KITARU_SANDBOX_MCP_METADATA_KEY not in cli_mcp_config
+    assert sandbox_tool_module.KITARU_SANDBOX_MCP_METADATA_KEY not in json.dumps(
+        cli_mcp_config, default=repr
+    )
+
     metadata = sandbox_tool_module.kitaru_sandbox_mcp_metadata(server)
     assert metadata == {
         "kind": "kitaru_sandbox_command_mcp_server",
         "server_name": "kitaru_custom",
         "tool_name": "sandbox_exec",
+        "description": "Run it safely",
         "allowed_tool_name": "mcp__kitaru_custom__sandbox_exec",
         "default_max_chars": 123,
         "default_cleanup": "close",
@@ -184,11 +193,23 @@ def test_real_installed_sdk_server_shape_drives_manifest_and_cache_identity(
     assert server["type"] == "sdk"
     assert server["name"] == "kitaru"
     assert "instance" in server
+    assert sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KEY not in server
+    cli_mcp_config = {key: value for key, value in server.items() if key != "instance"}
+    assert sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KEY not in cli_mcp_config
+    assert sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KEY not in json.dumps(
+        cli_mcp_config, default=repr
+    )
+
     metadata = sandbox_tool.kitaru_sandbox_mcp_metadata(server)
     assert metadata == {
         "kind": "kitaru_sandbox_command_mcp_server",
         "server_name": "kitaru",
         "tool_name": "run_command",
+        "description": (
+            "Run a shell command or argv-style command list through the active "
+            "Kitaru stack's sandbox component. Use this instead of Claude's "
+            "built-in Bash when command execution should be owned by Kitaru."
+        ),
         "allowed_tool_name": "mcp__kitaru__run_command",
         "default_max_chars": 321,
         "default_cleanup": "close",
@@ -202,6 +223,27 @@ def test_real_installed_sdk_server_shape_drives_manifest_and_cache_identity(
     mcp_servers = cast(dict[str, Any], options["mcp_servers"])
     assert mcp_servers["kitaru"] == metadata
     assert serialization.to_cache_identity(server) == metadata
+
+
+def test_kitaru_sandbox_mcp_server_cache_identity_includes_description(
+    sandbox_tool_module: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._serialization"
+    )
+
+    concise_server = sandbox_tool_module.create_kitaru_sandbox_mcp_server(
+        description="Run only safe read commands."
+    )
+    broader_server = sandbox_tool_module.create_kitaru_sandbox_mcp_server(
+        description="Run read and write commands when needed."
+    )
+
+    concise_identity = serialization.to_cache_identity(concise_server)
+    broader_identity = serialization.to_cache_identity(broader_server)
+    assert concise_identity["description"] == "Run only safe read commands."
+    assert broader_identity["description"] == "Run read and write commands when needed."
+    assert concise_identity != broader_identity
 
 
 def test_handler_offloads_shared_sandbox_helper(
@@ -294,6 +336,53 @@ def test_non_zero_process_exit_is_completed_tool_result(
     payload = _payload(result)
     assert payload["status"] == "completed"
     assert payload["exit_code"] == 17
+    assert result["is_error"] is False
+
+
+def test_env_redactions_sort_by_length_then_value(
+    sandbox_tool_module: types.ModuleType,
+) -> None:
+    assert sandbox_tool_module._env_redactions(
+        {
+            "FIRST_CONFIG": "zzzz",
+            "SECOND_CONFIG": "aaaa",
+            "THIRD_CONFIG": "longer-value",
+        }
+    ) == ("longer-value", "aaaa", "zzzz")
+
+
+def test_handler_redacts_non_trivial_env_values_from_innocuous_keys(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_value = '{"api_key":"dummy-secret-marker"}'
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        _ = command, kwargs
+        return _sandbox_result(
+            stdout=f"loaded config {config_value}\n",
+            stderr=f"debug config {config_value}\n",
+            cleanup_error=f"cleanup config {config_value}",
+        )
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+
+    result = asyncio.run(
+        server["tools"][0].handler(
+            {"command": "echo hi", "env": {"CONFIG": config_value}}
+        )
+    )
+
+    payload = _payload(result)
+    assert payload["stdout"] == "loaded config [REDACTED_ENV]\n"
+    assert payload["stderr"] == "debug config [REDACTED_ENV]\n"
+    assert payload["cleanup"]["error"] == "cleanup config [REDACTED_ENV]"
+    assert config_value not in json.dumps(payload)
     assert result["is_error"] is False
 
 
@@ -448,9 +537,28 @@ def test_invalid_helper_defaults_raise_usage_errors(
 ) -> None:
     with pytest.raises(KitaruUsageError, match="server_name"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(server_name=" ")
+    with pytest.raises(KitaruUsageError, match="server_name"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(server_name="bad name")
+    with pytest.raises(KitaruUsageError, match="server_name"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(server_name="bad.name")
+    with pytest.raises(KitaruUsageError, match="server_name"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(server_name="bad__name")
+    with pytest.raises(KitaruUsageError, match="tool_name"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(tool_name="run command")
+    with pytest.raises(KitaruUsageError, match="tool_name"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(tool_name="run__command")
     with pytest.raises(KitaruUsageError, match="default_max_chars"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=0)
     with pytest.raises(KitaruUsageError, match="default_max_chars"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=True)
     with pytest.raises(KitaruUsageError, match="default_cleanup"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_cleanup="keep")
+
+
+def test_allowed_tool_name_rejects_invalid_components(
+    sandbox_tool_module: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="server_name"):
+        sandbox_tool_module.allowed_tool_name("bad name", "run_command")
+    with pytest.raises(KitaruUsageError, match="tool_name"):
+        sandbox_tool_module.allowed_tool_name("kitaru", "run__command")

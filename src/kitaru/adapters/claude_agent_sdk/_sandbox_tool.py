@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from typing import Any, Literal, cast
 
 from kitaru._config._sandbox import DEFAULT_SANDBOX_COMMAND_MAX_CHARS
@@ -22,11 +24,21 @@ SandboxCommand = str | list[str]
 
 KITARU_SANDBOX_MCP_SERVER_NAME = "kitaru"
 KITARU_SANDBOX_COMMAND_TOOL_NAME = "run_command"
-KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME = (
-    f"mcp__{KITARU_SANDBOX_MCP_SERVER_NAME}__{KITARU_SANDBOX_COMMAND_TOOL_NAME}"
+
+
+def _format_allowed_tool_name(server_name: str, tool_name: str) -> str:
+    return f"mcp__{server_name}__{tool_name}"
+
+
+KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME = _format_allowed_tool_name(
+    KITARU_SANDBOX_MCP_SERVER_NAME,
+    KITARU_SANDBOX_COMMAND_TOOL_NAME,
 )
 KITARU_SANDBOX_MCP_METADATA_KIND = "kitaru_sandbox_command_mcp_server"
 KITARU_SANDBOX_MCP_METADATA_KEY = "__kitaru_sandbox_command_mcp_server__"
+
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+_PRIVATE_METADATA_ATTRIBUTE = "_kitaru_sandbox_mcp_metadata"
 
 _DEFAULT_DESCRIPTION = (
     "Run a shell command or argv-style command list through the active Kitaru "
@@ -92,13 +104,14 @@ def create_kitaru_sandbox_mcp_server(
     """
     normalized_server_name = _normalize_identifier(server_name, "server_name")
     normalized_tool_name = _normalize_identifier(tool_name, "tool_name")
+    normalized_description = description or _DEFAULT_DESCRIPTION
     normalized_max_chars = _normalize_default_max_chars(default_max_chars)
     normalized_cleanup = _normalize_default_cleanup(default_cleanup)
     tool_api, create_server = _claude_sdk_mcp_apis()
 
     sdk_tool = create_kitaru_sandbox_command_tool(
         tool_name=normalized_tool_name,
-        description=description,
+        description=normalized_description,
         default_max_chars=normalized_max_chars,
         default_cleanup=normalized_cleanup,
         tool_api=tool_api,
@@ -106,14 +119,14 @@ def create_kitaru_sandbox_mcp_server(
     server = create_server(
         name=normalized_server_name, version="1.0.0", tools=[sdk_tool]
     )
-    _attach_metadata(
+    return _attach_metadata(
         server,
         server_name=normalized_server_name,
         tool_name=normalized_tool_name,
+        description=normalized_description,
         default_max_chars=normalized_max_chars,
         default_cleanup=normalized_cleanup,
     )
-    return server
 
 
 def create_kitaru_sandbox_command_tool(
@@ -313,20 +326,21 @@ def _run_sandbox_command(
 
 def kitaru_sandbox_mcp_metadata(value: Any) -> dict[str, Any] | None:
     """Return Kitaru sandbox MCP metadata attached to a server config."""
-    if not isinstance(value, Mapping):
-        return None
-    metadata = value.get(KITARU_SANDBOX_MCP_METADATA_KEY)
-    if (
-        isinstance(metadata, Mapping)
-        and metadata.get("kind") == KITARU_SANDBOX_MCP_METADATA_KIND
-    ):
-        return dict(metadata)
+    metadata = getattr(value, _PRIVATE_METADATA_ATTRIBUTE, None)
+    if _is_kitaru_sandbox_mcp_metadata(metadata):
+        return dict(cast(Mapping[str, Any], metadata))
+    if isinstance(value, Mapping):
+        metadata = value.get(KITARU_SANDBOX_MCP_METADATA_KEY)
+        if _is_kitaru_sandbox_mcp_metadata(metadata):
+            return dict(cast(Mapping[str, Any], metadata))
     return None
 
 
 def allowed_tool_name(server_name: str, tool_name: str) -> str:
     """Build Claude's allowed-tools entry for an MCP server tool."""
-    return f"mcp__{server_name}__{tool_name}"
+    normalized_server_name = _normalize_identifier(server_name, "server_name")
+    normalized_tool_name = _normalize_identifier(tool_name, "tool_name")
+    return _format_allowed_tool_name(normalized_server_name, normalized_tool_name)
 
 
 def _claude_sdk_mcp_apis() -> tuple[Any, Any]:
@@ -341,23 +355,49 @@ def _claude_sdk_mcp_apis() -> tuple[Any, Any]:
     return tool, create_sdk_mcp_server
 
 
+class _KitaruSandboxMcpServerConfig(dict[str, Any]):
+    """Dict-shaped Claude MCP config with private Kitaru metadata."""
+
+    def __init__(
+        self,
+        server: Mapping[str, Any],
+        *,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        super().__init__(server)
+        setattr(self, _PRIVATE_METADATA_ATTRIBUTE, dict(metadata))
+
+
+def _is_kitaru_sandbox_mcp_metadata(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and value.get("kind") == KITARU_SANDBOX_MCP_METADATA_KIND
+    )
+
+
 def _attach_metadata(
     server: Any,
     *,
     server_name: str,
     tool_name: str,
+    description: str,
     default_max_chars: int,
     default_cleanup: SandboxCommandCleanup,
-) -> None:
+) -> Any:
+    metadata = {
+        "kind": KITARU_SANDBOX_MCP_METADATA_KIND,
+        "server_name": server_name,
+        "tool_name": tool_name,
+        "description": description,
+        "allowed_tool_name": allowed_tool_name(server_name, tool_name),
+        "default_max_chars": default_max_chars,
+        "default_cleanup": default_cleanup,
+    }
     if isinstance(server, dict):
-        server[KITARU_SANDBOX_MCP_METADATA_KEY] = {
-            "kind": KITARU_SANDBOX_MCP_METADATA_KIND,
-            "server_name": server_name,
-            "tool_name": tool_name,
-            "allowed_tool_name": allowed_tool_name(server_name, tool_name),
-            "default_max_chars": default_max_chars,
-            "default_cleanup": default_cleanup,
-        }
+        return _KitaruSandboxMcpServerConfig(server, metadata=metadata)
+    with suppress(AttributeError, TypeError):
+        setattr(server, _PRIVATE_METADATA_ATTRIBUTE, metadata)
+    return server
 
 
 def _claude_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -392,8 +432,6 @@ _SENSITIVE_ENV_KEY_FRAGMENTS = (
     "secret",
     "token",
 )
-_SECRET_VALUE_PREFIXES = ("sk-", "ak_", "pk_", "Bearer ")
-_SECRET_VALUE_FRAGMENTS = ("secret", "token", "password")
 
 
 def _env_redactions(env: Mapping[str, str] | None) -> tuple[str, ...]:
@@ -403,29 +441,16 @@ def _env_redactions(env: Mapping[str, str] | None) -> tuple[str, ...]:
     for key, value in env.items():
         if _should_redact_env_value(key, value):
             values.add(value)
-    return tuple(sorted(values, key=lambda item: len(item), reverse=True))
+    return tuple(sorted(values, key=lambda item: (-len(item), item)))
 
 
 def _should_redact_env_value(key: str, value: str) -> bool:
-    if len(value) < 4:
+    if not value:
         return False
     lowered_key = key.lower()
     if any(fragment in lowered_key for fragment in _SENSITIVE_ENV_KEY_FRAGMENTS):
         return True
-    return _is_secret_like_env_value(value)
-
-
-def _is_secret_like_env_value(value: str) -> bool:
-    lowered_value = value.lower()
-    if any(value.startswith(prefix) for prefix in _SECRET_VALUE_PREFIXES):
-        return True
-    if any(fragment in lowered_value for fragment in _SECRET_VALUE_FRAGMENTS):
-        return True
-    return (
-        len(value) >= 8
-        and any(char.isalpha() for char in value)
-        and any(char.isdigit() for char in value)
-    )
+    return len(value) >= 4
 
 
 def _redact_env_values(value: Any, redactions: tuple[str, ...]) -> Any:
@@ -464,7 +489,13 @@ def _normalize_identifier(value: str, field_name: str) -> str:
         raise KitaruUsageError(
             f"Claude sandbox MCP `{field_name}` must be a non-empty string."
         )
-    return value.strip()
+    normalized = value.strip()
+    if "__" in normalized or _IDENTIFIER_PATTERN.fullmatch(normalized) is None:
+        raise KitaruUsageError(
+            f"Claude sandbox MCP `{field_name}` must contain only letters, "
+            "digits, underscores, or hyphens, and must not contain `__`."
+        )
+    return normalized
 
 
 def _normalize_default_max_chars(value: int) -> int:

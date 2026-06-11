@@ -393,6 +393,7 @@ def _kitaru_sandbox_server_config(
     *,
     server_name: str = "kitaru",
     tool_name: str = "run_command",
+    description: str = "Run sandbox commands.",
     default_max_chars: int = 1_048_576,
     default_cleanup: str = "destroy",
 ) -> dict[str, object]:
@@ -407,6 +408,7 @@ def _kitaru_sandbox_server_config(
             "kind": sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KIND,
             "server_name": server_name,
             "tool_name": tool_name,
+            "description": description,
             "allowed_tool_name": f"mcp__{server_name}__{tool_name}",
             "default_max_chars": default_max_chars,
             "default_cleanup": default_cleanup,
@@ -436,6 +438,7 @@ def test_kitaru_sandbox_mcp_server_manifest_records_metadata(
         "kind": "kitaru_sandbox_command_mcp_server",
         "server_name": "kitaru",
         "tool_name": "run_command",
+        "description": "Run sandbox commands.",
         "allowed_tool_name": "mcp__kitaru__run_command",
         "default_max_chars": 123,
         "default_cleanup": "close",
@@ -478,11 +481,22 @@ def test_kitaru_sandbox_mcp_server_cache_identity_changes_by_configuration(
             }
         },
     )
+    description_key = runner._invocation_cache_key(
+        request,
+        options={
+            "mcp_servers": {
+                "kitaru": _kitaru_sandbox_server_config(
+                    description="Run sandbox commands with a stricter policy."
+                )
+            }
+        },
+    )
 
     assert default_key == same_default_key
     assert default_key != no_server_key
     assert renamed_key != default_key
     assert defaults_key != default_key
+    assert description_key != default_key
 
 
 def test_options_manifest_redacts_sequence_pairs(

@@ -59,6 +59,9 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert claude_adapter.KitaruClaudeRunner.run_stream
     assert claude_adapter.KitaruClaudeRunner.run_stream_sync
     assert claude_adapter.create_kitaru_sandbox_mcp_server
+    assert claude_adapter.allowed_tool_name("kitaru_custom", "sandbox_exec") == (
+        "mcp__kitaru_custom__sandbox_exec"
+    )
     assert claude_adapter.KITARU_SANDBOX_MCP_SERVER_NAME == "kitaru"
     assert claude_adapter.KITARU_SANDBOX_COMMAND_TOOL_NAME == "run_command"
     assert (
@@ -84,6 +87,7 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert "calls" not in public_names
     assert "runner_call" not in public_names
     assert "durability_mode" not in public_names
+    assert "allowed_tool_name" in public_names
 
     signature = inspect.signature(claude_adapter.KitaruClaudeRunner)
     assert "checkpoint_strategy" in signature.parameters

@@ -721,6 +721,14 @@ created with `tool(...)` are registered through `create_sdk_mcp_server(...)` and
 `ClaudeAgentOptions(mcp_servers=...)`, which is what
 `create_kitaru_sandbox_mcp_server()` builds for you.
 
+If you customize the server or tool name, build the matching allowed-tools entry
+with `allowed_tool_name(server_name, tool_name)` instead of hand-writing the
+`mcp__...` string:
+
+```python
+from kitaru.adapters.claude_agent_sdk import allowed_tool_name
+```
+
 This helper does **not** transparently redirect Claude's built-in `Bash`. If you
 want command execution to be Kitaru-owned, deny or omit `Bash` and give Claude
 the Kitaru MCP tool instead. Claude's own `ClaudeAgentOptions(sandbox=...)` is
@@ -751,9 +759,10 @@ That avoids the bad outcome where Claude asks for a simple inspection command
 and Kitaru silently runs it in the wrong sandbox.
 
 {% hint style="warning" %}
-Kitaru does not include `env` values in the tool output. Claude may still record
-the tool **input** in its own messages or transcript. Avoid passing secrets
-through `env` unless you are comfortable with those values appearing in
+Kitaru redacts non-trivial `env` values, plus values from secret-like keys such
+as `TOKEN`, `API_KEY`, or `PASSWORD`, from the returned tool output. Claude may
+still record the tool **input** in its own messages or transcript. Avoid passing
+secrets through `env` unless you are comfortable with those values appearing in
 Claude-side records.
 {% endhint %}
 
