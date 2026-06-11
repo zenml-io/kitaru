@@ -1,0 +1,424 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from kitaru.adapters.pydantic_ai import _sandbox
+from kitaru.config import SandboxCommandResult
+
+
+def _fake_core_result(
+    *,
+    command: str | list[str] = "python --version",
+    cwd: str | None = "/workspace",
+    stdout: str = "Python 3.12.0\n",
+    stderr: str = "",
+    exit_code: int = 0,
+    stdout_truncated: bool = False,
+    stderr_truncated: bool = False,
+    cleanup_succeeded: bool = True,
+    cleanup_error: str | None = None,
+) -> SandboxCommandResult:
+    return SandboxCommandResult(
+        command=command,
+        cwd=cwd,
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=exit_code,
+        stdout_truncated=stdout_truncated,
+        stderr_truncated=stderr_truncated,
+        stack_id="stack-1",
+        stack_name="dev",
+        sandbox_id="sandbox-1",
+        sandbox_name="sandbox-dev",
+        session_id="session-1",
+        cleanup="destroy",
+        cleanup_succeeded=cleanup_succeeded,
+        cleanup_error=cleanup_error,
+    )
+
+
+def _tool_context() -> Any:
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx.tool_call_id = "call_sandbox"
+    return ctx
+
+
+async def _get_tool(toolset: Any, ctx: Any) -> Any:
+    return (await toolset.get_tools(ctx))[_sandbox.SANDBOX_COMMAND_TOOL_NAME]
+
+
+def _install_checkpoint_recorder(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from kitaru.runtime import _checkpoint_scope
+
+    checkpoint_steps: list[str] = []
+
+    async def fake_checkpoint(
+        *, step_name: str, body: Callable[[], Awaitable[Any]], **kwargs: Any
+    ) -> Any:
+        checkpoint_steps.append(step_name)
+        with _checkpoint_scope(
+            name=step_name,
+            checkpoint_type=kwargs["config"].get("type", "tool_call"),
+        ):
+            return await body()
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+    return checkpoint_steps
+
+
+def _install_fake_tracker(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    recorded_events: list[dict[str, Any]] = []
+
+    class FakeTracker:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, Any]:
+            assert tool_call_id == "call_sandbox"
+            return "event-1", object()
+
+        def record_tool_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded_events.append(kwargs)
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: FakeTracker(),
+    )
+    return recorded_events
+
+
+def _assert_recorded_tool_event(
+    event: dict[str, Any],
+    *,
+    status: str,
+    error_type: type[BaseException] | None = None,
+) -> None:
+    assert event["status"] == status
+    assert event["name"] == _sandbox.SANDBOX_COMMAND_TOOL_NAME
+    assert event["toolset_kind"] == "function"
+    assert event["capture_mode"] == "metadata"
+    assert isinstance(event["duration_ms"], float)
+    assert event["hitl"] is False
+    assert event["artifacts"] == {}
+    if error_type is None:
+        assert "error" not in event
+    else:
+        assert isinstance(event["error"], error_type)
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_toolset_exposes_safe_function_tool_schema() -> None:
+    from pydantic_ai import FunctionToolset
+
+    toolset = _sandbox.sandbox_command_toolset(max_chars=20_000)
+
+    assert isinstance(toolset, FunctionToolset)
+    tool = await _get_tool(toolset, _tool_context())
+    schema = tool.tool_def.parameters_json_schema
+    properties = schema["properties"]
+
+    assert set(properties) == {"command", "cwd"}
+    assert schema["required"] == ["command"]
+    assert "env" not in properties
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_calls_shared_helper_with_factory_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import SandboxCommandToolResult
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_sandbox_command(*args: Any, **kwargs: Any) -> SandboxCommandResult:
+        calls.append({"args": args, "kwargs": kwargs})
+        return _fake_core_result(command=cast(str, args[0]), cwd=kwargs.get("cwd"))
+
+    monkeypatch.setattr(
+        _sandbox.kitaru, "run_sandbox_command", fake_run_sandbox_command
+    )
+    toolset = _sandbox.sandbox_command_toolset(max_chars=123, cleanup="close")
+    ctx = _tool_context()
+    tool = await _get_tool(toolset, ctx)
+
+    result = await toolset.call_tool(
+        _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+        {"command": "python --version", "cwd": "/workspace"},
+        ctx,
+        tool,
+    )
+
+    assert isinstance(result, SandboxCommandToolResult)
+    assert result.stdout == "Python 3.12.0\n"
+    assert calls == [
+        {
+            "args": ("python --version",),
+            "kwargs": {"cwd": "/workspace", "max_chars": 123, "cleanup": "close"},
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_uses_llm_facing_default_max_chars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_sandbox_command(*_args: Any, **kwargs: Any) -> SandboxCommandResult:
+        calls.append(kwargs)
+        return _fake_core_result()
+
+    monkeypatch.setattr(
+        _sandbox.kitaru, "run_sandbox_command", fake_run_sandbox_command
+    )
+    toolset = _sandbox.sandbox_command_toolset()
+    ctx = _tool_context()
+    tool = await _get_tool(toolset, ctx)
+
+    await toolset.call_tool(
+        _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+        {"command": "python --version"},
+        ctx,
+        tool,
+    )
+
+    assert calls == [
+        {
+            "cwd": None,
+            "max_chars": _sandbox.DEFAULT_SANDBOX_TOOL_MAX_CHARS,
+            "cleanup": "destroy",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_result_excludes_infrastructure_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _sandbox.kitaru,
+        "run_sandbox_command",
+        lambda *_args, **_kwargs: _fake_core_result(),
+    )
+    toolset = _sandbox.sandbox_command_toolset()
+    ctx = _tool_context()
+    tool = await _get_tool(toolset, ctx)
+
+    result = await toolset.call_tool(
+        _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+        {"command": "python --version"},
+        ctx,
+        tool,
+    )
+
+    assert result.model_dump(mode="json") == {
+        "command": "python --version",
+        "cwd": "/workspace",
+        "stdout": "Python 3.12.0\n",
+        "stderr": "",
+        "exit_code": 0,
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+        "cleanup_succeeded": True,
+        "cleanup_error": None,
+    }
+    assert "stack_id" not in result.model_dump(mode="json")
+    assert "sandbox_id" not in result.model_dump(mode="json")
+    assert "session_id" not in result.model_dump(mode="json")
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_returns_non_zero_exit_as_normal_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _sandbox.kitaru,
+        "run_sandbox_command",
+        lambda *_args, **_kwargs: _fake_core_result(
+            stdout="", stderr="nope", exit_code=7
+        ),
+    )
+    toolset = _sandbox.sandbox_command_toolset()
+    ctx = _tool_context()
+    tool = await _get_tool(toolset, ctx)
+
+    result = await toolset.call_tool(
+        _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+        {"command": "false"},
+        ctx,
+        tool,
+    )
+
+    assert result.exit_code == 7
+    assert result.stderr == "nope"
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_propagates_helper_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.errors import KitaruStateError
+
+    def raise_missing_sandbox(*_args: Any, **_kwargs: Any) -> SandboxCommandResult:
+        raise KitaruStateError("Active stack has no sandbox component.")
+
+    monkeypatch.setattr(_sandbox.kitaru, "run_sandbox_command", raise_missing_sandbox)
+    toolset = _sandbox.sandbox_command_toolset()
+    ctx = _tool_context()
+    tool = await _get_tool(toolset, ctx)
+
+    with pytest.raises(KitaruStateError, match="no sandbox"):
+        await toolset.call_tool(
+            _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+            {"command": "python --version"},
+            ctx,
+            tool,
+        )
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_toolset_uses_existing_function_toolset_wrapper() -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruFunctionToolset
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+
+    wrapped = kitaruify_toolset(
+        _sandbox.sandbox_command_toolset(),
+        capture=CapturePolicy(correlate_otel_spans=False),
+    )
+
+    assert isinstance(wrapped, KitaruFunctionToolset)
+    assert wrapped.toolset_kind == "function"
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_opens_calls_strategy_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    monkeypatch.setattr(
+        _sandbox.kitaru,
+        "run_sandbox_command",
+        lambda *_args, **_kwargs: _fake_core_result(),
+    )
+    checkpoint_steps = _install_checkpoint_recorder(monkeypatch)
+    wrapped = kitaruify_toolset(
+        _sandbox.sandbox_command_toolset(),
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = _tool_context()
+    tool = await _get_tool(wrapped, ctx)
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool(
+            _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+            {"command": "python --version"},
+            ctx,
+            tool,
+        )
+
+    assert result.exit_code == 0
+    assert checkpoint_steps == [f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "core_result",
+    [
+        _fake_core_result(exit_code=0),
+        _fake_core_result(stdout="", stderr="nope", exit_code=5),
+    ],
+)
+async def test_sandbox_command_tool_tracking_records_completed_events(
+    monkeypatch: pytest.MonkeyPatch,
+    core_result: SandboxCommandResult,
+) -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+
+    monkeypatch.setattr(
+        _sandbox.kitaru,
+        "run_sandbox_command",
+        lambda *_args, **_kwargs: core_result,
+    )
+    recorded_events = _install_fake_tracker(monkeypatch)
+    wrapped = kitaruify_toolset(
+        _sandbox.sandbox_command_toolset(),
+        capture=CapturePolicy(tool_capture="metadata", correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={_sandbox.SANDBOX_COMMAND_TOOL_NAME: False},
+    )
+    ctx = _tool_context()
+    tool = await _get_tool(wrapped, ctx)
+
+    result = await wrapped.call_tool(
+        _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+        {"command": "python --version"},
+        ctx,
+        tool,
+    )
+
+    assert result.exit_code == core_result.exit_code
+    assert len(recorded_events) == 1
+    _assert_recorded_tool_event(recorded_events[0], status="completed")
+
+
+@pytest.mark.anyio
+async def test_sandbox_command_tool_tracking_records_failed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.errors import KitaruStateError
+
+    def raise_missing_sandbox(*_args: Any, **_kwargs: Any) -> SandboxCommandResult:
+        raise KitaruStateError("Active stack has no sandbox component.")
+
+    monkeypatch.setattr(_sandbox.kitaru, "run_sandbox_command", raise_missing_sandbox)
+    recorded_events = _install_fake_tracker(monkeypatch)
+    wrapped = kitaruify_toolset(
+        _sandbox.sandbox_command_toolset(),
+        capture=CapturePolicy(tool_capture="metadata", correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={_sandbox.SANDBOX_COMMAND_TOOL_NAME: False},
+    )
+    ctx = _tool_context()
+    tool = await _get_tool(wrapped, ctx)
+
+    with pytest.raises(KitaruStateError, match="no sandbox"):
+        await wrapped.call_tool(
+            _sandbox.SANDBOX_COMMAND_TOOL_NAME,
+            {"command": "python --version"},
+            ctx,
+            tool,
+        )
+
+    assert len(recorded_events) == 1
+    _assert_recorded_tool_event(
+        recorded_events[0], status="failed", error_type=KitaruStateError
+    )
+
+
+def test_pydantic_ai_sandbox_toolset_example_imports_and_wires_agent() -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+
+    from kitaru.adapters.pydantic_ai import KitaruAgent
+
+    agent = pydantic_ai_sandbox_toolset.build_agent(model="test")
+
+    assert isinstance(agent, KitaruAgent)
+    assert agent.name == "sandboxed_pydantic_ai_agent"

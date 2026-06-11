@@ -215,6 +215,39 @@ With `checkpoint_strategy="calls"`, `@hitl_tool` stays flow-scope safe because t
 
 See [Wait, Input, and Resume](../guides/wait-and-resume.md) for how paused flows are resolved.
 
+### Active-stack sandbox command toolset
+
+Use `sandbox_command_toolset(...)` when a PydanticAI agent should run shell commands through the active Kitaru stack sandbox instead of on your laptop or server process.
+
+```python
+from pydantic_ai import Agent
+from kitaru.adapters.pydantic_ai import KitaruAgent, sandbox_command_toolset
+
+agent = Agent(
+    "openai:gpt-4o",
+    name="sandboxed_agent",
+    toolsets=[sandbox_command_toolset(max_chars=20_000)],
+)
+durable_agent = KitaruAgent(agent)
+```
+
+The toolset exposes one model-facing tool named `run_sandbox_command(command, cwd=None)`. The active stack must have exactly one sandbox component. Each tool call creates one temporary sandbox session, runs one command, collects `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys that temporary session. By default, the adapter collects up to 20,000 characters from each output stream; pass `max_chars=` to change that limit.
+
+A command that exits with a non-zero code is still a successful tool call from Kitaru's point of view: the model receives `exit_code`, `stdout`, and `stderr` and can decide what to do next. Missing sandbox components, multiple sandbox components, unsupported sandbox runtime APIs, and backend failures become failed tool calls and raise the same public Kitaru errors as `kitaru.run_sandbox_command(...)`.
+
+The tool is a normal PydanticAI function tool under the hood, so Kitaru tracks and checkpoints it like any other function tool. If the command has side effects, disable cache for just this tool so replay does not reuse an old command result accidentally:
+
+```python
+KitaruAgent(
+    agent,
+    tool_checkpoint_config_by_name={
+        "run_sandbox_command": {"cache": False},
+    },
+)
+```
+
+The model can choose only the command and optional working directory. `env` is intentionally not exposed through this LLM-facing tool because tool arguments can be captured as Kitaru artifacts. If a command needs environment variables, write your own hand-authored PydanticAI tool around `kitaru.run_sandbox_command(...)` and pass only values you are comfortable handling in that code path.
+
 ### MCP servers
 
 MCP servers attached to the agent are wrapped automatically. Their tool calls are tracked alongside native tools; with the default `checkpoint_strategy="calls"`, each top-level MCP call gets its own adapter checkpoint. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.

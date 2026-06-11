@@ -17,6 +17,14 @@ Then run the no-key adapter example:
 uv run python pydantic_ai_adapter.py       # wrap an agent, keep replay boundary
 ```
 
+To let a real provider call the active-stack sandbox command tool, set provider
+credentials and run:
+
+```bash
+export OPENAI_API_KEY=sk-...
+uv run python pydantic_ai_sandbox_toolset.py
+```
+
 To watch real PydanticAI stream events, set provider credentials and run the
 streaming example:
 
@@ -25,7 +33,7 @@ export OPENAI_API_KEY=sk-...
 uv run python pydantic_ai_streaming.py
 ```
 
-You can override the streaming model with `PYDANTIC_AI_MODEL`; it defaults to
+You can override the streaming or sandbox-toolset model with `PYDANTIC_AI_MODEL`; both default to
 `openai:gpt-5-nano`.
 
 These examples use your current Kitaru connection context. If you want the run
@@ -41,6 +49,15 @@ and tool calls are tracked as child events under that checkpoint, giving
 you full observability without changing the agent's control flow.
 
 Uses `TestModel` so no API keys are needed to run it.
+
+## `pydantic_ai_sandbox_toolset.py` — Run a command in the active stack sandbox
+
+Attaches `sandbox_command_toolset(...)` to a PydanticAI agent and wraps that
+agent with `KitaruAgent`. The model is asked to call `run_sandbox_command` for
+`python --version`. The example uses the adapter's 20,000-character output
+limit. Your active stack must have exactly one sandbox component; if provider
+credentials or sandbox support are missing, the example prints a short setup
+message instead of a long provider/backend traceback.
 
 ## `pydantic_ai_streaming.py` — Watch live PydanticAI events
 

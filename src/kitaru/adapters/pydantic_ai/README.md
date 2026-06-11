@@ -178,6 +178,31 @@ agent = Agent('openai:gpt-4o', name='researcher', toolsets=[server])
 durable_agent = KitaruAgent(agent)
 ```
 
+### 5. Active-stack sandbox commands
+
+Import `sandbox_command_toolset` from this package when a PydanticAI agent should run commands in the active Kitaru stack sandbox:
+
+```python
+from pydantic_ai import Agent
+from kitaru.adapters.pydantic_ai import KitaruAgent, sandbox_command_toolset
+
+agent = Agent(
+    'openai:gpt-4o',
+    name='sandboxed_agent',
+    toolsets=[sandbox_command_toolset(max_chars=20_000)],
+)
+durable_agent = KitaruAgent(
+    agent,
+    tool_checkpoint_config_by_name={
+        'run_sandbox_command': {'cache': False},
+    },
+)
+```
+
+The factory returns a normal PydanticAI `FunctionToolset` with one tool named `run_sandbox_command`. Kitaru wraps it as a function toolset, so existing tracking and calls-strategy checkpoints still apply. The active stack must have exactly one sandbox component. Every tool call creates one temporary sandbox session, runs one command, returns `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys the temporary session. The adapter default is 20,000 characters per output stream; pass `max_chars=` when you need a different limit.
+
+Non-zero process exits come back as normal `SandboxCommandToolResult` values. Missing sandbox setup or backend failures raise public Kitaru errors and are recorded as failed tool calls. The model-facing tool accepts only `command` and optional `cwd`; `env` is deliberately not exposed because captured tool arguments may be stored as artifacts.
+
 ## Checkpoint strategy
 
 The adapter offers two strategies for how agent work maps onto Kitaru checkpoints. Pick per agent based on how you want to replay and retry.
