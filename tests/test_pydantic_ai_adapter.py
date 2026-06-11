@@ -19,7 +19,10 @@ pytest.importorskip("pydantic_ai")
 
 from kitaru.adapters.pydantic_ai._utils import (
     CheckpointConfig,
+    adapter_streaming_fallback_checkpoint,
     checkpoint_cache_key,
+    get_adapter_streaming_fallback_checkpoint,
+    has_explicit_tool_checkpoint_opt_out,
     reject_isolated_runtime,
     resolve_tool_checkpoint_config,
     turn_cache_key,
@@ -551,6 +554,27 @@ class TestRejectIsolatedRuntime:
         reject_isolated_runtime({})
 
 
+class TestAdapterStreamingFallbackCheckpointMarker:
+    def test_marker_is_visible_only_inside_context(self) -> None:
+        assert get_adapter_streaming_fallback_checkpoint() is None
+
+        with adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True):
+            marker = get_adapter_streaming_fallback_checkpoint()
+            assert marker is not None
+            assert marker.allow_sync_tool_body_waits is True
+
+        assert get_adapter_streaming_fallback_checkpoint() is None
+
+    def test_marker_resets_after_exception(self) -> None:
+        with (
+            pytest.raises(RuntimeError, match="boom"),
+            adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=False),
+        ):
+            raise RuntimeError("boom")
+
+        assert get_adapter_streaming_fallback_checkpoint() is None
+
+
 class TestResolveToolCheckpointConfig:
     def test_default_used_when_no_override(self) -> None:
         default: CheckpointConfig = {"retries": 2}
@@ -586,6 +610,23 @@ class TestResolveToolCheckpointConfig:
             by_name={"foo": False},
         )
         assert resolved == default
+
+    def test_explicit_false_helper_distinguishes_default_none(self) -> None:
+        assert has_explicit_tool_checkpoint_opt_out("ask_user", None) is False
+        assert has_explicit_tool_checkpoint_opt_out("ask_user", {}) is False
+        assert (
+            has_explicit_tool_checkpoint_opt_out("ask_user", {"ask_user": False})
+            is True
+        )
+        assert (
+            has_explicit_tool_checkpoint_opt_out(
+                "ask_user", {"ask_user": {"cache": False}}
+            )
+            is False
+        )
+        assert (
+            has_explicit_tool_checkpoint_opt_out("ask_user", {"other": False}) is False
+        )
 
 
 class TestWithDefaultType:
@@ -1586,6 +1627,57 @@ class TestThreadingCompat:
         assert 'checkpoint_strategy="calls"' in message
         assert "granular_checkpoints=True" in message
 
+    @pytest.mark.anyio
+    async def test_stream_context_managers_enter_inline_sync_tool_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextlib import asynccontextmanager, contextmanager
+
+        from pydantic_ai import Agent
+        from pydantic_ai.agent.abstract import AbstractAgent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="stream_inline_tools_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+            allow_sync_tool_body_waits=True,
+        )
+        entered: list[bool] = []
+        streamed_result = object()
+        iter_result = object()
+
+        @contextmanager
+        def fake_inline_sync_tool_execution(*, enabled: bool):
+            entered.append(enabled)
+            yield enabled
+
+        @asynccontextmanager
+        async def fake_run_stream(*_args: Any, **_kwargs: Any):
+            yield streamed_result
+
+        @asynccontextmanager
+        async def fake_iter(*_args: Any, **_kwargs: Any):
+            yield iter_result
+
+        monkeypatch.setattr(
+            agent_module,
+            "_inline_sync_tool_execution",
+            fake_inline_sync_tool_execution,
+        )
+        monkeypatch.setattr(agent, "_require_explicit_checkpoint", lambda _method: None)
+        monkeypatch.setattr(AbstractAgent, "run_stream", fake_run_stream)
+        monkeypatch.setattr(agent.wrapped, "iter", fake_iter)
+
+        async with agent.run_stream("hello") as result:
+            assert result is streamed_result
+        async with agent.iter("hello") as result:
+            assert result is iter_result
+
+        assert entered == [True, True]
+
 
 class TestWaitForInput:
     """Adapter-namespaced helper for calling wait from a tool body."""
@@ -2585,6 +2677,352 @@ async def test_non_hitl_tool_still_uses_calls_strategy_tool_checkpoint(
 
     assert result == "ordinary result"
     assert checkpoint_steps == ["ordinary_tool_tool"]
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_tool() -> (
+    None
+):
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+    from zenml.steps.step_context import StepContext
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import (
+        _checkpoint_scope,
+        _flow_scope,
+        _get_step_context_var,
+        _is_inside_checkpoint,
+    )
+
+    observed_body_scope: list[tuple[bool, bool]] = []
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def ask_user() -> str:
+        observed_body_scope.append((_is_inside_checkpoint(), StepContext.is_active()))
+        return "human answer"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"ask_user": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["ask_user"]
+    step_context_var = _get_step_context_var()
+    step_context_token = step_context_var.set(cast(Any, object()))
+    try:
+        with (
+            _flow_scope(name="demo_flow", flow_id="flow-1", execution_id="exec-1"),
+            _checkpoint_scope(
+                name="streamed_turn",
+                checkpoint_type="llm_call",
+                execution_id="exec-1",
+                checkpoint_id="checkpoint-1",
+            ),
+            adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
+        ):
+            assert _is_inside_checkpoint()
+            assert StepContext.is_active()
+            result = await wrapped.call_tool("ask_user", {}, ctx, tool)
+            assert _is_inside_checkpoint()
+            assert StepContext.is_active()
+    finally:
+        step_context_var.reset(step_context_token)
+
+    assert result == "human answer"
+    assert observed_body_scope == [(False, False)]
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_suspend_eligibility_is_tightly_scoped() -> None:
+    from pydantic import TypeAdapter
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext, ToolDefinition
+    from pydantic_ai.toolsets import ToolsetTool
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import KitaruToolset, kitaruify_toolset
+    from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def sync_tool() -> str:
+        return "sync"
+
+    @toolset.tool_plain
+    async def async_tool() -> str:
+        return "async"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"sync_tool": False},
+    )
+    assert isinstance(wrapped, KitaruToolset)
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tools = await wrapped.get_tools(ctx)
+    sync_function_tool = tools["sync_tool"]
+    async_function_tool = tools["async_tool"]
+    generic_tool: ToolsetTool[None] = ToolsetTool(
+        toolset=cast(Any, wrapped),
+        tool_def=ToolDefinition(name="sync_tool"),
+        max_retries=1,
+        args_validator=cast(Any, TypeAdapter(dict[str, Any]).validator),
+    )
+
+    with (
+        _flow_scope(name="demo_flow"),
+        _checkpoint_scope(name="streamed_turn", checkpoint_type="llm_call"),
+    ):
+        # A user-created or otherwise unmarked checkpoint must not be treated as
+        # Kitaru's streamed calls-strategy fallback checkpoint.
+        assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+            name="sync_tool", tool=sync_function_tool
+        )
+
+        with adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=False):
+            assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="sync_tool", tool=sync_function_tool
+            )
+
+        with adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True):
+            assert wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="sync_tool", tool=sync_function_tool
+            )
+            assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="missing_override", tool=sync_function_tool
+            )
+            wrapped.tool_checkpoint_config_by_name = {"sync_tool": {"cache": False}}
+            assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="sync_tool", tool=sync_function_tool
+            )
+            wrapped.tool_checkpoint_config_by_name = {"sync_tool": False}
+            assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="async_tool", tool=async_function_tool
+            )
+            assert not wrapped._should_suspend_streaming_fallback_checkpoint_scope(
+                name="sync_tool", tool=cast(Any, generic_tool)
+            )
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_does_not_suspend_hitl_tool() -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, hitl_tool
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    @hitl_tool(schema=str, question="Need human input")
+    def ask_human() -> str:
+        return "never reached"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"ask_human": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["ask_human"]
+
+    with (
+        _flow_scope(name="demo_flow"),
+        _checkpoint_scope(name="streamed_turn", checkpoint_type="llm_call"),
+        adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
+        pytest.raises(KitaruUsageError, match="Kitaru waits must be created"),
+    ):
+        await wrapped.call_tool("ask_human", {}, ctx, tool)
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_suspension_restores_scope_after_tool_error() -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+    from zenml.steps.step_context import StepContext
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import (
+        _checkpoint_scope,
+        _flow_scope,
+        _get_step_context_var,
+        _is_inside_checkpoint,
+    )
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def exploding_tool() -> str:
+        assert not _is_inside_checkpoint()
+        assert not StepContext.is_active()
+        raise RuntimeError("tool exploded")
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"exploding_tool": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["exploding_tool"]
+    step_context_var = _get_step_context_var()
+    step_context_token = step_context_var.set(cast(Any, object()))
+    try:
+        with (
+            _flow_scope(name="demo_flow", flow_id="flow-1", execution_id="exec-1"),
+            _checkpoint_scope(
+                name="streamed_turn",
+                checkpoint_type="llm_call",
+                execution_id="exec-1",
+                checkpoint_id="checkpoint-1",
+            ),
+            adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
+        ):
+            with pytest.raises(RuntimeError, match="tool exploded"):
+                await wrapped.call_tool("exploding_tool", {}, ctx, tool)
+            assert _is_inside_checkpoint()
+            assert StepContext.is_active()
+    finally:
+        step_context_var.reset(step_context_token)
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_suspension_restores_scope_after_wait_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+    from zenml.steps.step_context import StepContext
+
+    from kitaru.adapters import pydantic_ai as kp
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import (
+        _checkpoint_scope,
+        _flow_scope,
+        _get_step_context_var,
+        _is_inside_checkpoint,
+    )
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def ask_user() -> str:
+        assert not _is_inside_checkpoint()
+        assert not StepContext.is_active()
+        return kp.wait_for_input(schema=str, name="unit_wait")
+
+    def fake_wait(**_kwargs: Any) -> str:
+        raise RuntimeError("wait paused")
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._wait_for_input.kitaru.wait", fake_wait
+    )
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"ask_user": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["ask_user"]
+    step_context_var = _get_step_context_var()
+    step_context_token = step_context_var.set(cast(Any, object()))
+    try:
+        with (
+            _flow_scope(name="demo_flow", flow_id="flow-1", execution_id="exec-1"),
+            _checkpoint_scope(
+                name="streamed_turn",
+                checkpoint_type="llm_call",
+                execution_id="exec-1",
+                checkpoint_id="checkpoint-1",
+            ),
+            adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
+        ):
+            with pytest.raises(RuntimeError, match="wait paused"):
+                await wrapped.call_tool("ask_user", {}, ctx, tool)
+            assert _is_inside_checkpoint()
+            assert StepContext.is_active()
+    finally:
+        step_context_var.reset(step_context_token)
+
+
+@pytest.mark.anyio
+async def test_streaming_fallback_suspension_restores_scope_after_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+    from zenml.steps.step_context import StepContext
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import (
+        _checkpoint_scope,
+        _flow_scope,
+        _get_step_context_var,
+        _is_inside_checkpoint,
+    )
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def ask_user() -> str:
+        return "body replaced by monkeypatch"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"ask_user": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["ask_user"]
+
+    async def fake_call_tool_tracked(*_args: Any, **_kwargs: Any) -> Any:
+        assert not _is_inside_checkpoint()
+        assert not StepContext.is_active()
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(wrapped, "_call_tool_tracked", fake_call_tool_tracked)
+    step_context_var = _get_step_context_var()
+    step_context_token = step_context_var.set(cast(Any, object()))
+    try:
+        with (
+            _flow_scope(name="demo_flow", flow_id="flow-1", execution_id="exec-1"),
+            _checkpoint_scope(
+                name="streamed_turn",
+                checkpoint_type="llm_call",
+                execution_id="exec-1",
+                checkpoint_id="checkpoint-1",
+            ),
+            adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await wrapped.call_tool("ask_user", {}, ctx, tool)
+            assert _is_inside_checkpoint()
+            assert StepContext.is_active()
+    finally:
+        step_context_var.reset(step_context_token)
 
 
 @pytest.mark.anyio

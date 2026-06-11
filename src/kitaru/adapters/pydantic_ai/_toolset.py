@@ -18,8 +18,10 @@ from pydantic_ai.toolsets import (
     ToolsetTool,
     WrapperToolset,
 )
+from pydantic_ai.toolsets.function import FunctionToolsetTool
 
 from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.runtime import _suspend_checkpoint_scope
 from kitaru.wait import _WAIT_INSIDE_CHECKPOINT_ERROR
 
 from ._constants import (
@@ -44,6 +46,8 @@ from ._utils import (
     checkpoint_cache_key,
     checkpoint_input_value,
     get_adapter_checkpoint_artifact_refs,
+    get_adapter_streaming_fallback_checkpoint,
+    has_explicit_tool_checkpoint_opt_out,
     resolve_tool_checkpoint_config,
     run_async_in_checkpoint,
     with_default_type,
@@ -67,6 +71,11 @@ def _json_safe(value: Any) -> Any:
             "python_type": value.__class__.__name__,
             "serialization_error": "json_safe_failed",
         }
+
+
+def _is_ordinary_sync_function_tool(tool: ToolsetTool[Any]) -> bool:
+    """Return whether ``tool`` is a plain sync PydanticAI function tool."""
+    return isinstance(tool, FunctionToolsetTool) and tool.is_async is False
 
 
 def _raise_checkpoint_wait_not_supported(tool_name: str, kind: DeferredKind) -> None:
@@ -146,6 +155,30 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             and not is_inside_checkpoint()
         )
 
+    def _should_suspend_streaming_fallback_checkpoint_scope(
+        self,
+        *,
+        name: str,
+        tool: ToolsetTool[AgentDepsT],
+    ) -> bool:
+        """Return whether an opted-out sync tool may run at flow scope.
+
+        PydanticAI may execute several tool calls concurrently. This helper stays
+        intentionally narrow: it is used only under Kitaru's private marker for a
+        streamed calls-strategy fallback turn, and only for function tools whose
+        sync body is forced inline by ``allow_sync_tool_body_waits=True``.
+        """
+        marker = get_adapter_streaming_fallback_checkpoint()
+        return (
+            marker is not None
+            and marker.allow_sync_tool_body_waits
+            and is_inside_checkpoint()
+            and has_explicit_tool_checkpoint_opt_out(
+                name, self.tool_checkpoint_config_by_name
+            )
+            and _is_ordinary_sync_function_tool(tool)
+        )
+
     async def call_tool(
         self,
         name: str,
@@ -164,6 +197,14 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             default=self.tool_checkpoint_config,
             by_name=self.tool_checkpoint_config_by_name,
         )
+        if self._should_suspend_streaming_fallback_checkpoint_scope(
+            name=name,
+            tool=tool,
+        ):
+            with _suspend_checkpoint_scope():
+                return await self._call_tool_tracked(
+                    name, tool_args, ctx, tool, hitl_config
+                )
         if self._should_use_tool_checkpoint(
             name=name,
             ctx=ctx,
