@@ -760,6 +760,11 @@ def test_serialize_stack_details_contract() -> None:
                 name="prod-storage",
                 purpose="stores artifacts",
             ),
+            StackComponentDetails(
+                role="sandbox",
+                name="prod-sandbox",
+                backend="local",
+            ),
         ),
     )
 
@@ -781,6 +786,7 @@ def test_serialize_stack_details_contract() -> None:
                 "name": "prod-storage",
                 "purpose": "stores artifacts",
             },
+            {"role": "sandbox", "name": "prod-sandbox", "backend": "local"},
         ],
     }
 

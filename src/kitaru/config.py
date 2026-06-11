@@ -52,6 +52,7 @@ _LOG_STORE_BACKEND_PATTERN = _config_log_store._LOG_STORE_BACKEND_PATTERN
 _MODEL_ALIAS_PATTERN = _config_models._MODEL_ALIAS_PATTERN
 _STACK_MANAGED_LABEL_KEY = _config_stacks._STACK_MANAGED_LABEL_KEY
 _STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
+_LOCAL_SANDBOX_FLAVOR = _config_stacks.LOCAL_SANDBOX_FLAVOR
 
 KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
 KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
@@ -512,6 +513,7 @@ def _create_kubernetes_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     return _config_stacks._create_kubernetes_stack_operation(
@@ -520,6 +522,7 @@ def _create_kubernetes_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -531,6 +534,7 @@ def _create_vertex_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Vertex AI stack via ZenML's one-shot stack API."""
     return _config_stacks._create_vertex_stack_operation(
@@ -539,6 +543,7 @@ def _create_vertex_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -550,6 +555,7 @@ def _create_sagemaker_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a SageMaker stack via ZenML's one-shot stack API."""
     return _config_stacks._create_sagemaker_stack_operation(
@@ -558,6 +564,7 @@ def _create_sagemaker_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -569,6 +576,7 @@ def _create_azureml_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create an AzureML stack via ZenML's one-shot stack API."""
     return _config_stacks._create_azureml_stack_operation(
@@ -577,6 +585,7 @@ def _create_azureml_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -589,6 +598,7 @@ def _create_stack_operation(
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     result = _config_stacks._create_stack_operation(
@@ -598,6 +608,7 @@ def _create_stack_operation(
         labels=labels,
         remote_spec=remote_spec,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         operation_overrides=cast(
             dict[StackType, Callable[..., _StackCreateResult]],
             {
@@ -628,6 +639,7 @@ def _create_local_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
     return _config_stacks._create_local_stack_operation(
@@ -635,6 +647,7 @@ def _create_local_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor or _LOCAL_SANDBOX_FLAVOR,
         client_factory=Client,
         current_stack_getter=current_stack,
     )

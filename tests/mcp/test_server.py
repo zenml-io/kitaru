@@ -1327,7 +1327,11 @@ def test_manage_stack_create_returns_structured_result() -> None:
         mock_create_stack.return_value = SimpleNamespace(
             stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
             previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+            components_created=(
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+                "dev (sandbox)",
+            ),
             stack_type="local",
             service_connectors_created=(),
             resources=None,
@@ -1340,13 +1344,18 @@ def test_manage_stack_create_returns_structured_result() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     assert payload == {
         "id": "stack-dev-id",
         "name": "dev",
         "is_active": True,
         "previous_active_stack": "default",
-        "components_created": ["dev (orchestrator)", "dev (artifact_store)"],
+        "components_created": [
+            "dev (orchestrator)",
+            "dev (artifact_store)",
+            "dev (sandbox)",
+        ],
         "stack_type": "local",
     }
 
@@ -1357,6 +1366,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
     with (
@@ -1369,7 +1379,11 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         mock_create_stack.return_value = SimpleNamespace(
             stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
             previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+            components_created=(
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+                "dev (sandbox)",
+            ),
             stack_type="local",
             service_connectors_created=(),
             resources=None,
@@ -1385,6 +1399,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         force=False,
         stack_type="local",
         artifact_store=None,
+        sandbox=None,
         container_registry=None,
         cluster=None,
         region=None,
@@ -1403,6 +1418,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
 
@@ -1467,6 +1483,7 @@ def test_manage_stack_delete_delegates_request_building_to_shared_interface() ->
         force=True,
         stack_type="local",
         artifact_store=None,
+        sandbox=None,
         container_registry=None,
         cluster=None,
         region=None,
@@ -1582,6 +1599,49 @@ def test_manage_stack_create_kubernetes_dispatches_structured_spec(
             "container_registry": container_registry,
         },
     }
+
+
+def test_manage_stack_create_kubernetes_passes_explicit_sandbox() -> None:
+    """MCP callers should be able to attach an explicit sandbox to remote stacks."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-k8s-id", name="k8s-dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "k8s-dev (orchestrator)",
+                "k8s-dev (artifact_store)",
+                "k8s-dev (container_registry)",
+                "k8s-dev (sandbox)",
+            ),
+            stack_type="kubernetes",
+            service_connectors_created=(),
+            resources={"sandbox": "local"},
+        )
+
+        payload = manage_stack(
+            "create",
+            "k8s-dev",
+            stack_type="kubernetes",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            cluster="cluster-1",
+            region="eu-west-1",
+            sandbox="local",
+        )
+
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
+    assert payload["resources"] == {"sandbox": "local"}
+
+
+def test_manage_stack_delete_rejects_sandbox_option() -> None:
+    """Sandbox selection is only valid for create actions."""
+    with (
+        patch("kitaru._config._stacks._delete_stack_operation") as mock_delete_stack,
+        pytest.raises(ValueError, match="`sandbox`"),
+    ):
+        manage_stack("delete", "dev", sandbox="local")
+
+    mock_delete_stack.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1740,6 +1800,7 @@ def test_manage_stack_create_vertex_passes_extra_and_async_overrides() -> None:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "team-ml"},
+        "sandbox": {},
     }
 
 

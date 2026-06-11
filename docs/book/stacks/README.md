@@ -15,6 +15,8 @@ bundles three concerns:
   and saved data are written (local, S3, GCS, Azure Blob)
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
+- **Sandbox** — the isolated execution environment Kitaru can use when a
+  checkpoint asks for sandboxed work
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -83,9 +85,16 @@ By default, Kitaru creates:
 
 - a local orchestrator named `dev`
 - a local artifact store named `dev`
+- a local sandbox named `dev`
 - a stack named `dev`
 
-Then it automatically activates the new stack.
+Then it automatically activates the new stack. The local sandbox uses Kitaru's
+installed local sandbox provider. If another sandbox provider is installed in
+your environment, you can choose it explicitly:
+
+```bash
+kitaru stack create dev --sandbox local
+```
 
 You will see output like:
 
@@ -170,6 +179,25 @@ kitaru stack create prod-azureml \
 
 AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
+Remote stacks do not get a sandbox by default. If you want one, pass
+`--sandbox FLAVOR`:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --sandbox local
+```
+
+Kitaru validates the sandbox name and configuration against the providers
+available in your current environment. It does not keep a separate hardcoded
+list of cloud sandbox providers. The practical consequence is: if the provider
+is installed and accepts the configuration, Kitaru can use it; if the provider is
+missing or rejects the configuration, Kitaru reports the validation error.
+
 You can also keep the same inputs in a YAML file and create the stack with:
 
 ```bash
@@ -194,6 +222,7 @@ You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 - `orchestrator`
 - `artifact_store`
 - `container_registry`
+- `sandbox`
 
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
@@ -229,12 +258,17 @@ type: vertex
 artifact_store: gs://my-bucket/kitaru
 container_registry: us-central1-docker.pkg.dev/my-project/my-repo
 region: us-central1
+sandbox: local
 async: true
 extra:
   orchestrator:
     pipeline_root: gs://my-bucket/vertex-root
   container_registry:
     default_repository: agents
+  sandbox:
+    forward_env: false
+    sandbox_environment:
+      MY_VAR: value
 ```
 
 CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.

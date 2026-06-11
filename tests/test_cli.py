@@ -149,11 +149,14 @@ def _stack_create_result_stub(
     resources: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight stack-create result object for CLI tests."""
+    default_components = (f"{name} (orchestrator)", f"{name} (artifact_store)")
+    if stack_type == "local":
+        default_components = (*default_components, f"{name} (sandbox)")
+
     return SimpleNamespace(
         stack=SimpleNamespace(id=f"stack-{name}-id", name=name, is_active=is_active),
         previous_active_stack=previous_active_stack,
-        components_created=components_created
-        or (f"{name} (orchestrator)", f"{name} (artifact_store)"),
+        components_created=components_created or default_components,
         stack_type=stack_type,
         service_connectors_created=service_connectors_created,
         resources=resources,
@@ -204,6 +207,13 @@ def _stack_details_stub(
                 name=f"{name}-registry",
                 backend="aws",
                 details=(("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),),
+                purpose=None,
+            ),
+            SimpleNamespace(
+                role="sandbox",
+                name=f"{name}-sandbox",
+                backend="local",
+                details=(),
                 purpose=None,
             ),
         ],
@@ -5050,6 +5060,7 @@ def test_stack_show_renders_translated_component_snapshot(
         "Image registry: my-k8s-registry (aws); location: "
         "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
     )
+    assert "Sandbox: my-k8s-sandbox (local)" in output
     assert "artifact_store" not in output
     assert "container_registry" not in output
 
@@ -5101,6 +5112,11 @@ def test_stack_show_json_output(
                     "details": {
                         "location": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
                     },
+                },
+                {
+                    "role": "sandbox",
+                    "name": "my-k8s-sandbox",
+                    "backend": "local",
                 },
             ],
         },
@@ -5187,6 +5203,7 @@ def test_stack_create_reports_auto_activation(
         stack_type=StackType.LOCAL,
         activate=True,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -5213,6 +5230,7 @@ def test_stack_create_no_activate_skips_active_stack_line(
         stack_type=StackType.LOCAL,
         activate=False,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -5240,6 +5258,7 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
             "components_created": [
                 "dev (orchestrator)",
                 "dev (artifact_store)",
+                "dev (sandbox)",
             ],
             "stack_type": "local",
         },
@@ -5602,6 +5621,57 @@ def test_stack_create_kubernetes_builds_aws_spec() -> None:
     }
 
 
+def test_stack_create_kubernetes_passes_explicit_sandbox() -> None:
+    """`--sandbox` should pass an explicit sandbox flavor for remote stacks."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            resources={
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "sandbox": "local",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+                "--sandbox",
+                "local",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
+
+
+def test_stack_create_rejects_blank_sandbox(capsys: pytest.CaptureFixture[str]) -> None:
+    """Blank sandbox flavor strings should fail validation."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--sandbox", "   "])
+
+    assert exc_info.value.code == 1
+    assert "--sandbox cannot be empty." in capsys.readouterr().err
+
+
 def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify() -> (
     None
 ):
@@ -5956,6 +6026,7 @@ def test_stack_create_vertex_passes_extra_and_async_overrides() -> None:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "my-team"},
+        "sandbox": {},
     }
 
 
@@ -6018,12 +6089,17 @@ type: vertex
 artifact_store: gs://bucket/kitaru
 container_registry: us-central1-docker.pkg.dev/demo/repo
 region: us-central1
+sandbox: local
 async: true
 extra:
   orchestrator:
     pipeline_root: gs://bucket/root
   container_registry:
     default_repository: from-yaml
+  sandbox:
+    forward_env: false
+    sandbox_environment:
+      FROM_YAML: yes
 """.strip(),
     )
 
@@ -6045,10 +6121,13 @@ extra:
                 "orchestrator.custom_job_parameters.machine_type=n1-standard-4",
                 "--extra",
                 "container_registry.default_repository=from-cli",
+                "--extra",
+                "sandbox.sandbox_environment.FROM_CLI=enabled",
             ]
         )
 
     assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
     overrides = mock_create_stack.call_args.kwargs["component_overrides"]
     assert isinstance(overrides, StackComponentConfigOverrides)
     assert overrides.model_dump() == {
@@ -6059,6 +6138,10 @@ extra:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "from-cli"},
+        "sandbox": {
+            "forward_env": False,
+            "sandbox_environment": {"FROM_YAML": True, "FROM_CLI": "enabled"},
+        },
     }
 
 
@@ -6584,6 +6667,7 @@ activate: true
         stack_type=StackType.LOCAL,
         activate=True,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
 
