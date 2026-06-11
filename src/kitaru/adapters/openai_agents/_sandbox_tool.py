@@ -7,6 +7,9 @@ from typing import Any, Final, Literal, cast
 from agents.tool import FunctionTool
 
 import kitaru
+from kitaru._config._sandbox import (
+    normalize_timeout_seconds as _normalize_sandbox_timeout_seconds,
+)
 from kitaru.config import DEFAULT_SANDBOX_COMMAND_MAX_CHARS, SandboxCommandResult
 from kitaru.errors import KitaruUsageError
 
@@ -21,9 +24,14 @@ _MODEL_VISIBLE_RESULT_FIELDS: Final = (
     "exit_code",
     "stdout_truncated",
     "stderr_truncated",
+    "timed_out",
     "cleanup_succeeded",
     "cleanup_error",
 )
+_SANDBOX_TOOL_TIMEOUT_ERROR = (
+    "sandbox_command_tool timeout_seconds must be a finite number greater than 0."
+)
+DEFAULT_SANDBOX_TOOL_TIMEOUT_SECONDS: Final = 30.0
 _DEFAULT_TOOL_NAME = "kitaru_sandbox_command"
 _DEFAULT_DESCRIPTION = (
     "Run a shell command in the sandbox attached to Kitaru's active stack. "
@@ -56,16 +64,27 @@ def sandbox_command_tool(
     name: str = _DEFAULT_TOOL_NAME,
     description: str | None = None,
     max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    timeout_seconds: float | None = DEFAULT_SANDBOX_TOOL_TIMEOUT_SECONDS,
     cleanup: SandboxToolCleanupPolicy = _CLEANUP_DESTROY,
 ) -> FunctionTool:
     """Return an OpenAI Agents SDK tool backed by Kitaru's active sandbox.
 
     The model controls only the command string and optional working directory.
-    Output size and cleanup behavior stay application-owned factory settings.
+    Output size, timeout, and cleanup behavior stay application-owned factory
+    settings.
+
+    This keeps the model from setting environment variables on the tool call,
+    but it does not make sandbox secrets private from model-chosen commands.
+    A command such as ``cat /path/to/secret`` or ``env`` can still read any file,
+    environment variable, credential, or network resource reachable from the
+    active sandbox. Use least-privileged sandboxes with no unnecessary secrets,
+    and wrap this tool with your own command allowlist or validator when prompts
+    or users are not fully trusted.
     """
     tool_name = _normalize_tool_name(name)
     tool_description = _normalize_description(description)
     normalized_max_chars = _normalize_max_chars(max_chars)
+    normalized_timeout_seconds = _normalize_timeout_seconds(timeout_seconds)
     normalized_cleanup = _normalize_cleanup(cleanup)
 
     async def _invoke_sandbox_command(_context: Any, input_json: str) -> str:
@@ -73,12 +92,17 @@ def sandbox_command_tool(
         if "error" in parsed:
             return _json_result(parsed)
 
+        command_options: dict[str, Any] = {
+            "cwd": cast(str | None, parsed["cwd"]),
+            "max_chars": normalized_max_chars,
+            "cleanup": normalized_cleanup,
+        }
+        if normalized_timeout_seconds is not None:
+            command_options["timeout_seconds"] = normalized_timeout_seconds
         result = await asyncio.to_thread(
             kitaru.run_sandbox_command,
             cast(str, parsed["command"]),
-            cwd=cast(str | None, parsed["cwd"]),
-            max_chars=normalized_max_chars,
-            cleanup=normalized_cleanup,
+            **command_options,
         )
         return _json_result(_model_visible_result_payload(result))
 
@@ -89,15 +113,14 @@ def sandbox_command_tool(
         on_invoke_tool=_invoke_sandbox_command,
         strict_json_schema=False,
     )
-    object.__setattr__(
-        tool,
-        "_kitaru_cache_identity",
-        {
-            "kind": "sandbox_command_tool",
-            "max_chars": normalized_max_chars,
-            "cleanup": normalized_cleanup,
-        },
-    )
+    cache_identity: dict[str, Any] = {
+        "kind": "sandbox_command_tool",
+        "max_chars": normalized_max_chars,
+        "cleanup": normalized_cleanup,
+    }
+    if normalized_timeout_seconds is not None:
+        cache_identity["timeout_seconds"] = normalized_timeout_seconds
+    object.__setattr__(tool, "_kitaru_cache_identity", cache_identity)
     return tool
 
 
@@ -127,6 +150,13 @@ def _normalize_max_chars(max_chars: int) -> int:
     if max_chars < 0:
         raise KitaruUsageError("sandbox_command_tool max_chars must be >= 0.")
     return max_chars
+
+
+def _normalize_timeout_seconds(timeout_seconds: float | None) -> float | None:
+    return _normalize_sandbox_timeout_seconds(
+        timeout_seconds,
+        error_message=_SANDBOX_TOOL_TIMEOUT_ERROR,
+    )
 
 
 def _normalize_cleanup(cleanup: str) -> SandboxToolCleanupPolicy:
@@ -172,4 +202,8 @@ def _json_result(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-__all__ = ["SandboxToolCleanupPolicy", "sandbox_command_tool"]
+__all__ = [
+    "DEFAULT_SANDBOX_TOOL_TIMEOUT_SECONDS",
+    "SandboxToolCleanupPolicy",
+    "sandbox_command_tool",
+]

@@ -15,8 +15,10 @@ bundles these concerns:
   and saved data are written (local, S3, GCS, Azure Blob)
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
-- **Sandbox** — the isolated execution environment Kitaru can use when a
-  checkpoint asks for sandboxed work
+- **Sandbox** — the execution environment Kitaru can use when a checkpoint
+  asks for sandboxed work. The local sandbox is a development convenience, not a
+  security boundary: local sandbox commands run as local subprocesses with the
+  filesystem and network access available to your current user.
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -89,8 +91,11 @@ By default, Kitaru creates:
 - a stack named `dev`
 
 Then it automatically activates the new stack. The local sandbox uses Kitaru's
-installed local sandbox provider. If another sandbox provider is installed in
-your environment, you can choose it explicitly:
+installed local sandbox provider. This is useful for development, but it is not a
+security boundary for untrusted commands: commands run as local subprocesses and
+can access files, environment variables, and network resources your current user
+can access. If another sandbox provider is installed in your environment, you can
+choose it explicitly:
 
 ```bash
 kitaru stack create dev --sandbox local
@@ -205,6 +210,12 @@ active stack. It does not choose by stack type. It reads the stack Kitaru is
 already using, finds the one attached sandbox component, creates a temporary
 session, runs the command, collects output, and then closes or destroys that
 session.
+
+If the active stack uses the local sandbox, this is still local code execution,
+not a security boundary. The command runs as a local subprocess with the current
+user's filesystem and network access. Do not treat it as a safe place to run
+untrusted model-chosen commands unless you have separately restricted what that
+user, directory, and network can reach.
 
 ```python
 import kitaru

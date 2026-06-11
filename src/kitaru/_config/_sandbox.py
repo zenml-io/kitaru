@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import importlib
+import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
+from dataclasses import dataclass
+from queue import Empty, Queue
+from threading import Thread
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
@@ -20,6 +25,42 @@ DEFAULT_SANDBOX_COMMAND_MAX_CHARS = 1_048_576
 CLEANUP_DESTROY = "destroy"
 CLEANUP_CLOSE = "close"
 SandboxCleanupPolicy = Literal["destroy", "close"]
+_SANDBOX_COMMAND_TIMEOUT_EXIT_CODE = -1
+_SANDBOX_COMMAND_TIMEOUT_ERROR = (
+    "Sandbox command timeout_seconds must be a finite number greater than 0."
+)
+_REDACTED: str = "[REDACTED]"
+_SECRET_KEY_PATTERN = (
+    r"TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|ACCESS[_-]?KEY|"
+    r"PRIVATE[_-]?KEY|CREDENTIAL|AUTHORIZATION"
+)
+_SECRET_ASSIGNMENT_QUOTED_PATTERN = re.compile(
+    rf"(?i)(['\"]?[A-Z0-9_.-]*(?:{_SECRET_KEY_PATTERN})"
+    r"[A-Z0-9_.-]*['\"]?\s*[:=]\s*)(['\"])(.*?)(\2)"
+)
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    rf"(?i)(['\"]?[A-Z0-9_.-]*(?:{_SECRET_KEY_PATTERN})"
+    r"[A-Z0-9_.-]*['\"]?\s*[:=]\s*)([^'\"\s,;}\]]+)"
+)
+_AUTHORIZATION_PATTERN = re.compile(
+    r"(?i)\b(Authorization\s*[:=]\s*)(?:(?:Bearer|Basic)\s+)?([^\s,;}\]]+)"
+)
+_BEARER_PATTERN = re.compile(r"(?i)\b(Bearer\s+)([A-Za-z0-9._~+/=-]+)")
+_AWS_ACCESS_KEY_PREFIX = "AK" + "IA"
+_JWT_PREFIX = "ey" + "J"
+_SECRET_VALUE_PATTERNS = (
+    re.compile(rf"\b{_AWS_ACCESS_KEY_PREFIX}[0-9A-Z]{{16}}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"\bgh[opsu]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(rf"\b{_JWT_PREFIX}[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+)
+
+
+@dataclass(frozen=True)
+class _ProcessOutputCollection:
+    output: Any = None
+    timed_out: bool = False
 
 
 class SandboxCommandResult(BaseModel):
@@ -32,6 +73,7 @@ class SandboxCommandResult(BaseModel):
     exit_code: int
     stdout_truncated: bool
     stderr_truncated: bool
+    timed_out: bool = False
     stack_id: str
     stack_name: str
     sandbox_id: str | None
@@ -50,6 +92,7 @@ def run_sandbox_command(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    timeout_seconds: float | None = None,
     cleanup: SandboxCleanupPolicy = "destroy",
     client_factory: Callable[[], Any],
 ) -> SandboxCommandResult:
@@ -58,6 +101,10 @@ def run_sandbox_command(
     normalized_cwd = _normalize_cwd(cwd)
     normalized_env = _normalize_env(env)
     normalized_max_chars = _normalize_max_chars(max_chars)
+    normalized_timeout_seconds = normalize_timeout_seconds(
+        timeout_seconds,
+        error_message=_SANDBOX_COMMAND_TIMEOUT_ERROR,
+    )
     normalized_cleanup = _normalize_cleanup(cleanup)
 
     active_stack, active_stack_model = _resolve_active_stack(client_factory)
@@ -83,21 +130,64 @@ def run_sandbox_command(
             env=normalized_env,
         )
         _ensure_process_collect_api_available(process)
-        output = process.collect(max_chars=normalized_max_chars)
+        output_collection = _collect_process_output(
+            process,
+            max_chars=normalized_max_chars,
+            timeout_seconds=normalized_timeout_seconds,
+        )
+        if output_collection.timed_out:
+            assert normalized_timeout_seconds is not None
+            cleanup_succeeded, cleanup_error = _cleanup_after_timed_out_command(
+                session,
+                normalized_cleanup,
+                env=normalized_env,
+            )
+            return SandboxCommandResult(
+                command=normalized_command,
+                cwd=normalized_cwd,
+                stdout="",
+                stderr=(
+                    "Sandbox command timed out after "
+                    f"{normalized_timeout_seconds:g} seconds."
+                ),
+                exit_code=_SANDBOX_COMMAND_TIMEOUT_EXIT_CODE,
+                stdout_truncated=False,
+                stderr_truncated=False,
+                timed_out=True,
+                stack_id=stack_id,
+                stack_name=stack_name,
+                sandbox_id=sandbox_id,
+                sandbox_name=sandbox_name,
+                session_id=_session_id(session),
+                cleanup=normalized_cleanup,
+                cleanup_succeeded=cleanup_succeeded,
+                cleanup_error=cleanup_error,
+            )
+        output = output_collection.output
     except KitaruFeatureNotAvailableError:
-        _cleanup_after_failed_command(session, normalized_cleanup)
+        _cleanup_after_failed_command(session, normalized_cleanup, env=normalized_env)
         raise
     except Exception as exc:
-        _cleanup_after_failed_command(session, normalized_cleanup)
-        raise KitaruBackendError(
-            f"Sandbox command execution failed on active stack '{stack_name}': {exc}"
-        ) from exc
+        cleanup_succeeded, cleanup_error = _cleanup_after_failed_command(
+            session,
+            normalized_cleanup,
+            env=normalized_env,
+        )
+        error = _redact_exception_text(exc, env=normalized_env)
+        message = (
+            f"Sandbox command execution failed on active stack '{stack_name}': {error}"
+        )
+        if not cleanup_succeeded:
+            message = f"{message} Cleanup warning: {cleanup_error}"
+        raise KitaruBackendError(message) from None
 
     session_id = _optional_string_attribute(
         session, "id"
     ) or _optional_string_attribute(session, "session_id")
     cleanup_succeeded, cleanup_error = _cleanup_after_success(
-        session, normalized_cleanup
+        session,
+        normalized_cleanup,
+        env=normalized_env,
     )
     if not cleanup_succeeded and cleanup_error is None:
         cleanup_error = "Sandbox cleanup did not complete."
@@ -110,6 +200,7 @@ def run_sandbox_command(
         exit_code=_required_output_int(output, "exit_code"),
         stdout_truncated=_required_output_bool(output, "stdout_truncated"),
         stderr_truncated=_required_output_bool(output, "stderr_truncated"),
+        timed_out=False,
         stack_id=stack_id,
         stack_name=stack_name,
         sandbox_id=sandbox_id,
@@ -169,12 +260,59 @@ def _normalize_env(env: Mapping[str, str] | None) -> dict[str, str] | None:
     return normalized
 
 
+def _redact_exception_text(
+    exc: Exception,
+    *,
+    env: Mapping[str, str] | None,
+) -> str:
+    redacted: str = str(exc) or exc.__class__.__name__
+
+    redacted = _AUTHORIZATION_PATTERN.sub(r"\1" + _REDACTED, redacted)
+    redacted = _BEARER_PATTERN.sub(r"\1" + _REDACTED, redacted)
+    redacted = _SECRET_ASSIGNMENT_QUOTED_PATTERN.sub(
+        r"\1\2" + _REDACTED + r"\4",
+        redacted,
+    )
+    redacted = _SECRET_ASSIGNMENT_PATTERN.sub(r"\1" + _REDACTED, redacted)
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub(_REDACTED, redacted)
+
+    if env is not None:
+        explicit_env_values: list[str] = sorted(
+            {str(value) for value in env.values()},
+            key=lambda value: len(value),
+            reverse=True,
+        )
+        for value in explicit_env_values:
+            if value:
+                redacted = redacted.replace(value, _REDACTED)
+
+    return redacted
+
+
 def _normalize_max_chars(max_chars: int) -> int:
     if isinstance(max_chars, bool) or not isinstance(max_chars, int):
         raise KitaruUsageError("Sandbox command max_chars must be an integer.")
     if max_chars < 0:
         raise KitaruUsageError("Sandbox command max_chars must be >= 0.")
     return max_chars
+
+
+def normalize_timeout_seconds(
+    timeout_seconds: float | None,
+    *,
+    error_message: str,
+) -> float | None:
+    if timeout_seconds is None:
+        return None
+    if isinstance(timeout_seconds, bool) or not isinstance(
+        timeout_seconds, int | float
+    ):
+        raise KitaruUsageError(error_message)
+    normalized = float(timeout_seconds)
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise KitaruUsageError(error_message)
+    return normalized
 
 
 def _normalize_cleanup(cleanup: str) -> SandboxCleanupPolicy:
@@ -287,6 +425,62 @@ def _optional_string_attribute(obj: Any, attr: str) -> str | None:
     return normalized or None
 
 
+def _session_id(session: Any | None) -> str | None:
+    if session is None:
+        return None
+    return _optional_string_attribute(session, "id") or _optional_string_attribute(
+        session, "session_id"
+    )
+
+
+def _collect_process_output(
+    process: Any,
+    *,
+    max_chars: int,
+    timeout_seconds: float | None,
+) -> _ProcessOutputCollection:
+    if timeout_seconds is None:
+        return _ProcessOutputCollection(output=process.collect(max_chars=max_chars))
+
+    result_queue: Queue[tuple[bool, Any]] = Queue(maxsize=1)
+
+    def _collect_in_background() -> None:
+        try:
+            result_queue.put_nowait((True, process.collect(max_chars=max_chars)))
+        except Exception as exc:
+            result_queue.put_nowait((False, exc))
+
+    collect_thread = Thread(
+        target=_collect_in_background,
+        name="kitaru-sandbox-process-collect",
+        daemon=True,
+    )
+    collect_thread.start()
+
+    try:
+        succeeded, value = result_queue.get(timeout=timeout_seconds)
+    except Empty:
+        _kill_timed_out_process(process)
+        # The sandbox backend only gives us `collect()` and optional `kill()`.
+        # If `kill()` does not make the backend's blocking `collect()` return,
+        # Python cannot safely stop that in-flight call. The daemon worker keeps
+        # interpreter shutdown unblocked, and the session cleanup below still runs
+        # best-effort destroy/close against the provider.
+        return _ProcessOutputCollection(timed_out=True)
+
+    if not succeeded:
+        raise cast(Exception, value)
+    return _ProcessOutputCollection(output=value)
+
+
+def _kill_timed_out_process(process: Any) -> None:
+    kill = getattr(process, "kill", None)
+    if not callable(kill):
+        return
+    with suppress(Exception):
+        kill()
+
+
 def _required_output_string(output: Any, attr: str) -> str:
     value = getattr(output, attr, None)
     if not isinstance(value, str):
@@ -311,20 +505,52 @@ def _required_output_bool(output: Any, attr: str) -> bool:
 def _cleanup_after_failed_command(
     session: Any | None,
     cleanup: SandboxCleanupPolicy,
-) -> None:
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[bool, str | None]:
     if session is None:
-        return
+        return True, None
 
     try:
-        if cleanup == CLEANUP_DESTROY:
-            _destroy_session_or_close_if_unsupported(session)
-        else:
-            session.close()
-    except Exception:
-        return
+        return _apply_cleanup_policy(session, cleanup, env=env)
+    except Exception as exc:
+        error = _redact_exception_text(exc, env=env)
+        return False, f"Sandbox cleanup after command failure failed: {error}"
 
 
-def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | None]:
+def _cleanup_after_timed_out_command(
+    session: Any | None,
+    cleanup: SandboxCleanupPolicy,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[bool, str | None]:
+    if session is None:
+        return True, None
+
+    try:
+        return _apply_cleanup_policy(session, cleanup, env=env)
+    except Exception as exc:
+        error = _redact_exception_text(exc, env=env)
+        return False, f"Sandbox cleanup after command timeout failed: {error}"
+
+
+def _apply_cleanup_policy(
+    session: Any,
+    cleanup: SandboxCleanupPolicy,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> tuple[bool, str | None]:
+    if cleanup == CLEANUP_DESTROY:
+        return _destroy_session_or_close_if_unsupported(session, env=env)
+    session.close()
+    return True, None
+
+
+def _destroy_session_or_close_if_unsupported(
+    session: Any,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[bool, str | None]:
     try:
         session.destroy()
     except NotImplementedError as exc:
@@ -332,40 +558,38 @@ def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | 
         try:
             session.close()
         except Exception as close_exc:
-            close_error = f" Best-effort close also failed: {close_exc}"
-        return (
-            False,
+            close_error = (
+                " Best-effort close also failed: "
+                f"{_redact_exception_text(close_exc, env=env)}"
+            )
+        destroy_error = _redact_exception_text(exc, env=env)
+        cleanup_error = (
             "Sandbox session destroy is not supported by this provider; "
-            f"the command result is still available. {exc}{close_error or ''}",
+            f"the command result is still available. {destroy_error}"
+            f"{close_error or ''}"
         )
+        return False, cleanup_error
     return True, None
 
 
 def _cleanup_after_success(
     session: Any,
     cleanup: SandboxCleanupPolicy,
+    *,
+    env: Mapping[str, str] | None,
 ) -> tuple[bool, str | None]:
-    if cleanup == CLEANUP_CLOSE:
-        try:
-            session.close()
-        except Exception as exc:
-            raise KitaruBackendError(
-                "Sandbox command completed, but closing the sandbox session failed: "
-                f"{exc}"
-            ) from exc
-        return True, None
-
     try:
-        return _destroy_session_or_close_if_unsupported(session)
+        return _apply_cleanup_policy(session, cleanup, env=env)
     except Exception as exc:
-        with suppress(Exception):
-            session.close()
+        if cleanup == CLEANUP_DESTROY:
+            with suppress(Exception):
+                session.close()
+        action = "closing" if cleanup == CLEANUP_CLOSE else "destroying"
+        error = _redact_exception_text(exc, env=env)
         raise KitaruBackendError(
-            "Sandbox command completed, but destroying the sandbox session failed: "
-            f"{exc}"
-        ) from exc
-
-    return True, None
+            "Sandbox command completed, but "
+            f"{action} the sandbox session failed: {error}"
+        ) from None
 
 
 __all__ = [

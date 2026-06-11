@@ -198,7 +198,13 @@ agent = Agent(
         "JSON. Check exit_code before trusting stdout."
     ),
     model="gpt-5-nano",
-    tools=[sandbox_command_tool(max_chars=20_000, cleanup="destroy")],
+    tools=[
+        sandbox_command_tool(
+            max_chars=20_000,
+            timeout_seconds=30,
+            cleanup="destroy",
+        )
+    ],
 )
 
 runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
@@ -220,10 +226,27 @@ The model can provide only:
 - `command` — required, non-empty string
 - `cwd` — optional working directory inside the sandbox
 
-The application keeps control of `max_chars` and `cleanup` when it creates the
-tool. The model cannot set `env`, `max_chars`, or cleanup behavior. That keeps
-secret and credential handling easier to reason about: the model gets a command
-box, not a way to choose environment variables.
+The application keeps control of `max_chars`, `timeout_seconds`, and `cleanup`
+when it creates the tool. The model cannot set `env`, `max_chars`, the runtime
+limit, or cleanup behavior. `sandbox_command_tool(...)` uses a finite default
+`timeout_seconds=30.0`; pass a different finite value when your app needs a
+shorter or longer command budget.
+
+{% hint style="warning" %}
+This is not a secret-protection boundary. The model cannot pass a custom `env`
+object to the tool, but it still chooses the command. If the active sandbox can
+read `/workspace/.env`, cloud credentials, SSH keys, internal network endpoints,
+or inherited environment variables, then a model-chosen command can try to read
+or exfiltrate them. In concrete terms: `sandbox_command_tool(...)` blocks "run
+this command with these extra environment variables", but it does not block
+"print the environment that is already there" or "read this file that the
+sandbox user can already read".
+
+Use the least-privileged sandbox you can: no unnecessary secrets, no broad cloud
+credentials, and only the network access the task truly needs. For prompts or
+users you do not fully trust, wrap the tool in your own allowlist or validator so
+only approved commands and working directories reach `run_sandbox_command(...)`.
+{% endhint %}
 
 The compact JSON returned to the model contains:
 
@@ -234,6 +257,7 @@ The compact JSON returned to the model contains:
   "exit_code": 0,
   "stdout_truncated": false,
   "stderr_truncated": false,
+  "timed_out": false,
   "cleanup_succeeded": true,
   "cleanup_error": null
 }
@@ -242,7 +266,8 @@ The compact JSON returned to the model contains:
 The tool deliberately omits stack, sandbox, and session IDs from the model-visible
 result. Those are operational details for Kitaru, not facts the model needs in
 order to answer the user. Tell the model to inspect `exit_code` first: a command
-can write to `stdout` and still fail.
+can write to `stdout` and still fail. If `timed_out` is `true`, Kitaru stopped
+waiting for the command after the app-owned timeout and returns `exit_code: -1`.
 
 The active stack must have exactly one sandbox component. If there is no sandbox,
 Kitaru raises an error and does not run the command. If there is more than one

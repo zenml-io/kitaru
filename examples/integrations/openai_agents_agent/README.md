@@ -50,6 +50,12 @@ Remote stacks need an explicit sandbox component. If the active stack has no
 sandbox, or has more than one sandbox, Kitaru raises an error instead of guessing
 where to run the command.
 
+Security note: the tool schema prevents the model from choosing extra environment
+variables for a tool call, but the model still chooses the command. Do not attach
+this tool to a sandbox that contains secrets, broad cloud credentials, or network
+access the agent does not need. If prompts or users are not fully trusted, put a
+small allowlist or validator in front of the tool so only approved commands run.
+
 The sandbox tool example also supports the same strategy comparison mode:
 
 ```bash

@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, RunContextWrapper, function_tool
+from agents import Agent, RunConfig, RunContextWrapper, function_tool, handoff
 from agents.exceptions import ToolInputGuardrailTripwireTriggered
 from agents.items import ModelResponse
 from agents.models.interface import Model
@@ -155,6 +155,32 @@ class ToolCallingModel(Model):
         raise NotImplementedError
 
 
+class HandoffCallingModel(Model):
+    def __init__(self, *, handoff_tool_name: str) -> None:
+        self.handoff_tool_name = handoff_tool_name
+        self.call_count = 0
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        return ModelResponse(
+            output=[
+                ResponseFunctionToolCall(
+                    arguments="{}",
+                    call_id="call_transfer_to_child",
+                    id="fc_transfer_to_child",
+                    name=self.handoff_tool_name,
+                    status="completed",
+                    type="function_call",
+                )
+            ],
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_handoff_call",
+        )
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
 class SandboxToolCallingModel(Model):
     def __init__(self, *, tool_name: str = "kitaru_sandbox_command") -> None:
         self.tool_name = tool_name
@@ -188,6 +214,37 @@ class SandboxToolCallingModel(Model):
 
     def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
         raise NotImplementedError
+
+
+class HandoffSandboxToolCallingModel(SandboxToolCallingModel):
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        self.call_count += 1
+        sdk_input = _args[1] if len(_args) > 1 else None
+        sandbox_outputs = [
+            output
+            for output in _function_call_outputs(sdk_input)
+            if '"exit_code"' in output
+        ]
+        if sandbox_outputs:
+            self.seen_function_call_outputs.extend(sandbox_outputs)
+            return _text_response(
+                "sandbox command complete",
+                response_id=f"resp_sandbox_final_{self.call_count}",
+            )
+        return ModelResponse(
+            output=[
+                ResponseFunctionToolCall(
+                    arguments='{"command":"python --version","cwd":"/workspace"}',
+                    call_id="call_sandbox_command",
+                    id="fc_sandbox_command",
+                    name=self.tool_name,
+                    status="completed",
+                    type="function_call",
+                )
+            ],
+            usage=Usage(requests=1, input_tokens=3, output_tokens=2, total_tokens=5),
+            response_id="resp_sandbox_tool_call",
+        )
 
 
 class GuardrailToolCallingModel(Model):
@@ -337,6 +394,7 @@ def _fake_sandbox_result(
     exit_code: int = 0,
     stdout_truncated: bool = False,
     stderr_truncated: bool = False,
+    timed_out: bool = False,
     cleanup: str = "destroy",
     cleanup_succeeded: bool = True,
     cleanup_error: str | None = None,
@@ -349,6 +407,7 @@ def _fake_sandbox_result(
         exit_code=exit_code,
         stdout_truncated=stdout_truncated,
         stderr_truncated=stderr_truncated,
+        timed_out=timed_out,
         stack_id="stack-secret",
         stack_name="prod-gpu",
         sandbox_id="sandbox-secret",
@@ -402,6 +461,7 @@ class TestOpenAISandboxCommandToolFactory:
         assert set(schema["properties"]) == {"command", "cwd"}
         assert "env" not in schema["properties"]
         assert "max_chars" not in schema["properties"]
+        assert "timeout_seconds" not in schema["properties"]
         assert "cleanup" not in schema["properties"]
         assert schema["additionalProperties"] is False
 
@@ -436,6 +496,7 @@ class TestOpenAISandboxCommandToolFactory:
                 "command": "python --version",
                 "cwd": "/workspace",
                 "max_chars": 20_000,
+                "timeout_seconds": 30.0,
                 "cleanup": "close",
             }
         ]
@@ -446,6 +507,7 @@ class TestOpenAISandboxCommandToolFactory:
             "exit_code": 0,
             "stdout_truncated": False,
             "stderr_truncated": False,
+            "timed_out": False,
             "cleanup_succeeded": False,
             "cleanup_error": "destroy not supported",
         }
@@ -483,6 +545,46 @@ class TestOpenAISandboxCommandToolFactory:
         assert payload["stderr_truncated"] is True
 
     @pytest.mark.anyio
+    async def test_timeout_result_returns_structured_json(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        seen_calls: list[dict[str, Any]] = []
+
+        def fake_run_sandbox_command(
+            command: str, **kwargs: Any
+        ) -> SandboxCommandResult:
+            seen_calls.append({"command": command, **kwargs})
+            return _fake_sandbox_result(
+                stdout="",
+                stderr="Sandbox command timed out after 3 seconds.",
+                exit_code=-1,
+                timed_out=True,
+            )
+
+        monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
+        tool = sandbox_command_tool(timeout_seconds=3)
+
+        result = await tool.on_invoke_tool(
+            cast(Any, SimpleNamespace()),
+            '{"command":"sleep 999999"}',
+        )
+
+        assert seen_calls == [
+            {
+                "command": "sleep 999999",
+                "cwd": None,
+                "max_chars": 1_048_576,
+                "timeout_seconds": 3.0,
+                "cleanup": "destroy",
+            }
+        ]
+        payload = json.loads(result)
+        assert payload["timed_out"] is True
+        assert payload["exit_code"] == -1
+        assert "timed out after 3 seconds" in payload["stderr"]
+
+    @pytest.mark.anyio
     @pytest.mark.parametrize(
         ("input_json", "message"),
         [
@@ -513,6 +615,9 @@ class TestOpenAISandboxCommandToolFactory:
             {"description": ""},
             {"max_chars": -1},
             {"max_chars": True},
+            {"timeout_seconds": 0},
+            {"timeout_seconds": float("nan")},
+            {"timeout_seconds": True},
             {"cleanup": cast(Any, "keep")},
         ],
     )
@@ -1135,15 +1240,74 @@ async def test_sandbox_tool_checkpoint_cache_includes_factory_settings(
 
     identities = [payload["tool_cache_identity"] for payload in seen_cache_payloads]
     assert identities == [
-        {"kind": "sandbox_command_tool", "max_chars": 100, "cleanup": "destroy"},
+        {
+            "kind": "sandbox_command_tool",
+            "max_chars": 100,
+            "timeout_seconds": 30.0,
+            "cleanup": "destroy",
+        },
         {
             "kind": "sandbox_command_tool",
             "max_chars": 20_000,
+            "timeout_seconds": 30.0,
             "cleanup": "destroy",
         },
-        {"kind": "sandbox_command_tool", "max_chars": 100, "cleanup": "close"},
+        {
+            "kind": "sandbox_command_tool",
+            "max_chars": 100,
+            "timeout_seconds": 30.0,
+            "cleanup": "close",
+        },
     ]
     assert len({json.dumps(identity, sort_keys=True) for identity in identities}) == 3
+
+
+@pytest.mark.anyio
+async def test_calls_strategy_prepare_objects_reuses_shared_handoff_child() -> None:
+    child_tool = sandbox_command_tool(max_chars=100)
+    child_agent = Agent(
+        name="shared_sandbox_child",
+        model="gpt-5-nano",
+        tools=[child_tool],
+    )
+    first_handoff = handoff(child_agent)
+    second_handoff = handoff(child_agent)
+    runner = KitaruRunner(
+        Agent(
+            name="shared_handoff_parent",
+            model="gpt-5-nano",
+            handoffs=cast(Any, [first_handoff, second_handoff]),
+        ),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    prepared_agent, _run_config = runner._prepare_execution_objects(
+        wrap_calls=True,
+        context_cache_identity=None,
+        context_cache_key=None,
+    )
+
+    prepared_handoffs = list(prepared_agent.handoffs)
+    assert len(prepared_handoffs) == 2
+    prepared_children = [
+        prepared_handoff._agent_ref() for prepared_handoff in prepared_handoffs
+    ]
+    assert prepared_children[0] is prepared_children[1]
+    assert prepared_children[0] is not child_agent
+    prepared_child = prepared_children[0]
+    assert prepared_child.tools[0]._kitaru_wrapped is True
+    assert prepared_child.tools[0]._kitaru_original_tool is child_tool
+
+    invoked_first_child = await prepared_handoffs[0].on_invoke_handoff(
+        SimpleNamespace(),
+        None,
+    )
+    invoked_second_child = await prepared_handoffs[1].on_invoke_handoff(
+        SimpleNamespace(),
+        None,
+    )
+    assert invoked_first_child is prepared_child
+    assert invoked_second_child is prepared_child
 
 
 def test_calls_strategy_prepare_objects_wires_context_cache_key_factory(
@@ -2033,6 +2197,7 @@ def test_calls_strategy_sandbox_tool_runs_inside_checkpoint_and_caches(
             "command": "python --version",
             "cwd": "/workspace",
             "max_chars": 100,
+            "timeout_seconds": 30.0,
             "cleanup": "destroy",
         }
     ]
@@ -2063,10 +2228,87 @@ def test_calls_strategy_sandbox_tool_runs_inside_checkpoint_and_caches(
             "command": "python --version",
             "cwd": "/workspace",
             "max_chars": 100,
+            "timeout_seconds": 30.0,
             "cleanup": "destroy",
         }
     ]
     assert model.call_count == 2
+
+
+def test_calls_strategy_explicit_handoff_wraps_child_sandbox_tools(
+    primed_zenml,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox_calls: list[dict[str, Any]] = []
+
+    def fake_run_sandbox_command(command: str, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append({"command": command, **kwargs})
+        return _fake_sandbox_result(stdout="Python 3.12.0\n")
+
+    monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
+
+    child_name = f"sandbox_handoff_child_{uuid4().hex[:8]}"
+    child_model = HandoffSandboxToolCallingModel()
+    child_agent = Agent(
+        name=child_name,
+        model=child_model,
+        tools=[sandbox_command_tool(max_chars=100)],
+    )
+    parent_model = HandoffCallingModel(handoff_tool_name=f"transfer_to_{child_name}")
+    parent_name = f"openai_sandbox_handoff_parent_{uuid4().hex[:8]}"
+    runner = KitaruRunner(
+        Agent(
+            name=parent_name,
+            model=parent_model,
+            handoffs=cast(Any, [handoff(child_agent)]),
+        ),
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    @flow
+    def handoff_sandbox_tool_flow(prompt: str, nonce: str) -> str:
+        _ = nonce
+        return str(runner.run_sync(OpenAIRunRequest.start(prompt)).final_output)
+
+    first = handoff_sandbox_tool_flow.run("delegate to the child", "first")
+    first_hydrated = _wait_for_hydrated_run(first.exec_id)
+
+    assert sandbox_calls == [
+        {
+            "command": "python --version",
+            "cwd": "/workspace",
+            "max_chars": 100,
+            "timeout_seconds": 30.0,
+            "cleanup": "destroy",
+        }
+    ]
+    assert parent_model.call_count == 1
+    assert child_model.call_count == 2
+    assert any(
+        "kitaru_sandbox_command_tool_call" in name
+        for name in _step_names(first_hydrated)
+    )
+    event_map = first_hydrated.run_metadata["openai_agents_events"]
+    events = _events(event_map)
+    assert any(
+        event["kind"] == "tool_call" and event["artifacts"].get("result") == "output"
+        for event in events
+    )
+
+    second = handoff_sandbox_tool_flow.run("delegate to the child", "second")
+    _wait_for_hydrated_run(second.exec_id)
+
+    assert sandbox_calls == [
+        {
+            "command": "python --version",
+            "cwd": "/workspace",
+            "max_chars": 100,
+            "timeout_seconds": 30.0,
+            "cleanup": "destroy",
+        }
+    ]
+    assert parent_model.call_count == 2
+    assert child_model.call_count == 2
 
 
 def test_calls_strategy_function_tool_receives_fresh_context(

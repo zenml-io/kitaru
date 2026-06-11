@@ -4,14 +4,14 @@ import asyncio
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, Runner
+from agents import Agent, ModelSettings, RunConfig, Runner, handoff
 from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from zenml.client import Client
 
 import kitaru
+import kitaru.adapters.openai_agents._agent as openai_agent_module
 import kitaru.adapters.openai_agents._runner as openai_runner
 from kitaru import SandboxCommandResult, flow
 from kitaru.adapters.openai_agents import (
@@ -267,6 +268,178 @@ def test_runner_call_cache_key_omits_context_when_context_absent(
     assert "context" not in seen_payloads[0]
 
 
+def test_runner_call_cache_identity_varies_by_agent_instructions() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    permissive_runner = KitaruRunner(
+        Agent(
+            name="behavior-cache-agent",
+            model=StaticTextModel("ok"),
+            instructions="You may run sandbox commands when useful.",
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    restrictive_runner = KitaruRunner(
+        Agent(
+            name="behavior-cache-agent",
+            model=StaticTextModel("ok"),
+            instructions="Never run shell commands; explain only.",
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    permissive_key = permissive_runner._runner_call_cache_key(
+        request,
+        agent=permissive_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    restrictive_key = restrictive_runner._runner_call_cache_key(
+        request,
+        agent=restrictive_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = permissive_runner._agent_cache_identity(
+        permissive_runner.agent
+    )["behavior"]
+
+    assert permissive_key != restrictive_key
+    assert (
+        behavior_identity["instructions"] == "You may run sandbox commands when useful."
+    )
+
+
+def test_runner_call_cache_identity_varies_by_string_agent_model_value() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    nano_runner = KitaruRunner(
+        Agent(name="string-model-cache-agent", model="gpt-5-nano"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    mini_runner = KitaruRunner(
+        Agent(name="string-model-cache-agent", model="gpt-4.1-mini"),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    nano_key = nano_runner._runner_call_cache_key(
+        request,
+        agent=nano_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    mini_key = mini_runner._runner_call_cache_key(
+        request,
+        agent=mini_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    model_identity = nano_runner._agent_cache_identity(nano_runner.agent)["model"]
+
+    assert nano_key != mini_key
+    assert model_identity["python_type"] == "builtins.str"
+    assert model_identity["value"] == "gpt-5-nano"
+
+
+def test_runner_call_cache_identity_varies_by_custom_model_public_state() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    concise_model = StaticTextModel("short answer")
+    detailed_model = StaticTextModel("detailed answer")
+    concise_runner = KitaruRunner(
+        Agent(name="custom-model-cache-agent", model=concise_model),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    detailed_runner = KitaruRunner(
+        Agent(name="custom-model-cache-agent", model=detailed_model),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    concise_key = concise_runner._runner_call_cache_key(
+        request,
+        agent=concise_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    detailed_key = detailed_runner._runner_call_cache_key(
+        request,
+        agent=detailed_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    model_identity = concise_runner._agent_cache_identity(concise_runner.agent)["model"]
+
+    concise_model.call_count = 99
+    after_mutation_key = concise_runner._runner_call_cache_key(
+        request,
+        agent=concise_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+
+    assert concise_key != detailed_key
+    assert after_mutation_key == concise_key
+    assert model_identity["python_type"].endswith(".StaticTextModel")
+    assert model_identity["public_state"]["text"] == "short answer"
+
+
+def test_runner_call_cache_identity_varies_by_agent_model_settings() -> None:
+    request = OpenAIRunRequest.start("hello")
+    cold_settings = ModelSettings(temperature=0.0)
+    warm_settings = ModelSettings(temperature=0.8)
+    run_config = RunConfig(tracing_disabled=True)
+    cold_runner = KitaruRunner(
+        Agent(
+            name="model-settings-cache-agent",
+            model=StaticTextModel("ok"),
+            model_settings=cold_settings,
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    warm_runner = KitaruRunner(
+        Agent(
+            name="model-settings-cache-agent",
+            model=StaticTextModel("ok"),
+            model_settings=warm_settings,
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    cold_key = cold_runner._runner_call_cache_key(
+        request,
+        agent=cold_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    warm_key = warm_runner._runner_call_cache_key(
+        request,
+        agent=warm_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = cold_runner._agent_cache_identity(cold_runner.agent)["behavior"]
+
+    assert cold_key != warm_key
+    assert behavior_identity["model_settings"]["fields"]["temperature"] == 0.0
+
+
 def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
     request = OpenAIRunRequest.start("hello")
     run_config = RunConfig(tracing_disabled=True)
@@ -297,6 +470,15 @@ def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
         checkpoint_strategy="runner_call",
         run_config_factory=lambda: run_config,
     )
+    runner_short_timeout = KitaruRunner(
+        Agent(
+            name="sandbox-cache-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=100, timeout_seconds=1)],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
 
     small_key = runner_small_output._runner_call_cache_key(
         request,
@@ -319,8 +501,217 @@ def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
         context_cache_identity=None,
         surface="run",
     )
+    timeout_key = runner_short_timeout._runner_call_cache_key(
+        request,
+        agent=runner_short_timeout.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
 
-    assert len({small_key, large_key, close_key}) == 3
+    assert len({small_key, large_key, close_key, timeout_key}) == 4
+
+
+def test_runner_call_cache_identity_varies_by_sandbox_tool_description() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    read_only_runner = KitaruRunner(
+        Agent(
+            name="sandbox-description-agent",
+            model=StaticTextModel("ok"),
+            tools=[
+                sandbox_command_tool(
+                    description="Run read-only inspection commands only."
+                )
+            ],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    write_allowed_runner = KitaruRunner(
+        Agent(
+            name="sandbox-description-agent",
+            model=StaticTextModel("ok"),
+            tools=[
+                sandbox_command_tool(
+                    description="Run inspection commands and safe file writes."
+                )
+            ],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    read_only_key = read_only_runner._runner_call_cache_key(
+        request,
+        agent=read_only_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    write_allowed_key = write_allowed_runner._runner_call_cache_key(
+        request,
+        agent=write_allowed_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    tool_identity = read_only_runner._agent_cache_identity(read_only_runner.agent)[
+        "tools"
+    ][0]
+
+    assert read_only_key != write_allowed_key
+    assert tool_identity["description"] == "Run read-only inspection commands only."
+    assert (
+        tool_identity["params_json_schema"]["properties"]["command"]["description"]
+        == "Non-empty shell command to run inside the active stack sandbox."
+    )
+
+
+def test_runner_call_cache_identity_varies_by_handoff_sandbox_tool_settings() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(max_chars: int) -> KitaruRunner:
+        handoff_agent = Agent(
+            name="sandbox-handoff-child",
+            model=StaticTextModel("handoff ok"),
+            tools=[sandbox_command_tool(max_chars=max_chars)],
+        )
+        return KitaruRunner(
+            Agent(
+                name="sandbox-handoff-parent",
+                model=StaticTextModel("parent ok"),
+                handoffs=cast(Any, [handoff(handoff_agent)]),
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    small_handoff_runner = make_runner(100)
+    large_handoff_runner = make_runner(20_000)
+
+    small_handoff_key = small_handoff_runner._runner_call_cache_key(
+        request,
+        agent=small_handoff_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    large_handoff_key = large_handoff_runner._runner_call_cache_key(
+        request,
+        agent=large_handoff_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+
+    assert small_handoff_key != large_handoff_key
+
+
+def test_runner_call_cache_identity_varies_by_handoff_input_filter() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    child_agent = Agent(
+        name="filtered-handoff-child",
+        model=StaticTextModel("handoff ok"),
+    )
+
+    def support_only(input_data: Any) -> Any:
+        return input_data
+
+    def billing_only(input_data: Any) -> Any:
+        return input_data
+
+    def make_runner(input_filter: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="filtered-handoff-parent",
+                model=StaticTextModel("parent ok"),
+                handoffs=cast(
+                    Any,
+                    [handoff(child_agent, input_filter=input_filter)],
+                ),
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    support_runner = make_runner(support_only)
+    billing_runner = make_runner(billing_only)
+
+    support_key = support_runner._runner_call_cache_key(
+        request,
+        agent=support_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    billing_key = billing_runner._runner_call_cache_key(
+        request,
+        agent=billing_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    handoff_identity = support_runner._agent_cache_identity(support_runner.agent)[
+        "handoffs"
+    ][0]
+
+    assert support_key != billing_key
+    assert handoff_identity["input_filter"]["qualname"].endswith("support_only")
+    assert "on_invoke_handoff" in handoff_identity
+
+
+def test_runner_call_agent_cache_identity_handles_handoff_cycles() -> None:
+    agent = Agent(name="cyclic-agent", model=StaticTextModel("ok"))
+    object.__setattr__(agent, "handoffs", [agent])
+    runner = KitaruRunner(
+        agent,
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    identity = runner._agent_cache_identity(agent)
+
+    assert identity["handoffs"] == [
+        {
+            "kind": "agent",
+            "agent": {
+                "name": "cyclic-agent",
+                "python_type": "agents.agent.Agent",
+                "recursive_reference": True,
+            },
+        }
+    ]
+
+
+def test_runner_call_agent_cache_identity_bounds_deep_handoff_chains() -> None:
+    max_depth = openai_agent_module._MAX_HANDOFF_CACHE_IDENTITY_DEPTH
+    agents = [
+        Agent(name=f"deep-agent-{index}", model=StaticTextModel("ok"))
+        for index in range(max_depth + 3)
+    ]
+    for index, agent in enumerate(agents[:-1]):
+        object.__setattr__(agent, "handoffs", cast(Any, [handoff(agents[index + 1])]))
+    runner = KitaruRunner(
+        agents[0],
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    first_identity = runner._agent_cache_identity(agents[0])
+    second_identity = runner._agent_cache_identity(agents[0])
+    current_agent_identity = first_identity
+    for _ in range(max_depth + 1):
+        current_agent_identity = current_agent_identity["handoffs"][0]["agent"]
+
+    assert first_identity == second_identity
+    assert current_agent_identity == {
+        "name": f"deep-agent-{max_depth + 1}",
+        "python_type": "agents.agent.Agent",
+        "max_handoff_depth_exceeded": True,
+    }
 
 
 def test_runner_call_cache_identity_varies_by_structural_context() -> None:
@@ -452,6 +843,46 @@ def test_context_cache_identity_stops_before_oversized_collections() -> None:
     assert identity["serialization_error"] == "max_items_exceeded"
     assert "items" not in identity
     assert "first" not in repr(identity)
+
+
+def test_behavior_cache_identity_stops_before_oversized_collections() -> None:
+    identity = openai_agent_module._behavior_value_cache_identity(
+        list(range(openai_agent_module._MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS + 1))
+    )
+
+    assert identity == {
+        "collection_type": "list",
+        "item_count": openai_agent_module._MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS + 1,
+        "serialization_error": "max_items_exceeded",
+    }
+
+
+def test_behavior_cache_identity_bounds_depth_but_keeps_callables_distinct() -> None:
+    def first_callback() -> None:
+        return None
+
+    def second_callback() -> None:
+        return None
+
+    def nested(value: Any) -> Any:
+        for _ in range(openai_agent_module._MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH):
+            value = [value]
+        return value
+
+    first = openai_agent_module._behavior_value_cache_identity(nested(first_callback))
+    second = openai_agent_module._behavior_value_cache_identity(nested(second_callback))
+
+    assert first != second
+    first_marker = first
+    for _ in range(openai_agent_module._MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH):
+        first_marker = first_marker["items"][0]
+    assert first_marker == {
+        "python_type": (
+            f"{type(first_callback).__module__}.{type(first_callback).__qualname__}"
+        ),
+        "serialization_error": "max_depth_exceeded",
+        "object_id": id(first_callback),
+    }
 
 
 def test_opaque_context_cache_identity_is_distinct_per_object() -> None:
@@ -588,6 +1019,7 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
             "command": "python --version",
             "cwd": None,
             "max_chars": 123,
+            "timeout_seconds": 30.0,
             "cleanup": "destroy",
         }
     ]

@@ -1,6 +1,7 @@
 """Public runner wrapper for the OpenAI Agents SDK adapter foundation."""
 
 import asyncio
+import weakref
 from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from typing import Any, cast
@@ -49,6 +50,31 @@ from ._utils import (
     validate_tool_checkpoint_overrides,
 )
 
+_MAX_HANDOFF_CACHE_IDENTITY_DEPTH = 32
+_MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH = 16
+_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS = 64
+_HANDOFF_BEHAVIOR_CACHE_ATTRIBUTES = (
+    "input_filter",
+    "on_invoke_handoff",
+    "is_enabled",
+    "nest_handoff_history",
+    "strict_json_schema",
+)
+_AGENT_BEHAVIOR_CACHE_ATTRIBUTES = (
+    "handoff_description",
+    "instructions",
+    "prompt",
+    "model_settings",
+    "input_guardrails",
+    "output_guardrails",
+    "output_type",
+    "hooks",
+    "tool_use_behavior",
+    "reset_tool_choice",
+    "mcp_servers",
+    "mcp_config",
+)
+
 
 def _is_openai_agent(value: Any) -> bool:
     try:
@@ -56,6 +82,165 @@ def _is_openai_agent(value: Any) -> bool:
     except ImportError:
         return False
     return isinstance(value, Agent)
+
+
+def _referenced_agent_from_handoff(handoff: Any) -> Any | None:
+    """Return the original agent held by an explicit SDK handoff wrapper."""
+    # OpenAI Agents SDK `handoff(agent)` wrappers keep the original agent behind
+    # this private weakref today. Including it makes Kitaru's runner-call cache
+    # identity change when that referenced agent's tools/model change.
+    agent_ref = getattr(handoff, "_agent_ref", None)
+    return agent_ref() if callable(agent_ref) else None
+
+
+def _behavior_value_cache_identity(
+    value: Any,
+    *,
+    seen_ids: set[int] | None = None,
+    depth: int = 0,
+) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if depth >= _MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH:
+        return _bounded_behavior_cache_identity(value, reason="max_depth_exceeded")
+    if seen_ids is None:
+        seen_ids = set()
+
+    value_id = id(value)
+    if value_id in seen_ids:
+        return {
+            "python_type": KitaruRunner._python_type(type(value)),
+            "recursive_reference": True,
+        }
+
+    seen_ids.add(value_id)
+    try:
+        if callable(value):
+            return _callable_cache_identity(value, seen_ids=seen_ids, depth=depth)
+        if isinstance(value, list | tuple):
+            if len(value) > _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
+                return _bounded_collection_cache_identity(
+                    value,
+                    reason="max_items_exceeded",
+                )
+            return {
+                "collection_type": type(value).__name__,
+                "items": [
+                    _behavior_value_cache_identity(
+                        item,
+                        seen_ids=seen_ids,
+                        depth=depth + 1,
+                    )
+                    for item in value
+                ],
+            }
+        if isinstance(value, dict):
+            if len(value) > _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
+                return _bounded_collection_cache_identity(
+                    value,
+                    reason="max_items_exceeded",
+                )
+            return {
+                str(key): _behavior_value_cache_identity(
+                    nested,
+                    seen_ids=seen_ids,
+                    depth=depth + 1,
+                )
+                for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        return stable_cache_identity(value, opaque_objects_unique=False)
+    finally:
+        seen_ids.remove(value_id)
+
+
+def _bounded_behavior_cache_identity(value: Any, *, reason: str) -> dict[str, Any]:
+    identity: dict[str, Any] = {
+        "python_type": KitaruRunner._python_type(type(value)),
+        "serialization_error": reason,
+    }
+    if callable(value):
+        identity["object_id"] = id(value)
+    return identity
+
+
+def _bounded_collection_cache_identity(
+    value: list[Any] | tuple[Any, ...] | dict[Any, Any],
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "collection_type": type(value).__name__,
+        "item_count": len(value),
+        "serialization_error": reason,
+    }
+
+
+def _callable_cache_identity(
+    value: Any,
+    *,
+    seen_ids: set[int],
+    depth: int,
+) -> dict[str, Any]:
+    identity: dict[str, Any] = {
+        "python_type": KitaruRunner._python_type(type(value)),
+        "module": getattr(value, "__module__", None),
+        "qualname": getattr(value, "__qualname__", None),
+        "object_id": id(value),
+    }
+    code = getattr(value, "__code__", None)
+    if code is not None:
+        identity["code"] = {
+            "filename": getattr(code, "co_filename", None),
+            "firstlineno": getattr(code, "co_firstlineno", None),
+            "name": getattr(code, "co_name", None),
+        }
+    func = getattr(value, "__func__", None)
+    if func is not None:
+        identity["function"] = _behavior_value_cache_identity(
+            func,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
+    self_obj = getattr(value, "__self__", None)
+    if self_obj is not None:
+        identity["bound_to"] = {
+            "python_type": KitaruRunner._python_type(type(self_obj)),
+            "object_id": id(self_obj),
+        }
+    closure = getattr(value, "__closure__", None)
+    if closure:
+        if len(closure) > _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
+            identity["closure"] = {
+                "collection_type": "tuple",
+                "item_count": len(closure),
+                "serialization_error": "max_items_exceeded",
+            }
+        else:
+            identity["closure"] = [
+                _closure_cell_cache_identity(
+                    cell,
+                    seen_ids=seen_ids,
+                    depth=depth + 1,
+                )
+                for cell in closure
+            ]
+    return identity
+
+
+def _closure_cell_cache_identity(
+    cell: Any,
+    *,
+    seen_ids: set[int],
+    depth: int,
+) -> Any:
+    try:
+        return _behavior_value_cache_identity(
+            cell.cell_contents,
+            seen_ids=seen_ids,
+            depth=depth,
+        )
+    except ValueError:
+        return {"empty_closure_cell": True}
 
 
 class KitaruRunner:
@@ -151,6 +336,7 @@ class KitaruRunner:
         self._strict_context = strict_context
         self._strict_sdk_version = strict_sdk_version
         self._cost_calculator = cost_calculator
+        self._model_value_cache_identities: dict[int, dict[str, Any]] = {}
 
         track(
             AnalyticsEvent.OPENAI_AGENTS_WRAPPED,
@@ -795,33 +981,156 @@ class KitaruRunner:
             return None
         return checkpoint_cache_key({"context": context_cache_identity})
 
-    def _agent_cache_identity(self, agent: Any) -> dict[str, Any]:
+    def _agent_cache_identity(
+        self,
+        agent: Any,
+        seen_agent_ids: set[int] | None = None,
+        handoff_depth: int = 0,
+    ) -> dict[str, Any]:
+        if seen_agent_ids is None:
+            seen_agent_ids = set()
         agent_type = type(agent)
-        tools = getattr(agent, "tools", []) or []
-        handoffs = getattr(agent, "handoffs", []) or []
-        model = getattr(agent, "model", None)
-        model_type = type(model)
-        return {
-            "name": self._name,
-            "python_type": f"{agent_type.__module__}.{agent_type.__qualname__}",
-            "model": {
-                "name": getattr(model, "model_name", None),
-                "python_type": f"{model_type.__module__}.{model_type.__qualname__}",
-            },
-            "tools": [self._tool_cache_identity(tool) for tool in tools],
-            "handoffs": [getattr(handoff, "name", None) for handoff in handoffs],
+        agent_name = (
+            self._name if agent is self._agent else getattr(agent, "name", None)
+        )
+        identity: dict[str, Any] = {
+            "name": agent_name,
+            "python_type": self._python_type(agent_type),
         }
+        agent_id = id(agent)
+        if agent_id in seen_agent_ids:
+            return {**identity, "recursive_reference": True}
+        if handoff_depth > _MAX_HANDOFF_CACHE_IDENTITY_DEPTH:
+            return {**identity, "max_handoff_depth_exceeded": True}
+
+        seen_agent_ids.add(agent_id)
+        try:
+            tools = getattr(agent, "tools", []) or []
+            handoffs = getattr(agent, "handoffs", []) or []
+            model = getattr(agent, "model", None)
+            behavior_identity = {
+                attr_name: _behavior_value_cache_identity(attr_value)
+                for attr_name in _AGENT_BEHAVIOR_CACHE_ATTRIBUTES
+                if (attr_value := getattr(agent, attr_name, None)) is not None
+            }
+            return {
+                **identity,
+                "model": self._model_value_cache_identity(model),
+                "behavior": behavior_identity,
+                "tools": [self._tool_cache_identity(tool) for tool in tools],
+                "handoffs": [
+                    self._handoff_cache_identity(
+                        handoff,
+                        seen_agent_ids,
+                        handoff_depth=handoff_depth,
+                    )
+                    for handoff in handoffs
+                ],
+            }
+        finally:
+            seen_agent_ids.remove(agent_id)
+
+    def _handoff_cache_identity(
+        self,
+        handoff: Any,
+        seen_agent_ids: set[int],
+        *,
+        handoff_depth: int,
+    ) -> dict[str, Any]:
+        next_handoff_depth = handoff_depth + 1
+        if _is_openai_agent(handoff):
+            return {
+                "kind": "agent",
+                "agent": self._agent_cache_identity(
+                    handoff,
+                    seen_agent_ids,
+                    handoff_depth=next_handoff_depth,
+                ),
+            }
+        identity: dict[str, Any] = {
+            "kind": "handoff",
+            "name": getattr(handoff, "name", None),
+            "python_type": self._python_type(type(handoff)),
+        }
+        for attr_name in (
+            "agent_name",
+            "tool_name",
+            "tool_description",
+            "input_json_schema",
+        ):
+            attr_value = getattr(handoff, attr_name, None)
+            if attr_value is not None:
+                identity[attr_name] = stable_cache_identity(attr_value)
+        for attr_name in _HANDOFF_BEHAVIOR_CACHE_ATTRIBUTES:
+            attr_value = getattr(handoff, attr_name, None)
+            if attr_value is not None:
+                identity[attr_name] = _behavior_value_cache_identity(attr_value)
+        referenced_agent = _referenced_agent_from_handoff(handoff)
+        if _is_openai_agent(referenced_agent):
+            identity["agent"] = self._agent_cache_identity(
+                referenced_agent,
+                seen_agent_ids,
+                handoff_depth=next_handoff_depth,
+            )
+        return identity
+
+    def _model_value_cache_identity(self, model: Any) -> dict[str, Any]:
+        if model is None or isinstance(model, str | int | float | bool):
+            return self._build_model_value_cache_identity(model)
+        model_id = id(model)
+        cached = self._model_value_cache_identities.get(model_id)
+        if cached is not None:
+            return cached
+        identity = self._build_model_value_cache_identity(model)
+        self._model_value_cache_identities[model_id] = identity
+        return identity
+
+    def _build_model_value_cache_identity(self, model: Any) -> dict[str, Any]:
+        model_type = type(model)
+        identity: dict[str, Any] = {
+            "name": getattr(model, "model_name", None),
+            "python_type": self._python_type(model_type),
+            "value": stable_cache_identity(model),
+        }
+        public_state = self._public_model_state_cache_identity(model)
+        if public_state is not None:
+            identity["public_state"] = public_state
+        return identity
+
+    @staticmethod
+    def _public_model_state_cache_identity(model: Any) -> Any | None:
+        attrs = getattr(model, "__dict__", None)
+        if not isinstance(attrs, dict):
+            return None
+        public_attrs = {
+            key: value
+            for key, value in attrs.items()
+            if not key.startswith("_") and not callable(value)
+        }
+        if not public_attrs:
+            return None
+        return stable_cache_identity(public_attrs)
 
     @staticmethod
     def _tool_cache_identity(tool: Any) -> dict[str, Any]:
         identity: dict[str, Any] = {
             "name": getattr(tool, "name", None),
-            "python_type": f"{type(tool).__module__}.{type(tool).__qualname__}",
+            "python_type": KitaruRunner._python_type(type(tool)),
         }
+        description = getattr(tool, "description", None)
+        if description is not None:
+            identity["description"] = stable_cache_identity(description)
+        params_json_schema = getattr(tool, "params_json_schema", None)
+        if params_json_schema is not None:
+            identity["params_json_schema"] = stable_cache_identity(params_json_schema)
         tool_cache_identity = getattr(tool, "_kitaru_cache_identity", None)
         if tool_cache_identity is not None:
-            identity["tool_cache_identity"] = tool_cache_identity
+            identity["tool_cache_identity"] = stable_cache_identity(tool_cache_identity)
         return identity
+
+    @staticmethod
+    def _python_type(value_type: type[Any]) -> str:
+        return f"{value_type.__module__}.{value_type.__qualname__}"
 
     def _prepare_execution_objects(
         self,
@@ -846,10 +1155,17 @@ class KitaruRunner:
         )
         from ._tools import kitaruify_openai_tools
 
-        def _prepare_agent(agent: Any, seen: set[int]) -> Any:
-            if id(agent) in seen:
+        preparing: set[int] = set()
+        prepared_by_id: dict[int, Any] = {}
+
+        def _prepare_agent(agent: Any) -> Any:
+            agent_id = id(agent)
+            if agent_id in prepared_by_id:
+                return prepared_by_id[agent_id]
+            if agent_id in preparing:
                 return agent
-            seen.add(id(agent))
+
+            preparing.add(agent_id)
             agent_model = getattr(agent, "model", None)
             wrapped_model = (
                 kitaruify_openai_model(
@@ -871,18 +1187,58 @@ class KitaruRunner:
                 context_cache_key=context_cache_key,
                 context_cache_key_factory=self._context_cache_key_for_context,
             )
-            wrapped_handoffs = [
-                _prepare_agent(handoff, seen) if _is_openai_agent(handoff) else handoff
-                for handoff in (getattr(agent, "handoffs", []) or [])
-            ]
-            return replace(
-                agent,
-                model=wrapped_model,
-                tools=wrapped_tools,
-                handoffs=wrapped_handoffs,
-            )
+            try:
+                wrapped_handoffs = [
+                    _prepare_handoff(handoff)
+                    for handoff in (getattr(agent, "handoffs", []) or [])
+                ]
+                prepared_agent = replace(
+                    agent,
+                    model=wrapped_model,
+                    tools=wrapped_tools,
+                    handoffs=wrapped_handoffs,
+                )
+                prepared_by_id[agent_id] = prepared_agent
+                return prepared_agent
+            finally:
+                preparing.remove(agent_id)
 
-        prepared_agent = _prepare_agent(self._agent, set())
+        def _prepare_handoff(handoff: Any) -> Any:
+            if _is_openai_agent(handoff):
+                return _prepare_agent(handoff)
+
+            referenced_agent = _referenced_agent_from_handoff(handoff)
+            if not _is_openai_agent(referenced_agent):
+                return handoff
+
+            prepared_handoff_agent = _prepare_agent(referenced_agent)
+            original_on_invoke = getattr(handoff, "on_invoke_handoff", None)
+            if not callable(original_on_invoke):
+                return handoff
+
+            async def _wrapped_on_invoke_handoff(
+                context: Any,
+                input_json: str | None = None,
+            ) -> Any:
+                invoked_agent = await original_on_invoke(context, input_json)
+                if invoked_agent is referenced_agent:
+                    return prepared_handoff_agent
+                if _is_openai_agent(invoked_agent):
+                    return _prepare_agent(invoked_agent)
+                return invoked_agent
+
+            wrapped_handoff = replace(
+                handoff,
+                on_invoke_handoff=_wrapped_on_invoke_handoff,
+            )
+            object.__setattr__(
+                wrapped_handoff,
+                "_agent_ref",
+                weakref.ref(prepared_handoff_agent),
+            )
+            return wrapped_handoff
+
+        prepared_agent = _prepare_agent(self._agent)
 
         config_model = getattr(run_config, "model", None)
         if isinstance(config_model, Model):

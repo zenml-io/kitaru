@@ -49,12 +49,19 @@ def _build_agent() -> Agent:
         instructions=(
             "You can run one safe diagnostic command through the "
             "kitaru_sandbox_command tool. The tool returns JSON with stdout, "
-            "stderr, exit_code, truncation flags, and cleanup status. Always "
+            "stderr, exit_code, truncation flags, timeout status, and cleanup "
+            "status. Always "
             "check exit_code first. If exit_code is 0, summarize stdout. If it "
             "is non-zero, explain stderr and do not pretend the command worked."
         ),
         model=model,
-        tools=[sandbox_command_tool(max_chars=4_000, cleanup="destroy")],
+        tools=[
+            sandbox_command_tool(
+                max_chars=4_000,
+                timeout_seconds=30,
+                cleanup="destroy",
+            )
+        ],
     )
 
 

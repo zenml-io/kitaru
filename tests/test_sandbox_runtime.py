@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Event
 from typing import Any, cast
 
 import pytest
@@ -40,6 +41,7 @@ class FakeProcess:
         self.collect_error = collect_error
         self.collect_calls = 0
         self.collect_max_chars: list[int] = []
+        self.kill_calls = 0
 
     def collect(self, *, max_chars: int) -> FakeOutput:
         self.collect_calls += 1
@@ -47,6 +49,25 @@ class FakeProcess:
         if self.collect_error is not None:
             raise self.collect_error
         return self.output
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+
+class BlockingFakeProcess(FakeProcess):
+    def __init__(self) -> None:
+        super().__init__(FakeOutput(stdout="late"))
+        self.kill_event = Event()
+
+    def collect(self, *, max_chars: int) -> FakeOutput:
+        self.collect_calls += 1
+        self.collect_max_chars.append(max_chars)
+        self.kill_event.wait(timeout=1.0)
+        return self.output
+
+    def kill(self) -> None:
+        super().kill()
+        self.kill_event.set()
 
 
 class FakeSession:
@@ -172,6 +193,7 @@ def test_run_sandbox_command_returns_stable_result_shape() -> None:
         "exit_code": 0,
         "stdout_truncated": False,
         "stderr_truncated": False,
+        "timed_out": False,
         "stack_id": "stack-1",
         "stack_name": "dev",
         "sandbox_id": "sandbox-1",
@@ -233,6 +255,28 @@ def test_run_sandbox_command_copies_truncation_flags() -> None:
 
     assert result.stdout_truncated is True
     assert result.stderr_truncated is True
+
+
+def test_run_sandbox_command_times_out_and_cleans_up() -> None:
+    process = BlockingFakeProcess()
+    session = FakeSession(process)
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "sleep 999999",
+        timeout_seconds=0.01,
+        client_factory=_client_factory(client),
+    )
+
+    assert process.collect_calls == 1
+    assert process.kill_calls == 1
+    assert session.destroy_calls == 1
+    assert result.timed_out is True
+    assert result.exit_code == -1
+    assert "timed out after 0.01 seconds" in result.stderr
+    assert result.stdout == ""
+    assert result.cleanup_succeeded is True
 
 
 def test_run_sandbox_command_requires_one_active_sandbox() -> None:
@@ -315,6 +359,141 @@ def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure
     assert session.close_calls == 1
 
 
+def test_run_sandbox_command_redacts_provider_error_secrets() -> None:
+    env_secret = "env-token-value-123"
+    non_secret_env_value = "plain env value with spaces"
+    quoted_secret = "quoted secret value, with comma"
+    basic_auth_token = "basic-token-value-123"
+    openai_key = "sk-testtokenvalue1234567890"
+    github_token = "github-token-value-123"
+    process = FakeProcess(
+        collect_error=RuntimeError(
+            "provider failed with Authorization: Bearer "
+            f"{openai_key}; Authorization: Basic {basic_auth_token}; "
+            f"OPENAI_API_KEY={env_secret}; MODE={non_secret_env_value}; "
+            f'PASSWORD="{quoted_secret}"; token={github_token}'
+        )
+    )
+    session = FakeSession(process)
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"OPENAI_API_KEY": env_secret, "MODE": non_secret_env_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "[REDACTED]" in message
+    assert env_secret not in message
+    assert non_secret_env_value not in message
+    assert quoted_secret not in message
+    assert basic_auth_token not in message
+    assert openai_key not in message
+    assert github_token not in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_run_sandbox_command_reports_cleanup_failure_after_command_failure() -> None:
+    command_secret = "command-env-value with spaces"
+    cleanup_secret = "cleanup-secret-looking-value-123"
+    process = FakeProcess(collect_error=RuntimeError("collect failed"))
+    session = FakeSession(
+        process,
+        destroy_error=RuntimeError(
+            f"cleanup failed Authorization: Basic {cleanup_secret}"
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"MODE": command_secret, "CLEANUP_DETAIL": cleanup_secret},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert "collect failed" in message
+    assert "Cleanup warning" in message
+    assert "Sandbox cleanup after command failure failed" in message
+    assert "[REDACTED]" in message
+    assert command_secret not in message
+    assert cleanup_secret not in message
+    assert session.destroy_calls == 1
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_run_sandbox_command_redacts_cleanup_failure_secrets() -> None:
+    secret = "cleanup-secret-value-123"
+    session = FakeSession(
+        destroy_error=RuntimeError(f"destroy failed PASSWORD={secret}")
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"PASSWORD": secret},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "[REDACTED]" in message
+    assert secret not in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_run_sandbox_command_redacts_timeout_cleanup_error() -> None:
+    secret = "sk-timeoutsecret1234567890"
+    process = BlockingFakeProcess()
+    session = FakeSession(process, destroy_error=RuntimeError(f"Bearer {secret}"))
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "sleep 999999",
+        timeout_seconds=0.01,
+        client_factory=_client_factory(client),
+    )
+
+    assert result.cleanup_succeeded is False
+    assert result.cleanup_error is not None
+    assert "[REDACTED]" in result.cleanup_error
+    assert secret not in result.cleanup_error
+
+
+def test_run_sandbox_command_redacts_unsupported_destroy_cleanup_errors() -> None:
+    destroy_secret = "destroy-secret-value-123"
+    close_secret = "sk-closesecret1234567890"
+    session = FakeSession(
+        destroy_error=NotImplementedError(f"SECRET={destroy_secret}"),
+        close_error=RuntimeError(f"Authorization: Bearer {close_secret}"),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "echo hi",
+        env={"SECRET": destroy_secret},
+        client_factory=_client_factory(client),
+    )
+
+    assert result.cleanup_succeeded is False
+    assert result.cleanup_error is not None
+    assert "[REDACTED]" in result.cleanup_error
+    assert destroy_secret not in result.cleanup_error
+    assert close_secret not in result.cleanup_error
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -324,6 +503,9 @@ def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure
         ({"command": "echo", "max_chars": -1}, ">= 0"),
         ({"command": "echo", "max_chars": 1.2}, "integer"),
         ({"command": "echo", "max_chars": True}, "integer"),
+        ({"command": "echo", "timeout_seconds": 0}, "greater than 0"),
+        ({"command": "echo", "timeout_seconds": float("nan")}, "finite number"),
+        ({"command": "echo", "timeout_seconds": True}, "finite number"),
         ({"command": "echo", "env": {"A": 1}}, "keys and values"),
         ({"command": "echo", "cleanup": "keep"}, "destroy.*close"),
     ],

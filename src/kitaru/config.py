@@ -679,6 +679,7 @@ def run_sandbox_command(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    timeout_seconds: float | None = None,
     cleanup: Literal["destroy", "close"] = "destroy",
 ) -> SandboxCommandResult:
     """Execute one command through the active stack's sandbox component.
@@ -689,6 +690,10 @@ def run_sandbox_command(
         env: Optional environment variables for the command. These values are
             passed to the sandbox provider but are not included in the result.
         max_chars: Maximum characters to collect from each output stream.
+        timeout_seconds: Optional application-owned timeout for command
+            execution. If the command does not finish in time, Kitaru asks the
+            process to stop, cleans up the session on a best-effort basis, and
+            returns a structured timeout result.
         cleanup: Whether to destroy or close the fresh sandbox session after the
             command completes.
 
@@ -700,6 +705,7 @@ def run_sandbox_command(
         cwd=cwd,
         env=env,
         max_chars=max_chars,
+        timeout_seconds=timeout_seconds,
         cleanup=cleanup,
         client_factory=Client,
     )
