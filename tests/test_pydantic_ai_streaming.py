@@ -72,13 +72,64 @@ def _capture_published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return published
 
 
-def _make_agent(*, capture: Any = None) -> Any:
+def _make_agent(*, capture: Any = None, event_stream_handler: Any = None) -> Any:
     from pydantic_ai import Agent
     from pydantic_ai.models.test import TestModel
 
     from kitaru.adapters.pydantic_ai import KitaruAgent
 
-    return KitaruAgent(Agent(TestModel(), name="streamer"), capture=capture)
+    return KitaruAgent(
+        Agent(TestModel(), name="streamer"),
+        capture=capture,
+        event_stream_handler=event_stream_handler,
+    )
+
+
+def _stream_event_sources(published: list[dict[str, Any]]) -> list[str]:
+    return [
+        event["payload"]["source"]
+        for event in published
+        if event["kind"] == "pydantic_ai.stream.event"
+    ]
+
+
+def _pydantic_ai_stream_sources(published: list[dict[str, Any]]) -> list[str]:
+    return [
+        event["payload"]["source"]
+        for event in published
+        if event["kind"].startswith("pydantic_ai.stream.")
+    ]
+
+
+def _quiet_stream_capture_policy() -> Any:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+
+    return CapturePolicy(
+        save_prompts=False,
+        save_responses=False,
+        save_stream_transcripts=False,
+    )
+
+
+def _collecting_handler() -> tuple[list[Any], Any]:
+    received: list[Any] = []
+
+    async def handler(_ctx: Any, stream: AsyncIterable[Any]) -> None:
+        async for event in stream:
+            received.append(event)
+
+    return received, handler
+
+
+def _assert_only_handler_stream_events(
+    published: list[dict[str, Any]], received: list[Any]
+) -> None:
+    sources = _stream_event_sources(published)
+    assert received
+    assert sources
+    assert all(source == "event_stream_handler" for source in sources)
+    assert "model_request_stream" not in _pydantic_ai_stream_sources(published)
+    assert len(sources) == len(received)
 
 
 def test_pydantic_ai_stream_constants_are_stable() -> None:
@@ -579,6 +630,105 @@ async def test_handler_suppresses_nested_model_live_events(
 
     assert suppression_states == [True]
     assert model_stream_live_events_suppressed() is False
+
+
+@pytest.mark.anyio
+async def test_agent_run_with_handler_publishes_stream_events_once_from_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    received, handler = _collecting_handler()
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    await agent.run("hello", event_stream_handler=handler)
+
+    _assert_only_handler_stream_events(published, received)
+
+
+@pytest.mark.anyio
+async def test_agent_run_with_constructor_handler_publishes_once_from_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    received, handler = _collecting_handler()
+    agent = _make_agent(
+        capture=_quiet_stream_capture_policy(),
+        event_stream_handler=handler,
+    )
+
+    await agent.run("hello")
+
+    _assert_only_handler_stream_events(published, received)
+
+
+@pytest.mark.anyio
+async def test_agent_run_without_handler_does_not_publish_stream_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    await agent.run("hello")
+
+    assert _stream_event_sources(published) == []
+
+
+def test_agent_run_sync_with_handler_publishes_stream_events_once_from_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    received, handler = _collecting_handler()
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    agent.run_sync("hello", event_stream_handler=handler)
+
+    _assert_only_handler_stream_events(published, received)
+
+
+def test_agent_run_sync_without_handler_does_not_publish_stream_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _capture_published(monkeypatch)
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    agent.run_sync("hello")
+
+    assert _stream_event_sources(published) == []
+
+
+@pytest.mark.anyio
+async def test_agent_run_stream_with_handler_publishes_stream_events_once_from_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.runtime import _checkpoint_scope
+
+    published = _capture_published(monkeypatch)
+    received, handler = _collecting_handler()
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    with _checkpoint_scope(name="run-stream-checkpoint", checkpoint_type="custom"):
+        async with agent.run_stream("hello", event_stream_handler=handler) as result:
+            await result.get_output()
+
+    _assert_only_handler_stream_events(published, received)
+
+
+@pytest.mark.anyio
+async def test_agent_run_stream_without_handler_keeps_model_stream_live_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.runtime import _checkpoint_scope
+
+    published = _capture_published(monkeypatch)
+    agent = _make_agent(capture=_quiet_stream_capture_policy())
+
+    with _checkpoint_scope(name="run-stream-checkpoint", checkpoint_type="custom"):
+        async with agent.run_stream("hello") as result:
+            await result.get_output()
+
+    sources = _stream_event_sources(published)
+    assert sources
+    assert all(source == "model_request_stream" for source in sources)
 
 
 @pytest.mark.anyio
