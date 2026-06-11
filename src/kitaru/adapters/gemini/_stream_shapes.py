@@ -189,6 +189,15 @@ def delta_text(delta: Any, *, include_arguments_delta: bool = False) -> str | No
     return None
 
 
+def function_name_from_step(value: Any) -> str | None:
+    """Return a Gemini function/tool name from known provider field names."""
+    for field_name in ("name", "tool_name", "function_name"):
+        function_name = coerce_string(extract(value, field_name))
+        if function_name is not None:
+            return function_name
+    return None
+
+
 def safe_event_identity(event: Any) -> dict[str, Any]:
     """Return safe id metadata for a stream event."""
     fields: dict[str, Any] = {}

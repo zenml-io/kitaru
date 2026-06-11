@@ -7,9 +7,11 @@ import types
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.config import DEFAULT_SANDBOX_COMMAND_MAX_CHARS, SandboxCommandResult
 from kitaru.errors import KitaruStateError, KitaruUsageError
+from kitaru.runtime import _checkpoint_scope, _flow_scope
 from tests._gemini_fake_sdk import (
     install_fake_google_genai,
     purge_gemini_adapter_modules,
@@ -35,6 +37,8 @@ def _sandbox_result(
     exit_code: int = 0,
     stdout: str = "Python 3.12.0\n",
     stderr: str | None = None,
+    cleanup_succeeded: bool = True,
+    cleanup_error: str | None = None,
 ) -> SandboxCommandResult:
     return SandboxCommandResult(
         command="python --version",
@@ -50,8 +54,8 @@ def _sandbox_result(
         sandbox_name="dev-sandbox",
         session_id="session-1",
         cleanup="destroy",
-        cleanup_succeeded=True,
-        cleanup_error=None,
+        cleanup_succeeded=cleanup_succeeded,
+        cleanup_error=cleanup_error,
     )
 
 
@@ -161,7 +165,7 @@ def test_execute_gemini_sandbox_function_call_success(
         "stdout_payload_truncated": False,
         "stderr_payload_truncated": False,
         "payload_output_max_chars": 4_000,
-        "cleanup": {"policy": "destroy", "succeeded": True, "error": None},
+        "cleanup": {"policy": "destroy", "succeeded": True},
     }
     request = execution.function_result_request
     assert request.kind == "function_result"
@@ -204,6 +208,96 @@ def test_gemini_sandbox_function_execution_is_json_serializable(
     assert dumped["function_result_request"]["kind"] == "function_result"
 
 
+def test_execute_gemini_sandbox_function_call_outside_flow_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append(command)
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    gemini_adapter.execute_gemini_sandbox_function_call(
+        _requires_action_result(gemini_adapter),
+        {"sandbox_python_version": "python --version"},
+    )
+
+    assert sandbox_calls == ["python --version"]
+
+
+def test_execute_gemini_sandbox_function_call_inside_checkpoint_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append(command)
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    with (
+        _flow_scope(name="flow"),
+        _checkpoint_scope(name="checkpoint", checkpoint_type="agent_call"),
+    ):
+        gemini_adapter.execute_gemini_sandbox_function_call(
+            _requires_action_result(gemini_adapter),
+            {"sandbox_python_version": "python --version"},
+        )
+
+    assert sandbox_calls == ["python --version"]
+
+
+def test_execute_gemini_sandbox_function_call_rejects_direct_flow_body_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append(command)
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    with (
+        _flow_scope(name="flow"),
+        pytest.raises(KitaruUsageError, match="directly inside a Kitaru flow body"),
+    ):
+        gemini_adapter.execute_gemini_sandbox_function_call(
+            _requires_action_result(gemini_adapter),
+            {"sandbox_python_version": "python --version"},
+        )
+
+    assert sandbox_calls == []
+
+
+def test_execute_gemini_sandbox_function_call_allows_explicit_direct_flow_body_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append(command)
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    with _flow_scope(name="flow"):
+        gemini_adapter.execute_gemini_sandbox_function_call(
+            _requires_action_result(gemini_adapter),
+            {"sandbox_python_version": "python --version"},
+            allow_direct_execution_inside_flow_body=True,
+        )
+
+    assert sandbox_calls == ["python --version"]
+
+
 def test_execute_gemini_sandbox_function_call_rejects_provider_agent_result(
     gemini_adapter: types.ModuleType,
 ) -> None:
@@ -218,7 +312,7 @@ def test_execute_gemini_sandbox_function_call_rejects_provider_agent_result(
         )
 
 
-def test_execute_gemini_sandbox_function_call_requires_one_continuation_target(
+def test_execute_gemini_sandbox_function_call_requires_model_continuation_target(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
 ) -> None:
@@ -232,17 +326,78 @@ def test_execute_gemini_sandbox_function_call_requires_one_continuation_target(
     result = _requires_action_result(gemini_adapter)
     result.model = None
 
-    with pytest.raises(KitaruUsageError, match="exactly one continuation target"):
+    with pytest.raises(KitaruUsageError, match="model continuation target"):
         gemini_adapter.execute_gemini_sandbox_function_call(
             result,
             {"sandbox_python_version": "python --version"},
         )
 
-    with pytest.raises(KitaruUsageError, match="exactly one continuation target"):
+    assert sandbox_calls == []
+
+
+def test_execute_gemini_sandbox_function_call_rejects_agent_override(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="Do not pass agent"):
         gemini_adapter.execute_gemini_sandbox_function_call(
             _requires_action_result(gemini_adapter),
             {"sandbox_python_version": "python --version"},
             agent="caller-owned-agent",
+        )
+
+
+@pytest.mark.parametrize(
+    ("result_factory", "kwargs", "error_match"),
+    [
+        (
+            lambda adapter: _requires_action_result(adapter),
+            {"model": ""},
+            "non-empty",
+        ),
+        (
+            lambda adapter: _requires_action_result(adapter),
+            {"timeout_s": 0},
+            "positive",
+        ),
+        (
+            lambda adapter: _requires_action_result(
+                adapter,
+                steps=[
+                    adapter.GeminiInteractionStepSummary(
+                        index=0,
+                        type="function_call",
+                        call_id="",
+                        tool_name="sandbox_python_version",
+                    )
+                ],
+            ),
+            {},
+            "non-empty",
+        ),
+    ],
+)
+def test_execute_gemini_sandbox_function_call_preflights_continuation_request(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+    result_factory: Any,
+    kwargs: dict[str, Any],
+    error_match: str,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(
+        command: Any, **run_kwargs: Any
+    ) -> SandboxCommandResult:
+        sandbox_calls.append({"command": command, **run_kwargs})
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    with pytest.raises(ValidationError, match=error_match):
+        gemini_adapter.execute_gemini_sandbox_function_call(
+            result_factory(gemini_adapter),
+            {"sandbox_python_version": "python --version"},
+            **kwargs,
         )
 
     assert sandbox_calls == []
@@ -348,6 +503,32 @@ def test_execute_gemini_sandbox_function_call_returns_non_zero_exit_as_payload(
     assert execution.function_result_payload["ok"] is False
     assert execution.function_result_payload["exit_code"] == 7
     assert execution.function_result_payload["stderr"] == "boom\n"
+
+
+def test_default_function_result_payload_omits_cleanup_error_from_model_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    monkeypatch.setattr(
+        "kitaru.run_sandbox_command",
+        lambda command, **kwargs: _sandbox_result(
+            cleanup_succeeded=False,
+            cleanup_error="verbose provider cleanup failure with local details",
+        ),
+    )
+
+    execution = gemini_adapter.execute_gemini_sandbox_function_call(
+        _requires_action_result(gemini_adapter),
+        {"sandbox_python_version": "python --version"},
+    )
+
+    payload = execution.function_result_payload
+    assert payload["cleanup"] == {"policy": "destroy", "succeeded": False}
+    assert "error" not in payload["cleanup"]
+    assert (
+        execution.sandbox_result.cleanup_error
+        == "verbose provider cleanup failure with local details"
+    )
 
 
 def test_default_function_result_payload_caps_stdout_and_stderr(

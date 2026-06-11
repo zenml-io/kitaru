@@ -599,7 +599,11 @@ Gemini interaction checkpoint
   -> Gemini continues from the same interaction id
 ```
 
-In code, the middle checkpoint looks like this:
+In code, the middle checkpoint looks like this. The checkpoint matters:
+`execute_gemini_sandbox_function_call(...)` runs a sandbox command, so Kitaru
+rejects direct flow-body use by default to avoid replay running the command a
+second time.
+
 
 ```python
 import kitaru
@@ -629,12 +633,14 @@ The returned `GeminiSandboxFunctionExecution` contains the matched call metadata
 the local `SandboxCommandResult`, the JSON-like payload sent to Gemini, and the
 ready-to-send `GeminiInteractionRequest.function_result(...)`.
 
-V1 intentionally does **not** parse model-supplied function arguments. The helper
-matches by safe step metadata that Kitaru already exposes: step index, step type,
-call ID, and function name. Registered commands can be static, or they can be
-built from that safe call metadata. If you need model arguments later, that needs
-a separate opt-in design because those arguments live in raw provider payloads
-and may contain private user data.
+V1 intentionally does **not** parse model-supplied function arguments and only
+builds model-targeted continuations. It rejects provider-agent/Antigravity
+results and `agent=...` overrides. The helper matches by safe step metadata that
+Kitaru already exposes: step index, step type, call ID, and function name.
+Registered commands can be static, or they can be built from that safe call
+metadata. If you need model arguments later, that needs a separate opt-in design
+because those arguments live in raw provider payloads and may contain private
+user data.
 
 The default function-result payload includes:
 
@@ -643,11 +649,12 @@ The default function-result payload includes:
 - `stdout` and `stderr`, clipped to a compact model-facing size by default
 - stdout/stderr truncation flags, including whether the helper clipped the
   model-facing payload
-- cleanup policy, cleanup success, and cleanup error
+- cleanup policy and cleanup success
 
 It does not include environment variables, full stack IDs, sandbox IDs, session
-IDs, or the command string in the payload sent back to Gemini. The local
-`SandboxCommandResult` remains available to your own code for debugging.
+IDs, the command string, or a raw cleanup error string in the payload sent back
+to Gemini. The local `SandboxCommandResult` remains available to your own code
+for debugging.
 
 This helper does not move Google-owned execution into Kitaru. Antigravity
 internals, built-in Gemini code execution, hosted MCP, web execution, and

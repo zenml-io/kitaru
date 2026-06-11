@@ -143,6 +143,19 @@ def test_import_with_incomplete_interaction_type_annotations_raises(
         importlib.import_module("kitaru.adapters.gemini")
 
 
+def test_import_requires_complete_function_result_content_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(
+        monkeypatch,
+        function_result_annotations={"call_id": str},
+    )
+
+    with pytest.raises(KitaruFeatureNotAvailableError, match="preview API"):
+        importlib.import_module("kitaru.adapters.gemini")
+
+
 def test_gemini_analytics_events_do_not_use_granular_vocabulary() -> None:
     values = [
         event.value
@@ -192,7 +205,54 @@ def test_installed_google_genai_interactions_contract(
     function_call_fields = interaction_types.FunctionCallContent.__annotations__
     function_result_fields = interaction_types.FunctionResultContent.__annotations__
     assert "id" in function_call_fields
+    assert "name" in function_call_fields
+    assert "arguments" in function_call_fields
+    assert "type" in function_call_fields
     assert "call_id" in function_result_fields
+    assert "name" in function_result_fields
+    assert "result" in function_result_fields
+    assert "type" in function_result_fields
+
+    function_result = interaction_types.FunctionResultContent(
+        call_id="call-1",
+        name="lookup",
+        result={"ok": True},
+        type="function_result",
+    )
+    dumped_result = function_result.model_dump(mode="json")
+    assert dumped_result["call_id"] == "call-1"
+    assert dumped_result["name"] == "lookup"
+    assert dumped_result["result"] == {"ok": True}
+    assert dumped_result["type"] == "function_result"
+
+
+@pytest.mark.parametrize(
+    ("function_name_field", "function_name"),
+    [("tool_name", "lookup_tool"), ("function_name", "lookup_function")],
+)
+def test_normalize_interaction_uses_function_name_fallback_fields(
+    gemini_adapter: types.ModuleType,
+    function_name_field: str,
+    function_name: str,
+) -> None:
+    runner_module = importlib.import_module(f"{gemini_adapter.__name__}._runner")
+    step_data = {
+        "id": "step-1",
+        "type": "function_call",
+        "call_id": "call-1",
+        function_name_field: function_name,
+    }
+    interaction = types.SimpleNamespace(
+        status="requires_action",
+        id="interaction-1",
+        model="gemini-test",
+        steps=[types.SimpleNamespace(**step_data)],
+    )
+
+    payload = runner_module.normalize_interaction(interaction, duration_ms=0.0)
+
+    assert payload.steps[0].call_id == "call-1"
+    assert payload.steps[0].tool_name == function_name
 
 
 def test_runner_accepts_interaction_strategy(gemini_adapter: types.ModuleType) -> None:

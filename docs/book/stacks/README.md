@@ -15,8 +15,8 @@ bundles these concerns:
   and saved data are written (local, S3, GCS, Azure Blob)
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
-- **Sandbox** — the isolated execution environment Kitaru can use when a
-  checkpoint asks for sandboxed work
+- **Sandbox** — the execution environment Kitaru can use when sandboxed work
+  is requested. Isolation depends on the configured sandbox provider.
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -89,8 +89,17 @@ By default, Kitaru creates:
 - a stack named `dev`
 
 Then it automatically activates the new stack. The local sandbox uses Kitaru's
-installed local sandbox provider. If another sandbox provider is installed in
-your environment, you can choose it explicitly:
+installed local sandbox provider.
+
+{% hint style="warning" %}
+The local sandbox is a development convenience, not a security boundary.
+Commands run as local subprocesses on your machine and can access the local
+filesystem and network according to your normal user permissions. Use it for
+trusted development workflows, not for running untrusted code.
+{% endhint %}
+
+If another sandbox provider is installed in your environment, you can choose it
+explicitly:
 
 ```bash
 kitaru stack create dev --sandbox local

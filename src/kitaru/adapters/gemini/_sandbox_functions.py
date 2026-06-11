@@ -12,6 +12,7 @@ import kitaru
 from kitaru.config import DEFAULT_SANDBOX_COMMAND_MAX_CHARS, SandboxCommandResult
 from kitaru.errors import KitaruUsageError
 
+from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._types import (
     GeminiInteractionFunctionCall,
     GeminiInteractionRequest,
@@ -93,6 +94,7 @@ def execute_gemini_sandbox_function_call(
     functions: SandboxFunctionRegistry,
     *,
     call_id: str | None = None,
+    allow_direct_execution_inside_flow_body: bool = False,
     model: str | None = None,
     agent: str | None = None,
     environment: str | dict[str, Any] | None = None,
@@ -126,18 +128,39 @@ def execute_gemini_sandbox_function_call(
             "results remain Google-owned and cannot be redirected into Kitaru's "
             "sandbox helper."
         )
+    if agent is not None:
+        raise KitaruUsageError(
+            "Gemini sandbox function execution v1 only supports model-targeted "
+            "continuations. Do not pass agent=...; use model=... or the "
+            "result.model value from the original model interaction."
+        )
     if result.interaction_id is None:
         raise KitaruUsageError(
             "Gemini sandbox function execution requires result.interaction_id so "
             "the function_result request can continue the same interaction."
         )
 
+    _raise_if_unsafe_direct_flow_body_execution(
+        allow_direct_execution_inside_flow_body=allow_direct_execution_inside_flow_body
+    )
     registry = _normalize_function_registry(functions)
     call, spec = _select_function_call(result, registry, call_id=call_id)
-    target_model, target_agent = _resolve_continuation_target(
-        result,
-        model_override=model,
-        agent_override=agent,
+    target_model = _resolve_model_continuation_target(result, model_override=model)
+    _preflight_validate_function_result_request(
+        previous_interaction_id=result.interaction_id,
+        call=call,
+        model=target_model,
+        environment=environment,
+        tools=tools,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        agent_config=agent_config,
+        response_format=response_format,
+        response_mime_type=response_mime_type,
+        background=background,
+        store=store,
+        timeout_s=timeout_s,
+        metadata=metadata,
     )
     sandbox_result = kitaru.run_sandbox_command(
         spec.build_command(call),
@@ -147,13 +170,11 @@ def execute_gemini_sandbox_function_call(
         cleanup=spec.cleanup,
     )
     payload = spec.build_payload(call, sandbox_result)
-    request = GeminiInteractionRequest.function_result(
+    request = _build_function_result_request(
         previous_interaction_id=result.interaction_id,
-        function_call_id=call.call_id,
-        function_name=call.function_name,
+        call=call,
         function_result=payload,
         model=target_model,
-        agent=target_agent,
         environment=environment,
         tools=tools,
         system_instruction=system_instruction,
@@ -174,21 +195,116 @@ def execute_gemini_sandbox_function_call(
     )
 
 
-def _resolve_continuation_target(
+def _preflight_validate_function_result_request(
+    *,
+    previous_interaction_id: str,
+    call: GeminiInteractionFunctionCall,
+    model: str,
+    environment: str | dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None,
+    system_instruction: str | None,
+    generation_config: dict[str, Any] | None,
+    agent_config: dict[str, Any] | None,
+    response_format: dict[str, Any] | None,
+    response_mime_type: str | None,
+    background: bool,
+    store: bool,
+    timeout_s: float | None,
+    metadata: dict[str, Any] | None,
+) -> None:
+    _build_function_result_request(
+        previous_interaction_id=previous_interaction_id,
+        call=call,
+        function_result={"ok": True, "preflight": True},
+        model=model,
+        environment=environment,
+        tools=tools,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        agent_config=agent_config,
+        response_format=response_format,
+        response_mime_type=response_mime_type,
+        background=background,
+        store=store,
+        timeout_s=timeout_s,
+        metadata=metadata,
+    )
+
+
+def _build_function_result_request(
+    *,
+    previous_interaction_id: str,
+    call: GeminiInteractionFunctionCall,
+    function_result: Any,
+    model: str,
+    environment: str | dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None,
+    system_instruction: str | None,
+    generation_config: dict[str, Any] | None,
+    agent_config: dict[str, Any] | None,
+    response_format: dict[str, Any] | None,
+    response_mime_type: str | None,
+    background: bool,
+    store: bool,
+    timeout_s: float | None,
+    metadata: dict[str, Any] | None,
+) -> GeminiInteractionRequest:
+    return GeminiInteractionRequest.function_result(
+        previous_interaction_id=previous_interaction_id,
+        function_call_id=call.call_id,
+        function_name=call.function_name,
+        function_result=function_result,
+        model=model,
+        agent=None,
+        environment=environment,
+        tools=tools,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        agent_config=agent_config,
+        response_format=response_format,
+        response_mime_type=response_mime_type,
+        background=background,
+        store=store,
+        timeout_s=timeout_s,
+        metadata=metadata,
+    )
+
+
+def _raise_if_unsafe_direct_flow_body_execution(
+    *,
+    allow_direct_execution_inside_flow_body: bool,
+) -> None:
+    if not isinstance(allow_direct_execution_inside_flow_body, bool):
+        raise KitaruUsageError(
+            "`allow_direct_execution_inside_flow_body` must be a boolean."
+        )
+    if not is_inside_flow() or is_inside_checkpoint():
+        return
+    if allow_direct_execution_inside_flow_body:
+        return
+    raise KitaruUsageError(
+        "execute_gemini_sandbox_function_call(...) was called directly inside a "
+        "Kitaru flow body. The helper runs a sandbox command, and replaying the "
+        "flow can run that command again. Move the helper call into a "
+        "@checkpoint so Kitaru records the command result, or pass "
+        "allow_direct_execution_inside_flow_body=True if you deliberately accept "
+        "duplicate sandbox execution during replay."
+    )
+
+
+def _resolve_model_continuation_target(
     result: GeminiInteractionResult,
     *,
     model_override: str | None,
-    agent_override: str | None,
-) -> tuple[str | None, str | None]:
+) -> str:
     target_model = result.model if model_override is None else model_override
-    target_agent = result.agent if agent_override is None else agent_override
-    if (target_model is None) == (target_agent is None):
+    if target_model is None:
         raise KitaruUsageError(
-            "Gemini sandbox function execution needs exactly one continuation "
-            "target. Pass model=... for model interactions or agent=... for a "
-            "future caller-owned agent path."
+            "Gemini sandbox function execution v1 needs a model continuation "
+            "target. Pass model=... or use a requires_action result from a model "
+            "interaction that includes result.model."
         )
-    return target_model, target_agent
+    return target_model
 
 
 def _default_function_result_payload(
@@ -213,7 +329,6 @@ def _default_function_result_payload(
         "cleanup": {
             "policy": sandbox_result.cleanup,
             "succeeded": sandbox_result.cleanup_succeeded,
-            "error": sandbox_result.cleanup_error,
         },
     }
 

@@ -51,7 +51,12 @@ def install_fake_google_genai(
             "FunctionCallContent",
             (),
             {
-                "__annotations__": {"id": str}
+                "__annotations__": {
+                    "arguments": dict[str, Any],
+                    "id": str,
+                    "name": str,
+                    "type": str,
+                }
                 if function_call_annotations is None
                 else function_call_annotations
             },
@@ -60,7 +65,12 @@ def install_fake_google_genai(
             "FunctionResultContent",
             (),
             {
-                "__annotations__": {"call_id": str}
+                "__annotations__": {
+                    "call_id": str,
+                    "name": str,
+                    "result": dict[str, Any],
+                    "type": str,
+                }
                 if function_result_annotations is None
                 else function_result_annotations
             },

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable, Mapping, Sequence
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any, Literal, cast
 
@@ -20,6 +21,23 @@ DEFAULT_SANDBOX_COMMAND_MAX_CHARS = 1_048_576
 CLEANUP_DESTROY = "destroy"
 CLEANUP_CLOSE = "close"
 SandboxCleanupPolicy = Literal["destroy", "close"]
+_REDACTED: str = "[REDACTED]"
+_SECRET_KEY_NAME_PATTERN = (
+    r"[A-Za-z0-9_.-]*(?:api[_-]?key|authorization|password|passwd|secret|token|"
+    r"private[_-]?key|access[_-]?key|credentials?)[A-Za-z0-9_.-]*"
+)
+_AUTHORIZATION_VALUE_PATTERN = re.compile(
+    r"(?i)(\bAuthorization\s*[:=]\s*)([A-Za-z]+\s+)?([^\s,;\r\n]+)"
+)
+_BARE_BEARER_VALUE_PATTERN = re.compile(r"(?i)(\bBearer\s+)([^\s,;\r\n]+)")
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    rf"(?i)(\b{_SECRET_KEY_NAME_PATTERN}\b\s*[:=]\s*)"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s,;&}]+))"
+)
+_SECRET_JSON_PATTERN = re.compile(
+    rf"(?i)((?:['\"]){_SECRET_KEY_NAME_PATTERN}(?:['\"])\s*:\s*)"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s,;&}]+))"
+)
 
 
 class SandboxCommandResult(BaseModel):
@@ -57,6 +75,7 @@ def run_sandbox_command(
     normalized_command = _normalize_command(command)
     normalized_cwd = _normalize_cwd(cwd)
     normalized_env = _normalize_env(env)
+    explicit_secrets = _explicit_env_secrets(normalized_env)
     normalized_max_chars = _normalize_max_chars(max_chars)
     normalized_cleanup = _normalize_cleanup(cleanup)
 
@@ -85,19 +104,41 @@ def run_sandbox_command(
         _ensure_process_collect_api_available(process)
         output = process.collect(max_chars=normalized_max_chars)
     except KitaruFeatureNotAvailableError:
-        _cleanup_after_failed_command(session, normalized_cleanup)
+        _cleanup_after_failed_command(
+            session,
+            normalized_cleanup,
+            explicit_secrets=explicit_secrets,
+        )
         raise
     except Exception as exc:
-        _cleanup_after_failed_command(session, normalized_cleanup)
-        raise KitaruBackendError(
-            f"Sandbox command execution failed on active stack '{stack_name}': {exc}"
-        ) from exc
+        cleanup_succeeded, cleanup_error = _cleanup_after_failed_command(
+            session,
+            normalized_cleanup,
+            explicit_secrets=explicit_secrets,
+        )
+        failure = _safe_exception_message(
+            exc,
+            explicit_secrets=explicit_secrets,
+        )
+        message = (
+            f"Sandbox command execution failed on active stack '{stack_name}': "
+            f"{failure}"
+        )
+        if not cleanup_succeeded:
+            cleanup_detail = cleanup_error or "Sandbox cleanup did not complete."
+            message = (
+                f"{message} Sandbox cleanup also failed; the session may still "
+                f"be active. Cleanup failure: {cleanup_detail}"
+            )
+        raise KitaruBackendError(message) from None
 
     session_id = _optional_string_attribute(
         session, "id"
     ) or _optional_string_attribute(session, "session_id")
     cleanup_succeeded, cleanup_error = _cleanup_after_success(
-        session, normalized_cleanup
+        session,
+        normalized_cleanup,
+        explicit_secrets=explicit_secrets,
     )
     if not cleanup_succeeded and cleanup_error is None:
         cleanup_error = "Sandbox cleanup did not complete."
@@ -190,10 +231,10 @@ def _resolve_active_stack(
         client = client_factory()
         active_stack = client.active_stack
         active_stack_model = client.active_stack_model
-    except Exception as exc:
+    except Exception:
         raise KitaruBackendError(
             "Unable to resolve the active stack for sandbox command execution."
-        ) from exc
+        ) from None
     return active_stack, active_stack_model
 
 
@@ -311,20 +352,29 @@ def _required_output_bool(output: Any, attr: str) -> bool:
 def _cleanup_after_failed_command(
     session: Any | None,
     cleanup: SandboxCleanupPolicy,
-) -> None:
+    *,
+    explicit_secrets: Iterable[str] = (),
+) -> tuple[bool, str | None]:
     if session is None:
-        return
+        return True, None
 
     try:
         if cleanup == CLEANUP_DESTROY:
-            _destroy_session_or_close_if_unsupported(session)
-        else:
-            session.close()
-    except Exception:
-        return
+            return _destroy_session_or_close_if_unsupported(
+                session,
+                explicit_secrets=explicit_secrets,
+            )
+        session.close()
+    except Exception as exc:
+        return False, _safe_exception_message(exc, explicit_secrets=explicit_secrets)
+    return True, None
 
 
-def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | None]:
+def _destroy_session_or_close_if_unsupported(
+    session: Any,
+    *,
+    explicit_secrets: Iterable[str] = (),
+) -> tuple[bool, str | None]:
     try:
         session.destroy()
     except NotImplementedError as exc:
@@ -332,11 +382,17 @@ def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | 
         try:
             session.close()
         except Exception as close_exc:
-            close_error = f" Best-effort close also failed: {close_exc}"
+            safe_close_error = _safe_exception_message(
+                close_exc,
+                explicit_secrets=explicit_secrets,
+            )
+            close_error = f" Best-effort close also failed: {safe_close_error}"
         return (
             False,
             "Sandbox session destroy is not supported by this provider; "
-            f"the command result is still available. {exc}{close_error or ''}",
+            "the command result is still available. "
+            f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
+            f"{close_error or ''}",
         )
     return True, None
 
@@ -344,6 +400,8 @@ def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | 
 def _cleanup_after_success(
     session: Any,
     cleanup: SandboxCleanupPolicy,
+    *,
+    explicit_secrets: Iterable[str] = (),
 ) -> tuple[bool, str | None]:
     if cleanup == CLEANUP_CLOSE:
         try:
@@ -351,21 +409,71 @@ def _cleanup_after_success(
         except Exception as exc:
             raise KitaruBackendError(
                 "Sandbox command completed, but closing the sandbox session failed: "
-                f"{exc}"
-            ) from exc
+                f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
+            ) from None
         return True, None
 
     try:
-        return _destroy_session_or_close_if_unsupported(session)
+        return _destroy_session_or_close_if_unsupported(
+            session,
+            explicit_secrets=explicit_secrets,
+        )
     except Exception as exc:
         with suppress(Exception):
             session.close()
         raise KitaruBackendError(
             "Sandbox command completed, but destroying the sandbox session failed: "
-            f"{exc}"
-        ) from exc
+            f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
+        ) from None
 
     return True, None
+
+
+def _explicit_env_secrets(env: Mapping[str, str] | None) -> tuple[str, ...]:
+    if env is None:
+        return ()
+    return tuple(value for value in env.values() if value)
+
+
+def _safe_exception_message(
+    exc: BaseException,
+    *,
+    explicit_secrets: Iterable[str] = (),
+) -> str:
+    return _redact_sensitive_text(str(exc), explicit_secrets=explicit_secrets)
+
+
+def _redact_sensitive_text(
+    value: str,
+    *,
+    explicit_secrets: Iterable[str] = (),
+) -> str:
+    redacted: str = value
+    secrets = {str(secret) for secret in explicit_secrets if secret}
+    for secret in sorted(secrets, key=lambda item: len(item), reverse=True):
+        redacted = redacted.replace(secret, _REDACTED)
+    redacted = _AUTHORIZATION_VALUE_PATTERN.sub(_redact_authorization_value, redacted)
+    redacted = _BARE_BEARER_VALUE_PATTERN.sub(_redact_bare_bearer_value, redacted)
+    redacted = _SECRET_JSON_PATTERN.sub(_redact_keyed_secret_value, redacted)
+    redacted = _SECRET_ASSIGNMENT_PATTERN.sub(_redact_keyed_secret_value, redacted)
+    return redacted
+
+
+def _redact_authorization_value(match: re.Match[str]) -> str:
+    scheme = match.group(2) or ""
+    return f"{match.group(1)}{scheme}{_REDACTED}"
+
+
+def _redact_bare_bearer_value(match: re.Match[str]) -> str:
+    return f"{match.group(1)}{_REDACTED}"
+
+
+def _redact_keyed_secret_value(match: re.Match[str]) -> str:
+    if match.group(2) is not None:
+        return f'{match.group(1)}"{_REDACTED}"'
+    if match.group(3) is not None:
+        return f"{match.group(1)}'{_REDACTED}'"
+    return f"{match.group(1)}{_REDACTED}"
 
 
 __all__ = [

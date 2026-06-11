@@ -20,6 +20,7 @@ from ._stream_shapes import (
     dict_or_none,
     environment_id,
     extract,
+    function_name_from_step,
     has_unsafe_role_or_type_marker,
     normalize_token,
     normalized_token_contains_any,
@@ -808,7 +809,7 @@ def _summarize_step(
         type=type_value,
         status=coerce_string(extract(value, "status")),
         call_id=call_id,
-        tool_name=coerce_string(extract(value, "name")),
+        tool_name=function_name_from_step(value),
         text_preview=_text_preview(_extract_safe_text(value))
         if text_preview_allowed
         else None,

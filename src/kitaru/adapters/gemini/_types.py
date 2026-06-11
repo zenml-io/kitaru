@@ -354,7 +354,14 @@ class GeminiInteractionRequest(BaseModel):
         _reject_checkpoint_output_handles(value)
         return value
 
-    @field_validator("model", "agent", "previous_interaction_id", "interaction_id")
+    @field_validator(
+        "model",
+        "agent",
+        "previous_interaction_id",
+        "interaction_id",
+        "function_call_id",
+        "function_name",
+    )
     @classmethod
     def _validate_non_empty_strings(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():

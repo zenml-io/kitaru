@@ -127,8 +127,11 @@ uv run python gemini_interactions_adapter.py \
 This mode demonstrates the supported custom-function path. Gemini asks for a
 function named `sandbox_python_version`. Your application has explicitly
 registered that name as a Kitaru sandbox command. Kitaru then runs
-`python --version` in the active stack's sandbox and sends the command output
-back to Gemini as a `function_result`.
+`python --version` in the active stack's sandbox from a Kitaru checkpoint and
+sends the command output back to Gemini as a `function_result`. Keep that
+function body in a checkpoint when it is part of a flow: if the flow later
+replays, Kitaru can reuse the recorded sandbox command result instead of running
+the command twice.
 
 ```text
 Gemini model interaction
@@ -155,9 +158,10 @@ Then run:
 uv run python gemini_interactions_adapter.py --mode sandbox-function
 ```
 
-V1 is deliberately static-command based. It does **not** parse model-supplied
-function arguments. If Gemini asks for the registered function, the example runs
-the command your code registered for that function name.
+V1 is deliberately static-command based and model-targeted. It does **not**
+parse model-supplied function arguments or continue provider-agent/Antigravity
+results. If Gemini asks for the registered function, the example runs the command
+your code registered for that function name.
 
 This does not redirect Antigravity internals, built-in Gemini code execution,
 hosted MCP, web execution, or any Google-owned tool body into Kitaru. It only

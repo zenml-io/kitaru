@@ -75,6 +75,11 @@ def test_gemini_interactions_example_sandbox_function_dry_run(
     assert "sandbox_python_version" in output
     assert "Fake Kitaru sandbox command result" in output
     assert "python --version" in output
+    assert "payload_output_max_chars" in output
+    assert "stdout_payload_truncated" in output
+    assert '"cleanup": {' in output
+    assert '"error"' not in output
+    assert "run the sandbox command from a @checkpoint" in output
     assert "Fake Gemini function_result request" in output
     assert "dry-run-call-id" in output
 

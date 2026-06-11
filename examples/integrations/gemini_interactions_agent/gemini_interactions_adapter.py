@@ -49,6 +49,7 @@ from kitaru.adapters.gemini import (
     execute_gemini_sandbox_function_call,
 )
 from kitaru.client import KitaruClient
+from kitaru.config import SandboxCommandResult
 from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
@@ -221,6 +222,13 @@ def _guard_vertex_mode(mode: Mode) -> None:
         )
 
 
+def _sandbox_python_version_spec() -> GeminiSandboxFunctionSpec:
+    return GeminiSandboxFunctionSpec(
+        function_name=SANDBOX_FUNCTION_NAME,
+        command="python --version",
+    )
+
+
 @checkpoint
 def run_sandbox_python_version_function(
     result: GeminiInteractionResult,
@@ -228,12 +236,7 @@ def run_sandbox_python_version_function(
     """Execute the showcased Gemini custom function in Kitaru's sandbox."""
     return execute_gemini_sandbox_function_call(
         result,
-        {
-            SANDBOX_FUNCTION_NAME: GeminiSandboxFunctionSpec(
-                function_name=SANDBOX_FUNCTION_NAME,
-                command="python --version",
-            )
-        },
+        {SANDBOX_FUNCTION_NAME: _sandbox_python_version_spec()},
     )
 
 
@@ -361,19 +364,34 @@ def _fake_sandbox_requires_action_result(model: str) -> GeminiInteractionResult:
     )
 
 
+def _fake_sandbox_command_result() -> SandboxCommandResult:
+    return SandboxCommandResult(
+        command="python --version",
+        cwd=None,
+        stdout="Python 3.12.0\n",
+        stderr="",
+        exit_code=0,
+        stdout_truncated=False,
+        stderr_truncated=False,
+        stack_id="dry-run-stack-id",
+        stack_name="dry-run-stack",
+        sandbox_id="dry-run-sandbox-id",
+        sandbox_name="dry-run-sandbox",
+        session_id="dry-run-session-id",
+        cleanup="destroy",
+        cleanup_succeeded=True,
+        cleanup_error=None,
+    )
+
+
 def _fake_sandbox_function_result_request(
     result: GeminiInteractionResult,
 ) -> GeminiInteractionRequest:
     call = result.function_calls[0]
-    payload = {
-        "ok": True,
-        "exit_code": 0,
-        "stdout": "Python 3.12.0\n",
-        "stderr": "",
-        "stdout_truncated": False,
-        "stderr_truncated": False,
-        "cleanup": {"policy": "destroy", "succeeded": True, "error": None},
-    }
+    payload = _sandbox_python_version_spec().build_payload(
+        call,
+        _fake_sandbox_command_result(),
+    )
     return GeminiInteractionRequest.function_result(
         previous_interaction_id=result.interaction_id
         or "dry-run-function-interaction-id",
@@ -396,6 +414,7 @@ def _print_sandbox_function_dry_run(model: str) -> None:
     print("\n=== Sandbox function dry run ===")
     print("No Google request, sandbox command, or Kitaru flow execution was run.")
     print("This previews the caller-owned custom function sequence.")
+    print("In a real flow, run the sandbox command from a @checkpoint.")
 
     print("\n1. Fake Gemini requires_action result")
     _print_result(result)

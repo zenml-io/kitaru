@@ -25,6 +25,7 @@ from ._stream_shapes import (
     environment_id,
     event_type,
     extract,
+    function_name_from_step,
     interaction_from_event,
     is_safe_output_text_source,
     normalized_delta_type,
@@ -67,11 +68,7 @@ class _AccumulatedStep:
         self.role = role_from_step(value) or self.role
         self.status = coerce_string(extract(value, "status")) or self.status
         self.call_id = coerce_string(extract(value, "call_id")) or self.call_id
-        self.tool_name = (
-            coerce_string(extract(value, "name"))
-            or coerce_string(extract(value, "tool_name"))
-            or self.tool_name
-        )
+        self.tool_name = function_name_from_step(value) or self.tool_name
 
     def append_text(self, value: str, remaining_chars: int) -> int:
         accepted = self._append_bounded(

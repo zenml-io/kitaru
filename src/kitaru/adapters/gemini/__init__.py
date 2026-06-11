@@ -19,9 +19,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
     ) from exc
 
 
-def _annotations_contain(value: Any, field: str) -> bool:
+def _annotations_contain_all(value: Any, fields: set[str]) -> bool:
     annotations = getattr(value, "__annotations__", None)
-    return isinstance(annotations, dict) and field in annotations
+    return isinstance(annotations, dict) and fields.issubset(annotations)
 
 
 def _validate_interactions_preview_contract() -> None:
@@ -39,11 +39,13 @@ def _validate_interactions_preview_contract() -> None:
             INTERACTIONS_CONTRACT_ERROR_MESSAGE
         ) from exc
     if not (
-        _annotations_contain(
-            getattr(interaction_types, "FunctionCallContent", None), "id"
+        _annotations_contain_all(
+            getattr(interaction_types, "FunctionCallContent", None),
+            {"arguments", "id", "name", "type"},
         )
-        and _annotations_contain(
-            getattr(interaction_types, "FunctionResultContent", None), "call_id"
+        and _annotations_contain_all(
+            getattr(interaction_types, "FunctionResultContent", None),
+            {"call_id", "name", "result", "type"},
         )
     ):
         raise KitaruFeatureNotAvailableError(INTERACTIONS_CONTRACT_ERROR_MESSAGE)
