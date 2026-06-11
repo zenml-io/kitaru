@@ -741,6 +741,37 @@ def test_caller_owned_options_are_not_mutated(
     assert cast(Any, sdk_options).include_partial_messages is True
 
 
+def test_stream_options_copy_preserves_mcp_servers(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @dataclasses.dataclass
+    class StaticOptions:
+        mcp_servers: dict[str, object]
+        include_partial_messages: bool = False
+
+    server = {"type": "sdk", "name": "kitaru", "instance": object()}
+    original_options = StaticOptions(mcp_servers={"kitaru": server})
+
+    result = _run_stream_direct(
+        claude_adapter,
+        monkeypatch,
+        options=original_options,
+    )
+
+    assert result.final_text == "final secret result text"
+    assert original_options.include_partial_messages is False
+    assert original_options.mcp_servers == {"kitaru": server}
+    sdk_options = cast(list[dict[str, object]], fake_sdk.__dict__["calls"])[0][
+        "options"
+    ]
+    assert sdk_options is not original_options
+    assert cast(Any, sdk_options).include_partial_messages is True
+    assert cast(Any, sdk_options).mcp_servers == {"kitaru": server}
+    assert cast(Any, sdk_options).mcp_servers is original_options.mcp_servers
+
+
 def test_plain_copyable_options_are_copied_for_partial_messages(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,

@@ -225,6 +225,10 @@ collection limit. If a provider does not support destroying sessions, Kitaru
 returns the command output with `cleanup_succeeded=False` and a `cleanup_error`
 message after best-effort close.
 
+Claude Agent SDK users can also expose this same command runner to Claude as a
+Kitaru-owned MCP tool while denying Claude's built-in `Bash`; see
+[the Claude Agent SDK adapter sandbox command section](../adapters/claude-agent-sdk.md#kitaru-owned-sandbox-command-tool).
+
 You can also keep the same inputs in a YAML file and create the stack with:
 
 ```bash

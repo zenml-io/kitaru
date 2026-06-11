@@ -672,6 +672,101 @@ def report_flow(prompt: str) -> str:
 
 That way the durable file write is visible to Kitaru as its own checkpoint.
 
+## Kitaru-owned sandbox command tool
+
+Sometimes you do want Claude to run a command, but you want that command to go
+through the sandbox attached to the active Kitaru stack instead of through
+Claude's built-in `Bash` tool. Use Kitaru's Claude Agent SDK MCP helper for that
+case.
+
+The concrete path is:
+
+```text
+Claude prompt
+  -> Claude Agent SDK invocation
+  -> Claude calls mcp__kitaru__run_command
+  -> Kitaru runs kitaru.run_sandbox_command(...) in the active stack sandbox
+  -> Claude receives stdout, stderr, exit_code, and cleanup metadata
+  -> Kitaru stores one completed ClaudeRunResult for the whole invocation
+```
+
+Here is the supported registration shape:
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions
+from kitaru.adapters.claude_agent_sdk import (
+    KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME,
+    KitaruClaudeRunner,
+    create_kitaru_sandbox_mcp_server,
+)
+
+sandbox_server = create_kitaru_sandbox_mcp_server()
+
+runner = KitaruClaudeRunner(
+    name="claude_sandboxed",
+    options_factory=lambda request: ClaudeAgentOptions(
+        cwd=request.cwd,
+        resume=request.resume_session_id,
+        max_turns=request.max_turns,
+        mcp_servers={"kitaru": sandbox_server},
+        disallowed_tools=["Bash"],
+        allowed_tools=[KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME],
+    ),
+)
+```
+
+Do not pass the Kitaru MCP tool through `ClaudeAgentOptions(tools=[...])`.
+Claude Agent SDK uses `tools=` for built-in tool names and presets. Custom tools
+created with `tool(...)` are registered through `create_sdk_mcp_server(...)` and
+`ClaudeAgentOptions(mcp_servers=...)`, which is what
+`create_kitaru_sandbox_mcp_server()` builds for you.
+
+This helper does **not** transparently redirect Claude's built-in `Bash`. If you
+want command execution to be Kitaru-owned, deny or omit `Bash` and give Claude
+the Kitaru MCP tool instead. Claude's own `ClaudeAgentOptions(sandbox=...)` is
+also separate: it configures Claude-owned Bash sandboxing, not Kitaru stack
+sandbox execution.
+
+The MCP tool accepts these inputs from Claude:
+
+- `command`: a shell command string or argv-style list
+- `cwd`: optional working directory inside the sandbox
+- `env`: optional command environment
+- `max_chars`: optional output collection limit
+- `cleanup`: optional session cleanup policy, either `"destroy"` or `"close"`
+
+The tool output is JSON text. A successful sandbox call returns
+`status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
+flags, stack identity, sandbox identity, session ID, and cleanup status. A
+non-zero `exit_code` is still `status="completed"`; the sandbox ran the command
+and returned process data, so Claude can decide what to do next.
+
+If Kitaru cannot run the command, the tool returns `status="failed"` with an
+error object containing the exception type, a category such as `usage`, `state`,
+`feature_not_available`, `backend`, or `runtime`, and a message.
+
+The active stack must have exactly one sandbox component. If it has none, Kitaru
+refuses to run the command. If it has more than one, Kitaru refuses to guess.
+That avoids the bad outcome where Claude asks for a simple inspection command
+and Kitaru silently runs it in the wrong sandbox.
+
+{% hint style="warning" %}
+Kitaru does not include `env` values in the tool output. Claude may still record
+the tool **input** in its own messages or transcript. Avoid passing secrets
+through `env` unless you are comfortable with those values appearing in
+Claude-side records.
+{% endhint %}
+
+This still uses the adapter's invocation checkpoint model. If the whole Claude
+invocation is re-run before Kitaru has a completed checkpoint to reuse, Claude
+may call `mcp__kitaru__run_command` again. Treat commands with side effects the
+same way you would treat any command that might be retried: make them safe to
+repeat, or move the side effect into a separate Kitaru checkpoint after Claude
+returns.
+
+A runnable showcase lives in the repository at
+`examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`.
+
 ## Claude file checkpointing is different
 
 Claude Agent SDK has its own

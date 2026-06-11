@@ -58,6 +58,13 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert claude_adapter.ClaudeRunEvent
     assert claude_adapter.KitaruClaudeRunner.run_stream
     assert claude_adapter.KitaruClaudeRunner.run_stream_sync
+    assert claude_adapter.create_kitaru_sandbox_mcp_server
+    assert claude_adapter.KITARU_SANDBOX_MCP_SERVER_NAME == "kitaru"
+    assert claude_adapter.KITARU_SANDBOX_COMMAND_TOOL_NAME == "run_command"
+    assert (
+        claude_adapter.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME
+        == "mcp__kitaru__run_command"
+    )
     assert claude_adapter.CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"
     assert claude_adapter.CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"
     assert claude_adapter.CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"

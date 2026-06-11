@@ -91,6 +91,48 @@ A few details are worth knowing before you run it:
 - The final `ClaudeRunResult` is the durable record. Treat live events as
   progress updates, like a radio feed while the checkpoint is running.
 
+## Kitaru sandbox command tool example
+
+Use `claude_agent_sdk_sandbox_tool.py` when you want Claude to run a command
+through the sandbox attached to the active Kitaru stack.
+
+From the repository root:
+
+```bash
+uv sync --extra local --extra claude-agent-sdk
+uv run kitaru init
+export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
+uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+```
+
+This example gives Claude one MCP tool named `mcp__kitaru__run_command` and
+denies Claude's built-in `Bash`. When Claude calls that tool, Kitaru runs the
+command with `kitaru.run_sandbox_command(...)`, which uses the active stack's
+sandbox component.
+
+The default command is safe and read-only:
+
+```text
+python --version
+```
+
+The active stack must have exactly one sandbox component. If the active stack has
+no sandbox, or has more than one, the tool returns a structured failure to
+Claude instead of guessing where to run the command.
+
+Optional overrides:
+
+```bash
+uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py \
+  --command "pwd" \
+  --sandbox-cwd /workspace \
+  --max-turns 3
+```
+
+This is different from Claude built-in `Bash`: Kitaru does not secretly reroute
+`Bash`. The example removes that tool and gives Claude the explicit Kitaru MCP
+command tool instead.
+
 ## What to look for in Kitaru UI
 
 The flow contains one adapter-created checkpoint named like

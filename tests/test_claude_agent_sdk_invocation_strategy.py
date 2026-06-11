@@ -389,6 +389,102 @@ def test_cache_identity_is_deterministic_for_live_option_objects(
     assert stream_key != first_key
 
 
+def _kitaru_sandbox_server_config(
+    *,
+    server_name: str = "kitaru",
+    tool_name: str = "run_command",
+    default_max_chars: int = 1_048_576,
+    default_cleanup: str = "destroy",
+) -> dict[str, object]:
+    sandbox_tool = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._sandbox_tool"
+    )
+    return {
+        "type": "sdk",
+        "name": server_name,
+        "instance": object(),
+        sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KEY: {
+            "kind": sandbox_tool.KITARU_SANDBOX_MCP_METADATA_KIND,
+            "server_name": server_name,
+            "tool_name": tool_name,
+            "allowed_tool_name": f"mcp__{server_name}__{tool_name}",
+            "default_max_chars": default_max_chars,
+            "default_cleanup": default_cleanup,
+        },
+    }
+
+
+def test_kitaru_sandbox_mcp_server_manifest_records_metadata(
+    claude_adapter: types.ModuleType,
+) -> None:
+    serialization = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._serialization"
+    )
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+    server = _kitaru_sandbox_server_config(
+        default_max_chars=123, default_cleanup="close"
+    )
+
+    manifest = serialization.redacted_options_manifest(
+        {"mcp_servers": {"kitaru": server}},
+        request,
+    )
+
+    options = cast(dict[str, Any], manifest["options"])
+    mcp_servers = cast(dict[str, Any], options["mcp_servers"])
+    assert mcp_servers["kitaru"] == {
+        "kind": "kitaru_sandbox_command_mcp_server",
+        "server_name": "kitaru",
+        "tool_name": "run_command",
+        "allowed_tool_name": "mcp__kitaru__run_command",
+        "default_max_chars": 123,
+        "default_cleanup": "close",
+    }
+
+
+def test_kitaru_sandbox_mcp_server_cache_identity_changes_by_configuration(
+    claude_adapter: types.ModuleType,
+) -> None:
+    runner = claude_adapter.KitaruClaudeRunner(name="claude")
+    request = claude_adapter.ClaudeRunRequest.start("hello")
+
+    no_server_key = runner._invocation_cache_key(request, options={})
+    default_key = runner._invocation_cache_key(
+        request,
+        options={"mcp_servers": {"kitaru": _kitaru_sandbox_server_config()}},
+    )
+    same_default_key = runner._invocation_cache_key(
+        request,
+        options={"mcp_servers": {"kitaru": _kitaru_sandbox_server_config()}},
+    )
+    renamed_key = runner._invocation_cache_key(
+        request,
+        options={
+            "mcp_servers": {
+                "kitaru_custom": _kitaru_sandbox_server_config(
+                    server_name="kitaru_custom"
+                )
+            }
+        },
+    )
+    defaults_key = runner._invocation_cache_key(
+        request,
+        options={
+            "mcp_servers": {
+                "kitaru": _kitaru_sandbox_server_config(
+                    default_max_chars=123,
+                    default_cleanup="close",
+                )
+            }
+        },
+    )
+
+    assert default_key == same_default_key
+    assert default_key != no_server_key
+    assert renamed_key != default_key
+    assert defaults_key != default_key
+
+
 def test_options_manifest_redacts_sequence_pairs(
     claude_adapter: types.ModuleType,
 ) -> None:

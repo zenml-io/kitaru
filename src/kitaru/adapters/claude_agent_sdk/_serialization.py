@@ -9,6 +9,7 @@ from typing import Any
 from pydantic_core import to_jsonable_python
 
 from ._constants import ADAPTER_ID
+from ._sandbox_tool import kitaru_sandbox_mcp_metadata
 from ._types import ClaudeRunRequest
 
 _SECRET_FRAGMENTS = (
@@ -92,6 +93,9 @@ def redacted_options_manifest(
 def _cache_identity(value: Any, *, seen: set[int]) -> Any:
     if value is None or isinstance(value, _PRIMITIVE_TYPES):
         return value
+    metadata = kitaru_sandbox_mcp_metadata(value)
+    if metadata is not None:
+        return metadata
     if callable(value):
         return _callable_manifest(value)
 
@@ -186,6 +190,9 @@ def _manifest_value(value: Any, *, redact: bool, key_hint: str | None = None) ->
         return "[REDACTED]"
     if value is None or isinstance(value, _PRIMITIVE_TYPES):
         return value
+    metadata = kitaru_sandbox_mcp_metadata(value)
+    if metadata is not None:
+        return metadata
     if callable(value):
         return _callable_manifest(value)
     if isinstance(value, Mapping):
