@@ -123,6 +123,7 @@ Execution tools:
 - `kitaru_executions_list`
 - `kitaru_executions_get`
 - `kitaru_executions_latest`
+- `kitaru_executions_statistics`
 - `get_execution_logs`
 - `kitaru_executions_run`
 - `kitaru_executions_cancel`
@@ -172,6 +173,18 @@ Read-only status check:
 Check my Kitaru status and list the five latest executions. Summarize anything waiting for input.
 ```
 
+Execution health summary:
+
+```text
+Use Kitaru execution statistics to summarize execution health by status and by day. Do not fetch every execution unless the aggregate result shows a problem that needs detail.
+```
+
+Tag cohort analysis:
+
+```text
+Use Kitaru execution statistics to compare completed and failed executions for the nightly and customer-facing tag cohorts. Start with aggregate counts; only fetch individual executions if one cohort looks unhealthy.
+```
+
 Start and watch a flow:
 
 ```text
@@ -207,6 +220,76 @@ Deploy and invoke a shared flow route:
 ```text
 Deploy `flows/research.py:research_agent` with topic="durable execution" as a canary deployment, then invoke the canary route and show me the started execution ID.
 ```
+
+## Querying execution statistics
+
+Use `kitaru_executions_statistics` when an assistant needs counts or numeric
+aggregates instead of full execution records. A good agent pattern is: ask the
+cheap aggregate question first, then fetch individual executions only for the
+group that looks interesting.
+
+Example payloads:
+
+```json
+{
+  "group_by": ["status"],
+  "max_groups": 10
+}
+```
+
+```json
+{
+  "group_by": ["time:day", "status"],
+  "metrics": ["duration_avg:duration:avg"],
+  "flow": "content_pipeline",
+  "max_groups": 30
+}
+```
+
+```json
+{
+  "group_by": ["metadata:customer_tier", "status"],
+  "tags": ["customer-facing"],
+  "max_groups": 100
+}
+```
+
+The result shape is:
+
+```json
+{
+  "groups": [
+    {
+      "keys": {"status": "completed"},
+      "execution_count": 12,
+      "metrics": {"duration_avg": 43.2}
+    },
+    {
+      "keys": {"status": "failed"},
+      "execution_count": 2,
+      "metrics": {"duration_avg": 18.7}
+    }
+  ],
+  "truncated": false,
+  "group_count": 2
+}
+```
+
+Supported groupings are `status`, `flow`, `stack`, `tag`, `time:hour`,
+`time:day`, `time:week`, `time:month`, and `metadata:<key>`. `flow` and
+`stack` groupings return IDs as `flow_id` and `stack_id`; filters can still use
+names. Optional metrics use the same string format as the CLI:
+`<name>:<source>:<avg|sum|min|max>` for built-in numeric sources such as
+`duration`, or `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for numeric
+execution metadata. The tool does not yet filter by time range or metadata
+value. When `max_groups` truncates a time-grouped result, Kitaru keeps the
+newest time rows and still returns them from oldest to newest.
+
+{% hint style="warning" %}
+Grouping by `metadata:<key>` includes the matching metadata values in the MCP
+response. Only use it for metadata keys whose values are safe for the MCP
+client and transcript to see.
+{% endhint %}
 
 ## Starting executions with `kitaru_executions_run`
 
@@ -332,10 +415,11 @@ serverless routing, and auth context, see [Deployments](../concepts/deployments.
 
 ## Example query flow
 
-1. Call `kitaru_executions_list(status="waiting")`
-2. Ask the user to confirm an action for a pending wait
-3. Call `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`; CLI auto-detects)
-4. Re-check state via `kitaru_executions_get(exec_id)`
+1. Call `kitaru_executions_statistics(group_by=["status"])` to get the execution health overview
+2. Call `kitaru_executions_list(status="waiting")` if the overview shows waiting executions
+3. Ask the user to confirm an action for a pending wait
+4. Call `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`; CLI auto-detects)
+5. Re-check state via `kitaru_executions_get(exec_id)`
 
 To provision or clean up a local stack, use `manage_stack(action="create", name="local-dev")`
 or `manage_stack(action="delete", name="local-dev", force=True)`.

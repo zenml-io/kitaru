@@ -19,6 +19,7 @@ from tests._gemini_fake_sdk import (
     install_fake_google_genai,
     purge_gemini_adapter_modules,
 )
+from tests._gemini_usage_helpers import collect_usage_records
 
 
 @pytest.fixture
@@ -1354,6 +1355,35 @@ def test_run_stream_rejects_sync_only_client_before_provider_create(
 
     assert client.interactions.create_calls == []
     assert client.interactions.get_calls == []
+
+
+def test_run_stream_sync_logs_canonical_gemini_usage_record(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient([_completed_stream()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(name="gemini", client=client)
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+
+    result = runner.run_stream_sync(request)
+
+    assert result.status == "completed"
+    assert result.usage == {"total_tokens": 7}
+    assert len(records) == 1
+    record = records[0]
+    assert record["adapter"] == "gemini_interactions"
+    assert record["surface"] == "gemini_interaction"
+    assert record["model"] == "gemini-test"
+    assert record["requested_model"] == "gemini-test"
+    assert record["resolved_model"] == "gemini-test"
+    assert record["usage"]["total_tokens"] == 7
+    assert record["cost"]["source"] == "none"
+    assert record["billing_effect"] == "incurred"
 
 
 def test_runner_stream_lifecycle_publish_failures_do_not_replace_success(

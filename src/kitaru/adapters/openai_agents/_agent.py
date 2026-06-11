@@ -5,6 +5,11 @@ from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from typing import Any, cast
 
+from kitaru._llm_usage import (
+    build_usage_record,
+    estimate_calculated_cost_usd,
+    log_usage_record,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -690,11 +695,44 @@ class KitaruRunner:
             updates["state_artifact_name"] = f"{self._name}_openai_run_state"
         if result.status == "completed" and self._capture.save_final_output:
             updates["output_artifact_name"] = f"{self._name}_openai_final_output"
-        if self._cost_calculator is not None and result.usage is not None:
-            updates["estimated_cost_usd"] = self._cost_calculator(
-                OpenAIUsageSummary.model_validate(result.usage)
+        warnings = list(result.warnings)
+        usage_summary = (
+            OpenAIUsageSummary.model_validate(result.usage)
+            if result.usage is not None
+            else None
+        )
+        estimated_cost = estimate_calculated_cost_usd(
+            calculator=self._cost_calculator,
+            usage=usage_summary,
+            warnings=warnings,
+            adapter_name="OpenAI Agents",
+        )
+        updates["warnings"] = warnings
+        updates["estimated_cost_usd"] = estimated_cost
+        finalized = result.model_copy(update=updates)
+        if self._capture.save_usage:
+            usage_record = build_usage_record(
+                adapter="openai_agents",
+                surface="runner_call",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=finalized.usage,
+                model=usage_summary.model_name if usage_summary is not None else None,
+                estimated_cost_usd=finalized.estimated_cost_usd,
+                cost_source=(
+                    "calculator" if finalized.estimated_cost_usd is not None else "none"
+                ),
+                cost_source_label="openai_agents.cost_calculator",
+                status=finalized.status,
+                billing_effect="incurred"
+                if finalized.status == "completed"
+                else "unknown",
+                cache_status="executed",
+                warnings=finalized.warnings,
             )
-        return result.model_copy(update=updates)
+            log_usage_record(usage_record)
+        return finalized
 
     def _runner_call_checkpoint_config(self) -> CheckpointConfig:
         return {

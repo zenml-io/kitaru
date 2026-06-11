@@ -19,6 +19,7 @@ from tests._gemini_fake_sdk import (
     install_fake_google_genai,
     purge_gemini_adapter_modules,
 )
+from tests._gemini_usage_helpers import collect_usage_records
 
 
 @pytest.fixture
@@ -172,6 +173,225 @@ def test_run_sync_creates_one_synthetic_interaction_checkpoint(
     assert create_kwargs["model"] == "gemini-test"
     assert create_kwargs["generation_config"] == {"temperature": 0.1}
     assert "agent" not in create_kwargs
+
+
+def test_run_sync_logs_canonical_gemini_usage_record(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    usage = SimpleNamespace(
+        prompt_token_count=3,
+        candidates_token_count=4,
+        total_token_count=7,
+        cached_content_token_count=1,
+        thoughts_token_count=2,
+    )
+    client = FakeClient([_completed_interaction(usage=usage)])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.usage == {
+        "prompt_token_count": 3,
+        "candidates_token_count": 4,
+        "total_token_count": 7,
+        "cached_content_token_count": 1,
+        "thoughts_token_count": 2,
+    }
+    assert len(records) == 1
+    record = records[0]
+    assert record["adapter"] == "gemini_interactions"
+    assert record["surface"] == "gemini_interaction"
+    assert record["call_name"] == "gemini"
+    assert record["event_id"] == record["record_id"]
+    assert record["model"] == "gemini-test"
+    assert record["requested_model"] == "gemini-test"
+    assert record["resolved_model"] == "gemini-test"
+    assert record["provider"] == "google_gemini"
+    assert record["usage"]["input_tokens"] == 3
+    assert record["usage"]["output_tokens"] == 4
+    assert record["usage"]["total_tokens"] == 7
+    assert record["usage"]["cached_input_tokens"] == 1
+    assert record["usage"]["reasoning_tokens"] == 2
+    assert record["cost"]["source"] == "none"
+    assert record["cost"]["actual_cost_usd"] is None
+    assert record["cost"]["estimated_cost_usd"] is None
+    assert record["status"] == "completed"
+    assert record["billing_effect"] == "incurred"
+    assert record["cache_status"] == "executed"
+
+
+def test_requires_action_logs_canonical_completed_record_without_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient(
+        [
+            _completed_interaction(
+                status="requires_action",
+                usage=None,
+                outputs=[
+                    {
+                        "type": "function_call",
+                        "id": "call-1",
+                        "name": "lookup",
+                        "arguments": {"city": "Delft"},
+                    }
+                ],
+            )
+        ]
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "lookup weather",
+        model="gemini-test",
+        tools=[{"type": "function", "name": "lookup"}],
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.status == "requires_action"
+    assert result.usage is None
+    assert len(records) == 1
+    record = records[0]
+    # Canonical status describes the stable provider call. The public Gemini
+    # result can still ask the caller to send a follow-up turn.
+    assert record["status"] == "completed"
+    assert record["usage"]["input_tokens"] is None
+    assert record["usage"]["output_tokens"] is None
+    assert record["usage"]["total_tokens"] is None
+    assert record["usage"]["raw"] is None
+    assert record["cost"]["source"] == "none"
+
+
+def test_save_usage_false_skips_canonical_gemini_usage_record(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        capture=gemini_adapter.GeminiInteractionCapturePolicy(save_usage=False),
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    result = runner.run_sync(request)
+
+    assert result.status == "completed"
+    assert records == []
+
+
+def test_emit_events_false_still_logs_canonical_gemini_usage_record(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        capture=gemini_adapter.GeminiInteractionCapturePolicy(emit_events=False),
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    result = runner.run_sync(request)
+
+    assert result.event_log_artifact_name is None
+    assert result.run_summary_artifact_name is None
+    assert len(records) == 1
+    assert records[0]["adapter"] == "gemini_interactions"
+
+
+def test_canonical_gemini_usage_record_construction_failure_does_not_fail_result(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    agent = importlib.import_module("kitaru.adapters.gemini._agent")
+    monkeypatch.setattr(
+        agent,
+        "build_usage_record",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad usage shape")),
+    )
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start("hello", model="m")
+
+    result = runner.run_sync(request)
+
+    assert result.status == "completed"
+    assert not any("canonical usage" in warning.lower() for warning in result.warnings)
+
+
+def test_canonical_gemini_usage_record_skips_without_active_context(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    agent = importlib.import_module("kitaru.adapters.gemini._agent")
+    monkeypatch.setattr(agent, "is_inside_flow", lambda: False)
+    monkeypatch.setattr(agent, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(
+        agent,
+        "build_usage_record",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not build")),
+    )
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini", client=object()
+    )
+    payload = agent.GeminiInteractionPayload(
+        status="completed",
+        interaction_id="interaction-1",
+        previous_interaction_id=None,
+        output_text="hello",
+        model="gemini-test",
+        agent=None,
+        environment_id=None,
+        steps=[],
+        raw_interaction={},
+        raw_steps=[],
+        usage={"total_token_count": 5},
+        duration_ms=1.0,
+    )
+    result = gemini_adapter.GeminiInteractionResult(
+        status="completed",
+        interaction_id="interaction-1",
+        model="gemini-test",
+        usage={"total_token_count": 5},
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+    tracker = SimpleNamespace(run_label="run-1")
+
+    returned = runner._log_canonical_llm_call_record(
+        result,
+        payload=payload,
+        tracker=tracker,
+        request=request,
+    )
+
+    assert returned is None
 
 
 def test_structured_response_forwards_format_and_mime_type(

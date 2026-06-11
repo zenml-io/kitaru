@@ -47,6 +47,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `uv sync`: install and sync dependencies
 - `uv sync --extra local`: install with local ZenML runtime components
 - `uv run kitaru init`: **required in a fresh `git worktree`.** Creates the `.kitaru/` project marker that ZenML's dynamic pipeline resolver needs to re-import example modules by dotted path. Without it, ~14 `test_phase*_example::*_runs_end_to_end` tests fail with `RuntimeError: Unable to resolve dynamic pipeline source`. Worktrees do not inherit `.kitaru/` from the main checkout.
+- **Lockfile merge caution:** when merging `develop` into a feature branch and resolving `pyproject.toml` / `uv.lock`, do not assume a broad `uv lock` preserves recent dependency-security fixes. Check recent commits touching `uv.lock` / `.github/pip-audit-ignored.txt`, use targeted commands such as `uv lock --upgrade-package <package>` when a package was intentionally bumped, and run `just audit` before pushing.
 
 **Core dev loop — these three commands handle the vast majority of development needs:**
 

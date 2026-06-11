@@ -22,6 +22,7 @@ from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     resolve_deployment_exclusive,
 )
+from kitaru._client._statistics import validate_statistics_max_groups
 from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
@@ -115,6 +116,35 @@ def kitaru_executions_list(
         ]
 
     return run_with_mcp_error_boundary(_list_executions)
+
+
+@tracked_mcp_tool
+def kitaru_executions_statistics(
+    group_by: list[str] | None = None,
+    metrics: list[str | dict[str, Any]] | None = None,
+    flow: str | None = None,
+    status: str | None = None,
+    stack: str | None = None,
+    tags: list[str] | None = None,
+    max_groups: int = 1000,
+) -> dict[str, Any]:
+    """Return grouped execution statistics with optional numeric metrics."""
+
+    def _statistics() -> dict[str, Any]:
+        validate_statistics_max_groups(max_groups)
+        client = client_api.KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=group_by or [],
+            metrics=metrics or [],
+            flow=flow,
+            status=status,
+            stack=stack,
+            tags=tags,
+            max_groups=max_groups,
+        )
+        return inspection.serialize_execution_statistics(statistics)
+
+    return run_with_mcp_error_boundary(_statistics)
 
 
 @tracked_mcp_tool

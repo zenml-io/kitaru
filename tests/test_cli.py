@@ -7,12 +7,14 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+from kitaru._cli._executions import _execution_statistics_table
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
@@ -25,7 +27,12 @@ from kitaru.cli import (
     _parse_secret_assignments,
     app,
 )
-from kitaru.client import ExecutionStatus, LogEntry
+from kitaru.client import (
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
+    ExecutionStatus,
+    LogEntry,
+)
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
@@ -95,6 +102,7 @@ def _execution_stub(
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
     checkpoints: list[SimpleNamespace] | None = None,
+    llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
@@ -113,6 +121,8 @@ def _execution_stub(
         frozen_execution_spec=None,
         original_exec_id=None,
         checkpoints=checkpoints or [],
+        llm_usage_summary=llm_usage_summary,
+        llm_usage_records=[],
     )
 
 
@@ -483,6 +493,7 @@ def test_executions_help_lists_all_supported_subcommands(
         "resume",
         "retry",
         "cancel",
+        "statistics",
     ):
         assert command in output
 
@@ -2267,6 +2278,15 @@ def test_executions_get_renders_execution_details(
             SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
             SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
         ],
+        llm_usage_summary={
+            "usage_record_count": 2,
+            "incurred_usage_record_count": 1,
+            "reused_usage_record_count": 1,
+            "total_tokens": 42,
+            "display_cost_usd": 0.125,
+            "actual_cost_usd": 0.1,
+            "estimated_cost_usd": 0.025,
+        },
     )
     fake_client = Mock()
     fake_client.executions.get.return_value = execution
@@ -2287,6 +2307,74 @@ def test_executions_get_renders_execution_details(
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
+    assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_malformed_llm_usage_summary_honestly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed LLM usage summary numbers should not render as real zeroes."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": "not-an-int",
+            "incurred_usage_record_count": True,
+            "reused_usage_record_count": None,
+            "total_tokens": "not-an-int",
+            "display_cost_usd": "not-a-number",
+            "actual_cost_usd": float("nan"),
+            "estimated_cost_usd": None,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: summary metadata is malformed" in output
+    assert "0 calls (0 incurred, 0 reused), 0 tokens" not in output
+    assert "display cost $0.000000" not in output
+
+
+def test_executions_get_renders_valid_zero_llm_usage_summary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A complete zero summary should still render as real zero usage."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": 0,
+            "incurred_usage_record_count": 0,
+            "reused_usage_record_count": 0,
+            "total_tokens": 0,
+            "display_cost_usd": 0.0,
+            "actual_cost_usd": 0.0,
+            "estimated_cost_usd": 0.0,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: 0 usage records (0 incurred, 0 reused), 0 tokens" in output
+    assert "display cost $0.000000" in output
 
 
 def test_executions_list_applies_filters(
@@ -2387,6 +2475,233 @@ def test_executions_list_accepts_page_and_size() -> None:
         page=2,
         size=10,
     )
+
+
+def test_executions_statistics_forwards_filters_and_repeatable_options() -> None:
+    """`kitaru executions statistics` should delegate to the SDK surface."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "failed", "flow_id": "flow-123"},
+                execution_count=2,
+                metrics={"duration_avg": 4.2},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--group-by",
+                "flow",
+                "--metric",
+                "duration_avg:duration:avg",
+                "--flow",
+                "content_pipeline",
+                "--status",
+                "failed",
+                "--stack",
+                "prod",
+                "--tag",
+                "nightly",
+                "--tag",
+                "customer-facing",
+                "--max-groups",
+                "25",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["status", "flow"],
+        metrics=["duration_avg:duration:avg"],
+        flow="content_pipeline",
+        status="failed",
+        stack="prod",
+        tags=["nightly", "customer-facing"],
+        max_groups=25,
+    )
+
+
+def test_executions_statistics_renders_grouped_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Grouped statistics should render dynamic columns plus execution counts."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"duration_avg": 5.5},
+            ),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+            ExecutionStatisticsGroup(keys={"status": "running"}, execution_count=1),
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--group-by", "status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru execution statistics" in output
+    assert "Status" in output
+    assert "Executions" in output
+    assert "Duration Avg" in output
+    assert "completed" in output
+    assert "failed" in output
+    assert "running" in output
+    assert "12" in output
+    assert "5.5" in output
+    assert "2" in output
+    assert "1" in output
+
+
+def test_executions_statistics_table_uses_requested_metric_order() -> None:
+    """Metric columns should follow request order, not response dict order."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"cost_sum": 2.5, "duration_avg": 5.5},
+            )
+        ],
+        truncated=False,
+    )
+
+    columns, rows = _execution_statistics_table(
+        statistics,
+        requested_metric_names=["duration_avg", "cost_sum"],
+    )
+
+    assert columns == ["Status", "Executions", "Duration Avg", "Cost Sum"]
+    assert rows == [["completed", "12", "5.5", "2.5"]]
+
+
+def test_executions_statistics_renders_truncation_note(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text statistics output should tell users when rows are truncated."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=7)
+        ],
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--group-by", "status", "--max-groups", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Results truncated at --max-groups 1" in output
+    assert "Narrow filters or increase --max-groups" in output
+
+
+def test_executions_statistics_renders_global_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No-grouping statistics should render one global execution count."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru execution statistics" in output
+    assert "Executions" in output
+    assert "18" in output
+
+
+def test_executions_statistics_emits_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON statistics output should use the standard single-item envelope."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed", "day": "2026-05-30"},
+                execution_count=7,
+                metrics={"duration_avg": 9.5},
+            )
+        ],
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "time:day",
+                "--group-by",
+                "status",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "executions.statistics",
+        "item": {
+            "groups": [
+                {
+                    "keys": {"status": "completed", "day": "2026-05-30"},
+                    "execution_count": 7,
+                    "metrics": {"duration_avg": 9.5},
+                }
+            ],
+            "truncated": True,
+            "group_count": 1,
+        },
+    }
+
+
+def test_executions_statistics_rejects_invalid_max_groups(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI max-groups validation should fail before calling the SDK."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", "--max-groups", "0"])
+
+    assert exc_info.value.code == 1
+    error = capsys.readouterr().err
+    assert "--max-groups" in error
+    assert "between 1 and 10000" in error
 
 
 def test_executions_list_rejects_limit_with_page(

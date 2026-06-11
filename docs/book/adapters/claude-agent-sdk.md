@@ -460,6 +460,16 @@ inspection and audits:
 - usage and cost information when the SDK reports it
 - one invocation event and one run summary
 
+## Usage and cost statistics
+
+Each successful Claude invocation logs one canonical `llm_usage_v1` record. The record uses the adapter run label as its stable identity, includes the SDK `usage` payload when Claude reports one, and stores `cost_usd` as provider-reported `actual_cost_usd` when the Claude SDK provides it. Kitaru does not run a separate Claude cost estimator in this adapter path.
+
+Some Claude SDK results expose `model_usage` instead of the top-level `usage` payload. In that case, Kitaru uses `model_usage` as a fallback for the canonical usage record. If both are present, Kitaru uses `usage` and does not add `model_usage` on top; otherwise the same tokens could be counted twice.
+
+The canonical record is independent of the durable adapter event log. Turning `emit_events=False` suppresses the invocation event and run summary artifacts, but it does not stop the lightweight LLM usage metadata record. Set `save_usage=False` when you do not want Claude usage persisted; that disables both the separate usage artifact and the canonical invocation record used for execution-level LLM summaries.
+
+These records roll up after your code observes the terminal execution with `FlowHandle.wait()` or `FlowHandle.get()`. If Claude reports usage but not cost, the summary can still count tokens while marking that record as missing a dollar-cost value.
+
 You can reduce what is stored with `ClaudeCapturePolicy`:
 
 ```python

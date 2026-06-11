@@ -88,6 +88,7 @@ from kitaru._cli._executions import (
     replay_,
     resume_,
     retry_,
+    statistics,
 )
 from kitaru._cli._flows import (
     build,
@@ -537,6 +538,7 @@ __all__ = [
     "show__",
     "stack_app",
     "start_or_connect_local_server",
+    "statistics",
     "status",
     "stop_registered_local_server",
     "time",

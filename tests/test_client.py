@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,12 +27,30 @@ from kitaru._client._deployments import (
     map_deployment_snapshot,
     parse_deployment_snapshot_name,
 )
+from kitaru._client._mappers import (
+    _RAW_STATUS_TO_PUBLIC_STATUS,
+    _RAW_STATUSES_BY_PUBLIC_STATUS,
+    _to_public_status,
+)
+from kitaru._client._statistics import (
+    build_run_statistics_request,
+    map_run_statistics_response,
+    normalize_execution_statistics_groupings,
+    normalize_execution_statistics_metrics,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.analytics import AnalyticsEvent
 from kitaru.client import (
     AuthAPIKey,
     AuthAPIKeyWithValue,
     AuthServiceAccount,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
+    ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     KitaruClient,
     _import_module_for_replay,
@@ -338,6 +357,195 @@ def test_deployment_facade_is_exported_at_top_level() -> None:
     from kitaru._interface_deployments import Deployment as InterfaceDeployment
 
     assert PublicDeployment is InterfaceDeployment
+
+
+def test_execution_statistics_dtos_are_exported_at_top_level() -> None:
+    from kitaru import ExecutionStatistics as PublicStatistics
+    from kitaru import ExecutionStatisticsGrouping as PublicGrouping
+    from kitaru import ExecutionStatisticsMetric as PublicMetric
+
+    assert PublicStatistics is ExecutionStatistics
+    assert PublicGrouping is ExecutionStatisticsGrouping
+    assert PublicMetric is ExecutionStatisticsMetric
+
+
+def test_execution_statistics_grouping_defaults_and_validation() -> None:
+    assert ExecutionStatisticsGrouping("status").name == "status"
+    assert ExecutionStatisticsGrouping("flow").name == "flow_id"
+    assert ExecutionStatisticsGrouping("stack").name == "stack_id"
+    assert ExecutionStatisticsGrouping("tag").name == "tag"
+
+    day_grouping = ExecutionStatisticsGrouping("time", time_granularity="day")
+    assert day_grouping.name == "day"
+    assert day_grouping.time_granularity is ExecutionStatisticsTimeGranularity.DAY
+
+    metadata_grouping = ExecutionStatisticsGrouping(
+        "metadata", metadata_key="customer_tier"
+    )
+    assert metadata_grouping.name == "customer_tier"
+    assert metadata_grouping.metadata_key == "customer_tier"
+
+    custom = ExecutionStatisticsGrouping("status", name="public_status")
+    assert custom.name == "public_status"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"dimension": "time"}, "require time_granularity"),
+        ({"dimension": "metadata"}, "require metadata_key"),
+        (
+            {"dimension": "status", "time_granularity": "day"},
+            "cannot use time_granularity",
+        ),
+        ({"dimension": "flow", "metadata_key": "team"}, "cannot use metadata_key"),
+        ({"dimension": "status", "name": "   "}, "cannot be empty"),
+        ({"dimension": "metadata", "metadata_key": "   "}, "cannot be empty"),
+    ],
+)
+def test_execution_statistics_grouping_rejects_invalid_combinations(
+    kwargs: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(KitaruUsageError, match=message) as exc_info:
+        ExecutionStatisticsGrouping(**kwargs)
+
+    assert isinstance(exc_info.value, ValueError)
+
+
+def test_execution_statistics_grouping_parser_rejects_duplicates() -> None:
+    with pytest.raises(KitaruUsageError, match="Duplicate"):
+        normalize_execution_statistics_groupings(
+            ["status", ExecutionStatisticsGrouping("metadata", metadata_key="status")]
+        )
+
+
+def test_execution_statistics_metric_defaults_and_validation() -> None:
+    metric = ExecutionStatisticsMetric(
+        name="duration_avg",
+        source="duration",
+        aggregation="avg",
+    )
+    assert metric.name == "duration_avg"
+    assert metric.source is ExecutionStatisticsMetricSource.DURATION
+    assert metric.aggregation is ExecutionStatisticsMetricAggregation.AVG
+    assert metric.metadata_key is None
+
+    metadata_metric = ExecutionStatisticsMetric(
+        name="cost_sum",
+        source="metadata",
+        aggregation="sum",
+        metadata_key="kitaru_cost_usd",
+    )
+    assert metadata_metric.source is ExecutionStatisticsMetricSource.METADATA
+    assert metadata_metric.metadata_key == "kitaru_cost_usd"
+
+
+def test_execution_statistics_metric_enums_match_zenml_values() -> None:
+    from zenml.models import StatisticsAggregation, StatisticsMetricSource
+
+    assert {item.value for item in ExecutionStatisticsMetricSource} == {
+        item.value for item in StatisticsMetricSource
+    }
+    assert {item.value for item in ExecutionStatisticsMetricAggregation} == {
+        item.value for item in StatisticsAggregation
+    }
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (
+            {"name": "   ", "source": "duration", "aggregation": "sum"},
+            "name cannot be empty",
+        ),
+        (
+            {"name": "x", "source": "metadata", "aggregation": "sum"},
+            "require metadata_key",
+        ),
+        (
+            {
+                "name": "x",
+                "source": "duration",
+                "aggregation": "sum",
+                "metadata_key": "cost",
+            },
+            "cannot use metadata_key",
+        ),
+        (
+            {"name": "x", "source": "duration", "aggregation": "median"},
+            "Unsupported",
+        ),
+    ],
+)
+def test_execution_statistics_metric_rejects_invalid_combinations(
+    kwargs: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(KitaruUsageError, match=message):
+        ExecutionStatisticsMetric(**kwargs)
+
+
+def test_execution_statistics_metric_parser_rejects_duplicates() -> None:
+    metrics = normalize_execution_statistics_metrics(
+        [
+            "duration_avg:duration:avg",
+            {
+                "name": "cost_sum",
+                "source": "metadata",
+                "aggregation": "sum",
+                "metadata_key": "kitaru_cost_usd",
+            },
+        ]
+    )
+
+    assert metrics == [
+        ExecutionStatisticsMetric(
+            name="duration_avg",
+            source="duration",
+            aggregation="avg",
+        ),
+        ExecutionStatisticsMetric(
+            name="cost_sum",
+            source="metadata",
+            aggregation="sum",
+            metadata_key="kitaru_cost_usd",
+        ),
+    ]
+
+    with pytest.raises(KitaruUsageError, match="Duplicate"):
+        normalize_execution_statistics_metrics(
+            ["duration_avg:duration:avg", "duration_avg:step_count:sum"]
+        )
+
+
+def test_execution_status_mapping_covers_zenml_execution_status_values() -> None:
+    expected_statuses = {
+        ZenMLExecutionStatus.INITIALIZING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.PROVISIONING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.QUEUED: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.RUNNING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.RETRYING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.RESUMING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.PAUSED: ExecutionStatus.WAITING,
+        ZenMLExecutionStatus.COMPLETED: ExecutionStatus.COMPLETED,
+        ZenMLExecutionStatus.CACHED: ExecutionStatus.COMPLETED,
+        ZenMLExecutionStatus.SKIPPED: ExecutionStatus.COMPLETED,
+        ZenMLExecutionStatus.FAILED: ExecutionStatus.FAILED,
+        ZenMLExecutionStatus.RETRIED: ExecutionStatus.FAILED,
+        ZenMLExecutionStatus.CANCELLING: ExecutionStatus.RUNNING,
+        ZenMLExecutionStatus.CANCELLED: ExecutionStatus.CANCELLED,
+        ZenMLExecutionStatus.STOPPED: ExecutionStatus.CANCELLED,
+        ZenMLExecutionStatus.STOPPING: ExecutionStatus.RUNNING,
+    }
+
+    assert set(expected_statuses) == set(ZenMLExecutionStatus)
+    for raw_status, public_status in expected_statuses.items():
+        assert _to_public_status(raw_status) is public_status
+
+    for public_status, raw_statuses in _RAW_STATUSES_BY_PUBLIC_STATUS.items():
+        for raw_status in raw_statuses:
+            assert _RAW_STATUS_TO_PUBLIC_STATUS[raw_status] is public_status
 
 
 def test_client_initializes_namespaces() -> None:
@@ -2379,6 +2587,818 @@ def test_auth_pagination_rejects_non_integer_inputs() -> None:
             client.auth.service_accounts.list(size=2.5)  # ty: ignore[invalid-argument-type]
 
     client_cls.return_value.list_service_accounts.assert_not_called()
+
+
+def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
+    request = build_run_statistics_request(
+        project="project-a",
+        group_by=["flow", "time:day", "metadata:customer_tier"],
+        metrics=[
+            "duration_avg:duration:avg",
+            {
+                "name": "cost_sum",
+                "source": "metadata",
+                "aggregation": "sum",
+                "metadata_key": "kitaru_cost_usd",
+            },
+        ],
+        flow="support_flow",
+        status="completed",
+        stack="prod-stack",
+        tags=["release", "replay"],
+        max_groups=12,
+    )
+
+    assert request.filter.project == "project-a"
+    assert request.filter.pipeline == "support_flow"
+    assert request.filter.stack == "prod-stack"
+    assert request.filter.tags == ["release", "replay"]
+    assert request.filter.status == 'oneof:["completed","cached","skipped"]'
+    assert request.max_groups == 12
+    assert [grouping.name for grouping in request.groupings] == [
+        "flow_id",
+        "day",
+        "customer_tier",
+    ]
+    assert [grouping.type.value for grouping in request.groupings] == [
+        "pipeline",
+        "time",
+        "metadata",
+    ]
+    assert request.groupings[1].granularity.value == "day"
+    assert request.groupings[2].metadata_key == "customer_tier"
+    assert [metric.name for metric in request.metrics] == [
+        "duration_avg",
+        "cost_sum",
+    ]
+    assert [metric.source.value for metric in request.metrics] == [
+        "duration",
+        "metadata",
+    ]
+    assert [metric.aggregation.value for metric in request.metrics] == ["avg", "sum"]
+    assert request.metrics[1].metadata_key == "kitaru_cost_usd"
+
+
+def test_build_run_statistics_request_rejects_status_grouping() -> None:
+    with pytest.raises(KitaruUsageError, match="multiple backend requests"):
+        build_run_statistics_request(
+            project="project-a",
+            group_by=["status", "flow"],
+            flow=None,
+            status=None,
+            stack=None,
+            tags=None,
+            max_groups=12,
+        )
+
+
+def test_map_run_statistics_response_merges_public_status_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"status": "completed"}, run_count=2),
+            SimpleNamespace(group_keys={"status": "cached"}, run_count=3),
+            SimpleNamespace(group_keys={"status": "failed"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["status"],
+        max_groups=10,
+    )
+
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=5),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=1),
+        ],
+        truncated=False,
+    )
+
+
+def test_map_run_statistics_response_uses_status_grouping_metadata() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"public_status": "cached"}, run_count=3),
+            SimpleNamespace(group_keys={"status": "not-a-status"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=[
+            ExecutionStatisticsGrouping("status", name="public_status"),
+            ExecutionStatisticsGrouping("metadata", metadata_key="team", name="status"),
+        ],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"public_status": "completed"},
+            execution_count=3,
+        ),
+        ExecutionStatisticsGroup(keys={"status": "not-a-status"}, execution_count=1),
+    ]
+
+
+def test_map_run_statistics_response_preserves_time_order() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"day": "2026-03-15"}, run_count=20),
+            SimpleNamespace(group_keys={"day": "2026-03-14"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day"],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"day": "2026-03-14"}, execution_count=1),
+        ExecutionStatisticsGroup(keys={"day": "2026-03-15"}, execution_count=20),
+    ]
+
+
+def test_map_run_statistics_response_trims_oldest_time_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"day": "2026-03-15"}, run_count=20),
+            SimpleNamespace(group_keys={"day": "2026-03-13"}, run_count=99),
+            SimpleNamespace(group_keys={"day": "2026-03-14"}, run_count=1),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"day": "2026-03-14"}, execution_count=1),
+        ExecutionStatisticsGroup(keys={"day": "2026-03-15"}, execution_count=20),
+    ]
+    assert statistics.truncated is True
+
+
+def test_map_run_statistics_response_trims_oldest_time_status_groups() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"day": "2026-03-13", "status": "completed"},
+                run_count=99,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-14", "status": "failed"},
+                run_count=1,
+            ),
+            SimpleNamespace(
+                group_keys={"day": "2026-03-15", "status": "completed"},
+                run_count=20,
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["time:day", "status"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-14", "status": "failed"},
+            execution_count=1,
+        ),
+        ExecutionStatisticsGroup(
+            keys={"day": "2026-03-15", "status": "completed"},
+            execution_count=20,
+        ),
+    ]
+    assert statistics.truncated is True
+
+
+def test_map_run_statistics_response_sorts_counts_before_trimming() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(group_keys={"flow_id": "flow-a"}, run_count=1),
+            SimpleNamespace(group_keys={"flow_id": "flow-c"}, run_count=9),
+            SimpleNamespace(group_keys={"flow_id": "flow-b"}, run_count=9),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["flow"],
+        max_groups=2,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"flow_id": "flow-b"}, execution_count=9),
+        ExecutionStatisticsGroup(keys={"flow_id": "flow-c"}, execution_count=9),
+    ]
+    assert statistics.truncated is True
+
+
+def test_map_run_statistics_response_preserves_metrics() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"flow_id": "flow-a"},
+                run_count=3,
+                metrics={"duration_avg": 12.5, "cost_sum": None},
+            )
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["flow"],
+        metrics=[
+            "duration_avg:duration:avg",
+            "cost_sum:metadata:kitaru_cost_usd:sum",
+        ],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"flow_id": "flow-a"},
+            execution_count=3,
+            metrics={"duration_avg": 12.5, "cost_sum": None},
+        )
+    ]
+
+
+def test_map_run_statistics_response_merges_metric_values_for_public_status() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"status": "completed"},
+                run_count=2,
+                metrics={"duration_avg": 10.0, "cost_sum": 1.5},
+            ),
+            SimpleNamespace(
+                group_keys={"status": "cached"},
+                run_count=3,
+                metrics={"duration_avg": 20.0, "cost_sum": 2.5},
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["status"],
+        metrics=[
+            "duration_avg:duration:avg",
+            "cost_sum:metadata:kitaru_cost_usd:sum",
+        ],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"status": "completed"},
+            execution_count=5,
+            metrics={"duration_avg": 16.0, "cost_sum": 4.0},
+        )
+    ]
+
+
+def test_map_run_statistics_response_does_not_guess_merged_metadata_avg() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"status": "completed"},
+                run_count=100,
+                metrics={"score_avg": 500.0},
+            ),
+            SimpleNamespace(
+                group_keys={"status": "cached"},
+                run_count=1,
+                metrics={"score_avg": 10.0},
+            ),
+        ],
+        truncated=False,
+    )
+
+    statistics = map_run_statistics_response(
+        response,
+        group_by=["status"],
+        metrics=["score_avg:metadata:score:avg"],
+        max_groups=10,
+    )
+
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(
+            keys={"status": "completed"},
+            execution_count=101,
+            metrics={"score_avg": None},
+        )
+    ]
+
+
+def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> None:
+    result = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch(
+            "kitaru.client.get_execution_statistics",
+            return_value=result,
+        ) as delegate,
+        patch("kitaru.client.track") as track_mock,
+    ):
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status", "metadata:private_key"],
+            metrics=["duration_avg:duration:avg"],
+            flow="private-flow",
+            status="failed",
+            stack="private-stack",
+            tags=["private-tag"],
+            max_groups=5,
+        )
+
+    assert statistics is result
+    delegate.assert_called_once_with(
+        client=client,
+        group_by=["status", "metadata:private_key"],
+        metrics=["duration_avg:duration:avg"],
+        flow="private-flow",
+        status="failed",
+        stack="private-stack",
+        tags=["private-tag"],
+        max_groups=5,
+    )
+    track_mock.assert_called_once()
+    event, metadata = track_mock.call_args.args
+    assert event is AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
+    assert metadata == {
+        "grouping_count": 2,
+        "metric_count": 1,
+        "has_duration_metric": True,
+        "has_step_count_metric": False,
+        "has_cached_step_count_metric": False,
+        "has_output_artifact_count_metric": False,
+        "has_metadata_metric": False,
+        "has_status_grouping": True,
+        "has_flow_grouping": False,
+        "has_stack_grouping": False,
+        "has_tag_grouping": False,
+        "has_time_grouping": False,
+        "has_metadata_grouping": True,
+        "has_flow_filter": True,
+        "has_status_filter": True,
+        "has_stack_filter": True,
+        "tag_filter_count": 1,
+        "max_groups": 5,
+        "result_group_count": 1,
+        "truncated": False,
+    }
+    assert "private-flow" not in repr(metadata)
+    assert "private-stack" not in repr(metadata)
+    assert "private-tag" not in repr(metadata)
+    assert "private_key" not in repr(metadata)
+
+
+def test_statistics_fetches_global_count_from_zen_store() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=18)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics()
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert request.filter.project == "project-a"
+    assert request.groupings == []
+    assert request.metrics == []
+    assert request.max_groups == 1000
+    assert statistics == ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+
+
+def test_statistics_preserves_global_zero_without_grouping() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=0)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics()
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert request.groupings == []
+    assert statistics == ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=0)],
+        truncated=False,
+    )
+
+
+def test_statistics_fetches_metrics_from_zen_store() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"flow_id": "flow-a"},
+                run_count=2,
+                metrics={"duration_avg": 11.0, "cost_sum": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["flow"],
+            metrics=[
+                "duration_avg:duration:avg",
+                "cost_sum:metadata:kitaru_cost_usd:sum",
+            ],
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert [metric.name for metric in request.metrics] == [
+        "duration_avg",
+        "cost_sum",
+    ]
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-a"},
+                execution_count=2,
+                metrics={"duration_avg": 11.0, "cost_sum": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+
+def _raw_statuses_from_backend_filter(filter_value: str) -> tuple[str, ...]:
+    if filter_value.startswith("oneof:"):
+        return tuple(json.loads(filter_value.removeprefix("oneof:")))
+    return (filter_value,)
+
+
+def test_status_grouping_skips_global_zero_placeholders_before_max_groups() -> None:
+    responses_by_status = {
+        ExecutionStatus.RUNNING: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=0)],
+            truncated=False,
+        ),
+        ExecutionStatus.WAITING: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=3)],
+            truncated=False,
+        ),
+        ExecutionStatus.COMPLETED: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=5)],
+            truncated=False,
+        ),
+        ExecutionStatus.FAILED: SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=0)],
+            truncated=False,
+        ),
+        ExecutionStatus.CANCELLED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(
+                    group_keys={},
+                    run_count=0,
+                    metrics={"duration_avg": None},
+                )
+            ],
+            truncated=False,
+        ),
+    }
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(
+                side_effect=[
+                    responses_by_status[public_status]
+                    for public_status in ExecutionStatus
+                ]
+            )
+        )
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(group_by=["status"], max_groups=2)
+
+    assert all(group.execution_count > 0 for group in statistics.groups)
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=5),
+            ExecutionStatisticsGroup(keys={"status": "waiting"}, execution_count=3),
+        ],
+        truncated=False,
+    )
+
+
+def test_status_grouping_without_status_filter_splits_by_public_status() -> None:
+    responses = [
+        SimpleNamespace(
+            groups=[SimpleNamespace(group_keys={}, run_count=index)],
+            truncated=False,
+        )
+        for index, _public_status in enumerate(ExecutionStatus, start=1)
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(side_effect=responses))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(group_by=["status"], max_groups=5)
+
+    requests = [
+        call_args.args[0] for call_args in zen_store.get_run_statistics.call_args_list
+    ]
+    assert len(requests) == len(ExecutionStatus)
+    assert {
+        frozenset(_raw_statuses_from_backend_filter(request.filter.status))
+        for request in requests
+    } == {
+        frozenset(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
+        for public_status in ExecutionStatus
+    }
+    assert all(request.groupings == [] for request in requests)
+    assert all(request.max_groups == 5 for request in requests)
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"status": "cancelled"}, execution_count=5),
+        ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=4),
+        ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=3),
+        ExecutionStatisticsGroup(keys={"status": "waiting"}, execution_count=2),
+        ExecutionStatisticsGroup(keys={"status": "running"}, execution_count=1),
+    ]
+
+
+def test_statistics_status_filter_uses_one_backend_request() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=4)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status"],
+            status=ExecutionStatus.CANCELLED,
+            max_groups=5,
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert request.filter.status == 'oneof:["cancelled","stopped"]'
+    assert request.groupings == []
+    assert request.max_groups == 5
+    assert statistics.groups == [
+        ExecutionStatisticsGroup(keys={"status": "cancelled"}, execution_count=4)
+    ]
+
+
+def test_status_grouping_with_status_filter_skips_global_zero_placeholder() -> None:
+    response = SimpleNamespace(
+        groups=[SimpleNamespace(group_keys={}, run_count=0)],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status"],
+            status=ExecutionStatus.CANCELLED,
+            max_groups=5,
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert zen_store.get_run_statistics.call_count == 1
+    assert request.filter.status == 'oneof:["cancelled","stopped"]'
+    assert request.groupings == []
+    assert request.max_groups == 5
+    assert statistics == ExecutionStatistics(groups=[], truncated=False)
+
+
+def test_statistics_status_grouping_does_not_undercount_raw_status_truncation() -> None:
+    responses_by_status = {
+        ExecutionStatus.RUNNING: SimpleNamespace(groups=[], truncated=False),
+        ExecutionStatus.WAITING: SimpleNamespace(groups=[], truncated=False),
+        ExecutionStatus.COMPLETED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(group_keys={"flow_id": "flow-a"}, run_count=15),
+            ],
+            truncated=True,
+        ),
+        ExecutionStatus.FAILED: SimpleNamespace(
+            groups=[
+                SimpleNamespace(group_keys={"flow_id": "flow-b"}, run_count=8),
+            ],
+            truncated=False,
+        ),
+        ExecutionStatus.CANCELLED: SimpleNamespace(groups=[], truncated=False),
+    }
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(
+                side_effect=[
+                    responses_by_status[public_status]
+                    for public_status in ExecutionStatus
+                ]
+            )
+        )
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["status", "flow"],
+            max_groups=10,
+        )
+
+    requests = [
+        call_args.args[0] for call_args in zen_store.get_run_statistics.call_args_list
+    ]
+    assert len(requests) == len(ExecutionStatus)
+    assert all(
+        [grouping.type.value for grouping in request.groupings] == ["pipeline"]
+        for request in requests
+    )
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-a", "status": "completed"},
+                execution_count=15,
+            ),
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-b", "status": "failed"},
+                execution_count=8,
+            ),
+        ],
+        truncated=True,
+    )
+
+
+def test_statistics_rejects_bare_string_tags() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock())
+        client_cls.return_value.zen_store = zen_store
+        client = KitaruClient()
+
+        with pytest.raises(KitaruUsageError, match="not a string"):
+            client.executions.statistics(tags="release")
+
+    zen_store.get_run_statistics.assert_not_called()
+
+
+def test_statistics_missing_backend_support_raises_feature_error() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.zen_store = SimpleNamespace()
+        client = KitaruClient()
+
+        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.6"):
+            client.executions.statistics()
+
+
+def test_statistics_old_server_endpoint_error_raises_feature_error() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(
+                side_effect=RuntimeError("404 not found: /runs/statistics")
+            )
+        )
+        client_cls.return_value.zen_store = zen_store
+        client = KitaruClient()
+
+        with pytest.raises(KitaruFeatureNotAvailableError, match=r"ZenML 0\.94\.6"):
+            client.executions.statistics()
+
+
+def test_statistics_backend_failure_raises_backend_error() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zen_store = SimpleNamespace(
+            get_run_statistics=Mock(side_effect=RuntimeError("database offline"))
+        )
+        client_cls.return_value.zen_store = zen_store
+        client = KitaruClient()
+
+        with pytest.raises(KitaruBackendError, match="database offline"):
+            client.executions.statistics()
 
 
 def test_latest_raises_when_no_execution_matches() -> None:

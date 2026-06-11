@@ -16,6 +16,8 @@ from kitaru._client._models import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
     FailureInfo,
     LogEntry,
     PendingWait,
@@ -156,6 +158,10 @@ def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:
         "ended_at": to_jsonable(attempt.ended_at, fallback_repr=True),
         "metadata": to_jsonable(attempt.metadata, fallback_repr=True),
         "failure": serialize_failure(attempt.failure),
+        "llm_usage_records": to_jsonable(
+            attempt.llm_usage_records,
+            fallback_repr=True,
+        ),
     }
 
 
@@ -178,6 +184,10 @@ def serialize_checkpoint_call(checkpoint: CheckpointCall) -> dict[str, Any]:
         "artifacts": [
             serialize_artifact_ref(artifact) for artifact in checkpoint.artifacts
         ],
+        "llm_usage_records": to_jsonable(
+            checkpoint.llm_usage_records,
+            fallback_repr=True,
+        ),
     }
 
 
@@ -197,6 +207,10 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "metadata": to_jsonable(execution.metadata, fallback_repr=True),
         "checkpoint_count": len(execution.checkpoints),
         "artifact_count": len(execution.artifacts),
+        "llm_usage_summary": to_jsonable(
+            execution.llm_usage_summary,
+            fallback_repr=True,
+        ),
     }
 
 
@@ -209,6 +223,10 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
             fallback_repr=True,
         ),
         "original_exec_id": execution.original_exec_id,
+        "llm_usage_records": to_jsonable(
+            execution.llm_usage_records,
+            fallback_repr=True,
+        ),
         "checkpoints": [
             serialize_checkpoint_call(checkpoint)
             for checkpoint in execution.checkpoints
@@ -216,6 +234,31 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
         "artifacts": [
             serialize_artifact_ref(artifact) for artifact in execution.artifacts
         ],
+    }
+
+
+def serialize_execution_statistics_group(
+    group: ExecutionStatisticsGroup,
+) -> dict[str, Any]:
+    """Serialize one execution-statistics group."""
+    return {
+        "keys": to_jsonable(group.keys, fallback_repr=True),
+        "execution_count": group.execution_count,
+        "metrics": to_jsonable(group.metrics, fallback_repr=True),
+    }
+
+
+def serialize_execution_statistics(
+    statistics: ExecutionStatistics,
+) -> dict[str, Any]:
+    """Serialize grouped execution statistics."""
+    groups = [
+        serialize_execution_statistics_group(group) for group in statistics.groups
+    ]
+    return {
+        "groups": groups,
+        "truncated": statistics.truncated,
+        "group_count": len(groups),
     }
 
 
