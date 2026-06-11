@@ -199,7 +199,7 @@ durable_agent = KitaruAgent(
 )
 ```
 
-The factory returns a normal PydanticAI `FunctionToolset` with one tool named `run_sandbox_command`. Kitaru wraps it as a function toolset, so existing tracking and calls-strategy checkpoints still apply. The active stack must have exactly one sandbox component. Every tool call creates one temporary sandbox session, runs one command, returns `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys the temporary session. The adapter default is 20,000 characters per output stream; pass `max_chars=` when you need a different limit.
+The factory returns a normal PydanticAI `FunctionToolset` with one tool named `run_sandbox_command`. Kitaru wraps it as a function toolset, so existing tracking and calls-strategy checkpoints still apply. The active stack must have exactly one sandbox component. Every tool call creates one temporary sandbox session, runs one command, returns `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys the temporary session. The adapter default is 20,000 characters per output stream; pass `max_chars=` when you need a different limit. Pass `cleanup="destroy"` or `cleanup="close"` to choose how the temporary session is cleaned up after the command: `"destroy"` is the default and removes the session when supported, while `"close"` only closes the session handle.
 
 Non-zero process exits come back as normal `SandboxCommandToolResult` values. Missing sandbox setup or backend failures raise public Kitaru errors and are recorded as failed tool calls. The model-facing tool accepts only `command` and optional `cwd`; `env` is deliberately not exposed because captured tool arguments may be stored as artifacts.
 
@@ -354,6 +354,10 @@ from kitaru.adapters.pydantic_ai import (
     hitl_tool,
     wait_for_input,
     kitaruify_toolset,
+    sandbox_command_toolset,
+    SandboxCommandToolResult,
+    SANDBOX_COMMAND_TOOL_NAME,
+    DEFAULT_SANDBOX_TOOL_MAX_CHARS,
 )
 ```
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 import kitaru
 from kitaru.config import SandboxCommandResult
@@ -9,23 +9,12 @@ from pydantic_ai import FunctionToolset
 
 SANDBOX_COMMAND_TOOL_NAME: Final = "run_sandbox_command"
 DEFAULT_SANDBOX_TOOL_MAX_CHARS: Final = 20_000
-_SANDBOX_COMMAND_TOOL_RESULT_FIELDS: Final[set[str]] = {
-    "command",
-    "cwd",
-    "stdout",
-    "stderr",
-    "exit_code",
-    "stdout_truncated",
-    "stderr_truncated",
-    "cleanup_succeeded",
-    "cleanup_error",
-}
 
 
 class SandboxCommandToolResult(BaseModel):
     """LLM-facing result for one command executed in the active sandbox."""
 
-    command: str | list[str]
+    command: str
     cwd: str | None
     stdout: str
     stderr: str
@@ -36,6 +25,11 @@ class SandboxCommandToolResult(BaseModel):
     cleanup_error: str | None
 
     model_config = ConfigDict(extra="forbid")
+
+
+_SANDBOX_COMMAND_TOOL_RESULT_FIELDS: Final[set[str]] = set(
+    SandboxCommandToolResult.model_fields
+)
 
 
 def _tool_result_from_core_result(
@@ -51,7 +45,7 @@ def sandbox_command_toolset(
     *,
     max_chars: int = DEFAULT_SANDBOX_TOOL_MAX_CHARS,
     cleanup: Literal["destroy", "close"] = "destroy",
-) -> FunctionToolset[None]:
+) -> FunctionToolset[Any]:
     """Return a PydanticAI toolset for active-stack sandbox commands.
 
     The returned toolset contains one tool, ``run_sandbox_command``. The model
@@ -60,7 +54,7 @@ def sandbox_command_toolset(
     factory, and environment variables are intentionally not exposed as tool
     arguments.
     """
-    toolset: FunctionToolset[None] = FunctionToolset()
+    toolset: FunctionToolset[Any] = FunctionToolset()
 
     @toolset.tool_plain(name=SANDBOX_COMMAND_TOOL_NAME)
     def run_sandbox_command(

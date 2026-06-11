@@ -13,7 +13,7 @@ from kitaru.config import SandboxCommandResult
 
 def _fake_core_result(
     *,
-    command: str | list[str] = "python --version",
+    command: str = "python --version",
     cwd: str | None = "/workspace",
     stdout: str = "Python 3.12.0\n",
     stderr: str = "",
@@ -376,6 +376,88 @@ async def test_sandbox_command_tool_tracking_records_completed_events(
     assert result.exit_code == core_result.exit_code
     assert len(recorded_events) == 1
     _assert_recorded_tool_event(recorded_events[0], status="completed")
+
+
+def test_kitaru_agent_run_calls_sandbox_command_toolset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
+    from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+    calls: list[dict[str, Any]] = []
+    checkpoint_steps: list[str] = []
+    checkpoint_configs: dict[str, dict[str, Any]] = {}
+
+    def fake_run_sandbox_command(*args: Any, **kwargs: Any) -> SandboxCommandResult:
+        calls.append({"args": args, "kwargs": kwargs})
+        return _fake_core_result(
+            command=cast(str, args[0]),
+            cwd=kwargs.get("cwd"),
+            stdout="sandbox output\n",
+        )
+
+    async def fake_checkpoint(
+        *, step_name: str, body: Callable[[], Awaitable[Any]], **kwargs: Any
+    ) -> Any:
+        checkpoint_steps.append(step_name)
+        config = dict(kwargs["config"])
+        checkpoint_configs[step_name] = config
+        with _checkpoint_scope(
+            name=step_name,
+            checkpoint_type=config.get("type", "checkpoint"),
+        ):
+            return await body()
+
+    monkeypatch.setattr(
+        _sandbox.kitaru, "run_sandbox_command", fake_run_sandbox_command
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+
+    agent = Agent(
+        TestModel(call_tools=[_sandbox.SANDBOX_COMMAND_TOOL_NAME]),
+        name="sandbox_agent",
+        output_type=str,
+        toolsets=[_sandbox.sandbox_command_toolset(max_chars=321)],
+    )
+    durable_agent = KitaruAgent(
+        agent,
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            tool_capture="metadata",
+            correlate_otel_spans=False,
+        ),
+        tool_checkpoint_config_by_name={
+            _sandbox.SANDBOX_COMMAND_TOOL_NAME: {"cache": False},
+        },
+    )
+
+    with _flow_scope(name="sandbox_agent_flow"):
+        result = durable_agent.run_sync("Use the sandbox command tool.")
+
+    assert "sandbox output" in result.output
+    assert calls == [
+        {
+            "args": ("a",),
+            "kwargs": {"cwd": None, "max_chars": 321, "cleanup": "destroy"},
+        }
+    ]
+    assert "sandbox_agent_model_request" in checkpoint_steps
+    assert f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool" in checkpoint_steps
+    assert checkpoint_configs[f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool"] == {
+        "cache": False,
+        "type": "tool_call",
+    }
 
 
 @pytest.mark.anyio
