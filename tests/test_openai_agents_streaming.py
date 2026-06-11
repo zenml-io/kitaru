@@ -42,6 +42,7 @@ class FakeStreamedResult:
 def fake_tracker_scope(_agent_name: str):
     yield SimpleNamespace(
         event_log_artifact_name="events",
+        run_label="agent-openai-run",
         run_summary_artifact_name="summary",
     )
 
@@ -571,6 +572,7 @@ def test_run_stream_sync_publishes_completed_after_tracker_persistence(
         try:
             yield SimpleNamespace(
                 event_log_artifact_name="events",
+                run_label="agent-openai-run",
                 run_summary_artifact_name="summary",
             )
         finally:
@@ -618,6 +620,7 @@ async def test_run_stream_async_publishes_completed_after_tracker_persistence(
         try:
             yield SimpleNamespace(
                 event_log_artifact_name="events",
+                run_label="agent-openai-run",
                 run_summary_artifact_name="summary",
             )
         finally:

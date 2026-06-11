@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+
 ### Fixed
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 

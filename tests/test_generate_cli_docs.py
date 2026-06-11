@@ -155,6 +155,7 @@ class TestBuildCommandTree:
             "replay",
             "resume",
             "retry",
+            "statistics",
         ]
 
     def test_auth_tree_includes_service_accounts_and_api_keys(self) -> None:
@@ -540,6 +541,7 @@ class TestWriteDocsTree:
             "replay",
             "resume",
             "retry",
+            "statistics",
         ]
 
     def test_frontmatter_present_in_generated_page(self, output_dir: Path) -> None:

@@ -165,6 +165,10 @@ def test_core_funnel_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_RETRIED == "Kitaru execution retried"
     assert AnalyticsEvent.EXECUTION_RESUMED == "Kitaru execution resumed"
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
+    assert (
+        AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
+        == "Kitaru execution statistics queried"
+    )
 
 
 def test_deployment_event_canonical_strings() -> None:

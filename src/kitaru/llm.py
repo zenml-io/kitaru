@@ -12,10 +12,12 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from kitaru._env import _temporary_env
+from kitaru._llm_usage import build_usage_record, usage_record_metadata
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import (
@@ -667,7 +669,28 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     filtered_metadata = {
         key: value for key, value in llm_metadata.items() if value is not None
     }
-    log(llm_calls={request.call_name: filtered_metadata})
+    usage_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        call_name=request.call_name,
+        record_id=f"{request.call_name}:{uuid4().hex}",
+        requested_model=model_selection.requested_model,
+        resolved_model=model_selection.resolved_model,
+        model=model_selection.resolved_model,
+        provider=model_selection.resolved_model.split("/", 1)[0]
+        if "/" in model_selection.resolved_model
+        else None,
+        input_tokens=usage.prompt_tokens,
+        output_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        latency_ms=latency_ms,
+        billing_effect="unknown" if is_mocked else "incurred",
+        cache_status="unknown" if is_mocked else "executed",
+    )
+    log(
+        llm_calls={request.call_name: filtered_metadata},
+        **usage_record_metadata(usage_record),
+    )
 
     _track_llm_call_analytics(
         model_selection=model_selection,

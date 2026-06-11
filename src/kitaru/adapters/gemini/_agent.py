@@ -7,10 +7,12 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from kitaru._llm_usage import build_usage_record, log_usage_record
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
+from ._constants import ADAPTER_ID
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import GeminiInteractionCapturePolicy
 from ._runner import (
@@ -47,6 +49,7 @@ _DIRECT_EXECUTION_WARNING = (
     "checkpoint can call Google again and duplicate Gemini-side tool calls, "
     "managed-agent work, sandbox mutations, or API cost."
 )
+_CANONICAL_LLM_SURFACE = "gemini_interaction"
 
 ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
 InteractionSurface = Literal["run", "run_sync", "run_stream", "run_stream_sync"]
@@ -580,6 +583,13 @@ class KitaruGeminiInteractionsRunner:
             warnings=warnings,
             metadata=metadata,
         )
+        self._log_canonical_llm_call_record(
+            result,
+            payload=payload,
+            tracker=tracker,
+            request=request,
+        )
+        warnings = result.warnings
         if self._capture.emit_events:
             tracker.record_interaction(
                 status="completed",
@@ -595,6 +605,69 @@ class KitaruGeminiInteractionsRunner:
                 },
             )
         return result
+
+    def _log_canonical_llm_call_record(
+        self,
+        result: GeminiInteractionResult,
+        *,
+        payload: GeminiInteractionPayload,
+        tracker: EventTracker,
+        request: GeminiInteractionRequest,
+    ) -> None:
+        """Log one canonical LLM call record, even when tokens are absent.
+
+        The canonical status describes the provider call: Gemini returned a
+        stable interaction response, so this record is completed. The public
+        ``GeminiInteractionResult.status`` can still be ``requires_action`` when
+        the stable response asks the caller to send a follow-up turn.
+        """
+        if not self._capture.save_usage or not (
+            is_inside_flow() or is_inside_checkpoint()
+        ):
+            return
+        try:
+            model, requested_model, resolved_model = self._usage_model_fields(
+                payload=payload,
+                request=request,
+            )
+            usage_record = build_usage_record(
+                adapter=ADAPTER_ID,
+                surface=_CANONICAL_LLM_SURFACE,
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=payload.usage,
+                model=model,
+                requested_model=requested_model,
+                resolved_model=resolved_model,
+                provider="google_gemini",
+                cost_source="none",
+                latency_ms=payload.duration_ms,
+                status="completed",
+                billing_effect="incurred",
+                cache_status="executed",
+                warnings=result.warnings,
+            )
+        except Exception:
+            return
+        log_usage_record(usage_record)
+
+    @staticmethod
+    def _usage_model_fields(
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return canonical model fields without treating agents as models."""
+        if request.target_kind == "model":
+            return (
+                payload.model or request.model,
+                request.model,
+                payload.model,
+            )
+        if payload.model is not None:
+            return payload.model, None, payload.model
+        return None, None, None
 
     def _persist_capture_artifacts(
         self,
@@ -757,7 +830,7 @@ class KitaruGeminiInteractionsRunner:
         plan: _InteractionPlan | None = None,
     ) -> str:
         payload: dict[str, Any] = {
-            "adapter": "gemini_interactions",
+            "adapter": ADAPTER_ID,
             "checkpoint_strategy": "interaction",
             "google_genai_version": google_genai_version(),
             "runner_name": self._name,

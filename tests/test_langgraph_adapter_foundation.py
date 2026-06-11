@@ -820,6 +820,361 @@ def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(
     assert summary_metadata["thread_id"] == "thread-1"
 
 
+def test_find_usages_ignores_application_usage_dict_without_token_fields(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    assert (
+        agent_module._find_usages(
+            {"usage": {"feature": "beta"}},
+            max_depth=3,
+        )
+        == []
+    )
+
+
+def test_find_usages_accepts_zero_token_usage(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    usages = agent_module._find_usages(
+        {"message": {"usage_metadata": {"input_tokens": 0, "output_tokens": 1}}},
+        max_depth=3,
+    )
+
+    assert usages == [{"input_tokens": 0, "output_tokens": 1}]
+
+
+def test_find_usages_deduplicates_shared_usage_references(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    shared_usage = {"input_tokens": 2, "output_tokens": 3}
+
+    usages = agent_module._find_usages(
+        {
+            "first": SimpleNamespace(usage_metadata=shared_usage),
+            "second": {"usage": shared_usage},
+            "third": [SimpleNamespace(usage=shared_usage)],
+        },
+        max_depth=3,
+    )
+
+    assert usages == [shared_usage]
+
+
+def test_graph_call_counts_request_response_token_aliases(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "usage": {
+                    "request_tokens": 4,
+                    "response_tokens": 6,
+                    "tokens_total": 10,
+                },
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 4
+    assert result.usage.output_tokens == 6
+    assert result.usage.total_tokens == 10
+    assert logged[0]["usage"]["input_tokens"] == 4
+    assert logged[0]["usage"]["output_tokens"] == 6
+    assert logged[0]["usage"]["total_tokens"] == 10
+
+
+def test_graph_call_prefers_completed_model_event_usage(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            tracker = tracking.get_current_tracker()
+            assert tracker is not None
+            first_event_id, first_context = tracker.start_model_event()
+            tracker.record_model_event(
+                first_event_id,
+                first_context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "fake-model",
+                    "usage": {"input_tokens": 2, "output_tokens": 3},
+                },
+            )
+            second_event_id, second_context = tracker.start_model_event()
+            tracker.record_model_event(
+                second_event_id,
+                second_context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "fake-model",
+                    "usage": {"input_tokens": 5, "output_tokens": 7},
+                },
+            )
+            return {
+                "usage": {"input_tokens": 100, "output_tokens": 200},
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.model_name == "fake-model"
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 10
+    assert result.usage.total_tokens == 17
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 10
+    assert logged[0]["usage"]["total_tokens"] == 17
+
+
+def test_graph_call_aggregates_multiple_output_usage_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content="first",
+                        type="ai",
+                        usage_metadata={"input_tokens": 2, "output_tokens": 3},
+                    ),
+                    SimpleNamespace(
+                        content="second",
+                        type="ai",
+                        usage_metadata={"input_tokens": 5, "output_tokens": 7},
+                    ),
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 10
+    assert result.usage.total_tokens == 17
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 10
+    assert logged[0]["usage"]["total_tokens"] == 17
+
+
+def test_graph_call_deduplicates_shared_output_usage_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+    shared_usage = {"input_tokens": 2, "output_tokens": 3}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content="first",
+                        type="ai",
+                        usage_metadata=shared_usage,
+                    ),
+                    {"usage": shared_usage},
+                    SimpleNamespace(usage=shared_usage),
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 2
+    assert result.usage.output_tokens == 3
+    assert result.usage.total_tokens == 5
+    assert logged[0]["usage"]["input_tokens"] == 2
+    assert logged[0]["usage"]["output_tokens"] == 3
+    assert logged[0]["usage"]["total_tokens"] == 5
+
+
+def test_graph_call_samples_raw_usage_metadata_for_many_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content=f"message-{index}",
+                        type="ai",
+                        usage_metadata={"input_tokens": 1, "output_tokens": 2},
+                    )
+                    for index in range(7)
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 14
+    assert result.usage.total_tokens == 21
+    assert result.usage.raw == {
+        "payload_count": 7,
+        "sample_count": 5,
+        "sample_limit": 5,
+        "truncated": True,
+        "samples": [{"input_tokens": 1, "output_tokens": 2} for _ in range(5)],
+    }
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 14
+    assert logged[0]["usage"]["total_tokens"] == 21
+
+
+def test_graph_call_keeps_successful_run_when_cost_calculator_fails(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"input_tokens": 1, "output_tokens": 2}, "echo": input}
+
+    def fail_cost(_usage: object) -> float:
+        raise RuntimeError("pricing service down")
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        cost_calculator=fail_cost,
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.estimated_cost_usd is None
+    assert any("cost calculator failed" in warning for warning in result.warnings)
+    assert len(logged) == 1
+    assert logged[0]["cost"]["estimated_cost_usd"] is None
+    assert logged[0]["warnings"] == result.warnings
+
+
+def test_graph_call_logs_one_record_without_usage(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"feature": "beta"}, "echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is None
+    assert len(logged) == 1
+    assert logged[0]["usage"]["total_tokens"] is None
+
+
 def test_failed_graph_call_saves_event_artifacts_in_checkpoint_scope(
     langgraph_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
