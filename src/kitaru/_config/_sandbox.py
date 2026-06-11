@@ -85,19 +85,23 @@ def run_sandbox_command(
         _ensure_process_collect_api_available(process)
         output = process.collect(max_chars=normalized_max_chars)
     except KitaruFeatureNotAvailableError:
-        _cleanup_after_failed_command(session, normalized_cleanup)
+        _cleanup_after_failed_command(session, normalized_cleanup, env=normalized_env)
         raise
     except Exception as exc:
-        _cleanup_after_failed_command(session, normalized_cleanup)
+        _cleanup_after_failed_command(session, normalized_cleanup, env=normalized_env)
+        error_text = _redact_env_values(str(exc), normalized_env)
         raise KitaruBackendError(
-            f"Sandbox command execution failed on active stack '{stack_name}': {exc}"
-        ) from exc
+            "Sandbox command execution failed on active stack "
+            f"'{stack_name}': {error_text}"
+        ) from None
 
     session_id = _optional_string_attribute(
         session, "id"
     ) or _optional_string_attribute(session, "session_id")
     cleanup_succeeded, cleanup_error = _cleanup_after_success(
-        session, normalized_cleanup
+        session,
+        normalized_cleanup,
+        env=normalized_env,
     )
     if not cleanup_succeeded and cleanup_error is None:
         cleanup_error = "Sandbox cleanup did not complete."
@@ -308,23 +312,44 @@ def _required_output_bool(output: Any, attr: str) -> bool:
     return value
 
 
+def _redact_env_values(text: str, env: Mapping[str, str] | None) -> str:
+    """Redact static sandbox env values from provider error text."""
+    if env is None:
+        return text
+
+    redacted = text
+    values = list(set(env.values()))
+    values.sort(key=lambda value: len(value), reverse=True)
+    for value in values:
+        if not value:
+            continue
+        redacted = redacted.replace(value, "[REDACTED]")
+    return redacted
+
+
 def _cleanup_after_failed_command(
     session: Any | None,
     cleanup: SandboxCleanupPolicy,
+    *,
+    env: Mapping[str, str] | None,
 ) -> None:
     if session is None:
         return
 
     try:
         if cleanup == CLEANUP_DESTROY:
-            _destroy_session_or_close_if_unsupported(session)
+            _destroy_session_or_close_if_unsupported(session, env=env)
         else:
             session.close()
     except Exception:
         return
 
 
-def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | None]:
+def _destroy_session_or_close_if_unsupported(
+    session: Any,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[bool, str | None]:
     try:
         session.destroy()
     except NotImplementedError as exc:
@@ -332,11 +357,15 @@ def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | 
         try:
             session.close()
         except Exception as close_exc:
-            close_error = f" Best-effort close also failed: {close_exc}"
+            close_error = (
+                " Best-effort close also failed: "
+                f"{_redact_env_values(str(close_exc), env)}"
+            )
         return (
             False,
             "Sandbox session destroy is not supported by this provider; "
-            f"the command result is still available. {exc}{close_error or ''}",
+            "the command result is still available. "
+            f"{_redact_env_values(str(exc), env)}{close_error or ''}",
         )
     return True, None
 
@@ -344,26 +373,30 @@ def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | 
 def _cleanup_after_success(
     session: Any,
     cleanup: SandboxCleanupPolicy,
+    *,
+    env: Mapping[str, str] | None,
 ) -> tuple[bool, str | None]:
     if cleanup == CLEANUP_CLOSE:
         try:
             session.close()
         except Exception as exc:
+            error_text = _redact_env_values(str(exc), env)
             raise KitaruBackendError(
                 "Sandbox command completed, but closing the sandbox session failed: "
-                f"{exc}"
-            ) from exc
+                f"{error_text}"
+            ) from None
         return True, None
 
     try:
-        return _destroy_session_or_close_if_unsupported(session)
+        return _destroy_session_or_close_if_unsupported(session, env=env)
     except Exception as exc:
         with suppress(Exception):
             session.close()
+        error_text = _redact_env_values(str(exc), env)
         raise KitaruBackendError(
             "Sandbox command completed, but destroying the sandbox session failed: "
-            f"{exc}"
-        ) from exc
+            f"{error_text}"
+        ) from None
 
     return True, None
 

@@ -40,7 +40,7 @@ CALLS_RUNNER_NAME = "langgraph_local_calls_demo"
 SANDBOX_RUNNER_NAME = "langgraph_sandbox_command_demo"
 SANDBOX_COMMAND_TOOL_NAME = DEFAULT_SANDBOX_COMMAND_TOOL_NAME
 DEFAULT_LANGGRAPH_AGENT_MODEL = "gpt-5-nano"
-DEFAULT_SANDBOX_AGENT_MODEL = "gpt-4.1-nano"
+DEFAULT_SANDBOX_AGENT_MODEL = "gpt-5-nano"
 SANDBOX_DEMO_COMMAND = (
     'python -c "import json, os, sys; '
     "print(json.dumps({'cwd': os.getcwd(), 'python': sys.version.split()[0]}))\""
@@ -69,7 +69,12 @@ class ReviewState(TypedDict, total=False):
 
 
 class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
-    """Force the demo model to call the sandbox command tool once."""
+    """Force the demo model to call the sandbox command tool once.
+
+    The provider call is still real. This middleware only makes the example's
+    side effect deterministic by replacing the sandbox tool call arguments after
+    the model has chosen the forced tool and before LangChain runs the tool.
+    """
 
     def wrap_model_call(
         self,
@@ -85,7 +90,75 @@ class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
                 "function": {"name": SANDBOX_COMMAND_TOOL_NAME},
             }
         )
-        return handler(forced_request)
+        response = handler(forced_request)
+        _force_sandbox_tool_arguments(response)
+        return response
+
+
+def _force_sandbox_tool_arguments(response: Any) -> None:
+    """Replace the single sandbox tool-call args with the demo command."""
+    matching_tool_calls: list[Any] = []
+    for message in _response_messages(response):
+        matching_tool_calls.extend(
+            tool_call
+            for tool_call in _message_tool_calls(message)
+            if _tool_call_name(tool_call) == SANDBOX_COMMAND_TOOL_NAME
+        )
+
+    if len(matching_tool_calls) != 1:
+        raise RuntimeError(
+            f"Sandbox demo expected exactly one {SANDBOX_COMMAND_TOOL_NAME} "
+            f"tool call from the real model, got {len(matching_tool_calls)}. "
+            "The demo stops before running any sandbox command so its summary "
+            "cannot report a different number of commands than actually ran."
+        )
+
+    tool_call = matching_tool_calls[0]
+    if isinstance(tool_call, dict):
+        tool_call["args"] = {"command": SANDBOX_DEMO_COMMAND}
+        return
+    try:
+        tool_call.args = {"command": SANDBOX_DEMO_COMMAND}
+    except Exception as exc:
+        raise RuntimeError(
+            "Sandbox demo could not pin the "
+            f"{SANDBOX_COMMAND_TOOL_NAME} arguments before LangChain tool "
+            "execution."
+        ) from exc
+
+
+def _response_messages(response: Any) -> list[Any]:
+    """Return message-like objects from LangChain's model response shapes."""
+    inner = getattr(response, "model_response", response)
+    result = getattr(inner, "result", None)
+    if isinstance(result, list | tuple):
+        return list(result)
+    if result is not None:
+        return [result]
+    if isinstance(inner, list | tuple):
+        return list(inner)
+    return [inner]
+
+
+def _message_tool_calls(message: Any) -> list[Any]:
+    """Return normalized LangChain tool-call payloads from one message."""
+    if isinstance(message, dict):
+        value = message.get("tool_calls") or message.get("tool_call_chunks")
+    else:
+        value = getattr(message, "tool_calls", None) or getattr(
+            message, "tool_call_chunks", None
+        )
+    if isinstance(value, list | tuple):
+        return list(value)
+    return []
+
+
+def _tool_call_name(tool_call: Any) -> str | None:
+    if isinstance(tool_call, dict):
+        name = tool_call.get("name")
+    else:
+        name = getattr(tool_call, "name", None)
+    return name if isinstance(name, str) else None
 
 
 def _message_history_has_tool_result(messages: Any) -> bool:

@@ -53,14 +53,29 @@ def test_force_sandbox_tool_choice_forces_specific_tool_only_initially(
     middleware = module.ForceSandboxToolChoiceMiddleware()
     request = _FakeModelRequest([{"role": "user", "content": "run the command"}])
     handled_requests: list[Any] = []
+    response = SimpleNamespace(
+        result=[
+            SimpleNamespace(
+                tool_calls=[
+                    {
+                        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+                        "args": {"command": "model-chosen-command"},
+                        "id": "sandbox-call-1",
+                    }
+                ]
+            )
+        ]
+    )
 
     def handler(model_request: Any) -> Any:
         handled_requests.append(model_request)
-        return model_request
+        return response
 
     result = middleware.wrap_model_call(request, handler)
 
-    assert result is handled_requests[0]
+    assert result is response
+    assert len(handled_requests) == 1
+    assert handled_requests[0].override_kwargs == request.overrides[0]
     assert request.overrides == [
         {
             "tool_choice": {
@@ -69,6 +84,70 @@ def test_force_sandbox_tool_choice_forces_specific_tool_only_initially(
             }
         }
     ]
+
+
+def test_force_sandbox_tool_choice_rewrites_tool_args_to_demo_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+    middleware = module.ForceSandboxToolChoiceMiddleware()
+    request = _FakeModelRequest([{"role": "user", "content": "run the command"}])
+    sandbox_tool_call = {
+        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+        "args": {"command": "python -c 'print(999)'", "cwd": "/tmp"},
+        "id": "sandbox-call-1",
+    }
+    other_tool_call = {
+        "name": "other_tool",
+        "args": {"command": "leave this alone"},
+        "id": "other-call-1",
+    }
+    response = SimpleNamespace(
+        result=[SimpleNamespace(tool_calls=[sandbox_tool_call, other_tool_call])]
+    )
+
+    result = middleware.wrap_model_call(request, lambda _request: response)
+
+    assert result is response
+    assert sandbox_tool_call == {
+        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+        "args": {"command": module.SANDBOX_DEMO_COMMAND},
+        "id": "sandbox-call-1",
+    }
+    assert other_tool_call == {
+        "name": "other_tool",
+        "args": {"command": "leave this alone"},
+        "id": "other-call-1",
+    }
+
+
+def test_force_sandbox_tool_choice_rejects_multiple_sandbox_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+    middleware = module.ForceSandboxToolChoiceMiddleware()
+    request = _FakeModelRequest([{"role": "user", "content": "run the command"}])
+    response = SimpleNamespace(
+        result=[
+            SimpleNamespace(
+                tool_calls=[
+                    {
+                        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+                        "args": {"command": "first"},
+                        "id": "sandbox-call-1",
+                    },
+                    {
+                        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+                        "args": {"command": "second"},
+                        "id": "sandbox-call-2",
+                    },
+                ]
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="expected exactly one"):
+        middleware.wrap_model_call(request, lambda _request: response)
 
 
 def test_force_sandbox_tool_choice_does_not_force_after_tool_result(

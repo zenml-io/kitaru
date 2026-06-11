@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
 
 ### Fixed
+- Fixed the LangGraph sandbox demo so its real-model run deterministically executes the documented demo command, and redacted static sandbox tool env values from wrapped provider error messages.
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 
 ## [0.15.0] - 2026-06-04

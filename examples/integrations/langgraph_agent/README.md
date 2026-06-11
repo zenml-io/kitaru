@@ -67,8 +67,8 @@ uv sync --extra local --extra langgraph-openai
 uv run kitaru init
 uv run kitaru login
 export OPENAI_API_KEY='sk-...'
-# Optional: override the sandbox demo default gpt-4.1-nano model.
-export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-4.1-nano'
+# Optional: override the sandbox demo default gpt-5-nano model.
+export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
 # Select or create a Kitaru stack with exactly one sandbox component first.
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
@@ -191,9 +191,9 @@ This is `checkpoint_strategy="calls"`. Kitaru is not splitting open arbitrary La
 The sandbox demo builds a LangChain agent with:
 
 - a real OpenAI chat model through `langchain-openai`;
-- the default sandbox model `gpt-4.1-nano`, overridable with `LANGGRAPH_SANDBOX_AGENT_MODEL` or the shared `LANGGRAPH_AGENT_MODEL`;
+- the default sandbox model `gpt-5-nano`, overridable with `LANGGRAPH_SANDBOX_AGENT_MODEL` or the shared `LANGGRAPH_AGENT_MODEL`;
 - `create_sandbox_command_tool()` as the only tool;
-- a tiny example-only middleware that forces the model to use that one tool;
+- a tiny example-only middleware that forces the model to choose that tool and pins its `command` argument to the deterministic demo command;
 - `KitaruLangGraphMiddleware` installed as LangChain middleware;
 - `KitaruGraphRunner(..., checkpoint_strategy="calls")`.
 
@@ -202,7 +202,7 @@ The sandbox example disables model-call checkpoints to keep the demo focused on 
 The concrete chain of events is:
 
 1. The model receives one safe Python command.
-2. The model calls `run_sandbox_command` with that command.
+2. The real model call chooses `run_sandbox_command`; the example middleware pins the tool-call `command` argument to the same safe command before LangChain runs the tool.
 3. LangChain calls the tool handler.
 4. Kitaru middleware opens a `tool_call__run_sandbox_command_...` checkpoint because the handler is synchronous and the run is inside a Kitaru flow.
 5. The tool handler calls `kitaru.run_sandbox_command(...)`.

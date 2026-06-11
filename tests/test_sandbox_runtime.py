@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -136,6 +137,20 @@ class FakeClient:
 
 def _client_factory(client: FakeClient) -> Any:
     return lambda: client
+
+
+def _assert_secret_not_in_public_exception(
+    exc: BaseException,
+    *secret_values: str,
+) -> str:
+    """Assert a public exception does not expose supplied secret values."""
+    message = str(exc)
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    for secret_value in secret_values:
+        assert secret_value not in message
+        assert secret_value not in formatted
+    assert exc.__cause__ is None
+    return message
 
 
 def test_run_sandbox_command_returns_stable_result_shape() -> None:
@@ -302,15 +317,23 @@ def test_run_sandbox_command_reports_unsupported_destroy_and_closes() -> None:
 def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure() -> (
     None
 ):
-    session = FakeSession(destroy_error=RuntimeError("provider exploded"))
+    secret_value = "destroy-token-from-tool-env"
+    session = FakeSession(
+        destroy_error=RuntimeError(f"provider exploded with {secret_value}")
+    )
     sandbox = FakeSandbox(session)
     client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
 
     with pytest.raises(
         KitaruBackendError, match="destroying the sandbox session failed"
-    ):
-        run_sandbox_command("echo hi", client_factory=_client_factory(client))
+    ) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"API_TOKEN": secret_value},
+            client_factory=_client_factory(client),
+        )
 
+    _ = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
     assert session.destroy_calls == 1
     assert session.close_calls == 1
 
@@ -367,6 +390,52 @@ def test_run_sandbox_command_maps_backend_failures(
         run_sandbox_command("echo hi", client_factory=_client_factory(client))
 
     assert sandbox.session.destroy_calls == expected_destroy_calls
+
+
+def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() -> None:
+    secret_value = "close-token-from-tool-env"
+    session = FakeSession(close_error=RuntimeError(f"close failed with {secret_value}"))
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(
+        KitaruBackendError, match="closing the sandbox session failed"
+    ) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            cleanup="close",
+            env={"API_TOKEN": secret_value},
+            client_factory=_client_factory(client),
+        )
+
+    _ = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
+
+
+def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
+    secret_value = "static-token-from-tool-env"
+    public_value = "demo-mode"
+    sandbox = FakeSandbox(
+        FakeSession(
+            exec_error=RuntimeError(
+                f"provider rejected token {secret_value} in mode {public_value}"
+            )
+        )
+    )
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"API_TOKEN": secret_value, "MODE": public_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = _assert_secret_not_in_public_exception(
+        exc_info.value,
+        secret_value,
+        public_value,
+    )
+    assert message.endswith("provider rejected token [REDACTED] in mode [REDACTED]")
 
 
 def test_public_sandbox_imports() -> None:

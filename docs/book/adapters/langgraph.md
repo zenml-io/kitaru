@@ -614,7 +614,7 @@ If you are using Deep Agents' virtual filesystem or sandbox backends, Kitaru rec
 
 ## Runnable example
 
-The included examples have two provider-neutral graph-call paths and two provider-backed calls-mode paths: one with local ticket tools and one with the sandbox command tool. The `graph_call` path is local and needs no provider API key. The `calls` and `sandbox` paths use OpenAI through LangChain, so they require `OPENAI_API_KEY`. The sandbox path defaults to `gpt-4.1-nano` and can be overridden with `LANGGRAPH_SANDBOX_AGENT_MODEL` or `LANGGRAPH_AGENT_MODEL`. It also requires an active Kitaru stack with exactly one sandbox component.
+The included examples have two provider-neutral graph-call paths and two provider-backed calls-mode paths: one with local ticket tools and one with the sandbox command tool. The `graph_call` path is local and needs no provider API key. The `calls` and `sandbox` paths use OpenAI through LangChain, so they require `OPENAI_API_KEY`. The sandbox path defaults to `gpt-5-nano` and can be overridden with `LANGGRAPH_SANDBOX_AGENT_MODEL` or `LANGGRAPH_AGENT_MODEL`. It also requires an active Kitaru stack with exactly one sandbox component.
 
 ```bash
 uv sync --extra local --extra langgraph
@@ -642,15 +642,15 @@ export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
-The sandbox path uses a real OpenAI-backed LangChain agent with Kitaru's sandbox command tool. It defaults to `gpt-4.1-nano` for tool-call reliability and also needs an active stack with exactly one sandbox component:
+The sandbox path uses a real OpenAI-backed LangChain agent with Kitaru's sandbox command tool. It defaults to `gpt-5-nano` and also needs an active stack with exactly one sandbox component:
 
 ```bash
 uv sync --extra local --extra langgraph-openai
 uv run kitaru init
 uv run kitaru login
 export OPENAI_API_KEY='sk-...'
-# Optional: override the sandbox demo default gpt-4.1-nano model.
-export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-4.1-nano'
+# Optional: override the sandbox demo default gpt-5-nano model.
+export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
 
@@ -686,7 +686,7 @@ The sandbox example disables model-call checkpoints to keep the demo focused on 
 `--strategy sandbox` runs the sandbox command tool demo:
 
 1. Builds an OpenAI-backed LangChain agent with `create_sandbox_command_tool()`.
-2. The model is forced to call `run_sandbox_command` with one deterministic Python command.
+2. The real model call is forced to choose `run_sandbox_command`, then the example middleware pins the tool-call `command` argument to one deterministic Python command.
 3. `KitaruLangGraphMiddleware` creates a sync call checkpoint around the tool handler.
 4. The tool handler calls `kitaru.run_sandbox_command(...)`, which asks the active stack sandbox to run the command.
 5. Kitaru records `tool_call__run_sandbox_command_...` and writes a `langgraph_summary__...` checkpoint.
@@ -737,7 +737,7 @@ Kitaru: Checkpoint `tool_call__run_sandbox_command_...` started.
 Kitaru: Checkpoint `langgraph_summary__...` started.
 LangGraph adapter demo summary (sandbox):
 - strategy: sandbox
-- model: gpt-4.1-nano
+- model: gpt-5-nano
 - sandbox_command: python -c "..."
 - kitaru_behavior: The command ran through the active Kitaru stack sandbox ...
 ```
