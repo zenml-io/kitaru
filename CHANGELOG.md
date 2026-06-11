@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added caller-owned Gemini custom function execution through Kitaru's active sandbox, with explicit registered sandbox commands, a dry-run example showcase, and docs that keep Antigravity / Google-owned tool internals outside Kitaru's replay promise. (#421)
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
 
 ### Fixed

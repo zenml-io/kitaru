@@ -22,6 +22,7 @@ from ._stream_shapes import (
     extract,
     has_unsafe_role_or_type_marker,
     normalize_token,
+    normalized_token_contains_any,
     sequence_or_empty,
 )
 from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
@@ -820,8 +821,8 @@ def _extract_step_call_id(value: Any) -> str | None:
     if explicit_call_id is not None:
         return explicit_call_id
     step_type = _normalized_step_type(value)
-    if step_type is not None and any(
-        fragment in step_type for fragment in CALL_ID_TYPE_FRAGMENTS
+    if step_type is not None and normalized_token_contains_any(
+        step_type, CALL_ID_TYPE_FRAGMENTS
     ):
         return coerce_string(extract(value, "id"))
     return None

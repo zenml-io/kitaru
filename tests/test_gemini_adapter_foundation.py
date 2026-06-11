@@ -45,6 +45,10 @@ def test_public_import_surface_uses_interaction_vocabulary(
     assert gemini_adapter.GeminiInteractionRequest
     assert gemini_adapter.GeminiInteractionResult
     assert gemini_adapter.GeminiInteractionStepSummary
+    assert gemini_adapter.GeminiInteractionFunctionCall
+    assert gemini_adapter.GeminiSandboxFunctionSpec
+    assert gemini_adapter.GeminiSandboxFunctionExecution
+    assert gemini_adapter.execute_gemini_sandbox_function_call
     assert gemini_adapter.GeminiInteractionCapturePolicy
     assert gemini_adapter.GeminiInteractionRunEvent
     assert gemini_adapter.GEMINI_STREAM_STARTED

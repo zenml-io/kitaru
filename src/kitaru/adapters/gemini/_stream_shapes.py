@@ -3,7 +3,12 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from . import _tokens
 from ._serialization import to_json_safe
+
+CALL_ID_TYPE_FRAGMENTS = _tokens.CALL_ID_TYPE_FRAGMENTS
+normalize_token = _tokens.normalize_token
+normalized_token_contains_any = _tokens.normalized_token_contains_any
 
 _STREAM_RECONSTRUCTION_POLICY = "stream_accumulator_v1"
 
@@ -35,7 +40,6 @@ TEXT_DELTA_TYPES = frozenset({"text", "output_text", "text_delta"})
 ARGUMENT_DELTA_TYPES = frozenset({"arguments_delta", "input_json_delta"})
 THOUGHT_DELTA_TYPES = frozenset({"thought_summary", "thought_signature", "thinking"})
 MEDIA_DELTA_TYPES = frozenset({"image", "audio", "document", "video"})
-CALL_ID_TYPE_FRAGMENTS = ("function_call", "tool_call")
 SAFE_OUTPUT_ROLES = frozenset({"assistant", "model"})
 SAFE_OUTPUT_STEP_TYPES = frozenset(
     {
@@ -218,14 +222,6 @@ def int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def normalize_token(value: str | None) -> str | None:
-    """Normalize provider event/type tokens for comparisons."""
-    if value is None:
-        return None
-    normalized = "_".join(value.strip().lower().replace("-", "_").split())
-    return normalized or None
 
 
 def environment_id(interaction: Any) -> str | None:

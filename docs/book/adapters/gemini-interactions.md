@@ -576,6 +576,92 @@ Keep human-in-the-loop waits at flow scope. For example, let the flow inspect th
 the later `function_result` interaction after the wait resumes. That keeps the
 pause visible to Kitaru instead of hiding it inside a provider-owned turn.
 
+### Running caller-owned custom functions in Kitaru's sandbox
+
+Kitaru also provides a helper for the narrow case where Gemini asks for a custom
+function and your application owns that function body. The helper does not run
+automatically. Your code must register the function names it is willing to run.
+
+A concrete safe example is a function named `sandbox_python_version`:
+
+```text
+Gemini interaction checkpoint
+  -> Gemini returns status="requires_action"
+  -> result.steps contains call_id="call_123" and tool_name="sandbox_python_version"
+
+Kitaru-owned sandbox checkpoint
+  -> your registry says sandbox_python_version means: run "python --version"
+  -> Kitaru runs that command through kitaru.run_sandbox_command(...)
+  -> non-zero exits are kept as result data instead of becoming Gemini-helper errors
+
+Gemini interaction checkpoint
+  -> your flow sends GeminiInteractionRequest.function_result(...)
+  -> Gemini continues from the same interaction id
+```
+
+In code, the middle checkpoint looks like this:
+
+```python
+import kitaru
+from kitaru.adapters.gemini import (
+    GeminiInteractionResult,
+    GeminiSandboxFunctionExecution,
+    GeminiSandboxFunctionSpec,
+    execute_gemini_sandbox_function_call,
+)
+
+@kitaru.checkpoint
+def run_requested_function(
+    result: GeminiInteractionResult,
+) -> GeminiSandboxFunctionExecution:
+    return execute_gemini_sandbox_function_call(
+        result,
+        {
+            "sandbox_python_version": GeminiSandboxFunctionSpec(
+                function_name="sandbox_python_version",
+                command="python --version",
+            )
+        },
+    )
+```
+
+The returned `GeminiSandboxFunctionExecution` contains the matched call metadata,
+the local `SandboxCommandResult`, the JSON-like payload sent to Gemini, and the
+ready-to-send `GeminiInteractionRequest.function_result(...)`.
+
+V1 intentionally does **not** parse model-supplied function arguments. The helper
+matches by safe step metadata that Kitaru already exposes: step index, step type,
+call ID, and function name. Registered commands can be static, or they can be
+built from that safe call metadata. If you need model arguments later, that needs
+a separate opt-in design because those arguments live in raw provider payloads
+and may contain private user data.
+
+The default function-result payload includes:
+
+- `ok`
+- `exit_code`
+- `stdout` and `stderr`, clipped to a compact model-facing size by default
+- stdout/stderr truncation flags, including whether the helper clipped the
+  model-facing payload
+- cleanup policy, cleanup success, and cleanup error
+
+It does not include environment variables, full stack IDs, sandbox IDs, session
+IDs, or the command string in the payload sent back to Gemini. The local
+`SandboxCommandResult` remains available to your own code for debugging.
+
+This helper does not move Google-owned execution into Kitaru. Antigravity
+internals, built-in Gemini code execution, hosted MCP, web execution, and
+Google-owned tools still run wherever Google runs them. Kitaru can only
+checkpoint the custom function body that your application explicitly executes.
+
+The runnable example includes a dry-run-first showcase:
+
+```bash
+uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+  --dry-run \
+  --mode sandbox-function
+```
+
 ## Polling background interactions
 
 For background interactions, avoid accidentally starting duplicate remote jobs.
@@ -752,10 +838,10 @@ those call bodies. Google runs them inside its hosted interaction runtime. The
 adapter would be lying if it claimed it could replay those internals
 independently.
 
-A future client-tool mode may be possible for tools that your Python process
-executes itself: Gemini reaches `requires_action`, Kitaru runs the local tool
-body, and a later interaction sends the matching function result. That would
-only cover the local tool body Kitaru actually runs. It would still not make
+Caller-owned custom functions are supported through the explicit sandbox helper
+shown above: Gemini reaches `requires_action`, Kitaru runs a registered sandbox
+command, and a later interaction sends the matching function result. That only
+covers the function body Kitaru actually runs. It still does not make
 Google-owned managed-agent internals replayable.
 
 ## Recommended durability pattern

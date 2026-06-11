@@ -58,6 +58,11 @@ from ._events import (  # noqa: E402
     GeminiInteractionRunEvent,
 )
 from ._policy import GeminiInteractionCapturePolicy  # noqa: E402
+from ._sandbox_functions import (  # noqa: E402
+    GeminiSandboxFunctionExecution,
+    GeminiSandboxFunctionSpec,
+    execute_gemini_sandbox_function_call,
+)
 from ._streaming import (  # noqa: E402
     GEMINI_STREAM_COMPLETED,
     GEMINI_STREAM_EVENT,
@@ -67,6 +72,7 @@ from ._streaming import (  # noqa: E402
     GEMINI_STREAM_TERMINAL_EVENT_KINDS,
 )
 from ._types import (  # noqa: E402
+    GeminiInteractionFunctionCall,
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
@@ -89,10 +95,14 @@ __all__ = [
     "GeminiAdapterEvent",
     "GeminiInteractionCapturePolicy",
     "GeminiInteractionEventError",
+    "GeminiInteractionFunctionCall",
     "GeminiInteractionRequest",
     "GeminiInteractionResult",
     "GeminiInteractionRunEvent",
     "GeminiInteractionStepSummary",
+    "GeminiSandboxFunctionExecution",
+    "GeminiSandboxFunctionSpec",
     "KitaruGeminiInteractionsRunner",
+    "execute_gemini_sandbox_function_call",
     "validate_checkpoint_strategy",
 ]

@@ -84,13 +84,18 @@ The help path is safe for smoke tests:
 uv run python gemini_interactions_adapter.py --help
 ```
 
-The dry-run path also avoids credentials, network calls, and Kitaru flow
-execution:
+The dry-run path also avoids credentials, network calls, sandbox commands, and
+Kitaru flow execution:
 
 ```bash
 uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
 uv run python gemini_interactions_adapter.py --dry-run --stream
+uv run python gemini_interactions_adapter.py --dry-run --mode sandbox-function
 ```
+
+The `sandbox-function` dry run prints three concrete objects: a fake Gemini
+`requires_action` result, a fake Kitaru sandbox command result, and the matching
+fake `function_result` request that would be sent back to Gemini.
 
 ## Run a cheap model interaction
 
@@ -116,6 +121,48 @@ uv run python gemini_interactions_adapter.py \
   --mode model \
   --prompt "Explain Kitaru checkpoints using a simple train-station metaphor."
 ```
+
+## Run the caller-owned sandbox function showcase
+
+This mode demonstrates the supported custom-function path. Gemini asks for a
+function named `sandbox_python_version`. Your application has explicitly
+registered that name as a Kitaru sandbox command. Kitaru then runs
+`python --version` in the active stack's sandbox and sends the command output
+back to Gemini as a `function_result`.
+
+```text
+Gemini model interaction
+  -> returns requires_action for sandbox_python_version
+Kitaru checkpoint
+  -> runs python --version in the active Kitaru sandbox
+Gemini model interaction
+  -> receives the function_result and writes the final answer
+```
+
+Real runs need both pieces:
+
+1. Gemini Developer API credentials (`GEMINI_API_KEY` or `GOOGLE_API_KEY`).
+2. An active Kitaru stack with exactly one sandbox component. For a local stack:
+
+```bash
+uv run kitaru stack create sandbox-demo
+uv run kitaru stack current
+```
+
+Then run:
+
+```bash
+uv run python gemini_interactions_adapter.py --mode sandbox-function
+```
+
+V1 is deliberately static-command based. It does **not** parse model-supplied
+function arguments. If Gemini asks for the registered function, the example runs
+the command your code registered for that function name.
+
+This does not redirect Antigravity internals, built-in Gemini code execution,
+hosted MCP, web execution, or any Google-owned tool body into Kitaru. It only
+covers the custom function body your Python application owns and explicitly
+registered.
 
 ## Run the Antigravity managed-agent demo
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from kitaru.checkpoint import _raise_if_checkpoint_output_handle
 
 from ._constants import ANTIGRAVITY_AGENT_ID
+from ._tokens import CALL_ID_TYPE_FRAGMENTS, normalized_token_contains_any
 
 GeminiInteractionKind = Literal["start", "resume", "function_result", "poll"]
 GeminiInteractionInput = str | dict[str, Any] | list[dict[str, Any]] | None
@@ -468,6 +469,39 @@ class GeminiInteractionStepSummary(BaseModel):
     raw_keys: list[str] = Field(default_factory=list)
 
 
+class GeminiInteractionFunctionCall(BaseModel):
+    """Safe identity for one Gemini custom function call.
+
+    This model intentionally contains only call metadata already exposed by
+    ``GeminiInteractionStepSummary``. It does not capture model-supplied
+    function arguments.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    step_type: str | None = None
+    call_id: str
+    function_name: str
+
+    @classmethod
+    def from_step_summary(
+        cls,
+        step: GeminiInteractionStepSummary,
+    ) -> "GeminiInteractionFunctionCall":
+        """Build a typed function-call view from a safe step summary."""
+        if step.call_id is None:
+            raise ValueError("Gemini function-call step is missing call_id.")
+        if step.tool_name is None:
+            raise ValueError("Gemini function-call step is missing tool_name.")
+        return cls(
+            index=step.index,
+            step_type=step.type,
+            call_id=step.call_id,
+            function_name=step.tool_name,
+        )
+
+
 class GeminiInteractionResult(BaseModel):
     """Serializable output from one stable Gemini interaction boundary."""
 
@@ -496,6 +530,30 @@ class GeminiInteractionResult(BaseModel):
     run_summary_artifact_name: str | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def function_call_steps(self) -> list[GeminiInteractionStepSummary]:
+        """Return step summaries that look like Gemini function/tool calls."""
+        return [step for step in self.steps if _is_function_call_step(step)]
+
+    @property
+    def function_calls(self) -> list[GeminiInteractionFunctionCall]:
+        """Return complete Gemini function-call identities from safe summaries.
+
+        Incomplete provider step summaries are skipped here. Use
+        ``function_call_steps`` when you need to diagnose a malformed
+        ``requires_action`` response.
+        """
+        calls: list[GeminiInteractionFunctionCall] = []
+        for step in self.function_call_steps:
+            if step.call_id is None or step.tool_name is None:
+                continue
+            calls.append(GeminiInteractionFunctionCall.from_step_summary(step))
+        return calls
+
+
+def _is_function_call_step(step: GeminiInteractionStepSummary) -> bool:
+    return normalized_token_contains_any(step.type, CALL_ID_TYPE_FRAGMENTS)
 
 
 def _default_list(value: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

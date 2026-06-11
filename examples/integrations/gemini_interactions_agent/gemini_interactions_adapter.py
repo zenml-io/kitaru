@@ -34,7 +34,7 @@ import sys
 import threading
 from typing import Any, Literal
 
-from kitaru import flow
+from kitaru import checkpoint, flow
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.adapters.gemini import (
     GEMINI_STREAM_EVENT_KINDS,
@@ -43,7 +43,10 @@ from kitaru.adapters.gemini import (
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
+    GeminiSandboxFunctionExecution,
+    GeminiSandboxFunctionSpec,
     KitaruGeminiInteractionsRunner,
+    execute_gemini_sandbox_function_call,
 )
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
@@ -64,7 +67,22 @@ DEFAULT_ANTIGRAVITY_PROMPT = (
     "Inspect the task at a high level and explain what you would check first. "
     "Do not edit files or run destructive commands."
 )
-Mode = Literal["model", "antigravity"]
+SANDBOX_FUNCTION_NAME = "sandbox_python_version"
+DEFAULT_SANDBOX_FUNCTION_PROMPT = (
+    "Call the sandbox_python_version function to learn the Python version in "
+    "Kitaru's active sandbox, then explain the result in one sentence."
+)
+SANDBOX_FUNCTION_TOOL = {
+    "type": "function",
+    "name": SANDBOX_FUNCTION_NAME,
+    "description": "Return the Python version from Kitaru's active sandbox.",
+}
+Mode = Literal["model", "antigravity", "sandbox-function"]
+DEFAULT_PROMPTS_BY_MODE: dict[Mode, str] = {
+    "model": DEFAULT_MODEL_PROMPT,
+    "antigravity": DEFAULT_ANTIGRAVITY_PROMPT,
+    "sandbox-function": DEFAULT_SANDBOX_FUNCTION_PROMPT,
+}
 
 
 def _vertex_mode_enabled() -> bool:
@@ -154,6 +172,16 @@ def _build_request(args: argparse.Namespace) -> GeminiInteractionRequest:
             model=str(args.model),
             metadata={"example": "gemini_interactions_agent", "mode": "model"},
         )
+    if args.mode == "sandbox-function":
+        return GeminiInteractionRequest.start(
+            prompt,
+            model=str(args.model),
+            tools=[SANDBOX_FUNCTION_TOOL],
+            metadata={
+                "example": "gemini_interactions_agent",
+                "mode": "sandbox-function",
+            },
+        )
     # Antigravity defaults to background mode because the Vertex/Chiliagon
     # managed-agent path can require it. Keep --foreground-antigravity as a
     # preview-backend escape hatch if a specific endpoint rejects background mode.
@@ -172,14 +200,16 @@ def _guard_vertex_mode(mode: Mode) -> None:
     """Fail fast on combinations the Vertex AI Interactions API cannot serve."""
     if not _vertex_mode_enabled():
         return
-    if mode == "model":
+    if mode in {"model", "sandbox-function"}:
         raise SystemExit(
             f"{VERTEXAI_ENV}=true (Vertex AI mode), but the Vertex Interactions "
             "API does not serve raw model interactions yet: every model returns "
             "'Unsupported model interaction'.\n"
-            "Use an agent instead, or switch to an API key for model mode:\n"
+            "Use an agent instead, or switch to an API key for model or "
+            "sandbox-function mode:\n"
             f"  --mode antigravity   (and export {CLOUD_LOCATION_ENV}=global)\n"
-            f"  unset {VERTEXAI_ENV}; export {GEMINI_API_KEY_ENV}='<key>'  # model"
+            f"  unset {VERTEXAI_ENV}; "
+            f"export {GEMINI_API_KEY_ENV}='<key>'  # model/sandbox-function"
         )
     location = os.getenv(CLOUD_LOCATION_ENV, "")
     if location and location != "global":
@@ -189,6 +219,47 @@ def _guard_vertex_mode(mode: Mode) -> None:
             f"export {CLOUD_LOCATION_ENV}=global and retry.",
             file=sys.stderr,
         )
+
+
+@checkpoint
+def run_sandbox_python_version_function(
+    result: GeminiInteractionResult,
+) -> GeminiSandboxFunctionExecution:
+    """Execute the showcased Gemini custom function in Kitaru's sandbox."""
+    return execute_gemini_sandbox_function_call(
+        result,
+        {
+            SANDBOX_FUNCTION_NAME: GeminiSandboxFunctionSpec(
+                function_name=SANDBOX_FUNCTION_NAME,
+                command="python --version",
+            )
+        },
+    )
+
+
+@flow
+def run_gemini_sandbox_function_showcase(
+    request: GeminiInteractionRequest,
+    *,
+    stream: bool = False,
+    show_text_deltas: bool = False,
+) -> GeminiInteractionResult:
+    """Run Gemini, answer one sandbox function call, then resume Gemini."""
+    runner = (
+        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    )
+    first_result = (
+        runner.run_stream_sync(request) if stream else runner.run_sync(request)
+    )
+    if first_result.status != "requires_action":
+        raise RuntimeError(
+            "The sandbox-function showcase expected Gemini to request "
+            "sandbox_python_version, but Gemini returned "
+            f"status={first_result.status!r}. Try the default prompt or ask "
+            "explicitly for that function call."
+        )
+    execution = run_sandbox_python_version_function(first_result)
+    return runner.run_sync(execution.function_result_request)
 
 
 def _fake_result(
@@ -259,6 +330,89 @@ def _fake_result(
             ),
         },
     )
+
+
+def _fake_sandbox_requires_action_result(model: str) -> GeminiInteractionResult:
+    return GeminiInteractionResult(
+        status="requires_action",
+        interaction_id="dry-run-function-interaction-id",
+        model=model,
+        steps=[
+            GeminiInteractionStepSummary(
+                index=0,
+                step_id="dry-run-function-call",
+                type="function_call",
+                status="requires_action",
+                call_id="dry-run-call-id",
+                tool_name=SANDBOX_FUNCTION_NAME,
+                raw_keys=["type", "id", "name"],
+            )
+        ],
+        usage={"dry_run": True},
+        duration_ms=0.0,
+        sdk_version="dry-run",
+        warnings=[
+            "Dry run: no Google request, sandbox command, or Kitaru flow execution."
+        ],
+        metadata={
+            "example": "gemini_interactions_agent",
+            "mode": "sandbox-function",
+        },
+    )
+
+
+def _fake_sandbox_function_result_request(
+    result: GeminiInteractionResult,
+) -> GeminiInteractionRequest:
+    call = result.function_calls[0]
+    payload = {
+        "ok": True,
+        "exit_code": 0,
+        "stdout": "Python 3.12.0\n",
+        "stderr": "",
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+        "cleanup": {"policy": "destroy", "succeeded": True, "error": None},
+    }
+    return GeminiInteractionRequest.function_result(
+        previous_interaction_id=result.interaction_id
+        or "dry-run-function-interaction-id",
+        function_call_id=call.call_id,
+        function_name=call.function_name,
+        function_result=payload,
+        model=result.model,
+        metadata={
+            "example": "gemini_interactions_agent",
+            "mode": "sandbox-function",
+            "dry_run": True,
+        },
+    )
+
+
+def _print_sandbox_function_dry_run(model: str) -> None:
+    result = _fake_sandbox_requires_action_result(model)
+    request = _fake_sandbox_function_result_request(result)
+
+    print("\n=== Sandbox function dry run ===")
+    print("No Google request, sandbox command, or Kitaru flow execution was run.")
+    print("This previews the caller-owned custom function sequence.")
+
+    print("\n1. Fake Gemini requires_action result")
+    _print_result(result)
+
+    print("\n2. Fake Kitaru sandbox command result")
+    print(
+        _json_block(
+            {
+                "registered_function": SANDBOX_FUNCTION_NAME,
+                "sandbox_command": "python --version",
+                "result_payload_sent_to_gemini": request.function_result_payload,
+            }
+        )
+    )
+
+    print("\n3. Fake Gemini function_result request")
+    print(_json_block(request.model_dump(by_alias=True)))
 
 
 def _coerce_result(value: Any) -> GeminiInteractionResult:
@@ -383,11 +537,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("model", "antigravity"),
+        choices=("model", "antigravity", "sandbox-function"),
         default="model",
         help=(
-            "Use a cheap Gemini model interaction or the Antigravity managed-agent "
-            "preset. Defaults to model."
+            "Use a cheap Gemini model interaction, the Antigravity managed-agent "
+            "preset, or the caller-owned sandbox-function showcase. Defaults "
+            "to model."
         ),
     )
     parser.add_argument(
@@ -464,20 +619,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
     if args.prompt is None:
-        args.prompt = (
-            DEFAULT_MODEL_PROMPT if args.mode == "model" else DEFAULT_ANTIGRAVITY_PROMPT
-        )
+        args.prompt = DEFAULT_PROMPTS_BY_MODE[args.mode]
 
     if args.dry_run:
-        _print_result(
-            _fake_result(args.mode, str(args.model), stream=bool(args.stream))
-        )
+        if args.mode == "sandbox-function":
+            _print_sandbox_function_dry_run(str(args.model))
+        else:
+            _print_result(
+                _fake_result(args.mode, str(args.model), stream=bool(args.stream))
+            )
         return
 
     _prepare_google_credentials()
     _guard_vertex_mode(args.mode)
     request = _build_request(args)
-    handle = run_gemini_interaction.run(
+    flow_entrypoint = (
+        run_gemini_sandbox_function_showcase
+        if args.mode == "sandbox-function"
+        else run_gemini_interaction
+    )
+    handle = flow_entrypoint.run(
         request,
         stream=bool(args.stream),
         show_text_deltas=bool(args.stream and args.show_text_deltas),

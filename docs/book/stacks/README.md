@@ -219,6 +219,14 @@ error instead of guessing. That avoids the bad version of the story: you thought
 the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
 sandbox and ran it somewhere expensive.
 
+The Gemini Interactions adapter can use this same active-stack sandbox for
+caller-owned custom functions. Gemini returns `requires_action`, your code
+matches the requested function name against an explicit registry, and Kitaru runs
+the registered command through `kitaru.run_sandbox_command(...)`. This does not
+redirect Antigravity internals, built-in Gemini code execution, hosted MCP, web
+execution, or Google-owned tools into Kitaru; it only covers the function body
+your application explicitly executes.
+
 The result is intentionally plain and serializable. Check `exit_code` yourself,
 and use `stdout_truncated` / `stderr_truncated` to detect when output hit the
 collection limit. If a provider does not support destroying sessions, Kitaru

@@ -23,6 +23,7 @@ def test_gemini_interactions_example_help(capsys: pytest.CaptureFixture[str]) ->
     assert "--dry-run" in output
     assert "--show-text-deltas" in output
     assert "--hide-text-deltas" in output
+    assert "sandbox-function" in output
 
 
 def test_gemini_interactions_example_dry_run_without_credentials(
@@ -56,6 +57,26 @@ def test_gemini_interactions_example_dry_run_accepts_show_text_deltas(
     output = capsys.readouterr().out
     assert "Dry run only: no Google request was made" in output
     assert "Stream metadata" in output
+
+
+def test_gemini_interactions_example_sandbox_function_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    gemini_interactions_adapter.main(["--dry-run", "--mode", "sandbox-function"])
+
+    output = capsys.readouterr().out
+    assert "Sandbox function dry run" in output
+    assert "Fake Gemini requires_action result" in output
+    assert "Status: requires_action" in output
+    assert "sandbox_python_version" in output
+    assert "Fake Kitaru sandbox command result" in output
+    assert "python --version" in output
+    assert "Fake Gemini function_result request" in output
+    assert "dry-run-call-id" in output
 
 
 def test_gemini_interactions_example_main_shows_text_deltas_by_default(
@@ -185,6 +206,57 @@ def test_gemini_interactions_example_antigravity_foreground_override() -> None:
     assert request.store is True
 
 
+def test_gemini_interactions_example_sandbox_function_request_uses_model_tool() -> None:
+    args = argparse.Namespace(
+        mode="sandbox-function",
+        prompt="call the sandbox function",
+        model="gemini-test",
+        timeout=123.0,
+        foreground_antigravity=False,
+    )
+
+    request = gemini_interactions_adapter._build_request(args)
+
+    assert request.model == "gemini-test"
+    assert request.agent is None
+    assert request.tools == [gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL]
+    assert request.metadata["mode"] == "sandbox-function"
+
+
+def test_gemini_interactions_example_sandbox_showcase_requires_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = gemini_interactions_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+
+    class FakeRunner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_sync(
+            self,
+            request: gemini_interactions_adapter.GeminiInteractionRequest,
+        ) -> gemini_interactions_adapter.GeminiInteractionResult:
+            self.calls += 1
+            return gemini_interactions_adapter.GeminiInteractionResult(
+                status="completed",
+                interaction_id="interaction-1",
+                model="gemini-test",
+            )
+
+    fake_runner = FakeRunner()
+    monkeypatch.setattr(gemini_interactions_adapter, "RUNNER", fake_runner)
+
+    with pytest.raises(RuntimeError, match="expected Gemini to request"):
+        gemini_interactions_adapter.run_gemini_sandbox_function_showcase._func(
+            request,
+        )
+
+    assert fake_runner.calls == 1
+
+
 def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> None:
     default_runner = gemini_interactions_adapter._build_runner()
     opt_in_runner = gemini_interactions_adapter._build_runner(
@@ -237,6 +309,19 @@ def test_gemini_interactions_example_vertex_requires_project_and_location(
 
     assert "GOOGLE_CLOUD_PROJECT" in str(exc_info.value)
     assert "GOOGLE_CLOUD_LOCATION" in str(exc_info.value)
+
+
+def test_gemini_interactions_example_vertex_rejects_sandbox_function_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+
+    with pytest.raises(SystemExit) as exc_info:
+        gemini_interactions_adapter._guard_vertex_mode("sandbox-function")
+
+    message = str(exc_info.value)
+    assert "sandbox-function mode" in message
+    assert "--mode antigravity" in message
 
 
 def test_gemini_interactions_example_coerces_foreign_model_result() -> None:
