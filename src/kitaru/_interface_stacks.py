@@ -12,8 +12,8 @@ import yaml
 from zenml.utils import yaml_utils
 
 from kitaru._config import _stacks as stack_ops
+from kitaru._config._sandbox_stack_components import LOCAL_SANDBOX_FLAVOR
 from kitaru._config._stacks import (
-    LOCAL_SANDBOX_FLAVOR,
     AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,

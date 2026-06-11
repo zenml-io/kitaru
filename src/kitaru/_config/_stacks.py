@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -68,9 +68,9 @@ from zenml.integrations.s3.flavors.s3_artifact_store_flavor import (
 from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 from zenml.orchestrators.local.local_orchestrator import LocalOrchestratorFlavor
-from zenml.sandboxes.local_sandbox import LOCAL_SANDBOX_FLAVOR, LocalSandboxFlavor
 from zenml.stack.utils import validate_stack_component_config
 
+from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
 
 _STACK_MANAGED_LABEL_KEY = "kitaru.managed"
@@ -284,7 +284,6 @@ def _build_component_validation_registry() -> dict[
         AWSContainerRegistryFlavor(),
         GCPContainerRegistryFlavor(),
         AzureContainerRegistryFlavor(),
-        LocalSandboxFlavor(),
     )
     return {
         (flavor.type, flavor.name): _ComponentValidationMetadata(
@@ -368,7 +367,24 @@ def _component_validation_metadata(
 ) -> _ComponentValidationMetadata | None:
     """Return validation metadata for one managed component flavor."""
     component_type = _STACK_COMPONENT_TARGET_TO_TYPE[target]
-    return _COMPONENT_VALIDATION_METADATA.get((component_type, flavor))
+    metadata = _COMPONENT_VALIDATION_METADATA.get((component_type, flavor))
+    if metadata is not None:
+        return metadata
+
+    if target == StackComponentTarget.SANDBOX:
+        sandbox_metadata = _sandbox_components.local_sandbox_validation_metadata(
+            flavor=flavor,
+        )
+        if sandbox_metadata is None:
+            return None
+        if sandbox_metadata.component_type != StackComponentType.SANDBOX:
+            return None
+        return _ComponentValidationMetadata(
+            config_class=sandbox_metadata.config_class,
+            docs_url=sandbox_metadata.docs_url,
+        )
+
+    return None
 
 
 def _rewrite_invalid_component_options(
@@ -869,26 +885,26 @@ def _build_connector_services_list(
     ]
 
 
-def _add_sandbox_component_info(
-    components: dict[StackComponentType, list[UUID | ComponentInfo]],
+def _add_remote_sandbox_component_info(
+    components: MutableMapping[StackComponentType, list[UUID | ComponentInfo]],
     *,
     sandbox_flavor: str | None,
     component_overrides: StackComponentConfigOverrides | None,
 ) -> None:
-    """Attach one sandbox component to a one-shot ZenML stack request."""
+    """Attach a remote sandbox component when the stack request asks for one."""
     if sandbox_flavor is None:
         return
 
-    components[StackComponentType.SANDBOX] = [
-        ComponentInfo(
-            flavor=sandbox_flavor,
-            configuration=_build_component_configuration(
-                {},
-                overrides=component_overrides,
-                target=StackComponentTarget.SANDBOX,
-            ),
-        )
-    ]
+    configuration = _build_component_configuration(
+        {},
+        overrides=component_overrides,
+        target=StackComponentTarget.SANDBOX,
+    )
+    _sandbox_components.add_remote_sandbox_component_info(
+        components,
+        sandbox_flavor=sandbox_flavor,
+        configuration=configuration,
+    )
 
 
 def _build_kubernetes_stack_request(
@@ -962,7 +978,7 @@ def _build_kubernetes_stack_request(
         service_connectors=_build_connector_services_list(connector_spec),
     )
     assert stack_request.components is not None
-    _add_sandbox_component_info(
+    _add_remote_sandbox_component_info(
         stack_request.components,
         sandbox_flavor=sandbox_flavor,
         component_overrides=component_overrides,
@@ -1031,7 +1047,7 @@ def _build_vertex_stack_request(
         service_connectors=_build_connector_services_list(connector_spec),
     )
     assert stack_request.components is not None
-    _add_sandbox_component_info(
+    _add_remote_sandbox_component_info(
         stack_request.components,
         sandbox_flavor=sandbox_flavor,
         component_overrides=component_overrides,
@@ -1100,7 +1116,7 @@ def _build_sagemaker_stack_request(
         service_connectors=_build_connector_services_list(connector_spec),
     )
     assert stack_request.components is not None
-    _add_sandbox_component_info(
+    _add_remote_sandbox_component_info(
         stack_request.components,
         sandbox_flavor=sandbox_flavor,
         component_overrides=component_overrides,
@@ -1178,7 +1194,7 @@ def _build_azureml_stack_request(
         service_connectors=_build_connector_services_list(connector_spec),
     )
     assert stack_request.components is not None
-    _add_sandbox_component_info(
+    _add_remote_sandbox_component_info(
         stack_request.components,
         sandbox_flavor=sandbox_flavor,
         component_overrides=component_overrides,
@@ -1261,7 +1277,7 @@ def _extract_remote_stack_components(
     ):
         _collect_component(
             sandbox_component,
-            kind="sandbox",
+            kind=_sandbox_components.SANDBOX_COMPONENT_KIND,
             require_connector_metadata=False,
         )
 
@@ -1439,7 +1455,7 @@ def _delete_stack_components_best_effort(
         "orchestrator": StackComponentType.ORCHESTRATOR,
         "artifact_store": StackComponentType.ARTIFACT_STORE,
         "container_registry": StackComponentType.CONTAINER_REGISTRY,
-        "sandbox": StackComponentType.SANDBOX,
+        _sandbox_components.SANDBOX_COMPONENT_KIND: StackComponentType.SANDBOX,
     }
 
     for component in reversed(components):
@@ -1497,7 +1513,7 @@ _RECURSIVE_DELETE_COMPONENT_TYPES: tuple[
     (StackComponentType.ORCHESTRATOR, "orchestrator"),
     (StackComponentType.ARTIFACT_STORE, "artifact_store"),
     (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
-    (StackComponentType.SANDBOX, "sandbox"),
+    _sandbox_components.SANDBOX_RECURSIVE_DELETE_ENTRY,
 )
 
 
@@ -1916,7 +1932,7 @@ def _stack_component_details_from_model(
 
     if component_type == StackComponentType.SANDBOX:
         return StackComponentDetails(
-            role="sandbox",
+            role=_sandbox_components.SANDBOX_COMPONENT_KIND,
             name=component_name,
             backend=backend,
         )
@@ -2036,7 +2052,9 @@ def _infer_stack_details_type(
         return "kubernetes"
 
     if components and all(
-        component.role in {"runner", "storage", "sandbox"} for component in components
+        component.role
+        in {"runner", "storage", _sandbox_components.SANDBOX_COMPONENT_KIND}
+        for component in components
     ):
         backends = {
             component.backend
@@ -2338,7 +2356,8 @@ def _create_stack_operation(
         local_kwargs: dict[str, Any] = {
             "activate": activate,
             "labels": labels,
-            "sandbox_flavor": sandbox_flavor or LOCAL_SANDBOX_FLAVOR,
+            "sandbox_flavor": sandbox_flavor
+            or _sandbox_components.LOCAL_SANDBOX_FLAVOR,
         }
         if component_overrides is not None:
             local_kwargs["component_overrides"] = component_overrides
@@ -2372,7 +2391,7 @@ def _create_local_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
-    sandbox_flavor: str = LOCAL_SANDBOX_FLAVOR,
+    sandbox_flavor: str = _sandbox_components.LOCAL_SANDBOX_FLAVOR,
     client_factory: Callable[[], Any] = Client,
     current_stack_getter: Callable[[], StackInfo] | None = None,
 ) -> _StackCreateResult:
@@ -2413,7 +2432,10 @@ def _create_local_stack_operation(
     components_created = (
         _format_stack_component_label(selector, "orchestrator"),
         _format_stack_component_label(selector, "artifact_store"),
-        _format_stack_component_label(selector, "sandbox"),
+        _format_stack_component_label(
+            selector,
+            _sandbox_components.SANDBOX_COMPONENT_KIND,
+        ),
     )
 
     _prevalidate_component_configuration(
@@ -2487,17 +2509,17 @@ def _create_local_stack_operation(
         raise KitaruBackendError(message) from exc
 
     try:
-        sandbox = client.create_stack_component(
+        sandbox = _sandbox_components.create_local_sandbox_component(
+            client,
             name=selector,
             flavor=sandbox_flavor,
-            component_type=StackComponentType.SANDBOX,
             configuration=sandbox_configuration,
         )
         created_components.append(
             _StackComponent(
                 component_id=str(sandbox.id),
                 name=selector,
-                kind="sandbox",
+                kind=_sandbox_components.SANDBOX_COMPONENT_KIND,
             )
         )
     except EntityExistsError as exc:
