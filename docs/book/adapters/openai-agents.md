@@ -181,6 +181,89 @@ call in your own `@checkpoint` is **not** a workaround here — the adapter
 guards against it and will raise, because per-call checkpoints cannot be
 nested inside another Kitaru checkpoint.
 
+## Active-stack sandbox command tool
+
+Use `sandbox_command_tool(...)` when you want an OpenAI agent to run a command
+through the sandbox attached to Kitaru's active stack:
+
+```python
+from agents import Agent
+
+from kitaru.adapters.openai_agents import KitaruRunner, sandbox_command_tool
+
+agent = Agent(
+    name="diagnostic_agent",
+    instructions=(
+        "Use kitaru_sandbox_command for shell inspection tasks. The tool returns "
+        "JSON. Check exit_code before trusting stdout."
+    ),
+    model="gpt-5-nano",
+    tools=[sandbox_command_tool(max_chars=20_000, cleanup="destroy")],
+)
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+```
+
+Here is what happens, step by step:
+
+```text
+OpenAI model emits a local function-tool call
+→ OpenAI Agents SDK invokes the Kitaru tool callback
+→ the callback parses {"command": "...", "cwd": "..."}
+→ Kitaru calls run_sandbox_command(...)
+→ the active stack's one sandbox runs the command
+→ the callback returns compact JSON to the model
+```
+
+The model can provide only:
+
+- `command` — required, non-empty string
+- `cwd` — optional working directory inside the sandbox
+
+The application keeps control of `max_chars` and `cleanup` when it creates the
+tool. The model cannot set `env`, `max_chars`, or cleanup behavior. That keeps
+secret and credential handling easier to reason about: the model gets a command
+box, not a way to choose environment variables.
+
+The compact JSON returned to the model contains:
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "cleanup_succeeded": true,
+  "cleanup_error": null
+}
+```
+
+The tool deliberately omits stack, sandbox, and session IDs from the model-visible
+result. Those are operational details for Kitaru, not facts the model needs in
+order to answer the user. Tell the model to inspect `exit_code` first: a command
+can write to `stdout` and still fail.
+
+The active stack must have exactly one sandbox component. If there is no sandbox,
+Kitaru raises an error and does not run the command. If there is more than one
+sandbox, Kitaru raises instead of guessing. The bad version would be: you
+expected a cheap local sandbox, Kitaru silently picked a different one, and the
+model ran a command somewhere you did not intend.
+
+Strategy behavior is the same as other local `FunctionTool` work:
+
+- With `checkpoint_strategy="runner_call"`, Kitaru saves one outer checkpoint for
+  the whole OpenAI runner call. The sandbox command runs during that SDK run.
+- With `checkpoint_strategy="calls"`, Kitaru also saves the sandbox command as a
+  separate `tool_call` checkpoint. Replaying the same command with the same tool
+  settings can reuse that checkpoint instead of calling the sandbox again.
+
+This helper does **not** redirect OpenAI-hosted tools into Kitaru's sandbox.
+`CodeInterpreterTool`, hosted shell containers, hosted MCP, and other
+provider-hosted tools run on OpenAI's side. Kitaru can still wrap the outer
+runner call around them, but their execution environment is not the sandbox on
+your active Kitaru stack.
+
 ## Streaming with Kitaru durability
 
 Use `run_stream(...)` / `run_stream_sync(...)` when you want OpenAI Agents SDK
@@ -455,6 +538,9 @@ export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
 uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+
+# active-stack sandbox command tool example
+uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
 
 # streaming runner-call example
 uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py

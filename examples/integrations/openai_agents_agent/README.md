@@ -31,6 +31,36 @@ uv run python openai_agents_adapter.py
 
 If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
+## Active-stack sandbox tool example
+
+To let an OpenAI agent run a command through Kitaru's active stack sandbox, run:
+
+```bash
+uv run python openai_agents_sandbox_tool.py
+```
+
+The example gives the agent one local OpenAI Agents SDK `FunctionTool` created by
+`kitaru.adapters.openai_agents.sandbox_command_tool(...)`. When the model calls
+that tool, Kitaru runs the command through the sandbox attached to the active
+stack and returns compact JSON to the model. The prompt tells the model to check
+`exit_code` before trusting `stdout`.
+
+`uv run kitaru init` creates a local stack with a local sandbox for this example.
+Remote stacks need an explicit sandbox component. If the active stack has no
+sandbox, or has more than one sandbox, Kitaru raises an error instead of guessing
+where to run the command.
+
+The sandbox tool example also supports the same strategy comparison mode:
+
+```bash
+OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_sandbox_tool.py
+```
+
+The default `runner_call` run saves one outer OpenAI runner checkpoint. In the
+optional `calls` run, the sandbox command becomes its own `tool_call` checkpoint,
+so you can inspect the command input and compact JSON result separately in the
+Kitaru UI.
+
 ## Streaming example
 
 To watch OpenAI Agents stream updates while Kitaru saves the final durable

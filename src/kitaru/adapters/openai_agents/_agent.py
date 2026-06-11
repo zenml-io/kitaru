@@ -808,17 +808,20 @@ class KitaruRunner:
                 "name": getattr(model, "model_name", None),
                 "python_type": f"{model_type.__module__}.{model_type.__qualname__}",
             },
-            "tools": [
-                {
-                    "name": getattr(tool, "name", None),
-                    "python_type": (
-                        f"{type(tool).__module__}.{type(tool).__qualname__}"
-                    ),
-                }
-                for tool in tools
-            ],
+            "tools": [self._tool_cache_identity(tool) for tool in tools],
             "handoffs": [getattr(handoff, "name", None) for handoff in handoffs],
         }
+
+    @staticmethod
+    def _tool_cache_identity(tool: Any) -> dict[str, Any]:
+        identity: dict[str, Any] = {
+            "name": getattr(tool, "name", None),
+            "python_type": f"{type(tool).__module__}.{type(tool).__qualname__}",
+        }
+        tool_cache_identity = getattr(tool, "_kitaru_cache_identity", None)
+        if tool_cache_identity is not None:
+            identity["tool_cache_identity"] = tool_cache_identity
+        return identity
 
     def _prepare_execution_objects(
         self,

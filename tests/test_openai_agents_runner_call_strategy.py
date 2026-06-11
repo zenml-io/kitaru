@@ -1,5 +1,7 @@
 """Focused tests for OpenAI runner-call checkpointing and RunState bridging."""
 
+import asyncio
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -9,7 +11,7 @@ import pytest
 
 pytest.importorskip("agents")
 
-from agents import Agent, RunConfig, Runner, function_tool
+from agents import Agent, RunConfig, Runner
 from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
@@ -17,13 +19,15 @@ from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 from pydantic import BaseModel
 from zenml.client import Client
 
+import kitaru
 import kitaru.adapters.openai_agents._runner as openai_runner
-from kitaru import flow
+from kitaru import SandboxCommandResult, flow
 from kitaru.adapters.openai_agents import (
     KitaruRunner,
     OpenAIApprovalDecision,
     OpenAIRunRequest,
     OpenAIRunStateEnvelope,
+    sandbox_command_tool,
 )
 
 
@@ -77,6 +81,26 @@ def _wait_for_hydrated_run(exec_id: str) -> Any:
 
 def _step_names(hydrated_run: Any) -> set[str]:
     return set(hydrated_run.steps)
+
+
+def _fake_sandbox_result() -> SandboxCommandResult:
+    return SandboxCommandResult(
+        command="python --version",
+        cwd=None,
+        stdout="Python 3.12.0\n",
+        stderr="",
+        exit_code=0,
+        stdout_truncated=False,
+        stderr_truncated=False,
+        stack_id="stack-id",
+        stack_name="dev",
+        sandbox_id="sandbox-id",
+        sandbox_name="dev",
+        session_id="session-id",
+        cleanup="destroy",
+        cleanup_succeeded=True,
+        cleanup_error=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -241,6 +265,62 @@ def test_runner_call_cache_key_omits_context_when_context_absent(
 
     assert cache_key == "cache-key"
     assert "context" not in seen_payloads[0]
+
+
+def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    runner_small_output = KitaruRunner(
+        Agent(
+            name="sandbox-cache-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=100, cleanup="destroy")],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    runner_large_output = KitaruRunner(
+        Agent(
+            name="sandbox-cache-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=20_000, cleanup="destroy")],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    runner_close_cleanup = KitaruRunner(
+        Agent(
+            name="sandbox-cache-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=100, cleanup="close")],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    small_key = runner_small_output._runner_call_cache_key(
+        request,
+        agent=runner_small_output.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    large_key = runner_large_output._runner_call_cache_key(
+        request,
+        agent=runner_large_output.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    close_key = runner_close_cleanup._runner_call_cache_key(
+        request,
+        agent=runner_close_cleanup.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+
+    assert len({small_key, large_key, close_key}) == 3
 
 
 def test_runner_call_cache_identity_varies_by_structural_context() -> None:
@@ -447,9 +527,11 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     import kitaru.adapters.openai_agents._model as openai_model_module
     import kitaru.adapters.openai_agents._tools as openai_tools_module
 
-    @function_tool
-    def double_value(value: int) -> str:
-        return f"doubled={value * 2}"
+    sandbox_calls: list[dict[str, Any]] = []
+
+    def fake_run_sandbox_command(command: str, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append({"command": command, **kwargs})
+        return _fake_sandbox_result()
 
     def fail_model_wrapper(*_args: object, **_kwargs: object) -> object:
         pytest.fail("runner_call must not wrap model calls")
@@ -457,6 +539,20 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     def fail_tool_wrapper(*_args: object, **_kwargs: object) -> object:
         pytest.fail("runner_call must not wrap function tools")
 
+    def fake_run_openai_agent_sync(**kwargs: Any) -> SimpleNamespace:
+        tool = kwargs["agent"].tools[0]
+        tool_result = asyncio.run(
+            tool.on_invoke_tool(
+                SimpleNamespace(),
+                '{"command":"python --version"}',
+            )
+        )
+        payload = json.loads(tool_result)
+        assert payload["exit_code"] == 0
+        assert payload["stdout"] == "Python 3.12.0\n"
+        return SimpleNamespace(final_output="ok")
+
+    monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
     monkeypatch.setattr(
         openai_model_module,
         "kitaruify_openai_model",
@@ -470,11 +566,15 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     monkeypatch.setattr(
         openai_agent_module,
         "run_openai_agent_sync",
-        lambda **_kwargs: SimpleNamespace(final_output="ok"),
+        fake_run_openai_agent_sync,
     )
 
     runner = KitaruRunner(
-        Agent(name="coarse", model=StaticTextModel("ok"), tools=[double_value]),
+        Agent(
+            name="coarse",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=123)],
+        ),
         checkpoint_strategy="runner_call",
         run_config_factory=lambda: RunConfig(tracing_disabled=True),
     )
@@ -483,6 +583,14 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
 
     assert result.status == "completed"
     assert result.final_output == "ok"
+    assert sandbox_calls == [
+        {
+            "command": "python --version",
+            "cwd": None,
+            "max_chars": 123,
+            "cleanup": "destroy",
+        }
+    ]
 
 
 def test_interruption_summary_omits_payloads_when_capture_disabled(

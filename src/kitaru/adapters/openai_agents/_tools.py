@@ -176,6 +176,9 @@ def _wrap_function_tool(
                 "tool_namespace": getattr(tool, "_tool_namespace", None),
                 "input_json": input_json,
             }
+            tool_cache_identity = getattr(tool, "_kitaru_cache_identity", None)
+            if tool_cache_identity is not None:
+                cache_payload["tool_cache_identity"] = tool_cache_identity
             if effective_context_cache_key is not None:
                 cache_payload["context_cache_key"] = effective_context_cache_key
 

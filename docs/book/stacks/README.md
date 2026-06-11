@@ -219,6 +219,11 @@ error instead of guessing. That avoids the bad version of the story: you thought
 the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
 sandbox and ran it somewhere expensive.
 
+If you use the OpenAI Agents SDK, `sandbox_command_tool(...)` turns this same
+active-stack sandbox command path into a local OpenAI `FunctionTool`. See the
+[OpenAI Agents adapter guide](../adapters/openai-agents.md#active-stack-sandbox-command-tool)
+for the agent-facing version and its hosted-tool limitations.
+
 The result is intentionally plain and serializable. Check `exit_code` yourself,
 and use `stdout_truncated` / `stderr_truncated` to detect when output hit the
 collection limit. If a provider does not support destroying sessions, Kitaru
