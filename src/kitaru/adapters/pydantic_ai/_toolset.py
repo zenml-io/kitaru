@@ -4,6 +4,7 @@ import inspect
 import re
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import Any
 from typing import get_type_hints
@@ -197,14 +198,6 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             default=self.tool_checkpoint_config,
             by_name=self.tool_checkpoint_config_by_name,
         )
-        if self._should_suspend_streaming_fallback_checkpoint_scope(
-            name=name,
-            tool=tool,
-        ):
-            with _suspend_checkpoint_scope():
-                return await self._call_tool_tracked(
-                    name, tool_args, ctx, tool, hitl_config
-                )
         if self._should_use_tool_checkpoint(
             name=name,
             ctx=ctx,
@@ -269,6 +262,13 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         safe_args: Any | None = None,
     ) -> Any:
         capture_mode = self.capture.capture_mode_for_tool(name)
+        suspend_tool_body_checkpoint_scope = (
+            hitl_config is None
+            and self._should_suspend_streaming_fallback_checkpoint_scope(
+                name=name,
+                tool=tool,
+            )
+        )
         tracker = get_current_tracker()
         if tracker is None or capture_mode is None:
             return await self._call_with_hitl(
@@ -280,6 +280,9 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 hitl_config=hitl_config,
                 tracker=tracker,
                 capture_mode=capture_mode,
+                suspend_tool_body_checkpoint_scope=(
+                    suspend_tool_body_checkpoint_scope
+                ),
             )
 
         event_id, event_context = tracker.start_tool_event(
@@ -295,7 +298,11 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
 
         artifacts: dict[str, str] = {}
         adapter_refs = get_adapter_checkpoint_artifact_refs()
-        if capture_mode == "full" and is_inside_checkpoint():
+        if (
+            capture_mode == "full"
+            and is_inside_checkpoint()
+            and not suspend_tool_body_checkpoint_scope
+        ):
             if (
                 adapter_refs is not None
                 and ARTIFACT_ROLE_ARGS in adapter_refs.input_artifacts
@@ -319,6 +326,9 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 hitl_config=hitl_config,
                 tracker=tracker,
                 capture_mode=capture_mode,
+                suspend_tool_body_checkpoint_scope=(
+                    suspend_tool_body_checkpoint_scope
+                ),
             )
         except Exception as error:
             tracker.record_tool_event(
@@ -336,7 +346,11 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             raise
 
         duration_ms = _elapsed_ms(started_at)
-        if capture_mode == "full" and is_inside_checkpoint():
+        if (
+            capture_mode == "full"
+            and is_inside_checkpoint()
+            and not suspend_tool_body_checkpoint_scope
+        ):
             if (
                 adapter_refs is not None
                 and ARTIFACT_ROLE_RESULT in adapter_refs.output_artifacts
@@ -373,6 +387,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         hitl_config: HitlConfig | None,
         tracker: EventTracker | None,
         capture_mode: str | None,
+        suspend_tool_body_checkpoint_scope: bool,
     ) -> Any:
         def _call_suffix() -> str:
             return _wait_call_suffix(getattr(ctx, "tool_call_id", None))
@@ -399,12 +414,21 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             )
 
         try:
-            return await super().call_tool(name, tool_args, ctx, tool)
+            return await self._call_wrapped_tool(
+                name=name,
+                tool_args=tool_args,
+                ctx=ctx,
+                tool=tool,
+                suspend_checkpoint_scope=suspend_tool_body_checkpoint_scope,
+            )
         except KitaruContextError as error:
             if is_inside_checkpoint() and str(error) == _WAIT_INSIDE_CHECKPOINT_ERROR:
                 _raise_checkpoint_wait_not_supported(name, "hitl")
             raise
         except ApprovalRequired as error:
+            # Scope is suspended only while the ordinary sync tool body runs.
+            # Native deferred/approval handling resumes under the enclosing
+            # checkpoint and remains unsupported for this focused PR.
             if is_inside_checkpoint():
                 _raise_checkpoint_wait_not_supported(name, "approval_required")
             call_suffix = _call_suffix()
@@ -417,6 +441,8 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 run_after_wait=True,
             )
         except CallDeferred as error:
+            # See the ApprovalRequired branch above: this PR supports direct
+            # tool-body waits only, not native deferred/approval waits.
             if is_inside_checkpoint():
                 _raise_checkpoint_wait_not_supported(name, "call_deferred")
             call_suffix = _call_suffix()
@@ -438,6 +464,23 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             tracker=tracker,
             capture_mode=capture_mode,
         )
+
+    async def _call_wrapped_tool(
+        self,
+        *,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[AgentDepsT],
+        tool: ToolsetTool[AgentDepsT],
+        suspend_checkpoint_scope: bool,
+    ) -> Any:
+        checkpoint_scope = (
+            _suspend_checkpoint_scope()
+            if suspend_checkpoint_scope
+            else nullcontext()
+        )
+        with checkpoint_scope:
+            return await super().call_tool(name, tool_args, ctx, tool)
 
     async def _handle_deferred(
         self,

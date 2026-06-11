@@ -574,6 +574,69 @@ class TestAdapterStreamingFallbackCheckpointMarker:
 
         assert get_adapter_streaming_fallback_checkpoint() is None
 
+    @pytest.mark.anyio
+    async def test_marker_provenance_tracks_adapter_owned_streaming_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.adapters.pydantic_ai import _agent as agent_module
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        observations: list[tuple[str, bool]] = []
+
+        async def fake_checkpoint(*, body: Any, step_name: str, **_kwargs: Any) -> Any:
+            with _checkpoint_scope(name=step_name, checkpoint_type="llm_call"):
+                return await body()
+
+        async def observe(label: str) -> str:
+            observations.append(
+                (label, get_adapter_streaming_fallback_checkpoint() is not None)
+            )
+            return label
+
+        monkeypatch.setattr(
+            agent_module,
+            "run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        calls_agent = KitaruAgent(Agent(TestModel(), name="calls_marker_agent"))
+        turn_agent = KitaruAgent(
+            Agent(TestModel(), name="turn_marker_agent"),
+            checkpoint_strategy="turn",
+        )
+
+        with _flow_scope(name="demo_flow"):
+            await calls_agent._run_async(
+                lambda: observe("calls/no streaming"),
+                force_turn_checkpoint=False,
+            )
+            await calls_agent._run_async(
+                lambda: observe("calls/streaming"),
+                force_turn_checkpoint=True,
+                mark_streaming_fallback_checkpoint=True,
+            )
+            await turn_agent._run_async(
+                lambda: observe("turn/streaming"),
+                force_turn_checkpoint=True,
+                mark_streaming_fallback_checkpoint=False,
+            )
+            with _checkpoint_scope(name="user_checkpoint", checkpoint_type="custom"):
+                await calls_agent._run_async(
+                    lambda: observe("already inside checkpoint"),
+                    force_turn_checkpoint=True,
+                    mark_streaming_fallback_checkpoint=True,
+                )
+
+        assert observations == [
+            ("calls/no streaming", False),
+            ("calls/streaming", True),
+            ("turn/streaming", False),
+            ("already inside checkpoint", False),
+        ]
+
 
 class TestResolveToolCheckpointConfig:
     def test_default_used_when_no_override(self) -> None:
@@ -1678,6 +1741,65 @@ class TestThreadingCompat:
 
         assert entered == [True, True]
 
+    @pytest.mark.anyio
+    async def test_stream_context_manager_wait_for_input_still_uses_checkpoint_guard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextlib import asynccontextmanager, nullcontext
+
+        from pydantic_ai import Agent
+        from pydantic_ai.agent.abstract import AbstractAgent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters import pydantic_ai as kp
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="stream_context_wait_guard_agent"),
+            tool_checkpoint_config_by_name={"ask_user": False},
+            allow_sync_tool_body_waits=True,
+        )
+        streamed_result = object()
+        iter_result = object()
+
+        @asynccontextmanager
+        async def fake_run_stream(*_args: Any, **_kwargs: Any):
+            yield streamed_result
+
+        @asynccontextmanager
+        async def fake_iter(*_args: Any, **_kwargs: Any):
+            yield iter_result
+
+        monkeypatch.setattr(agent, "_tracking_scope", nullcontext)
+        monkeypatch.setattr(AbstractAgent, "run_stream", fake_run_stream)
+        monkeypatch.setattr(agent.wrapped, "iter", fake_iter)
+
+        def assert_checkpoint_wait_guidance(
+            exc_info: pytest.ExceptionInfo[Any],
+        ) -> None:
+            message = str(exc_info.value)
+            assert "adapter-created checkpoint" in message
+            assert "tool_checkpoint_config_by_name" in message
+            assert "allow_sync_tool_body_waits=True" in message
+
+        with _flow_scope(name="demo_flow"):
+            with _checkpoint_scope(
+                name="run_stream_checkpoint", checkpoint_type="custom"
+            ):
+                with pytest.raises(KitaruUsageError) as stream_exc:
+                    async with agent.run_stream("hello") as result:
+                        assert result is streamed_result
+                        kp.wait_for_input(schema=str, name="run_stream_wait")
+                assert_checkpoint_wait_guidance(stream_exc)
+
+            with _checkpoint_scope(name="iter_checkpoint", checkpoint_type="custom"):
+                with pytest.raises(KitaruUsageError) as iter_exc:
+                    async with agent.iter("hello") as result:
+                        assert result is iter_result
+                        kp.wait_for_input(schema=str, name="iter_wait")
+                assert_checkpoint_wait_guidance(iter_exc)
+
 
 class TestWaitForInput:
     """Adapter-namespaced helper for calling wait from a tool body."""
@@ -2680,9 +2802,9 @@ async def test_non_hitl_tool_still_uses_calls_strategy_tool_checkpoint(
 
 
 @pytest.mark.anyio
-async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_tool() -> (
-    None
-):
+async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from pydantic_ai import FunctionToolset
     from pydantic_ai.models.test import TestModel
     from pydantic_ai.tools import RunContext
@@ -2691,6 +2813,7 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
 
     from kitaru.adapters.pydantic_ai import CapturePolicy
     from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.adapters.pydantic_ai._tracking import EventTracker
     from kitaru.runtime import (
         _checkpoint_scope,
         _flow_scope,
@@ -2699,6 +2822,8 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
     )
 
     observed_body_scope: list[tuple[bool, bool]] = []
+    saved_artifacts: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    tracker = EventTracker(agent_name="streaming_tool_agent", run_label="unit")
     toolset: FunctionToolset[None] = FunctionToolset()
 
     @toolset.tool_plain
@@ -2713,6 +2838,14 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
     )
     ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["ask_user"]
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: tracker,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.save",
+        lambda *args, **kwargs: saved_artifacts.append((args, kwargs)),
+    )
     step_context_var = _get_step_context_var()
     step_context_token = step_context_var.set(cast(Any, object()))
     try:
@@ -2736,6 +2869,13 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
 
     assert result == "human answer"
     assert observed_body_scope == [(False, False)]
+    tool_events = [event for event in tracker.events if event.kind == "tool_call"]
+    assert len(tool_events) == 1
+    tool_event = cast(Any, tool_events[0])
+    assert tool_event.checkpoint_name == "streamed_turn"
+    assert tool_event.checkpoint_id == "checkpoint-1"
+    assert tool_event.artifacts == {}
+    assert saved_artifacts == []
 
 
 @pytest.mark.anyio
@@ -2972,6 +3112,7 @@ async def test_streaming_fallback_suspension_restores_scope_after_cancellation(
     from pydantic_ai import FunctionToolset
     from pydantic_ai.models.test import TestModel
     from pydantic_ai.tools import RunContext
+    from pydantic_ai.toolsets import WrapperToolset
     from pydantic_ai.usage import RunUsage
     from zenml.steps.step_context import StepContext
 
@@ -2998,12 +3139,12 @@ async def test_streaming_fallback_suspension_restores_scope_after_cancellation(
     ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["ask_user"]
 
-    async def fake_call_tool_tracked(*_args: Any, **_kwargs: Any) -> Any:
+    async def fake_call_tool(*_args: Any, **_kwargs: Any) -> Any:
         assert not _is_inside_checkpoint()
         assert not StepContext.is_active()
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(wrapped, "_call_tool_tracked", fake_call_tool_tracked)
+    monkeypatch.setattr(WrapperToolset, "call_tool", fake_call_tool)
     step_context_var = _get_step_context_var()
     step_context_token = step_context_var.set(cast(Any, object()))
     try:
