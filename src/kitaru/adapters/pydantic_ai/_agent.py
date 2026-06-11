@@ -18,10 +18,8 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import (
-    AbstractContextManager,
     asynccontextmanager,
     contextmanager,
-    nullcontext,
 )
 from contextvars import ContextVar
 from typing import Any
@@ -56,7 +54,6 @@ from ._streaming import (
     PydanticAIStreamPublisher,
     current_stream_surface,
     stream_surface,
-    suppress_model_stream_live_events,
 )
 from ._toolset import kitaruify_toolset
 from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_execution
@@ -162,12 +159,16 @@ def _builtin_tools_kwargs(
     return {"builtin_tools": builtin_tools}
 
 
+@contextmanager
 def _maybe_suppress_model_stream_live_events(
+    model: KitaruModel,
     event_stream_handler: EventStreamHandler[Any] | None,
-) -> AbstractContextManager[None]:
+) -> Iterator[None]:
     if event_stream_handler is None:
-        return nullcontext()
-    return suppress_model_stream_live_events()
+        yield
+        return
+    with model.suppress_live_stream_events(claim_first_stream_task=True):
+        yield
 
 
 class _AutoFlowSlot:
@@ -637,7 +638,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
             publisher.started()
             try:
-                with suppress_model_stream_live_events():
+                with self._model.suppress_live_stream_events():
                     await effective_handler(ctx, _live_stream())
                 publisher.completed(event_count=event_count)
             except BaseException as exc:
@@ -1133,7 +1134,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._tracking_scope(),
                 self._allow_internal_iter(),
                 stream_surface("run"),
-                _maybe_suppress_model_stream_live_events(wrapped_handler),
+                _maybe_suppress_model_stream_live_events(self._model, wrapped_handler),
                 _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
@@ -1249,7 +1250,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 self._tracking_scope(),
                 self._allow_internal_iter(),
                 stream_surface("run_sync"),
-                _maybe_suppress_model_stream_live_events(wrapped_handler),
+                _maybe_suppress_model_stream_live_events(self._model, wrapped_handler),
                 _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
                 model_cache_run_context(
                     conversation_id=conversation_id, message_history=effective_history
@@ -1366,7 +1367,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._kitaru_overrides(),
             self._tracking_scope(),
             stream_surface("run_stream"),
-            _maybe_suppress_model_stream_live_events(wrapped_handler),
+            _maybe_suppress_model_stream_live_events(self._model, wrapped_handler),
             model_cache_run_context(
                 conversation_id=conversation_id, message_history=message_history
             ),

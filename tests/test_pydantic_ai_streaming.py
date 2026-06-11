@@ -57,6 +57,13 @@ class _FakeTracker:
         self.reserved_tool_calls.append(kwargs)
 
 
+class _FailingCompletionTracker(_FakeTracker):
+    def record_model_event(self, event_id: str, context: Any, **kwargs: Any) -> None:
+        if kwargs["status"] == "completed":
+            raise RuntimeError("capture failed")
+        super().record_model_event(event_id, context, **kwargs)
+
+
 def _capture_published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     published: list[dict[str, Any]] = []
 
@@ -83,6 +90,25 @@ def _make_agent(*, capture: Any = None, event_stream_handler: Any = None) -> Any
         capture=capture,
         event_stream_handler=event_stream_handler,
     )
+
+
+def _make_tracked_model(
+    monkeypatch: pytest.MonkeyPatch,
+    wrapped_model: Any,
+    *,
+    capture: Any,
+    tracker: _FakeTracker | None = None,
+) -> tuple[Any, list[dict[str, Any]], _FakeTracker]:
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+
+    published = _capture_published(monkeypatch)
+    tracker = tracker or _FakeTracker()
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module.kitaru, "save", lambda *_args, **_kwargs: None)
+    model = KitaruModel(wrapped_model, capture=capture, agent_name="streamer")
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+    return model, published, tracker
 
 
 def _stream_event_sources(published: list[dict[str, Any]]) -> list[str]:
@@ -124,12 +150,16 @@ def _collecting_handler() -> tuple[list[Any], Any]:
 def _assert_only_handler_stream_events(
     published: list[dict[str, Any]], received: list[Any]
 ) -> None:
-    sources = _stream_event_sources(published)
+    stream_item_sources = _stream_event_sources(published)
+    all_stream_sources = _pydantic_ai_stream_sources(published)
     assert received
-    assert sources
-    assert all(source == "event_stream_handler" for source in sources)
-    assert "model_request_stream" not in _pydantic_ai_stream_sources(published)
-    assert len(sources) == len(received)
+    assert stream_item_sources
+    assert all_stream_sources
+    assert all(source == "event_stream_handler" for source in stream_item_sources), (
+        stream_item_sources
+    )
+    assert "model_request_stream" not in all_stream_sources
+    assert len(stream_item_sources) == len(received)
 
 
 def test_pydantic_ai_stream_constants_are_stable() -> None:
@@ -604,7 +634,7 @@ async def test_emit_child_events_false_keeps_handler_and_durable_record(
 
 
 @pytest.mark.anyio
-async def test_handler_suppresses_nested_model_live_events(
+async def test_handler_suppresses_own_model_live_events_without_global_leak(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kitaru.adapters.pydantic_ai import _agent as agent_module
@@ -614,11 +644,15 @@ async def test_handler_suppresses_nested_model_live_events(
 
     _capture_published(monkeypatch)
     monkeypatch.setattr(agent_module, "get_current_tracker", lambda: None)
-    suppression_states: list[bool] = []
+    model_suppression_states: list[bool] = []
+    global_suppression_states: list[bool] = []
 
     async def handler(_ctx: Any, stream: AsyncIterable[Any]) -> None:
         async for _event in stream:
-            suppression_states.append(model_stream_live_events_suppressed())
+            model_suppression_states.append(
+                agent._model._live_stream_events_suppressed()
+            )
+            global_suppression_states.append(model_stream_live_events_suppressed())
 
     agent = _make_agent()
     wrapped = agent._prepare_event_stream_handler(handler)
@@ -628,7 +662,9 @@ async def test_handler_suppresses_nested_model_live_events(
         SimpleNamespace(), _async_events([SimpleNamespace(event_kind="part_start")])
     )
 
-    assert suppression_states == [True]
+    assert model_suppression_states == [True]
+    assert global_suppression_states == [False]
+    assert agent._model._live_stream_events_suppressed() is False
     assert model_stream_live_events_suppressed() is False
 
 
@@ -659,6 +695,290 @@ async def test_agent_run_with_constructor_handler_publishes_once_from_handler(
     await agent.run("hello")
 
     _assert_only_handler_stream_events(published, received)
+
+
+@pytest.mark.anyio
+async def test_agent_run_with_handler_keeps_capture_without_model_live_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _agent as agent_module
+    from kitaru.adapters.pydantic_ai import _model as model_module
+
+    published = _capture_published(monkeypatch)
+    tracker = _FakeTracker()
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(agent_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(
+        model_module.kitaru,
+        "save",
+        lambda *args, **kwargs: saved.append({"args": args, "kwargs": kwargs}),
+    )
+    received, handler = _collecting_handler()
+    agent = _make_agent(
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=True,
+        ),
+    )
+
+    await agent.run("hello", event_stream_handler=handler)
+
+    _assert_only_handler_stream_events(published, received)
+    assert saved
+    transcript = saved[0]["args"][1]
+    assert tracker.model_records[-1]["status"] == "completed"
+    assert tracker.model_records[-1]["stream_event_count"] == len(received)
+    assert transcript["event_count"] == len(received)
+    assert len(transcript["events"]) == len(received)
+    assert transcript["events_truncated"] is False
+    assert transcript["omitted_event_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_model_live_suppression_does_not_leak_to_same_model_child_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._streaming import stream_surface
+
+    model, published, _tracker = _make_tracked_model(
+        monkeypatch,
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=False,
+        ),
+    )
+
+    async def child_no_handler_request() -> list[Any]:
+        with stream_surface("child-no-handler"):
+            async with model.request_stream(
+                [], None, ModelRequestParameters()
+            ) as response:
+                return [event async for event in response]
+
+    with model.suppress_live_stream_events():
+        events = await asyncio.create_task(child_no_handler_request())
+
+    child_payloads = [
+        event["payload"]
+        for event in published
+        if event["kind"].startswith("pydantic_ai.stream.")
+        and event["payload"]["surface"] == "child-no-handler"
+    ]
+    assert events
+    assert child_payloads
+    assert "model_request_stream" in {payload["source"] for payload in child_payloads}
+
+
+@pytest.mark.anyio
+async def test_claim_first_suppression_does_not_leak_to_preexisting_child_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._streaming import stream_surface
+
+    child_release = asyncio.Event()
+    model, published, _tracker = _make_tracked_model(
+        monkeypatch,
+        TestModel(),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=False,
+        ),
+    )
+
+    async def child_no_handler_request() -> list[Any]:
+        await child_release.wait()
+        with stream_surface("child-after-claim"):
+            async with model.request_stream(
+                [], None, ModelRequestParameters()
+            ) as response:
+                return [event async for event in response]
+
+    with model.suppress_live_stream_events(claim_first_stream_task=True):
+        child_task = asyncio.create_task(child_no_handler_request())
+        with stream_surface("mirrored"):
+            async with model.request_stream(
+                [], None, ModelRequestParameters()
+            ) as response:
+                mirrored_events = [event async for event in response]
+        child_release.set()
+        child_events = await asyncio.wait_for(child_task, timeout=5)
+
+    sources_by_surface: dict[str, set[str]] = {}
+    for event in published:
+        if event["kind"].startswith("pydantic_ai.stream."):
+            payload = event["payload"]
+            sources_by_surface.setdefault(payload["surface"], set()).add(
+                payload["source"]
+            )
+
+    assert mirrored_events
+    assert child_events
+    assert "model_request_stream" not in sources_by_surface.get("mirrored", set())
+    assert "model_request_stream" in sources_by_surface["child-after-claim"]
+
+
+@pytest.mark.anyio
+async def test_model_live_suppression_is_context_local_for_overlapping_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from pydantic_ai.models import Model, ModelRequestParameters
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._streaming import (
+        PydanticAIStreamPublisher,
+        current_stream_surface,
+        stream_surface,
+        suppress_model_stream_live_events,
+    )
+
+    class ControlledStreamedResponse:
+        def __init__(
+            self,
+            *,
+            release: asyncio.Event,
+            event_kind: str,
+        ) -> None:
+            self.model_request_parameters = ModelRequestParameters()
+            self.final_result_event = SimpleNamespace(event_kind="final_result")
+            self._release = release
+            self._event = SimpleNamespace(event_kind=event_kind)
+            self._response = SimpleNamespace(
+                model_name="fake-test-model",
+                usage=None,
+                tool_calls=[],
+            )
+
+        async def __aiter__(self) -> AsyncIterator[Any]:
+            await self._release.wait()
+            yield self._event
+
+        def get(self) -> Any:
+            return self._response
+
+    class ControlledWrappedModel(Model):
+        def __init__(self, streams: dict[str, ControlledStreamedResponse]) -> None:
+            self._streams = streams
+
+        @property
+        def model_name(self) -> str:
+            return "controlled-model"
+
+        @property
+        def system(self) -> str:
+            return "test"
+
+        async def request(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise NotImplementedError("non-streaming requests are not used")
+
+        @asynccontextmanager
+        async def request_stream(
+            self,
+            _messages: Any,
+            _model_settings: Any,
+            _model_request_parameters: Any,
+            _run_context: Any = None,
+        ) -> AsyncIterator[ControlledStreamedResponse]:
+            yield self._streams[current_stream_surface(default="missing-surface")]
+
+    handler_release = asyncio.Event()
+    no_handler_release = asyncio.Event()
+    no_handler_entered = asyncio.Event()
+    model, published, _tracker = _make_tracked_model(
+        monkeypatch,
+        ControlledWrappedModel(
+            {
+                "handler-run": ControlledStreamedResponse(
+                    release=handler_release,
+                    event_kind="handler_part",
+                ),
+                "no-handler-run": ControlledStreamedResponse(
+                    release=no_handler_release,
+                    event_kind="no_handler_part",
+                ),
+            }
+        ),
+        capture=CapturePolicy(
+            save_prompts=False,
+            save_responses=False,
+            save_stream_transcripts=False,
+        ),
+    )
+
+    async def handler_active_request() -> None:
+        with (
+            suppress_model_stream_live_events(),
+            model.suppress_live_stream_events(),
+            stream_surface("handler-run"),
+        ):
+            handler_publisher = PydanticAIStreamPublisher(
+                agent_name="streamer",
+                surface="handler-run",
+                source="event_stream_handler",
+                include_content=False,
+            )
+            handler_publisher.started()
+            async with model.request_stream(
+                [], None, ModelRequestParameters()
+            ) as response:
+                await no_handler_entered.wait()
+                handler_release.set()
+                event_count = 0
+                async for event in response:
+                    event_count += 1
+                    handler_publisher.event(event)
+            handler_publisher.completed(event_count=event_count)
+
+    async def no_handler_request() -> None:
+        with stream_surface("no-handler-run"):
+            async with model.request_stream(
+                [], None, ModelRequestParameters()
+            ) as response:
+                no_handler_entered.set()
+                no_handler_release.set()
+                async for _event in response:
+                    pass
+
+    await asyncio.wait_for(
+        asyncio.gather(handler_active_request(), no_handler_request()), timeout=5
+    )
+
+    sources_by_surface: dict[str, list[str]] = {}
+    categories_by_surface: dict[str, list[str]] = {}
+    for event in published:
+        if event["kind"].startswith("pydantic_ai.stream."):
+            payload = event["payload"]
+            surface = payload["surface"]
+            sources_by_surface.setdefault(surface, []).append(payload["source"])
+            categories_by_surface.setdefault(surface, []).append(payload["category"])
+
+    assert sources_by_surface["handler-run"]
+    assert sources_by_surface["no-handler-run"]
+    assert set(sources_by_surface["handler-run"]) == {"event_stream_handler"}
+    assert "handler_part" in categories_by_surface["handler-run"]
+    assert "model_request_stream" in sources_by_surface["no-handler-run"]
+    assert "event_stream_handler" not in sources_by_surface["no-handler-run"]
+    assert "no_handler_part" in categories_by_surface["no-handler-run"]
 
 
 @pytest.mark.anyio
@@ -726,9 +1046,10 @@ async def test_agent_run_stream_without_handler_keeps_model_stream_live_events(
         async with agent.run_stream("hello") as result:
             await result.get_output()
 
-    sources = _stream_event_sources(published)
+    sources = _pydantic_ai_stream_sources(published)
     assert sources
-    assert all(source == "model_request_stream" for source in sources)
+    assert "model_request_stream" in sources
+    assert "event_stream_handler" not in sources
 
 
 @pytest.mark.anyio
@@ -1003,16 +1324,8 @@ async def test_model_request_stream_capture_failure_publishes_failed_not_complet
     from kitaru.adapters.pydantic_ai import _model as model_module
     from kitaru.adapters.pydantic_ai._model import KitaruModel
 
-    class FailingCompletionTracker(_FakeTracker):
-        def record_model_event(
-            self, event_id: str, context: Any, **kwargs: Any
-        ) -> None:
-            if kwargs["status"] == "completed":
-                raise RuntimeError("capture failed")
-            super().record_model_event(event_id, context, **kwargs)
-
     published = _capture_published(monkeypatch)
-    tracker = FailingCompletionTracker()
+    tracker = _FailingCompletionTracker()
     monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
     monkeypatch.setattr(model_module.kitaru, "save", lambda *_args, **_kwargs: None)
     model = KitaruModel(
@@ -1069,6 +1382,42 @@ async def test_model_request_stream_tool_order_failure_publishes_failed_not_comp
     assert "pydantic_ai.stream.completed" not in published_kinds
     assert published_kinds[-1] == "pydantic_ai.stream.failed"
     assert [record["status"] for record in tracker.model_records] == ["failed"]
+
+
+@pytest.mark.anyio
+async def test_model_request_stream_suppression_disables_failed_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai import _model as model_module
+    from kitaru.adapters.pydantic_ai._model import KitaruModel
+    from kitaru.adapters.pydantic_ai._streaming import suppress_model_stream_live_events
+
+    published = _capture_published(monkeypatch)
+    tracker = _FailingCompletionTracker()
+    monkeypatch.setattr(model_module, "get_current_tracker", lambda: tracker)
+    monkeypatch.setattr(model_module.kitaru, "save", lambda *_args, **_kwargs: None)
+    model = KitaruModel(
+        TestModel(),
+        capture=CapturePolicy(save_prompts=False, save_responses=False),
+        agent_name="streamer",
+    )
+    monkeypatch.setattr(model, "_should_track", lambda: True)
+
+    with (
+        pytest.raises(RuntimeError, match="capture failed"),
+        suppress_model_stream_live_events(),
+    ):
+        async with model.request_stream([], None, ModelRequestParameters()) as response:
+            async for _event in response:
+                pass
+
+    assert published == []
+    assert tracker.model_records[-1]["status"] == "failed"
+    assert tracker.model_records[-1]["stream_event_count"] > 0
 
 
 @pytest.mark.anyio
