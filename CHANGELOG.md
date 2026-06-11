@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+
 ### Changed
 - Repositioned user-facing messaging (README, PyPI description, CLI `--help`, docs welcome page) around recording, replaying, and improving agents in production; durable execution is now described as the underlying mechanism rather than the headline.
 

@@ -5,6 +5,7 @@ from typing import Any
 import kitaru.events as kitaru_events
 from kitaru.adapters._streaming_utils import BaseStreamPublisher, clip_stream_text
 
+from ._constants import ADAPTER_ID
 from ._stream_shapes import (
     ARGUMENT_DELTA_TYPES,
     CONTENT_START_EVENT_TYPE,
@@ -349,7 +350,7 @@ class GeminiStreamPublisher(BaseStreamPublisher):
         self, *, category: str, display: str, **fields: Any
     ) -> dict[str, Any]:
         return {
-            "adapter": "gemini_interactions",
+            "adapter": ADAPTER_ID,
             "runner_name": self._runner_name,
             "surface": self._surface,
             "scope": "interaction",

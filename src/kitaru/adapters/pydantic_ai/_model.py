@@ -456,6 +456,8 @@ class KitaruModel(WrapperModel):
             model_name=response.model_name,
             usage=response.usage,
             checkpoint_name=checkpoint_name,
+            billing_effect="reused_not_incurred",
+            cache_status="checkpoint_cache_hit",
         )
         self._reserve_tool_call_order(
             tracker=tracker,

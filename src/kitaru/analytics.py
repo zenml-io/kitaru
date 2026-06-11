@@ -55,6 +55,7 @@ class AnalyticsEvent(StrEnum):
     EXECUTION_RETRIED = "Kitaru execution retried"
     EXECUTION_RESUMED = "Kitaru execution resumed"
     EXECUTION_CANCELLED = "Kitaru execution cancelled"
+    EXECUTION_STATISTICS_QUERIED = "Kitaru execution statistics queried"
 
     # Feature adoption
     LLM_CALLED = "Kitaru LLM called"

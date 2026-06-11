@@ -1,5 +1,7 @@
 from typing import Annotated, Any, Literal, cast
 
+from kitaru._llm_usage import LLMBillingEffect, LLMCacheStatus
+
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from pydantic_ai.usage import RequestUsage
@@ -37,6 +39,8 @@ class ModelEvent(_BaseEvent):
     artifacts: dict[str, str] = Field(default_factory=dict)
     model_name: str | None = None
     usage: RequestUsage | None = None
+    billing_effect: LLMBillingEffect = "incurred"
+    cache_status: LLMCacheStatus = "executed"
     error: EventError | None = None
     stream_event_count: int | None = None
 

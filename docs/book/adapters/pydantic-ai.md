@@ -414,6 +414,14 @@ durable_agent = KitaruAgent(
 
 Capture policy is observability-only — it never changes tool execution.
 
+## Usage and cost statistics
+
+When `emit_child_events=True` (the default) and the wrapped model runs inside a Kitaru checkpoint, the adapter records each observed Pydantic AI model request as a canonical `llm_usage_v1` record. The record uses the model event ID as its stable identity and includes the Pydantic AI `RequestUsage` payload when the model response exposes one.
+
+The Pydantic AI adapter does not run a separate cost calculator and does not receive provider-reported dollar cost through this path. In practice, these records are usually token records with empty cost fields. If a model response has no usage payload, Kitaru can still record that the model request happened; the token fields simply remain empty.
+
+In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded as `reused_not_incurred`, so replay and cache hits do not look like fresh spend in the execution summary. The canonical records roll up after `FlowHandle.wait()` or `FlowHandle.get()` observes the terminal execution. Setting `emit_child_events=False` disables the model/tool event tracking that produces these per-model usage records.
+
 ## Message history
 
 Pass `message_history` explicitly like any PydanticAI agent, or let the adapter thread it for you:

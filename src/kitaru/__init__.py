@@ -30,16 +30,16 @@ Current status:
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
-  (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and
-  a typed Kitaru exception hierarchy with failure journaling
-  (``Execution.failure``, ``CheckpointCall.attempts``) and live-event watching
+  (`get/list/latest/logs/statistics/input/retry/resume/cancel/replay` +
+  artifacts), a typed Kitaru exception hierarchy with failure journaling
+  (``Execution.failure``, ``CheckpointCall.attempts``), and live-event watching
   (``KitaruClient.executions.events(...)``).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack lifecycle via
 ``kitaru stack list/current/use/create/delete``, and execution lifecycle commands via
-``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
+``kitaru executions get/list/logs/statistics/input/replay/retry/resume/cancel``.
 """
 
 # ZenML must be imported explicitly here so that its init_logging() runs
@@ -65,6 +65,14 @@ from kitaru._client._models import (
     AuthAPIKeyWithValue,
     AuthServiceAccount,
     ExecutionEvent,
+    ExecutionStatistics,
+    ExecutionStatisticsDimension,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
+    ExecutionStatisticsTimeGranularity,
 )
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
@@ -121,6 +129,14 @@ __all__ = [
     "AuthServiceAccount",
     "Deployment",
     "ExecutionEvent",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
+    "ExecutionStatisticsTimeGranularity",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",

@@ -115,6 +115,50 @@ Google's Interactions API is still a preview/Beta-style surface. Treat schemas,
 agent names, and hosted-agent behavior as more likely to change than stable
 Gemini text-generation APIs.
 
+## Usage and cost statistics
+
+When `save_usage=True` (the default), the Gemini adapter records two related
+things after a stable provider response:
+
+```text
+Gemini returns usage metadata
+  -> result.usage keeps the raw token metadata
+  -> Kitaru logs one llm_usage_v1 statistics record for the interaction
+```
+
+That canonical statistics record uses Gemini token fields such as
+`prompt_token_count` / `promptTokenCount`, `candidates_token_count` /
+`candidatesTokenCount`, `cached_content_token_count` /
+`cachedContentTokenCount`, and `thoughts_token_count` / `thoughtsTokenCount` when
+Google reports them. The token counts then roll up into execution-level LLM usage
+summary fields and flat statistics keys after your code observes the terminal
+execution with `FlowHandle.wait()` or `FlowHandle.get()`.
+
+The canonical usage record's `status` describes the provider call, not the next
+thing your application must do. So a Gemini interaction that returns
+`GeminiInteractionResult.status == "requires_action"` still writes a canonical
+LLM usage record with `status="completed"`: Google returned a stable response,
+and that response is asking your code to send a follow-up turn.
+
+Gemini tracking is token-only in this adapter version. Google reports token usage
+metadata for these calls, but Kitaru does not receive a provider-reported
+per-call dollar cost from Gemini Interactions and does not estimate Gemini price
+locally here. That means Gemini records normally have:
+
+```text
+cost.source = "none"
+actual_cost_usd = null
+estimated_cost_usd = null
+```
+
+So if an execution includes Gemini calls, `records_without_cost_count` increasing
+is expected. It means “this provider call had no dollar-cost value attached,” not
+“usage tracking failed.” Token counts can still be present and aggregated.
+
+Set `save_usage=False` when you do not want Gemini usage persisted. That disables
+both the raw usage artifact and the canonical `llm_usage_v1` metadata record for
+that interaction, even if Gemini-specific events are still enabled.
+
 ## Install
 
 Add the Gemini extra. Include `local` if you want the local Kitaru server and

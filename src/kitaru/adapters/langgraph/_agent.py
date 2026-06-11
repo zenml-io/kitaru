@@ -7,6 +7,13 @@ from functools import lru_cache
 from importlib import metadata
 from typing import Any, cast
 
+from kitaru._llm_usage import (
+    add_optional_token_count,
+    build_usage_record,
+    estimate_calculated_cost_usd,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -711,12 +718,39 @@ class KitaruGraphRunner:
         else:
             tracker.record("graph_call_completed")
 
-        usage = self._usage_from_output(output) if self._capture.save_usage else None
+        usage = (
+            self._usage_from_model_events(tracker) if self._capture.save_usage else None
+        )
+        if usage is None and self._capture.save_usage:
+            usage = self._usage_from_output(output)
         estimated_cost = (
-            self._cost_calculator(usage)
-            if self._cost_calculator is not None and usage is not None
+            estimate_calculated_cost_usd(
+                calculator=self._cost_calculator,
+                usage=usage,
+                warnings=warnings,
+                adapter_name="LangGraph",
+            )
+            if self._capture.save_usage
             else None
         )
+        if self._capture.save_usage:
+            usage_record = build_usage_record(
+                adapter="langgraph",
+                surface="graph_call",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=usage.model_dump(mode="json") if usage is not None else None,
+                model=usage.model_name if usage is not None else None,
+                estimated_cost_usd=estimated_cost,
+                cost_source="calculator" if estimated_cost is not None else "none",
+                cost_source_label="langgraph.cost_calculator",
+                status=status,
+                billing_effect="incurred" if status == "completed" else "unknown",
+                cache_status="executed",
+                warnings=warnings,
+            )
+            log_usage_record(usage_record)
         result = LangGraphRunResult(
             status=status,
             output=None if status == "interrupted" else output,
@@ -1581,27 +1615,32 @@ class KitaruGraphRunner:
             metadata,
         )
 
+    def _usage_from_model_events(
+        self,
+        tracker: EventTracker,
+    ) -> LangGraphUsageSummary | None:
+        usages: list[Any] = []
+        model_names: set[str] = set()
+        seen_event_ids: set[str] = set()
+        for event in tracker.events:
+            if event.kind != "model_call" or event.status != "completed":
+                continue
+            if event.event_id in seen_event_ids:
+                continue
+            seen_event_ids.add(event.event_id)
+            usage = event.metadata.get("usage")
+            if usage is None:
+                continue
+            usages.append(usage)
+            if event.model_name:
+                model_names.add(event.model_name)
+            metadata_model_name = event.metadata.get("model_name")
+            if isinstance(metadata_model_name, str) and metadata_model_name:
+                model_names.add(metadata_model_name)
+        return _usage_summary_from_payloads(usages, model_names=model_names)
+
     def _usage_from_output(self, output: Any) -> LangGraphUsageSummary | None:
-        usage = _find_usage(output, max_depth=6)
-        if usage is None:
-            return None
-        usage_json = to_json_safe(usage)
-        if not isinstance(usage_json, dict):
-            return LangGraphUsageSummary(raw={"value": usage_json})
-        return LangGraphUsageSummary(
-            input_tokens=_int_or_none(
-                usage_json.get("input_tokens")
-                or usage_json.get("prompt_tokens")
-                or usage_json.get("input_token_count")
-            ),
-            output_tokens=_int_or_none(
-                usage_json.get("output_tokens")
-                or usage_json.get("completion_tokens")
-                or usage_json.get("output_token_count")
-            ),
-            total_tokens=_int_or_none(usage_json.get("total_tokens")),
-            raw=usage_json,
-        )
+        return _usage_summary_from_payloads(_find_usages(output, max_depth=6))
 
     def _output_has_interrupt(self, output: Any) -> bool:
         return _mapping_get(output, "__interrupt__") is not None
@@ -1752,6 +1791,54 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+_USAGE_TOKEN_KEYS = frozenset(
+    {
+        "input_tokens",
+        "prompt_tokens",
+        "request_tokens",
+        "tokens_input",
+        "input_token_count",
+        "output_tokens",
+        "completion_tokens",
+        "response_tokens",
+        "tokens_output",
+        "output_token_count",
+        "total_tokens",
+        "tokens_total",
+        "total_token_count",
+    }
+)
+_USAGE_CONTAINER_KEYS = ("usage", "token_usage", "usage_metadata")
+
+
+def _looks_like_usage(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            key in value and _int_or_none(value[key]) is not None
+            for key in _USAGE_TOKEN_KEYS
+        )
+    return any(
+        _int_or_none(getattr(value, key, None)) is not None for key in _USAGE_TOKEN_KEYS
+    )
+
+
+def _remember_usage_traversal_object(value: Any, seen: set[int]) -> bool:
+    """Return whether this traversal should inspect ``value``.
+
+    The usage collector walks object graphs where the same message or usage
+    mapping can be reachable through multiple output branches. Remembering
+    visited container/custom objects for the full walk prevents double-counting
+    without treating repeated scalar values as cycles.
+    """
+    if value is None or isinstance(value, str | bytes | int | float | bool):
+        return True
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    return True
+
+
 def _len_or_count(value: Any) -> int:
     try:
         return len(value)
@@ -1797,23 +1884,118 @@ def _type_label(value: Any) -> str:
     return f"{value_type.__module__}.{value_type.__qualname__}"
 
 
-def _find_usage(value: Any, *, max_depth: int, _depth: int = 0) -> Any | None:
-    if value is None or _depth > max_depth:
+_USAGE_RAW_SAMPLE_LIMIT = 5
+
+
+def _usage_summary_from_payloads(
+    payloads: Sequence[Any],
+    *,
+    model_names: set[str] | None = None,
+) -> LangGraphUsageSummary | None:
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    raw_samples: list[dict[str, Any]] = []
+    payload_count = 0
+
+    for payload in payloads:
+        if not _looks_like_usage(payload):
+            continue
+        usage_json = to_json_safe(payload)
+        if not isinstance(usage_json, dict):
+            usage_json = {"value": usage_json}
+        token_usage = token_usage_from_mapping(usage_json)
+        input_tokens = add_optional_token_count(
+            input_tokens, token_usage["input_tokens"]
+        )
+        output_tokens = add_optional_token_count(
+            output_tokens, token_usage["output_tokens"]
+        )
+        total_tokens = add_optional_token_count(
+            total_tokens, token_usage["total_tokens"]
+        )
+        payload_count += 1
+        if len(raw_samples) < _USAGE_RAW_SAMPLE_LIMIT:
+            raw_samples.append(usage_json)
+
+    if payload_count == 0:
         return None
+
+    raw: dict[str, Any]
+    if payload_count == 1:
+        raw = raw_samples[0]
+    else:
+        raw = {
+            "payload_count": payload_count,
+            "sample_count": len(raw_samples),
+            "sample_limit": _USAGE_RAW_SAMPLE_LIMIT,
+            "truncated": payload_count > len(raw_samples),
+            "samples": raw_samples,
+        }
+    model_name = None
+    if model_names is not None and len(model_names) == 1:
+        model_name = next(iter(model_names))
+    return LangGraphUsageSummary(
+        model_name=model_name,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        raw=raw,
+    )
+
+
+def _find_usages(
+    value: Any,
+    *,
+    max_depth: int,
+    _depth: int = 0,
+    _seen: set[int] | None = None,
+) -> list[Any]:
+    if value is None or _depth > max_depth:
+        return []
+
+    seen = _seen if _seen is not None else set()
+    if not _remember_usage_traversal_object(value, seen):
+        return []
+    if _looks_like_usage(value):
+        return [value]
+
     if isinstance(value, Mapping):
-        for key in ("usage", "token_usage", "usage_metadata"):
-            if key in value:
-                return value[key]
+        for key in _USAGE_CONTAINER_KEYS:
+            usage = value.get(key)
+            if _looks_like_usage(usage):
+                if _remember_usage_traversal_object(usage, seen):
+                    return [usage]
+                return []
+        usages: list[Any] = []
         for nested in value.values():
-            found = _find_usage(nested, max_depth=max_depth, _depth=_depth + 1)
-            if found is not None:
-                return found
+            usages.extend(
+                _find_usages(
+                    nested,
+                    max_depth=max_depth,
+                    _depth=_depth + 1,
+                    _seen=seen,
+                )
+            )
+        return usages
+
     if isinstance(value, list | tuple):
+        usages = []
         for item in value:
-            found = _find_usage(item, max_depth=max_depth, _depth=_depth + 1)
-            if found is not None:
-                return found
-    usage = getattr(value, "usage_metadata", None) or getattr(value, "usage", None)
-    if usage is not None:
-        return usage
-    return None
+            usages.extend(
+                _find_usages(
+                    item,
+                    max_depth=max_depth,
+                    _depth=_depth + 1,
+                    _seen=seen,
+                )
+            )
+        return usages
+
+    for key in ("usage_metadata", "usage"):
+        usage = getattr(value, key, None)
+        if _looks_like_usage(usage):
+            if _remember_usage_traversal_object(usage, seen):
+                return [usage]
+            return []
+    return []
