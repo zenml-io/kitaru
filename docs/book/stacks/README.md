@@ -6,7 +6,7 @@ icon: layer-group
 # Stacks
 
 A **stack** is where the runner places work and where artifacts live. It
-bundles three concerns:
+bundles these concerns:
 
 - **Execution placement** — the compute backend the runner uses for the run
   itself and for any `runtime="isolated"` checkpoints (local, Kubernetes, AWS,
@@ -197,6 +197,33 @@ available in your current environment. It does not keep a separate hardcoded
 list of cloud sandbox providers. The practical consequence is: if the provider
 is installed and accepts the configuration, Kitaru can use it; if the provider is
 missing or rejects the configuration, Kitaru reports the validation error.
+
+## Use the active stack sandbox from Python
+
+`kitaru.run_sandbox_command(...)` uses the sandbox attached to the currently
+active stack. It does not choose by stack type. It reads the stack Kitaru is
+already using, finds the one attached sandbox component, creates a temporary
+session, runs the command, collects output, and then closes or destroys that
+session.
+
+```python
+import kitaru
+
+result = kitaru.run_sandbox_command("python --version")
+print(result.stdout)
+```
+
+If the active stack has no sandbox, Kitaru raises an error and does not run the
+command. If the active stack has more than one sandbox, Kitaru also raises an
+error instead of guessing. That avoids the bad version of the story: you thought
+the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
+sandbox and ran it somewhere expensive.
+
+The result is intentionally plain and serializable. Check `exit_code` yourself,
+and use `stdout_truncated` / `stderr_truncated` to detect when output hit the
+collection limit. If a provider does not support destroying sessions, Kitaru
+returns the command output with `cleanup_succeeded=False` and a `cleanup_error`
+message after best-effort close.
 
 You can also keep the same inputs in a YAML file and create the stack with:
 

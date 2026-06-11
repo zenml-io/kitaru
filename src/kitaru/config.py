@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
@@ -34,6 +34,7 @@ from kitaru._config import _execution_spec as _config_execution_spec
 from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
+from kitaru._config import _sandbox as _config_sandbox
 from kitaru._config import _stacks as _config_stacks
 from kitaru._env import ZENML_CONFIG_PATH_ENV as _ZENML_CONFIG_PATH_ENV
 from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
@@ -100,6 +101,8 @@ ModelRegistryConfig = _config_models.ModelRegistryConfig
 ModelAliasEntry = _config_models.ModelAliasEntry
 ResolvedModelSelection = _config_models.ResolvedModelSelection
 
+SandboxCommandResult = _config_sandbox.SandboxCommandResult
+
 StackInfo = _config_stacks.StackInfo
 StackType = _config_stacks.StackType
 CloudProvider = _config_stacks.CloudProvider
@@ -151,6 +154,7 @@ _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 _normalize_model_alias = _config_models._normalize_model_alias
 _read_env_model_registry = _config_models._read_env_model_registry
 _normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
+DEFAULT_SANDBOX_COMMAND_MAX_CHARS = _config_sandbox.DEFAULT_SANDBOX_COMMAND_MAX_CHARS
 _extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
 _mask_environment_value = _config_log_store._mask_environment_value
 
@@ -666,6 +670,38 @@ def _delete_stack_operation(
         force=force,
         client_factory=Client,
         current_stack_getter=current_stack,
+    )
+
+
+def run_sandbox_command(
+    command: str | Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    cleanup: Literal["destroy", "close"] = "destroy",
+) -> SandboxCommandResult:
+    """Execute one command through the active stack's sandbox component.
+
+    Args:
+        command: Shell command string or argv-style command list.
+        cwd: Optional working directory inside the sandbox.
+        env: Optional environment variables for the command. These values are
+            passed to the sandbox provider but are not included in the result.
+        max_chars: Maximum characters to collect from each output stream.
+        cleanup: Whether to destroy or close the fresh sandbox session after the
+            command completes.
+
+    Returns:
+        Structured command output and cleanup status.
+    """
+    return _config_sandbox.run_sandbox_command(
+        command,
+        cwd=cwd,
+        env=env,
+        max_chars=max_chars,
+        cleanup=cleanup,
+        client_factory=Client,
     )
 
 

@@ -70,6 +70,12 @@ class TestPublicExports:
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
+    def test_run_sandbox_command_exists(self) -> None:
+        assert hasattr(kitaru, "run_sandbox_command")
+
+    def test_sandbox_command_result_exists(self) -> None:
+        assert hasattr(kitaru, "SandboxCommandResult")
+
     def test_all_exports_match(self) -> None:
         expected = {
             "AuthAPIKey",
@@ -104,6 +110,7 @@ class TestPublicExports:
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
+            "SandboxCommandResult",
             "Secret",
             "SecretSummary",
             "StackInfo",
@@ -124,6 +131,7 @@ class TestPublicExports:
             "load",
             "log",
             "progress",
+            "run_sandbox_command",
             "save",
             "use_stack",
             "wait",
