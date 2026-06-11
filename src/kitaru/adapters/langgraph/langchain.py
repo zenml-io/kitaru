@@ -40,6 +40,7 @@ from ._policy import (
     resolve_model_checkpoint_config,
     resolve_tool_call_checkpoint_config,
 )
+from ._sandbox_tool import SandboxCommandToolArgs, create_sandbox_command_tool
 from ._serialization import redact_config, to_cache_identity, to_json_safe
 from ._tracking import (
     EventContext,
@@ -1090,4 +1091,8 @@ def _elapsed_ms(started_at: float) -> float:
     return round((time.perf_counter() - started_at) * 1000, 3)
 
 
-__all__ = ["KitaruLangGraphMiddleware"]
+__all__ = [
+    "KitaruLangGraphMiddleware",
+    "SandboxCommandToolArgs",
+    "create_sandbox_command_tool",
+]

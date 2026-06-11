@@ -2,15 +2,19 @@
 
 The `graph_call` strategy is local and needs no provider API key. The `calls`
 strategy uses a real OpenAI-backed LangChain agent with deterministic local
-Python tools so Kitaru can checkpoint actual model/tool handler calls.
+Python tools so Kitaru can checkpoint actual model/tool handler calls. The
+`sandbox` strategy uses the same calls-mode path with Kitaru's active-stack
+sandbox command tool.
 """
 
 import argparse
 import os
 import time
+from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -19,18 +23,28 @@ from typing_extensions import TypedDict
 import kitaru
 from kitaru import checkpoint, flow
 from kitaru.adapters.langgraph import (
+    DEFAULT_SANDBOX_COMMAND_TOOL_NAME,
     KitaruGraphRunner,
+    LangGraphCallCheckpointPolicy,
     LangGraphRunRequest,
     build_resume_request,
+    create_sandbox_command_tool,
 )
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
 
-Strategy = Literal["graph_call", "calls"]
+Strategy = Literal["graph_call", "calls", "sandbox"]
 THREAD_ID = "langgraph-local-demo-thread"
 SUMMARY_ARTIFACT = "summary__langgraph_demo"
 GRAPH_CALL_RUNNER_NAME = "langgraph_local_interrupt_demo"
 CALLS_RUNNER_NAME = "langgraph_local_calls_demo"
+SANDBOX_RUNNER_NAME = "langgraph_sandbox_command_demo"
+SANDBOX_COMMAND_TOOL_NAME = DEFAULT_SANDBOX_COMMAND_TOOL_NAME
 DEFAULT_LANGGRAPH_AGENT_MODEL = "gpt-5-nano"
+DEFAULT_SANDBOX_AGENT_MODEL = "gpt-4.1-nano"
+SANDBOX_DEMO_COMMAND = (
+    'python -c "import json, os, sys; '
+    "print(json.dumps({'cwd': os.getcwd(), 'python': sys.version.split()[0]}))\""
+)
 
 TICKETS: dict[str, dict[str, str]] = {
     "ticket-42": {
@@ -52,6 +66,48 @@ class ReviewState(TypedDict, total=False):
     ticket: str
     decision: dict[str, Any]
     status: str
+
+
+class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
+    """Force the demo model to call the sandbox command tool once."""
+
+    def wrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        if _message_history_has_tool_result(getattr(request, "messages", [])):
+            return handler(request)
+
+        forced_request = request.override(
+            tool_choice={
+                "type": "function",
+                "function": {"name": SANDBOX_COMMAND_TOOL_NAME},
+            }
+        )
+        return handler(forced_request)
+
+
+def _message_history_has_tool_result(messages: Any) -> bool:
+    """Return whether LangChain has already appended a tool result message."""
+    if messages is None:
+        return False
+    try:
+        message_iter = reversed(messages)
+    except TypeError:
+        message_iter = iter(messages)
+    for message in message_iter:
+        if isinstance(message, dict):
+            if message.get("role") == "tool" or message.get("type") == "tool":
+                return True
+            continue
+        if getattr(message, "type", None) == "tool":
+            return True
+        if getattr(message, "role", None) == "tool":
+            return True
+        if getattr(message, "tool_call_id", None) is not None:
+            return True
+    return False
 
 
 def build_interrupt_graph() -> Any:
@@ -118,8 +174,15 @@ def _langgraph_agent_model_name() -> str:
     return os.getenv("LANGGRAPH_AGENT_MODEL", DEFAULT_LANGGRAPH_AGENT_MODEL)
 
 
-def build_calls_agent(ticket: str) -> Any:
-    """Build an OpenAI-backed LangChain agent with local ticket tools."""
+def _sandbox_agent_model_name() -> str:
+    return os.getenv(
+        "LANGGRAPH_SANDBOX_AGENT_MODEL",
+        os.getenv("LANGGRAPH_AGENT_MODEL", DEFAULT_SANDBOX_AGENT_MODEL),
+    )
+
+
+def _openai_chat_model(model_name: str | None = None) -> Any:
+    """Build the OpenAI chat model used by provider-backed examples."""
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as error:
@@ -129,9 +192,13 @@ def build_calls_agent(ticket: str) -> Any:
             "  uv sync --extra local --extra langgraph-openai"
         ) from error
 
-    model = ChatOpenAI(model=_langgraph_agent_model_name())
+    return ChatOpenAI(model=model_name or _langgraph_agent_model_name())
+
+
+def build_calls_agent(ticket: str) -> Any:
+    """Build an OpenAI-backed LangChain agent with local ticket tools."""
     return create_agent(
-        model=model,
+        model=_openai_chat_model(),
         tools=[lookup_ticket, approve_ticket],
         middleware=[KitaruLangGraphMiddleware(graph_name=CALLS_RUNNER_NAME)],
         checkpointer=InMemorySaver(),
@@ -143,6 +210,27 @@ def build_calls_agent(ticket: str) -> Any:
             "If the ticket status is needs_escalation, call approve_ticket. "
             "In the final response, include the ticket id, status, approval result, "
             "and next step."
+        ),
+    )
+
+
+def build_sandbox_agent() -> Any:
+    """Build an OpenAI-backed LangChain agent with Kitaru's sandbox command tool."""
+    return create_agent(
+        model=_openai_chat_model(_sandbox_agent_model_name()),
+        tools=[create_sandbox_command_tool()],
+        middleware=[
+            ForceSandboxToolChoiceMiddleware(),
+            KitaruLangGraphMiddleware(graph_name=SANDBOX_RUNNER_NAME),
+        ],
+        checkpointer=InMemorySaver(),
+        name="openai_sandbox_agent",
+        system_prompt=(
+            "You are demonstrating Kitaru's LangChain sandbox command tool. "
+            f"Call {SANDBOX_COMMAND_TOOL_NAME} exactly once with the command "
+            "provided by the user. After the tool returns JSON, summarize the "
+            "stdout, stderr, "
+            "and exit code. Do not claim to manage Deep Agents files."
         ),
     )
 
@@ -166,8 +254,10 @@ def run_demo_flow(strategy: Strategy, ticket: str) -> None:
     """Run one LangGraph adapter demo and persist a readable summary artifact."""
     if strategy == "graph_call":
         summary = _run_graph_call_demo(ticket)
-    else:
+    elif strategy == "calls":
         summary = _run_calls_demo(ticket)
+    else:
+        summary = _run_sandbox_demo()
     _ = persist_summary(summary)
 
 
@@ -269,6 +359,64 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
     }
 
 
+def _run_sandbox_demo() -> dict[str, Any]:
+    """Run the LangChain sandbox command tool through calls-mode checkpointing."""
+    _require_openai_api_key()
+    model_name = _sandbox_agent_model_name()
+    runner = KitaruGraphRunner(
+        build_sandbox_agent(),
+        name=SANDBOX_RUNNER_NAME,
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(
+            model_checkpoint_config=False,
+        ),
+    )
+    result = runner.invoke(
+        LangGraphRunRequest.start(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Use {SANDBOX_COMMAND_TOOL_NAME} to run this exact "
+                            f"command: {SANDBOX_DEMO_COMMAND}"
+                        ),
+                    }
+                ]
+            },
+            thread_id=THREAD_ID,
+        )
+    )
+    if result.status != "completed":
+        raise RuntimeError(f"Expected completed status, got: {result.status}")
+
+    output = cast(dict[str, Any], result.output)
+    messages = _message_summaries(output.get("messages", []))
+    return {
+        "strategy": "sandbox",
+        "thread_id": THREAD_ID,
+        "model": model_name,
+        "status": result.status,
+        "sandbox_command": SANDBOX_DEMO_COMMAND,
+        "message_count": len(messages),
+        "messages": messages,
+        "final_message": messages[-1]["content"] if messages else None,
+        "latest_checkpoint_id": result.latest_checkpoint_id,
+        "event_artifact": result.event_log_artifact_name,
+        "run_summary_artifact": result.run_summary_artifact_name,
+        "kitaru_behavior": (
+            "The command ran through the active Kitaru stack sandbox via "
+            "run_sandbox_command, and calls mode checkpoints the synchronous "
+            "LangChain tool handler."
+        ),
+        "expected_kitaru_call_checkpoint_prefixes": [
+            f"tool_call__{SANDBOX_COMMAND_TOOL_NAME}_...",
+            "langgraph_summary__...",
+        ],
+        "deep_agents_boundary": "This is not a Deep Agents backend.",
+    }
+
+
 def _message_summaries(messages: Any) -> list[dict[str, Any]]:
     """Return JSON-safe summaries for LangChain message objects."""
     summaries: list[dict[str, Any]] = []
@@ -294,7 +442,7 @@ def run_workflow(
     ticket: str = "ticket-42",
 ) -> tuple[str, dict[str, Any]]:
     """Run the flow and load the saved summary artifact."""
-    if strategy == "calls":
+    if strategy in {"calls", "sandbox"}:
         _require_openai_api_key()
 
     handle = run_demo_flow.run(strategy, ticket)
@@ -317,11 +465,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--strategy",
-        choices=["graph_call", "calls"],
+        choices=["graph_call", "calls", "sandbox"],
         default="graph_call",
         help=(
             "graph_call runs the local interrupt/resume demo; calls runs a real "
-            "OpenAI-backed LangChain agent with local ticket tools and requires "
+            "OpenAI-backed LangChain agent with local ticket tools; sandbox runs "
+            "a real OpenAI-backed LangChain agent with Kitaru's active-stack "
+            "sandbox command tool. Provider-backed strategies require "
             "OPENAI_API_KEY."
         ),
     )

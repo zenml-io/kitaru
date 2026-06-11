@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added a LangGraph/LangChain sandbox command tool via `create_sandbox_command_tool(...)`, plus a sandbox strategy in the LangGraph example, so agents can run shell commands through the active Kitaru stack sandbox. (#420)
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
 
 ### Fixed

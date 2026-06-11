@@ -46,11 +46,19 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.LangGraphCapturePolicy
     assert langgraph_adapter.LangGraphDurabilityPolicy
     assert langgraph_adapter.LangGraphStreamPolicy
+    assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_NAME == "run_sandbox_command"
+    assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS == 20_000
+    assert langgraph_adapter.SandboxCommandToolArgs
+    assert langgraph_adapter.create_sandbox_command_tool
     assert langgraph_adapter.build_resume_request
     assert langgraph_adapter.wait_for_interrupt
 
     public_names = set(langgraph_adapter.__all__)
     assert "graph_call" not in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_NAME" in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS" in public_names
+    assert "SandboxCommandToolArgs" in public_names
+    assert "create_sandbox_command_tool" in public_names
 
     signature = inspect.signature(langgraph_adapter.KitaruGraphRunner)
     assert "checkpoint_strategy" in signature.parameters
