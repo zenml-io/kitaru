@@ -6,7 +6,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -26,13 +26,14 @@ from zenml.constants import (
 from zenml.utils.source_utils import set_custom_source_root
 
 _PROVIDER_HOST_SUFFIX_BY_NAME = {
-    "OpenAI": ("api.openai.com", "api.openai.azure.com"),
+    "OpenAI": ("api.openai.com",),
     "Anthropic": ("api.anthropic.com",),
     "Gemini/Google GenAI": (
         "generativelanguage.googleapis.com",
         "aiplatform.googleapis.com",
     ),
 }
+_AZURE_OPENAI_RESOURCE_SUFFIX = ".openai.azure.com"
 _LIVE_PROVIDER_MARKERS = (
     "live_openai",
     "live_anthropic",
@@ -213,34 +214,82 @@ def _skip_if_live_provider_keys_are_missing(item: pytest.Item) -> None:
     )
 
 
+def _validate_live_marker_contract(
+    items: Iterable[tuple[str, set[str]]],
+) -> list[str]:
+    """Return marker-contract errors for collected pytest items."""
+    missing_live_llm: list[str] = []
+    missing_provider_marker: list[str] = []
+    for nodeid, marker_names in items:
+        provider_markers = [
+            marker_name
+            for marker_name in _LIVE_PROVIDER_MARKERS
+            if marker_name in marker_names
+        ]
+        has_live_llm = "live_llm" in marker_names
+        if provider_markers and not has_live_llm:
+            missing_live_llm.append(f"{nodeid} ({', '.join(provider_markers)})")
+        if has_live_llm and not provider_markers:
+            missing_provider_marker.append(nodeid)
+
+    errors: list[str] = []
+    if missing_live_llm:
+        formatted = "\n".join(f"- {nodeid}" for nodeid in missing_live_llm)
+        errors.append(
+            "Provider-specific live tests must also be marked with "
+            f"@pytest.mark.live_llm:\n{formatted}"
+        )
+    if missing_provider_marker:
+        formatted = "\n".join(f"- {nodeid}" for nodeid in missing_provider_marker)
+        provider_markers = ", ".join(
+            f"@pytest.mark.{name}" for name in _LIVE_PROVIDER_MARKERS
+        )
+        errors.append(
+            "Tests marked with @pytest.mark.live_llm must also declare at least "
+            f"one provider marker ({provider_markers}). If a future live test is "
+            "not provider-specific, deliberately extend the live marker contract "
+            f"in tests/conftest.py first:\n{formatted}"
+        )
+    return errors
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Require the umbrella live marker on every provider-specific live test."""
+    """Require live tests to carry umbrella and provider-specific markers."""
     del config
-    missing_live_llm: list[str] = []
-    for item in items:
-        provider_markers = [
-            marker_name
-            for marker_name in _LIVE_PROVIDER_MARKERS
-            if item.get_closest_marker(marker_name) is not None
-        ]
-        if provider_markers and item.get_closest_marker("live_llm") is None:
-            missing_live_llm.append(f"{item.nodeid} ({', '.join(provider_markers)})")
-
-    if missing_live_llm:
-        formatted = "\n".join(f"- {nodeid}" for nodeid in missing_live_llm)
-        raise pytest.UsageError(
-            "Provider-specific live tests must also be marked with "
-            f"@pytest.mark.live_llm:\n{formatted}"
+    marker_items = [
+        (
+            item.nodeid,
+            {
+                marker_name
+                for marker_name in ("live_llm", *_LIVE_PROVIDER_MARKERS)
+                if item.get_closest_marker(marker_name) is not None
+            },
         )
+        for item in items
+    ]
+    errors = _validate_live_marker_contract(marker_items)
+    if errors:
+        raise pytest.UsageError("\n\n".join(errors))
+
+
+def _is_azure_openai_host(normalized: str) -> bool:
+    if normalized == "api.openai.azure.com":
+        return True
+    if not normalized.endswith(_AZURE_OPENAI_RESOURCE_SUFFIX):
+        return False
+    resource_name = normalized[: -len(_AZURE_OPENAI_RESOURCE_SUFFIX)]
+    return bool(resource_name) and "." not in resource_name
 
 
 def _provider_name_for_host(host: str | None) -> str | None:
     if not host:
         return None
     normalized = host.lower().rstrip(".")
+    if _is_azure_openai_host(normalized):
+        return "OpenAI"
     if normalized.endswith("-aiplatform.googleapis.com"):
         return "Gemini/Google GenAI"
     for provider_name, suffixes in _PROVIDER_HOST_SUFFIX_BY_NAME.items():

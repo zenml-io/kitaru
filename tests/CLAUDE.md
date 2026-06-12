@@ -69,7 +69,7 @@ These files import and run real example flows from the `examples/` directory. Th
 
 ### Live provider tests (`tests/live/`)
 
-Live provider tests must be marked with `live_llm` plus `live_openai`, `live_anthropic`, or `live_gemini`. The shared guard skips provider-specific live tests when their required key is missing, and default pytest deselects them. Keep prompts short, set max-turns or equivalent limits, and add `provider_extended` for slower or higher-cost checks.
+Live provider tests must be marked with `live_llm` plus `live_openai`, `live_anthropic`, or `live_gemini`. `live_llm` by itself is invalid because it bypasses the deterministic provider-call guard but is not selected by provider workflows. The shared guard skips provider-specific live tests when their required key is missing, and default pytest deselects them. Keep prompts short, set max-turns or equivalent limits, and add `provider_extended` for slower or higher-cost checks.
 
 ### MCP tests (`tests/mcp/`)
 

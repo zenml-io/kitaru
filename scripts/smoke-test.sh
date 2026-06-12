@@ -339,7 +339,7 @@ write_json_results() {
     python3 - "$RESULT_RECORDS_FILE" "$JSON_OUT" \
         "$RELEASE_MODE" "$branch" "$sha" "$TIMEOUT_CMD" \
         "$HAS_OPENAI" "$HAS_CLAUDE_AGENT_SDK" "$HAS_GEMINI_API_KEY" \
-        "$HAS_GEMINI_VERTEX" "$HAS_GEMINI" \
+        "$HAS_GEMINI_VERTEX" "$HAS_GEMINI" "$RECORDING_FAILED" \
         "${REQUIRED_PROVIDER_AREAS[*]-}" <<'PY'
 import json
 import sys
@@ -356,6 +356,7 @@ import sys
     has_gemini_api_key,
     has_gemini_vertex,
     has_gemini,
+    recording_failed,
     required_provider_areas,
 ) = sys.argv[1:]
 
@@ -365,6 +366,20 @@ try:
         records = [json.loads(line) for line in handle if line.strip()]
 except FileNotFoundError:
     records = []
+
+if recording_failed == "true":
+    records.append(
+        {
+            "label": "structured result recording",
+            "status": "failed",
+            "section": "Smoke result integrity",
+            "reason": "one or more checks could not be written to structured result records",
+            "provider_area": "none",
+            "required_env": [],
+            "release_relevant": False,
+            "duration_seconds": 0,
+        }
+    )
 
 counts = {
     "passed": sum(1 for record in records if record["status"] == "passed"),

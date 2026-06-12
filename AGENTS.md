@@ -71,7 +71,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `just audit`: audit Python dependencies with `pip-audit` and the documented ignore list
 - `just links`: check markdown links offline (requires `lychee`: `brew install lychee`)
 - `just links-external`: check links including external URLs (slow)
-- `just example-coverage-audit`: validate `examples/example-coverage.yaml` against the public example docs and referenced tests/smoke/provider metadata. Audit-only: it does not run examples or call providers.
+- `just example-coverage-audit`: validate `examples/example-coverage.yaml` against public example docs, referenced tests/smoke/provider metadata, and explicit waivers for `missing`, `planned`, or `manual_only` coverage. Audit-only: it does not run examples or call providers, so a pass means the metadata is honest and internally consistent, not that every example executed.
 - `just build`: build wheel and sdist locally
 
 ### Docs workflows
@@ -154,7 +154,7 @@ Every PR description should include a "Reviewer Notes" H2 or H3 section. Treat t
 When adding a new CLI command, MCP tool, or SDK feature:
 
 - **Smoke test**: add a non-destructive invocation to `scripts/smoke-test.sh` (e.g. `kitaru <command> --dry-run` or `kitaru <command> --help`). The smoke test runs before every release, so new features should be exercised there to catch regressions.
-- **Example coverage manifest**: when adding, removing, renaming, or publicly documenting an example under `examples/`, update `examples/example-coverage.yaml` and run `just example-coverage-audit`. The manifest records coverage status only; it is not an example runner.
+- **Example coverage manifest**: when adding, removing, renaming, or publicly documenting an example under `examples/`, update `examples/example-coverage.yaml` and run `just example-coverage-audit`. The manifest records coverage status and required waivers only; it is not an example runner, so manual-only or missing coverage remains a release-review item.
 - **Analytics**: check whether the feature needs a tracking event. Add the event to `AnalyticsEvent` in `src/kitaru/analytics.py` and wire it into the appropriate surface (CLI handler via `track()`, MCP tool via `@tracked_mcp_tool`, or SDK lifecycle point). If the CLI command is multi-word (e.g. `clean project`), add it to `_MULTI_TOKEN_COMMANDS` in `cli.py`.
 
 ## CI/CD
@@ -172,7 +172,7 @@ Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generat
 ### Other workflows
 
 - `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release). Do not add live provider calls here; provider validation happens before release dispatch.
-- `llm-integration.yml`: trusted weekly/manual live OpenAI/Anthropic provider checks. It has only `schedule` and `workflow_dispatch` triggers, runs paid tests outside PR CI, can target an exact ref/SHA, uploads logs/results only, and sends a compact Discord failure alert via `DISCORD_WEBHOOK_SRE`.
+- `llm-integration.yml`: trusted weekly/manual live OpenAI/Anthropic provider checks. It has only `schedule` and `workflow_dispatch` triggers, runs paid tests outside PR CI, can target an exact ref/SHA, uploads logs/results only, and sends a compact Discord failure alert via `DISCORD_WEBHOOK_SRE`. Its secret-bearing jobs use the GitHub Environment `live-provider-tests`; configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as Environment secrets there, with `kitaru-admins` approval/restrictions.
 - `spellcheck.yml`: separate typo/spell checking on `develop` pushes and non-draft PRs
 - `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP files in same-repo non-draft PRs
 - `zizmor.yml`: GitHub Actions security analysis for workflow/dependabot changes, plus weekly and manual runs

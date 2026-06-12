@@ -55,6 +55,8 @@ jobs:
     name: Run selected live provider checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment:
+      name: live-provider-tests
     outputs:
       fail_count: ${{ steps.summarize.outputs.fail_count }}
       failed_checks: ${{ steps.summarize.outputs.failed_checks }}
@@ -302,21 +304,55 @@ jobs:
         run: |
           set +euo pipefail
           log_path="../llm-integration-results/logs/pytest.log"
-          uv run pytest tests/live -m "$MARKER_EXPR" --tb=short --durations=10 2>&1 | tee "$log_path"
+          junit_path="../llm-integration-results/pytest.junit.xml"
+          counts_path="../llm-integration-results/pytest.counts.env"
+          uv run pytest tests/live -m "$MARKER_EXPR" --tb=short --durations=10 \
+            --junitxml="$junit_path" 2>&1 | tee "$log_path"
           status=${PIPESTATUS[0]}
           set -euo pipefail
+          parse_failed=false
+          python - "$junit_path" "$counts_path" <<'PY' || parse_failed=true
+          import sys
+          import xml.etree.ElementTree as ET
+          junit_path, counts_path = sys.argv[1:]
+          root = ET.parse(junit_path).getroot()
+          cases = root.findall(".//testcase")
+          skipped = sum(1 for case in cases if case.find("skipped") is not None)
+          failed = sum(1 for case in cases if case.find("failure") is not None)
+          errors = sum(1 for case in cases if case.find("error") is not None)
+          total = len(cases)
+          passed = total - skipped - failed - errors
+          with open(counts_path, "w", encoding="utf-8") as handle:
+              handle.write(f"total={total}\n")
+              handle.write(f"passed={passed}\n")
+              handle.write(f"skipped={skipped}\n")
+              handle.write(f"failed={failed}\n")
+              handle.write(f"errors={errors}\n")
+          PY
+          if [ "$parse_failed" = "true" ]; then
+            echo "status=failed" > ../llm-integration-results/pytest.status
+            echo "Live pytest checks did not produce parseable JUnit XML." > ../llm-integration-results/pytest.failure
+            exit 0
+          fi
+          total=$(grep '^total=' "$counts_path" | cut -d= -f2)
+          passed=$(grep '^passed=' "$counts_path" | cut -d= -f2)
+          skipped=$(grep '^skipped=' "$counts_path" | cut -d= -f2)
+          failed=$(grep '^failed=' "$counts_path" | cut -d= -f2)
+          errors=$(grep '^errors=' "$counts_path" | cut -d= -f2)
           if [ "$status" -eq 5 ]; then
             echo "No pytest tests were selected for marker expression: $MARKER_EXPR" | tee -a "$log_path"
             echo "status=no-tests" > ../llm-integration-results/pytest.status
-            if [ "$SUITE" = "provider-extended" ] && [ "$INCLUDE_RESEARCH_BOT" = "true" ]; then
-              exit 0
-            fi
             echo "No live pytest tests selected for $SUITE." > ../llm-integration-results/pytest.failure
             exit 0
           fi
           if [ "$status" -ne 0 ]; then
             echo "status=failed" > ../llm-integration-results/pytest.status
             echo "Live pytest checks failed for marker expression: $MARKER_EXPR" > ../llm-integration-results/pytest.failure
+            exit 0
+          fi
+          if [ "$total" -eq 0 ] || [ "$passed" -eq 0 ]; then
+            echo "status=failed" > ../llm-integration-results/pytest.status
+            echo "Selected live pytest checks produced no passing tests: total=$total passed=$passed skipped=$skipped failed=$failed errors=$errors." > ../llm-integration-results/pytest.failure
             exit 0
           fi
           echo "status=passed" > ../llm-integration-results/pytest.status
@@ -400,12 +436,16 @@ jobs:
           fi
           secret_status="not-run"
           pytest_status="not-run"
+          pytest_counts="not-available"
           research_status="not-run"
           if [ -f "$results_dir/secret-preflight.status" ]; then
             secret_status=$(cut -d= -f2 "$results_dir/secret-preflight.status")
           fi
           if [ -f "$results_dir/pytest.status" ]; then
             pytest_status=$(cut -d= -f2 "$results_dir/pytest.status")
+          fi
+          if [ -f "$results_dir/pytest.counts.env" ]; then
+            pytest_counts=$(tr '\n' ' ' < "$results_dir/pytest.counts.env" | sed 's/[[:space:]]*$//')
           fi
           if [ -f "$results_dir/research-bot.status" ]; then
             research_status=$(cut -d= -f2 "$results_dir/research-bot.status")
@@ -422,6 +462,7 @@ jobs:
             echo "| Pytest marker | \`$MARKER_EXPR\` |"
             echo "| Secret preflight status | \`$secret_status\` |"
             echo "| Live pytest status | \`$pytest_status\` |"
+            echo "| Live pytest counts | \`$pytest_counts\` |"
             echo "| Research bot status | \`$research_status\` |"
             echo "| Failures | \`$fail_count\` |"
             echo
@@ -470,6 +511,8 @@ jobs:
     if: ${{ failure() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment:
+      name: live-provider-tests
     steps:
       - name: Download live-provider results
         continue-on-error: true

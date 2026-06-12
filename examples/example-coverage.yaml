@@ -3,7 +3,9 @@
 #
 # This file is not a runner. It records which public examples are documented,
 # which deterministic tests or smoke checks exercise them, and which provider
-# checks remain manual or opt-in.
+# checks remain manual or opt-in. Passing the audit means this metadata is
+# internally consistent and incomplete coverage has explicit waivers; it does
+# not mean every example ran.
 schema_version: 1
 schema:
   statuses:
@@ -26,6 +28,9 @@ schema:
     live_provider: Real provider coverage metadata for release/operator checks.
       weekly_workflow, local_release_smoke, and manual_command_available distinguish
       scheduled automation from local/manual command availability.
+    waiver: Required for missing, planned, and manual_only coverage statuses;
+      reason explains why automation is incomplete, and reviewer_action tells
+      a release reviewer what to do if that example changed.
     release_policy: Whether changes in this area should prompt release evidence.
 explicit_exclusions: []
 examples:
@@ -505,6 +510,9 @@ examples:
         timeout_seconds: 30
       live_provider:
         status: manual_only
+        waiver:
+          reason: The coding agent is an interactive OpenAI loop with human approval, so it is not safe as an unattended release check.
+          reviewer_action: If this example changes, run the documented command manually with OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/coding_agent && uv run python agent.py "Your
           task"
@@ -531,8 +539,14 @@ examples:
         status: missing
         command:
         requires_server: false
+        waiver:
+          reason: No non-interactive local smoke command exists for the full news scout flow yet.
+          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
+        waiver:
+          reason: The news scout makes real provider and external-news calls, so it stays manual until a bounded release command exists.
+          reviewer_action: If this example changes, run the manual command with ANTHROPIC_API_KEY or record a release waiver.
         provider: anthropic
         command: cd examples/end_to_end/news_scout && uv run python scout.py
         command_paths: [examples/end_to_end/news_scout/scout.py]
@@ -556,12 +570,18 @@ examples:
         notes: stage 1, stage 2, and stage 4 have fake Claude SDK tests
       local_smoke:
         status: planned
+        waiver:
+          reason: The current command is only a help-level placeholder until a safe local smoke path is added.
+          reviewer_action: If this example changes, run the deterministic compliance tests and decide whether a release waiver is needed.
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
           --help
         requires_server: false
         timeout_seconds: 30
       live_provider:
         status: manual_only
+        waiver:
+          reason: The full compliance review is a multi-stage Anthropic run and is too costly for unattended release smoke today.
+          reviewer_action: If this example changes, run the manual stage command with ANTHROPIC_API_KEY or record a release waiver.
         provider: anthropic
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
         weekly_workflow: false
@@ -588,8 +608,14 @@ examples:
         status: missing
         command:
         requires_server: false
+        waiver:
+          reason: No non-interactive local smoke command exists for the staged agent harness platform yet.
+          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
+        waiver:
+          reason: The staged platform starter kit can make real OpenAI calls and is still reviewed manually.
+          reviewer_action: If this example changes, run the manual stage command with OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/agent_harness_platform && uv run python stage_1_basic_agent.py
         command_paths: [examples/end_to_end/agent_harness_platform/stage_1_basic_agent.py]

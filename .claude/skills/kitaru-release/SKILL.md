@@ -120,6 +120,8 @@ For each changed behavior, record four facts in your release notes to the user b
 3. **Live/provider check:** the provider run required, if any.
 4. **Manual verification / waiver:** what a human must check if neither pytest nor smoke executes it.
 
+Run `just example-coverage-audit` when example coverage is part of the release evidence. It validates paths, metadata, and explicit waivers for `missing`, `planned`, or `manual_only` entries. It does not run examples or providers, so a green audit means the manifest is honest, not that every example executed.
+
 Translate changed provider behavior into smoke flags. Use this vocabulary only:
 
 | Changed behavior | Smoke flag |
@@ -338,6 +340,8 @@ cat /tmp/kitaru-llm-integration/llm-integration.summary.md
 ```
 
 The summary must show the release ref or SHA you are about to release. The workflow run's own `headSha` is the trusted workflow ref, not necessarily the Kitaru ref under test, so do not rely on `headSha` alone. Use the artifact line `Tested SHA` as the identity anchor.
+
+The live-provider workflow uses the GitHub Environment `live-provider-tests`. Configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as secrets on that Environment, with `kitaru-admins` approval/restrictions. If the Environment has required reviewers, the live test job and Discord notification job can wait for approval before secrets are available.
 
 If exact-ref evidence is needed and missing, trigger it manually from trusted workflow code while testing the release ref/SHA:
 

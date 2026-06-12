@@ -35,6 +35,7 @@ PROVIDER_STATUSES_REQUIRING_METADATA = {
     "opt_in_extended",
     "manual_only",
 }
+STATUSES_REQUIRING_WAIVER = {"missing", "planned", "manual_only"}
 ALLOWED_COST_CLASSES = {"none", "low", "medium", "high"}
 EXAMPLE_PATH_RE = re.compile(
     r"(?:https://github\.com/zenml-io/kitaru/(?:tree|blob)/develop/)?"
@@ -167,6 +168,8 @@ def _audit_coverage(entry: dict[str, Any], context: str) -> list[str]:
                 f"{context}: coverage.{section_name}.status must be one of "
                 f"{sorted(ALLOWED_STATUSES)}; got {status!r}"
             )
+        else:
+            errors.extend(_audit_waiver(section, context, f"coverage.{section_name}"))
 
     deterministic = coverage.get("deterministic_pytest", {})
     if isinstance(deterministic, dict):
@@ -181,6 +184,29 @@ def _audit_coverage(entry: dict[str, Any], context: str) -> list[str]:
         errors.extend(_audit_live_provider(live_provider, context))
         errors.extend(_audit_command(live_provider, context, "coverage.live_provider"))
 
+    return errors
+
+
+def _audit_waiver(section: dict[str, Any], context: str, field_name: str) -> list[str]:
+    status = section.get("status")
+    if status not in STATUSES_REQUIRING_WAIVER:
+        return []
+
+    waiver = section.get("waiver")
+    if not isinstance(waiver, dict):
+        return [
+            f"{context}: {field_name} with status {status!r} must include "
+            "waiver.reason and waiver.reviewer_action"
+        ]
+
+    errors: list[str] = []
+    for key in ("reason", "reviewer_action"):
+        value = waiver.get(key)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(
+                f"{context}: {field_name} with status {status!r} must include "
+                f"waiver.{key}"
+            )
     return errors
 
 

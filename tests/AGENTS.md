@@ -9,7 +9,7 @@ The test suite mixes a few different layers of coverage:
 - `tests/test_*.py`: unit, contract, and integration tests for the Python SDK and CLI
 - `tests/test_phase*.py`: example-driven end-to-end tests that exercise the runnable flows in `examples/`
 - `tests/mcp/test_*.py`: MCP-specific tests for the optional `kitaru[mcp]` surface
-- `tests/live/test_*.py`: paid/external provider checks, always marked `live_llm` and excluded from default pytest runs
+- `tests/live/test_*.py`: paid/external provider checks, always marked `live_llm` plus a provider-specific marker and excluded from default pytest runs
 - `tests/conftest.py`: the shared isolation harness for Kitaru + ZenML state and provider-call guard
 - `tests/mcp/conftest.py`: MCP-only fixtures and sample objects
 
@@ -116,7 +116,7 @@ Live provider tests live under `tests/live/` and are off by default. They are fo
 
 Rules:
 
-- mark every live provider test with `@pytest.mark.live_llm` plus the provider marker: `live_openai`, `live_anthropic`, or `live_gemini`
+- mark every live provider test with `@pytest.mark.live_llm` plus the provider marker: `live_openai`, `live_anthropic`, or `live_gemini`; `live_llm` by itself is invalid because it bypasses the deterministic provider-call guard but is not selected by provider workflows
 - put slower or higher-cost checks under `@pytest.mark.provider_extended` as well
 - skip cleanly when the required key is absent; the shared guard already skips `live_openai` without `OPENAI_API_KEY`, `live_anthropic` without `ANTHROPIC_API_KEY`, and `live_gemini` without `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - keep prompts tiny and bounded; set max-turns or equivalent limits explicitly
