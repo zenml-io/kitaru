@@ -25,20 +25,14 @@ _EXAMPLE_MODULES = {
 }
 
 
-def _module_lives_in_coding_agent_example(module: ModuleType) -> bool:
-    module_file = getattr(module, "__file__", None)
-    if not module_file:
-        return False
-    return Path(module_file).resolve().is_relative_to(_EXAMPLE_DIR)
-
-
 def _purge_coding_agent_modules(monkeypatch: Any) -> None:
-    for module_name in list(sys.modules):
-        module = sys.modules[module_name]
-        if module_name in _EXAMPLE_MODULES and _module_lives_in_coding_agent_example(
-            module
-        ):
-            monkeypatch.delitem(sys.modules, module_name, raising=False)
+    # Evict any cached module with these names regardless of which file it
+    # came from: other example tests (e.g. news_scout) import their own
+    # top-level `models`/`tools` modules, and a stale foreign entry in
+    # sys.modules would shadow the coding-agent module on the same worker.
+    # monkeypatch restores the evicted entries at teardown.
+    for module_name in _EXAMPLE_MODULES:
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
 
 
 def _import_coding_agent_module(
