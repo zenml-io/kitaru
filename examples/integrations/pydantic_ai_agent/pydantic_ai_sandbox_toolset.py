@@ -11,8 +11,8 @@ Prerequisites:
     export OPENAI_API_KEY=sk-...
 
 Your active stack must have exactly one sandbox component. The default local
-Kitaru stack includes one when the installed ZenML version supports sandbox
-components.
+Kitaru stack includes one when your installed Kitaru local runtime supports
+sandbox components.
 
 Run:
     uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
