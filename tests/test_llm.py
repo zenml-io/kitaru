@@ -626,6 +626,34 @@ def test_openrouter_uses_api_key_from_secret_overlay(
     assert mock_call.call_args.kwargs["api_key"] == "secret-or-key"
 
 
+def test_llm_redacts_openrouter_key_through_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenRouter failures should redact keys after provider dispatch."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    secret = "or-test-dispatch-secret"
+    provider_exc = RuntimeError(f"OpenRouter rejected API key {secret}")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = provider_exc
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openrouter/openai/gpt-4o"),
+            credential_overlay=({"OPENROUTER_API_KEY": secret}, "secret"),
+        ),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        llm("hello", model="openrouter/openai/gpt-4o", name="test")
+
+    message = str(raised.value)
+    assert "openrouter" in message
+    assert "[redacted]" in message
+    assert secret not in message
+    assert raised.value.__cause__ is provider_exc
+
+
 # ---------------------------------------------------------------------------
 # Credential resolution for new providers
 # ---------------------------------------------------------------------------
@@ -1211,6 +1239,32 @@ def test_call_openai_redacts_overlay_secrets_from_provider_errors() -> None:
     assert secret not in message
 
 
+def test_call_openai_redacts_client_construction_errors() -> None:
+    """OpenAI client construction errors should use the same redaction path."""
+    from kitaru.llm import _call_openai
+
+    secret = "sk-test-client-construction"
+    provider_exc = RuntimeError(f"Client rejected API key {secret}")
+    mock_openai_cls = MagicMock(side_effect=provider_exc)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"OPENAI_API_KEY": secret},
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+    assert raised.value.__cause__ is provider_exc
+
+
 def test_call_openai_redacts_process_env_secret_from_provider_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1303,6 +1357,34 @@ def test_call_anthropic_redacts_overlay_secrets_from_provider_errors() -> None:
     assert secret not in message
 
 
+def test_call_anthropic_redacts_client_construction_errors() -> None:
+    """Anthropic client construction errors should use the same redaction path."""
+    from kitaru.llm import _call_anthropic
+
+    secret = "sk-test-anthropic-client"
+    provider_exc = RuntimeError(f"Client rejected API key {secret}")
+    mock_anthropic_cls = MagicMock(side_effect=provider_exc)
+
+    with (
+        patch.dict(
+            "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+        ),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"ANTHROPIC_API_KEY": secret},
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+    assert raised.value.__cause__ is provider_exc
+
+
 def test_call_openai_leaves_non_secret_provider_error_text_unchanged() -> None:
     """Provider error text without known credentials should pass through."""
     from kitaru.llm import _call_openai
@@ -1359,6 +1441,37 @@ def test_redact_provider_error_text_handles_empty_and_ambient_secrets(
     )
 
 
+def test_redact_provider_error_text_skips_unrelated_and_short_values() -> None:
+    """Benign overlay values should not erase useful provider diagnostics."""
+    from kitaru.llm import _redact_provider_error_text
+
+    assert (
+        _redact_provider_error_text(
+            "provider project alpha failed with key sk",
+            env_overlay={"PROJECT_NAME": "alpha", "OPENAI_API_KEY": "sk"},
+        )
+        == "provider project alpha failed with key sk"
+    )
+
+
+def test_redact_provider_error_text_handles_overlapping_secrets() -> None:
+    """Longer credential values should be redacted before shorter prefixes."""
+    from kitaru.llm import _redact_provider_error_text
+
+    message = "primary sk-test12345 fallback sk-test1"
+
+    assert (
+        _redact_provider_error_text(
+            message,
+            env_overlay={
+                "OPENAI_API_KEY": "sk-test12345",
+                "BACKUP_API_KEY": "sk-test1",
+            },
+        )
+        == "primary [redacted] fallback [redacted]"
+    )
+
+
 def test_call_openai_redacts_message_but_preserves_original_cause() -> None:
     """Kitaru messages are redacted while exception chaining stays intact."""
     from kitaru.llm import _call_openai
@@ -1384,6 +1497,8 @@ def test_call_openai_redacts_message_but_preserves_original_cause() -> None:
     assert secret not in str(raised.value)
     assert "[redacted]" in str(raised.value)
     assert raised.value.__cause__ is provider_exc
+    # Kitaru redacts its own message, but preserves the provider exception for
+    # debug tracebacks; the original cause may still contain raw provider text.
     assert secret in str(raised.value.__cause__)
 
 
