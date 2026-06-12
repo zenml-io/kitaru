@@ -286,6 +286,39 @@ def _normalize_messages(
 # ---------------------------------------------------------------------------
 
 
+def _redact_provider_error_text(
+    text: str,
+    *,
+    env_overlay: Mapping[str, str],
+    env_names: Sequence[str] = (),
+    extra_secrets: Sequence[str | None] = (),
+) -> str:
+    """Strip known credential values from provider SDK error text.
+
+    Provider SDK exceptions can echo request credentials, so any value Kitaru
+    supplied to the call is replaced before the text reaches a Kitaru error
+    message.
+    """
+    secrets: list[str] = [value for value in env_overlay.values() if value]
+    for candidate in extra_secrets:
+        if candidate and candidate != _OLLAMA_DUMMY_API_KEY:
+            secrets.append(candidate)
+    # Ambient env values for provider credential names also count as values this
+    # process supplied to the provider SDK.
+    for name in set(env_overlay) | set(env_names):
+        ambient = os.environ.get(name)
+        if ambient:
+            secrets.append(ambient)
+
+    unique_secrets: list[str] = sorted(
+        set(secrets), key=lambda secret: len(secret), reverse=True
+    )
+    redacted = text
+    for secret in unique_secrets:
+        redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
 def _call_openai(
     *,
     model: str,
@@ -327,9 +360,15 @@ def _call_openai(
         try:
             response = client.chat.completions.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS.get(provider_label, ()),
+                extra_secrets=(api_key,),
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling {provider_label} for "
-                f"model `{provider_label}/{model}`: {exc}"
+                f"model `{provider_label}/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(
@@ -389,9 +428,14 @@ def _call_anthropic(
         try:
             response = client.messages.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS["anthropic"],
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling Anthropic for model "
-                f"`anthropic/{model}`: {exc}"
+                f"`anthropic/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(

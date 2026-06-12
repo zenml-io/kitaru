@@ -16,6 +16,7 @@ from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection, register_model_alias
 from kitaru.errors import (
+    KitaruBackendError,
     KitaruContextError,
     KitaruRuntimeError,
     KitaruUsageError,
@@ -1180,6 +1181,210 @@ def test_resolve_credential_overlay_errors_without_known_credentials(
 # ---------------------------------------------------------------------------
 # Direct provider SDK integration (verifies correct SDK invocation)
 # ---------------------------------------------------------------------------
+
+
+def test_call_openai_redacts_overlay_secrets_from_provider_errors() -> None:
+    """OpenAI provider errors should not leak env-overlay credentials."""
+    from kitaru.llm import _call_openai
+
+    secret = "sk-test-overlay-value"
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError(
+        f"Incorrect API key provided: {secret}"
+    )
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"OPENAI_API_KEY": secret},
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+
+
+def test_call_openai_redacts_process_env_secret_from_provider_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider errors should redact credentials read from os.environ."""
+    from kitaru.llm import _call_openai
+
+    secret = "sk-test-process-env-value"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError(
+        f"Incorrect API key provided: {secret}"
+    )
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+
+
+def test_call_openai_redacts_explicit_api_key_from_provider_errors() -> None:
+    """OpenAI-compatible provider errors should not leak explicit API keys."""
+    from kitaru.llm import _call_openai
+
+    secret = "sk-test-explicit-value"
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError(
+        f"Incorrect API key provided: {secret}"
+    )
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="openai/gpt-4o",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+            base_url="https://openrouter.ai/api/v1",
+            api_key=secret,
+            provider_label="openrouter",
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+
+
+def test_call_anthropic_redacts_overlay_secrets_from_provider_errors() -> None:
+    """Anthropic provider errors should not leak env-overlay credentials."""
+    from kitaru.llm import _call_anthropic
+
+    secret = "sk-test-anthropic-overlay"
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = RuntimeError(
+        f"Authentication failed for key {secret}"
+    )
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict(
+            "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+        ),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"ANTHROPIC_API_KEY": secret},
+        )
+
+    message = str(raised.value)
+    assert "[redacted]" in message
+    assert secret not in message
+
+
+def test_call_openai_leaves_non_secret_provider_error_text_unchanged() -> None:
+    """Provider error text without known credentials should pass through."""
+    from kitaru.llm import _call_openai
+
+    provider_error = "provider timeout without credential details"
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError(provider_error)
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+        )
+
+    message = str(raised.value)
+    assert provider_error in message
+    assert "[redacted]" not in message
+
+
+def test_redact_provider_error_text_handles_empty_and_ambient_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The helper should be a no-op unless Kitaru knows the credential value."""
+    from kitaru.llm import _redact_provider_error_text
+
+    assert (
+        _redact_provider_error_text(
+            "provider timeout", env_overlay={}, extra_secrets=()
+        )
+        == "provider timeout"
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-ambient-value")
+
+    assert (
+        _redact_provider_error_text(
+            "Incorrect API key provided: sk-test-ambient-value",
+            env_overlay={"OPENAI_API_KEY": ""},
+        )
+        == "Incorrect API key provided: [redacted]"
+    )
+    assert (
+        _redact_provider_error_text(
+            "ollama server unavailable", env_overlay={}, extra_secrets=("ollama",)
+        )
+        == "ollama server unavailable"
+    )
+
+
+def test_call_openai_redacts_message_but_preserves_original_cause() -> None:
+    """Kitaru messages are redacted while exception chaining stays intact."""
+    from kitaru.llm import _call_openai
+
+    secret = "sk-test-cause-value"
+    provider_exc = RuntimeError(f"Incorrect API key provided: {secret}")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = provider_exc
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError) as raised,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"OPENAI_API_KEY": secret},
+        )
+
+    assert secret not in str(raised.value)
+    assert "[redacted]" in str(raised.value)
+    assert raised.value.__cause__ is provider_exc
+    assert secret in str(raised.value.__cause__)
 
 
 def test_call_openai_passes_correct_parameters() -> None:
