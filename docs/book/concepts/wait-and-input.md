@@ -65,11 +65,11 @@ materialize checkpoint outputs in orchestration code.
 `@flow` function body, before or after checkpoint calls, not inside a
 `@checkpoint` function.
 
-A wait pauses the whole run. Kitaru records each checkpoint call as a step. If
-`wait()` pauses from inside that step, the flow can stop before the checkpoint
-has completed cleanly. That can leave the run in a confusing state where the
-flow is waiting but the checkpoint step appears failed. To avoid that state,
-Kitaru raises this error immediately:
+A wait pauses the whole run. If `wait()` pauses from inside a checkpoint, the
+run can stop before that checkpoint call has completed cleanly. That can leave
+things in a confusing state where the run is waiting for input, but the
+checkpoint call is marked failed. To avoid that state, Kitaru raises this error
+immediately:
 
 ```text
 wait() cannot run inside a @checkpoint. Move the wait to flow scope, before or after checkpoint calls.
