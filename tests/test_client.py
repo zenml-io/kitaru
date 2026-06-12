@@ -11,7 +11,7 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -3569,6 +3569,35 @@ def test_retry_rejects_non_failed_execution() -> None:
             client.executions.retry(str(run.id))
 
 
+def test_retry_rejects_missing_snapshot_stack_id_before_reopening() -> None:
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace()),
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(failed)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruRuntimeError, match="snapshot stack id is missing"):
+            client.executions.retry(str(run_id))
+
+    client_mock.zen_store.update_run.assert_not_called()
+    client_mock.activate_stack.assert_not_called()
+    track_mock.assert_not_called()
+
+
 def test_retry_rolls_back_when_stack_activation_fails_after_reopening() -> None:
     run_id = uuid4()
     snapshot_stack_id = uuid4()
@@ -3606,6 +3635,65 @@ def test_retry_rolls_back_when_stack_activation_fails_after_reopening() -> None:
         with pytest.raises(KitaruBackendError, match="stack unavailable"):
             client.executions.retry(str(run_id))
 
+    assert client_mock.zen_store.update_run.call_count == 2
+    _assert_run_update(
+        client_mock.zen_store.update_run.call_args_list[0],
+        run_id=run_id,
+        status=ZenMLExecutionStatus.RESUMING,
+        reason=_RETRY_RESUMING_REASON,
+    )
+    _assert_run_update(
+        client_mock.zen_store.update_run.call_args_list[1],
+        run_id=run_id,
+        status=ZenMLExecutionStatus.FAILED,
+        reason=_RETRY_ROLLBACK_REASON,
+    )
+    track_mock.assert_not_called()
+
+
+def test_retry_rolls_back_when_loading_active_stack_model_fails_after_reopening() -> (
+    None
+):
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    failed = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resuming = _DummyRun(
+        status=ZenMLExecutionStatus.RESUMING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=failed.snapshot,
+    )
+    failed_run = _as_pipeline_run(failed)
+    resuming_run = _as_pipeline_run(resuming)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.zen_store.update_run.side_effect = [resuming_run, failed_run]
+        client_mock.get_pipeline_run.return_value = failed_run
+
+        with patch.object(
+            type(client_mock),
+            "active_stack_model",
+            PropertyMock(side_effect=RuntimeError("active stack unavailable")),
+            create=True,
+        ):
+            client = KitaruClient()
+            with pytest.raises(KitaruBackendError, match="active stack unavailable"):
+                client.executions.retry(str(run_id))
+
+    client_mock.activate_stack.assert_not_called()
     assert client_mock.zen_store.update_run.call_count == 2
     _assert_run_update(
         client_mock.zen_store.update_run.call_args_list[0],
@@ -3737,6 +3825,88 @@ def test_retry_rolls_back_when_resume_submission_leaves_run_resuming() -> None:
         status=ZenMLExecutionStatus.FAILED,
         reason=_RETRY_ROLLBACK_REASON,
     )
+    track_mock.assert_not_called()
+
+
+def test_retry_reports_submission_and_restore_failures_after_rollback() -> None:
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    old_stack_id = uuid4()
+    failed = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resuming = _DummyRun(
+        status=ZenMLExecutionStatus.RESUMING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=failed.snapshot,
+    )
+    failed_run = _as_pipeline_run(failed)
+    resuming_run = _as_pipeline_run(resuming)
+    active_stack = SimpleNamespace(
+        orchestrator=SimpleNamespace(
+            resume_run=MagicMock(side_effect=RuntimeError("submit offline"))
+        )
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.activate_stack.side_effect = [
+            None,
+            RuntimeError("restore offline"),
+        ]
+        client_mock.zen_store.update_run.side_effect = [
+            resuming_run,
+            failed_run,
+        ]
+        client_mock.get_pipeline_run.side_effect = [
+            failed_run,
+            resuming_run,
+        ]
+
+        client = KitaruClient()
+        with pytest.raises(KitaruBackendError) as exc_info:
+            client.executions.retry(str(run_id))
+
+    message = str(exc_info.value)
+    assert "submit offline" in message
+    assert "restore offline" in message
+    assert "previous active Kitaru stack" in message
+    active_stack.orchestrator.resume_run.assert_called_once_with(
+        snapshot=failed.snapshot,
+        run=resuming_run,
+        stack=active_stack,
+    )
+    assert client_mock.activate_stack.call_args_list == [
+        call(str(snapshot_stack_id)),
+        call(old_stack_id),
+    ]
+    assert client_mock.zen_store.update_run.call_count == 2
+    _assert_run_update(
+        client_mock.zen_store.update_run.call_args_list[0],
+        run_id=run_id,
+        status=ZenMLExecutionStatus.RESUMING,
+        reason=_RETRY_RESUMING_REASON,
+    )
+    _assert_run_update(
+        client_mock.zen_store.update_run.call_args_list[1],
+        run_id=run_id,
+        status=ZenMLExecutionStatus.FAILED,
+        reason=_RETRY_ROLLBACK_REASON,
+    )
+    assert client_mock.get_pipeline_run.call_count == 2
     track_mock.assert_not_called()
 
 

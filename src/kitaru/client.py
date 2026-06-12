@@ -25,7 +25,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast, runtime_checkable
+from typing import Any, Literal, NoReturn, Protocol, cast, runtime_checkable
+from uuid import UUID
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -476,22 +477,6 @@ class _ReplayFlowLike(Protocol):
     ) -> Any: ...
 
 
-@contextmanager
-def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a stack while running an operation."""
-    if not stack_name_or_id:
-        yield
-        return
-
-    client = Client()
-    old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
-    try:
-        yield
-    finally:
-        client.activate_stack(old_stack_id)
-
-
 def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
     """Return `(module, attribute)` from a run snapshot source."""
     snapshot = run.snapshot
@@ -753,7 +738,7 @@ def _rollback_reopened_run(
     original_error: Exception,
     rollback_status: ZenMLExecutionStatus,
     rollback_reason: str,
-) -> None:
+) -> NoReturn:
     """Try to restore a run status after reopening it failed."""
     try:
         client._client().zen_store.update_run(
@@ -784,7 +769,7 @@ def _repair_reopened_run_after_resume_failure(
     original_error: Exception,
     rollback_status: ZenMLExecutionStatus,
     rollback_reason: str,
-) -> None:
+) -> NoReturn:
     """Repair a reopened run if ZenML did not move it out of RESUMING."""
     try:
         latest_run = client._get_pipeline_run(str(run.id), hydrate=False)
@@ -810,6 +795,34 @@ def _repair_reopened_run_after_resume_failure(
     )
 
 
+def _restore_previous_active_stack(
+    *,
+    client: Client,
+    old_stack_id: str | UUID,
+) -> Exception | None:
+    """Restore the active Kitaru stack and return the error if it fails."""
+    try:
+        client.activate_stack(old_stack_id)
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _raise_with_restore_failure_context(
+    *,
+    error: KitaruBackendError,
+    original_error: Exception,
+    restoration_error: Exception | None,
+) -> NoReturn:
+    """Raise an operation failure, adding Kitaru stack restore context if needed."""
+    if restoration_error is None:
+        raise error
+    raise KitaruBackendError(
+        f"{error}. Additionally failed to restore the previous active Kitaru "
+        f"stack: {restoration_error}."
+    ) from original_error
+
+
 def _restart_run_from_snapshot(
     *,
     run: PipelineRunResponse,
@@ -831,6 +844,12 @@ def _restart_run_from_snapshot(
             f"Unable to {operation_name} execution because snapshot stack "
             "metadata is missing."
         )
+    snapshot_stack_id = getattr(snapshot.stack, "id", None)
+    if not snapshot_stack_id:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot stack "
+            "id is missing."
+        )
 
     try:
         reopened_run = client._client().zen_store.update_run(
@@ -845,36 +864,10 @@ def _restart_run_from_snapshot(
             f"Failed to reopen execution '{run.id}' for {operation_name}: {exc}"
         ) from exc
 
-    resume_started = False
-    resume_returned = False
     try:
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = client._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            resume_started = True
-            orchestrator.resume_run(
-                snapshot=snapshot,
-                run=reopened_run,
-                stack=active_stack,
-            )
-            resume_returned = True
+        stack_client = Client()
+        old_stack_id = cast(str | UUID, stack_client.active_stack_model.id)
     except Exception as exc:
-        if resume_returned:
-            raise KitaruBackendError(
-                f"The {operation_name} request for execution '{run.id}' was submitted, "
-                "but restoring the previous active Kitaru stack failed: "
-                f"{exc}. The execution may continue; inspect its latest status "
-                "before retrying."
-            ) from exc
-        if resume_started:
-            _repair_reopened_run_after_resume_failure(
-                run=reopened_run,
-                client=client,
-                operation_name=operation_name,
-                original_error=exc,
-                rollback_status=rollback_status,
-                rollback_reason=rollback_reason,
-            )
         _rollback_reopened_run(
             run=reopened_run,
             client=client,
@@ -883,6 +876,81 @@ def _restart_run_from_snapshot(
             rollback_status=rollback_status,
             rollback_reason=rollback_reason,
         )
+
+    try:
+        stack_client.activate_stack(str(snapshot_stack_id))
+    except Exception as exc:
+        _rollback_reopened_run(
+            run=reopened_run,
+            client=client,
+            operation_name=operation_name,
+            original_error=exc,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+        )
+
+    try:
+        active_stack = stack_client.active_stack
+        orchestrator = cast(Any, active_stack.orchestrator)
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _rollback_reopened_run(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    try:
+        orchestrator.resume_run(
+            snapshot=snapshot,
+            run=reopened_run,
+            stack=active_stack,
+        )
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _repair_reopened_run_after_resume_failure(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    restoration_error = _restore_previous_active_stack(
+        client=stack_client,
+        old_stack_id=old_stack_id,
+    )
+    if restoration_error is not None:
+        raise KitaruBackendError(
+            f"The {operation_name} request for execution '{run.id}' was submitted, "
+            "but restoring the previous active Kitaru stack failed: "
+            f"{restoration_error}. The execution may continue; inspect its latest "
+            "status before retrying."
+        ) from restoration_error
 
 
 def _validate_event_filter_values(
