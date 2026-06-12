@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added LLM token tracking: tracked LLM calls (`kitaru.llm()` and the framework adapters) record input/output/total token counts as execution metadata, split into freshly-incurred vs. replay-reused, feeding the new execution statistics metrics. (#378)
 - Added LLM cost tracking where a trustworthy cost source exists: the Claude Agent SDK adapter records provider-reported USD cost automatically, and the LangGraph and OpenAI Agents adapters accept a cost calculator. Calls with no cost source (such as plain `kitaru.llm()`) are tallied under a records-without-cost count rather than reported as free. (#378)
 - Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
+- Added the prospect scout example (`examples/end_to_end/prospect_scout/`): a durable prospect-research sweep with one checkpoint per company, enum-typed PydanticAI qualification, a `kitaru.wait()` shortlist approval gate, per-prospect outreach drafts, and optional Exa-backed web search.
 
 ### Fixed
 - Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
