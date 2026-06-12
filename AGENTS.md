@@ -71,6 +71,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `just audit`: audit Python dependencies with `pip-audit` and the documented ignore list
 - `just links`: check markdown links offline (requires `lychee`: `brew install lychee`)
 - `just links-external`: check links including external URLs (slow)
+- `just example-coverage-audit`: validate `examples/example-coverage.yaml` against the public example docs and referenced tests/smoke/provider metadata. Audit-only: it does not run examples or call providers.
 - `just build`: build wheel and sdist locally
 
 ### Docs workflows
@@ -114,6 +115,8 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
 
+Default pytest runs exclude live provider checks via `-m 'not live_llm'`. Tests that call OpenAI, Anthropic/Claude, Gemini, or similar paid/external providers must live under `tests/live/`, carry `live_llm` plus the provider-specific marker, use short bounded prompts, and skip cleanly when credentials are absent. The shared provider-spend guard in `tests/conftest.py` blocks accidental provider calls from deterministic tests while allowing localhost/Kitaru/ZenML local traffic.
+
 ## Analytics Instrumentation
 
 Kitaru collects anonymous usage analytics for opted-in users. When adding new features, discuss analytics coverage with the core team to decide what should be tracked.
@@ -151,6 +154,7 @@ Every PR description should include a "Reviewer Notes" H2 or H3 section. Treat t
 When adding a new CLI command, MCP tool, or SDK feature:
 
 - **Smoke test**: add a non-destructive invocation to `scripts/smoke-test.sh` (e.g. `kitaru <command> --dry-run` or `kitaru <command> --help`). The smoke test runs before every release, so new features should be exercised there to catch regressions.
+- **Example coverage manifest**: when adding, removing, renaming, or publicly documenting an example under `examples/`, update `examples/example-coverage.yaml` and run `just example-coverage-audit`. The manifest records coverage status only; it is not an example runner.
 - **Analytics**: check whether the feature needs a tracking event. Add the event to `AnalyticsEvent` in `src/kitaru/analytics.py` and wire it into the appropriate surface (CLI handler via `track()`, MCP tool via `@tracked_mcp_tool`, or SDK lifecycle point). If the CLI command is multi-word (e.g. `clean project`), add it to `_MULTI_TOKEN_COMMANDS` in `cli.py`.
 
 ## CI/CD
@@ -167,7 +171,8 @@ Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generat
 
 ### Other workflows
 
-- `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release)
+- `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release). Do not add live provider calls here; provider validation happens before release dispatch.
+- `llm-integration.yml`: trusted weekly/manual live OpenAI/Anthropic provider checks. It has only `schedule` and `workflow_dispatch` triggers, runs paid tests outside PR CI, can target an exact ref/SHA, uploads logs/results only, and sends a compact Discord failure alert via `DISCORD_WEBHOOK_SRE`.
 - `spellcheck.yml`: separate typo/spell checking on `develop` pushes and non-draft PRs
 - `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP files in same-repo non-draft PRs
 - `zizmor.yml`: GitHub Actions security analysis for workflow/dependabot changes, plus weekly and manual runs
@@ -176,7 +181,8 @@ Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generat
 
 - Default branch is `develop`. All PRs target `develop`.
 - `main` tracks the latest released version only; do not push directly.
-- Before releasing, run `./scripts/smoke-test.sh` to exercise CLI, SDK flows, MCP tools, and LLM integration end-to-end against a local server. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set `OPENAI_API_KEY` to include LLM tests.
+- Before releasing, run release-grade smoke with structured output: `./scripts/smoke-test.sh --release --json-out smoke-results.json` plus repeatable `--required-provider-area <area>` flags for any changed provider-backed behavior (`openai`, `anthropic`, `gemini-model`, `gemini-antigravity`, `research-bot`). Bare `./scripts/smoke-test.sh` remains useful for local development, but it is not enough to prove a provider-relevant release because skipped provider checks do not fail outside `--release`. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set the relevant provider credentials and opt-in env vars before marking provider areas covered.
+- Also check `.github/workflows/llm-integration.yml` before release dispatch. A weekly green run on `develop` is a canary that provider paths are generally healthy; it is not exact release evidence. If OpenAI or Anthropic adapter/example behavior changed, trigger a manual `llm-integration.yml` run for the exact release ref or SHA and require it to pass, or record an explicit waiver in the release conversation. Gemini remains local release-smoke evidence or waiver for v1.
 - Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
 - Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
 - Version is maintained in `pyproject.toml` and bumped by the release workflow. Never hardcode it — use `importlib.metadata.version("kitaru")`.

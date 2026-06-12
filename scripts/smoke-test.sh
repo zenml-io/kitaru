@@ -9,6 +9,12 @@
 #   -k, --keep-server    Keep the local server running after the test
 #   -s, --skip-install   Skip the uv sync step (use current install)
 #   -v, --verbose        Print command output even on success
+#   --release            Enforce release-grade preflight and required provider skips
+#   --required-provider-area AREA
+#                        Mark a provider area as required for this release.
+#                        Repeatable. Areas: openai, anthropic, gemini-model,
+#                        gemini-antigravity, research-bot
+#   --json-out PATH      Write structured smoke results to PATH
 #   -h, --help           Show this help message
 
 # No -e: we deliberately continue past failures to collect all results.
@@ -17,6 +23,28 @@ set -uo pipefail
 # Disable analytics so smoke-test runs don't leak events to Mixpanel.
 export ZENML_ANALYTICS_OPT_IN=false
 
+print_help() {
+    cat <<'EOF'
+Pre-release smoke test for Kitaru.
+Exercises CLI, SDK flows, MCP tools, and LLM integration against a local server.
+
+Usage:
+  ./scripts/smoke-test.sh [OPTIONS]
+
+Options:
+  -k, --keep-server    Keep the local server running after the test
+  -s, --skip-install   Skip the uv sync step (use current install)
+  -v, --verbose        Print command output even on success
+  --release            Enforce release-grade preflight and required provider skips
+  --required-provider-area AREA
+                       Mark a provider area as required for this release.
+                       Repeatable. Areas: openai, anthropic, gemini-model,
+                       gemini-antigravity, research-bot
+  --json-out PATH      Write structured smoke results to PATH
+  -h, --help           Show this help message
+EOF
+}
+
 PY="3.12"
 UV_RUN="uv run --python $PY"
 DASHBOARD_URL="http://127.0.0.1:8383"
@@ -24,17 +52,118 @@ DASHBOARD_URL="http://127.0.0.1:8383"
 KEEP_SERVER=false
 SKIP_INSTALL=false
 VERBOSE=false
+RELEASE_MODE=false
+JSON_OUT=""
+REQUIRED_PROVIDER_AREAS=()
+
+find_json_out_arg() {
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "--json-out" ]] && [[ $# -ge 2 ]] && [[ "$2" != --* ]]; then
+            printf '%s\n' "$2"
+            return 0
+        fi
+        shift
+    done
+    return 0
+}
+
+write_early_json_result() {
+    local json_out="$1"
+    local label="$2"
+    local reason="$3"
+    local release_mode="${4:-false}"
+    [[ -z "$json_out" ]] && return 0
+
+    local branch
+    local sha
+    branch=$(git branch --show-current 2>/dev/null || echo "detached")
+    sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+    mkdir -p "$(dirname "$json_out")" || return 1
+
+    python3 - "$json_out" "$label" "$reason" "$release_mode" "$branch" "$sha" <<'PY'
+import json
+import sys
+
+out_path, label, reason, release_mode, branch, sha = sys.argv[1:]
+record = {
+    "label": label,
+    "status": "failed",
+    "section": "Preflight",
+    "reason": reason,
+    "provider_area": "none",
+    "required_env": [],
+    "release_relevant": False,
+    "duration_seconds": 0,
+}
+payload = {
+    "invocation": {"release": release_mode == "true", "required_provider_areas": []},
+    "git": {"branch": branch, "sha": sha},
+    "timeout": {"command": None},
+    "sections": ["Preflight"],
+    "checks": [record],
+    "provider_attestation": {
+        "required_provider_areas": [],
+        "credentials": {
+            "openai": False,
+            "anthropic": False,
+            "gemini_api_key": False,
+            "gemini_vertex": False,
+            "gemini_any": False,
+        },
+        "required_area_status": {},
+    },
+    "counts": {"passed": 0, "failed": 1, "skipped": 0, "release_relevant_skipped": 0},
+}
+with open(out_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+}
+
+DISCOVERED_JSON_OUT=$(find_json_out_arg "$@")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -k|--keep-server)  KEEP_SERVER=true; shift ;;
         -s|--skip-install) SKIP_INSTALL=true; shift ;;
         -v|--verbose)      VERBOSE=true; shift ;;
+        --release)         RELEASE_MODE=true; shift ;;
+        --json-out)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --json-out requires a path" >&2
+                write_early_json_result "$DISCOVERED_JSON_OUT" "smoke option parsing" "--json-out requires a path" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            JSON_OUT="$2"
+            shift 2
+            ;;
+        --required-provider-area)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--required-provider-area requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            case "$2" in
+                openai|anthropic|gemini-model|gemini-antigravity|research-bot)
+                    REQUIRED_PROVIDER_AREAS+=("$2")
+                    ;;
+                *)
+                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                    write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "unsupported provider area '$2'" "$RELEASE_MODE" || true
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
         -h|--help)
-            sed -n '2,/^$/s/^# \?//p' "$0"
+            print_help
             exit 0
             ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+        *)
+            echo "Unknown option: $1"
+            write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "unknown option '$1'" "$RELEASE_MODE" || true
+            exit 1
+            ;;
     esac
 done
 
@@ -51,7 +180,13 @@ fi
 PASSED=()
 FAILED=()
 SKIPPED=()
+RELEASE_RELEVANT_SKIPPED=()
+SECTIONS=()
+PROVIDER_AREAS_RECORDED=()
 SECTION_NUM=0
+CURRENT_SECTION="Preflight"
+RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
+RECORDING_FAILED=false
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -77,27 +212,274 @@ timed() {
 # ---------------------------------------------------------------------------
 section_header() {
     SECTION_NUM=$((SECTION_NUM + 1))
-    printf "\n${BOLD}${CYAN}[%d] %s${RESET}\n" "$SECTION_NUM" "$1"
+    CURRENT_SECTION="$1"
+    SECTIONS+=("$1")
+    printf "\n${BOLD}${CYAN}[%d] %s${RESET}\n" "$SECTION_NUM" "$CURRENT_SECTION"
+}
+
+is_required_provider_area() {
+    local area="$1"
+    local required
+    [[ ${#REQUIRED_PROVIDER_AREAS[@]} -eq 0 ]] && return 1
+    for required in "${REQUIRED_PROVIDER_AREAS[@]}"; do
+        [[ "$required" == "$area" ]] && return 0
+    done
+    return 1
+}
+
+provider_area_has_record() {
+    local area="$1"
+    local recorded
+    [[ ${#PROVIDER_AREAS_RECORDED[@]} -eq 0 ]] && return 1
+    for recorded in "${PROVIDER_AREAS_RECORDED[@]}"; do
+        [[ "$recorded" == "$area" ]] && return 0
+    done
+    return 1
+}
+
+record_check() {
+    local label="$1"
+    local status="$2"
+    local reason="${3:-}"
+    local provider_area="${4:-none}"
+    local required_env="${5:-}"
+    local duration_seconds="${6:-0}"
+    local release_relevant=false
+
+    if [[ "$RELEASE_MODE" == true ]] && is_required_provider_area "$provider_area"; then
+        release_relevant=true
+    fi
+    if [[ "$provider_area" != "none" ]]; then
+        PROVIDER_AREAS_RECORDED+=("$provider_area")
+    fi
+
+    case "$status" in
+        passed) PASSED+=("$label") ;;
+        failed)
+            if [[ -n "$reason" ]]; then
+                FAILED+=("$label ($reason)")
+            else
+                FAILED+=("$label")
+            fi
+            ;;
+        skipped)
+            if [[ -n "$reason" ]]; then
+                SKIPPED+=("$label — $reason")
+            else
+                SKIPPED+=("$label")
+            fi
+            if [[ "$release_relevant" == true ]]; then
+                RELEASE_RELEVANT_SKIPPED+=("$label — $reason")
+            fi
+            ;;
+    esac
+
+    python3 - "$RESULT_RECORDS_FILE" \
+        "$label" "$status" "$CURRENT_SECTION" "$reason" "$provider_area" \
+        "$required_env" "$release_relevant" "$duration_seconds" <<'PY'
+import json
+import sys
+
+path, label, status, section, reason, provider_area, required_env, release_relevant, duration = sys.argv[1:]
+record = {
+    "label": label,
+    "status": status,
+    "section": section,
+    "reason": reason,
+    "provider_area": provider_area,
+    "required_env": [item for item in required_env.split(",") if item],
+    "release_relevant": release_relevant == "true",
+    "duration_seconds": int(duration or 0),
+}
+with open(path, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record, sort_keys=True) + "\n")
+PY
+    local record_rc=$?
+    if [[ $record_rc -ne 0 ]]; then
+        RECORDING_FAILED=true
+        printf "  ${RED}Warning: failed to record structured result for %s${RESET}\n" "$label" >&2
+    fi
+}
+
+record_pass() {
+    local label="$1"
+    local provider_area="${2:-none}"
+    local required_env="${3:-}"
+    local duration_seconds="${4:-0}"
+    record_check "$label" "passed" "" "$provider_area" "$required_env" "$duration_seconds"
+}
+
+record_failure() {
+    local label="$1"
+    local reason="${2:-}"
+    local provider_area="${3:-none}"
+    local required_env="${4:-}"
+    local duration_seconds="${5:-0}"
+    record_check "$label" "failed" "$reason" "$provider_area" "$required_env" "$duration_seconds"
+}
+
+skip_test() {
+    local label="$1"
+    local reason="$2"
+    local provider_area="${3:-none}"
+    local required_env="${4:-}"
+    printf "  ${YELLOW}○${RESET} %s ${YELLOW}(%s)${RESET}\n" "$label" "$reason"
+    record_check "$label" "skipped" "$reason" "$provider_area" "$required_env" 0
+}
+
+write_json_results() {
+    [[ -z "$JSON_OUT" ]] && return 0
+
+    local branch
+    local sha
+    branch=$(git branch --show-current 2>/dev/null || echo "detached")
+    sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+    mkdir -p "$(dirname "$JSON_OUT")" || return 1
+
+    python3 - "$RESULT_RECORDS_FILE" "$JSON_OUT" \
+        "$RELEASE_MODE" "$branch" "$sha" "$TIMEOUT_CMD" \
+        "$HAS_OPENAI" "$HAS_CLAUDE_AGENT_SDK" "$HAS_GEMINI_API_KEY" \
+        "$HAS_GEMINI_VERTEX" "$HAS_GEMINI" \
+        "${REQUIRED_PROVIDER_AREAS[*]-}" <<'PY'
+import json
+import sys
+
+(
+    records_path,
+    out_path,
+    release_mode,
+    branch,
+    sha,
+    timeout_cmd,
+    has_openai,
+    has_anthropic,
+    has_gemini_api_key,
+    has_gemini_vertex,
+    has_gemini,
+    required_provider_areas,
+) = sys.argv[1:]
+
+records = []
+try:
+    with open(records_path, encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+except FileNotFoundError:
+    records = []
+
+counts = {
+    "passed": sum(1 for record in records if record["status"] == "passed"),
+    "failed": sum(1 for record in records if record["status"] == "failed"),
+    "skipped": sum(1 for record in records if record["status"] == "skipped"),
+    "release_relevant_skipped": sum(
+        1
+        for record in records
+        if record["status"] == "skipped" and record["release_relevant"]
+    ),
+}
+
+provider_areas = [area for area in required_provider_areas.split() if area]
+attestation = {
+    "required_provider_areas": provider_areas,
+    "credentials": {
+        "openai": has_openai == "true",
+        "anthropic": has_anthropic == "true",
+        "gemini_api_key": has_gemini_api_key == "true",
+        "gemini_vertex": has_gemini_vertex == "true",
+        "gemini_any": has_gemini == "true",
+    },
+    "required_area_status": {},
+}
+for area in provider_areas:
+    area_records = [record for record in records if record["provider_area"] == area]
+    attestation["required_area_status"][area] = {
+        "passed": sum(1 for record in area_records if record["status"] == "passed"),
+        "failed": sum(1 for record in area_records if record["status"] == "failed"),
+        "skipped": sum(1 for record in area_records if record["status"] == "skipped"),
+        "skip_reasons": [
+            {"label": record["label"], "reason": record["reason"]}
+            for record in area_records
+            if record["status"] == "skipped"
+        ],
+    }
+
+payload = {
+    "invocation": {
+        "release": release_mode == "true",
+        "required_provider_areas": provider_areas,
+    },
+    "git": {"branch": branch, "sha": sha},
+    "timeout": {"command": timeout_cmd or None},
+    "sections": list(dict.fromkeys(record["section"] for record in records)),
+    "checks": records,
+    "provider_attestation": attestation,
+    "counts": counts,
+}
+with open(out_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+}
+
+validate_required_provider_area_records() {
+    [[ "$RELEASE_MODE" != true ]] && return 0
+    [[ ${#REQUIRED_PROVIDER_AREAS[@]} -eq 0 ]] && return 0
+    local area
+    for area in "${REQUIRED_PROVIDER_AREAS[@]}"; do
+        if ! provider_area_has_record "$area"; then
+            printf "  ${RED}✗${RESET} required provider area %s has no recorded checks\n" "$area"
+            record_failure "required provider area $area coverage" \
+                "no checks recorded for required provider area" "$area" "" 0
+        fi
+    done
 }
 
 run_test() {
     local label="$1"; shift
     local output
+    local start=$SECONDS
     output=$("$@" 2>&1)
     local rc=$?
+    local duration=$((SECONDS - start))
     if [[ $rc -eq 0 ]]; then
         printf "  ${GREEN}✓${RESET} %s\n" "$label"
-        PASSED+=("$label")
+        record_pass "$label" "none" "" "$duration"
         if [[ "$VERBOSE" == true ]]; then
             echo "$output" | sed 's/^/    /'
         fi
     elif [[ $rc -eq 124 ]]; then
         printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
-        FAILED+=("$label (TIMEOUT)")
+        record_failure "$label" "TIMEOUT" "none" "" "$duration"
     else
         printf "  ${RED}✗${RESET} %s\n" "$label"
         echo "$output" | tail -30 | sed 's/^/    /'
-        FAILED+=("$label")
+        record_failure "$label" "exit status $rc" "none" "" "$duration"
+    fi
+    return $rc
+}
+
+run_provider_test() {
+    local provider_area="$1"
+    local required_env="$2"
+    local label="$3"
+    shift 3
+    local output
+    local start=$SECONDS
+    output=$("$@" 2>&1)
+    local rc=$?
+    local duration=$((SECONDS - start))
+    if [[ $rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        record_pass "$label" "$provider_area" "$required_env" "$duration"
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | sed 's/^/    /'
+        fi
+    elif [[ $rc -eq 124 ]]; then
+        printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
+        record_failure "$label" "TIMEOUT" "$provider_area" "$required_env" "$duration"
+    else
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        echo "$output" | tail -30 | sed 's/^/    /'
+        record_failure "$label" "exit status $rc" "$provider_area" "$required_env" "$duration"
     fi
     return $rc
 }
@@ -111,21 +493,23 @@ redact_sensitive_output() {
 run_sensitive_json_test() {
     local label="$1"; shift
     local output
+    local start=$SECONDS
     output=$("$@" 2>&1)
     local rc=$?
+    local duration=$((SECONDS - start))
     if [[ $rc -eq 0 ]]; then
         printf "  ${GREEN}✓${RESET} %s\n" "$label"
-        PASSED+=("$label")
+        record_pass "$label" "none" "" "$duration"
         if [[ "$VERBOSE" == true ]]; then
             echo "$output" | redact_sensitive_output | sed 's/^/    /'
         fi
     elif [[ $rc -eq 124 ]]; then
         printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
-        FAILED+=("$label (TIMEOUT)")
+        record_failure "$label" "TIMEOUT" "none" "" "$duration"
     else
         printf "  ${RED}✗${RESET} %s\n" "$label"
         echo "$output" | redact_sensitive_output | tail -30 | sed 's/^/    /'
-        FAILED+=("$label")
+        record_failure "$label" "exit status $rc" "none" "" "$duration"
     fi
     return $rc
 }
@@ -133,26 +517,22 @@ run_sensitive_json_test() {
 run_expected_failure() {
     local label="$1"; local expected="$2"; shift 2
     local output
+    local start=$SECONDS
     output=$("$@" 2>&1)
     local rc=$?
+    local duration=$((SECONDS - start))
     if [[ $rc -ne 0 ]] && [[ "$output" == *"$expected"* ]]; then
         printf "  ${GREEN}✓${RESET} %s\n" "$label"
-        PASSED+=("$label")
+        record_pass "$label" "none" "" "$duration"
         if [[ "$VERBOSE" == true ]]; then
             echo "$output" | sed 's/^/    /'
         fi
     else
         printf "  ${RED}✗${RESET} %s\n" "$label"
         echo "$output" | tail -30 | sed 's/^/    /'
-        FAILED+=("$label")
+        record_failure "$label" "expected failure did not match" "none" "" "$duration"
     fi
     return 0
-}
-
-skip_test() {
-    local label="$1"; local reason="$2"
-    printf "  ${YELLOW}○${RESET} %s ${YELLOW}(%s)${RESET}\n" "$label" "$reason"
-    SKIPPED+=("$label")
 }
 
 is_truthy_env_value() {
@@ -165,6 +545,8 @@ is_truthy_env_value() {
 }
 
 cleanup() {
+    rm -f "$RESULT_RECORDS_FILE"
+
     if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
         timed 10 $UV_RUN kitaru auth api-keys delete \
             "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
@@ -192,11 +574,13 @@ printf "════════════════════════
 
 if [[ ! -f pyproject.toml ]]; then
     echo "${RED}Error: run this script from the repo root.${RESET}"
+    write_early_json_result "$JSON_OUT" "repo root preflight" "run this script from the repo root" "$RELEASE_MODE" || true
     exit 1
 fi
 
 if ! command -v uv &>/dev/null; then
     echo "${RED}Error: uv is not installed.${RESET}"
+    write_early_json_result "$JSON_OUT" "uv preflight" "uv is not installed" "$RELEASE_MODE" || true
     exit 1
 fi
 
@@ -228,6 +612,23 @@ fi
 HAS_GEMINI=false
 if [[ "$HAS_GEMINI_API_KEY" == true ]] || [[ "$HAS_GEMINI_VERTEX" == true ]]; then
     HAS_GEMINI=true
+fi
+
+if [[ "$RELEASE_MODE" == true ]]; then
+    printf "  Release: enabled\n"
+    if [[ ${#REQUIRED_PROVIDER_AREAS[@]} -gt 0 ]]; then
+        printf "  Required provider areas: %s\n" "${REQUIRED_PROVIDER_AREAS[*]}"
+    else
+        printf "  Required provider areas: none\n"
+    fi
+    if [[ -z "$TIMEOUT_CMD" ]]; then
+        printf "  ${RED}Release mode requires timeout or gtimeout. Install coreutils before running release smoke.${RESET}\n"
+        record_failure "release preflight timeout command" "timeout/gtimeout missing" "none" "" 0
+        if [[ -n "$JSON_OUT" ]] && ! write_json_results; then
+            printf "  ${RED}Failed to write structured results: %s${RESET}\n" "$JSON_OUT" >&2
+        fi
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -288,7 +689,7 @@ LOGIN_RC=$?
 
 if [[ $LOGIN_RC -eq 0 ]]; then
     printf "  ${GREEN}✓${RESET} kitaru login\n"
-    PASSED+=("kitaru login")
+    record_pass "kitaru login"
     # Only own the server if we actually started it (not just connected to existing).
     if echo "$LOGIN_OUTPUT" | grep -qi "started\|Starting"; then
         SCRIPT_OWNS_SERVER=true
@@ -298,7 +699,7 @@ if [[ $LOGIN_RC -eq 0 ]]; then
 else
     printf "  ${RED}✗${RESET} kitaru login\n"
     echo "$LOGIN_OUTPUT" | tail -30 | sed 's/^/    /'
-    FAILED+=("kitaru login")
+    record_failure "kitaru login" "exit status $LOGIN_RC"
     printf "\n  ${RED}Server failed to start — aborting.${RESET}\n"
 fi
 
@@ -319,8 +720,10 @@ command -v open &>/dev/null && OPEN_CMD="open"
 if [[ -n "$OPEN_CMD" ]]; then
     "$OPEN_CMD" "$DASHBOARD_URL" 2>/dev/null &
     printf "  ${GREEN}✓${RESET} Opened dashboard (%s)\n" "$DASHBOARD_URL"
+    record_pass "Opened dashboard"
 else
     printf "  ${YELLOW}○${RESET} Could not open dashboard (no open/xdg-open)\n"
+    skip_test "Open dashboard" "no open/xdg-open command available"
 fi
 
 # ---------------------------------------------------------------------------
@@ -356,12 +759,12 @@ ANALYTICS_DISABLED=$(echo "$ANALYTICS_OUT" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['analytics_opt_in'])" 2>/dev/null) || true
 if [[ "${ANALYTICS_DISABLED:-}" == "False" ]]; then
     printf "  ${GREEN}✓${RESET} analytics disabled in smoke test\n"
-    PASSED+=("analytics disabled in smoke test")
+    record_pass "analytics disabled in smoke test"
 else
     printf "  ${RED}✗${RESET} analytics disabled in smoke test\n"
     echo "    Expected analytics_opt_in=False, got: ${ANALYTICS_DISABLED:-<parse error>}" | sed 's/^/    /'
     echo "    Raw output: ${ANALYTICS_OUT:0:200}" | sed 's/^/    /'
-    FAILED+=("analytics disabled in smoke test")
+    record_failure "analytics disabled in smoke test" "analytics status was not disabled"
 fi
 
 # ---------------------------------------------------------------------------
@@ -390,8 +793,8 @@ section_header "Project init"
 
 # kitaru init errors if .kitaru/ already exists — not idempotent.
 if [[ -d .kitaru ]]; then
-    PASSED+=(".kitaru/ already exists")
     printf "  ${GREEN}✓${RESET} .kitaru/ already exists (skipping init)\n"
+    record_pass ".kitaru/ already exists"
 else
     run_test "kitaru init" $UV_RUN kitaru init
 fi
@@ -407,10 +810,11 @@ run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
     $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
 if [[ "$HAS_OPENAI" == true ]]; then
-    run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
 else
-    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example"
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "LangGraph adapter"
@@ -420,25 +824,30 @@ run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy 
 run_test "examples/integrations/langgraph_agent/langgraph_streaming.py" \
     timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_streaming.py
 if [[ "$HAS_OPENAI" == true ]]; then
-    run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
-        $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
+        timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 else
-    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" "OPENAI_API_KEY not set"
+    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "OpenAI Agents adapter"
 
 run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
     $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py --help
+run_test "examples/end_to_end/coding_agent import/CLI contract" \
+    $UV_RUN python -c 'import ast, sys; from pathlib import Path; root = Path("examples/end_to_end/coding_agent"); sys.path.insert(0, str(root)); from models import FollowUp, LLMResponse; import tools; assert FollowUp(is_finished=True).is_finished; assert LLMResponse(role="assistant", content="ok").to_message()["role"] == "assistant"; assert any(tool["function"]["name"] == "read_file" for tool in tools.ALL_TOOLS); tree = ast.parse((root / "agent.py").read_text()); funcs = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}; assert {"coding_agent", "main"} <= set(funcs); assert any(isinstance(dec, ast.Call) and getattr(dec.func, "attr", getattr(dec.func, "id", "")) == "command" for dec in funcs["main"].decorator_list)'
 
 if [[ "$HAS_OPENAI" == true ]]; then
-    run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
-        $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
-    run_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" \
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
+        timed 120 $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/openai_agents_agent/openai_agents_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 else
-    skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
-    skip_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" "OPENAI_API_KEY not set; provider credentials required for OpenAI Agents streaming example"
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_streaming.py" "OPENAI_API_KEY not set; provider credentials required for OpenAI Agents streaming example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "Claude Agent SDK adapter"
@@ -447,17 +856,19 @@ run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.
     $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py --help
 
 if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
-    run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" \
+    run_provider_test "anthropic" "ANTHROPIC_API_KEY,CLAUDE_CODE_USE_BEDROCK,CLAUDE_CODE_USE_VERTEX" \
+        "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" \
         timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py \
             --prompt "Explain one Kitaru checkpoint in one short sentence. Do not use tools, Bash, or files." \
             --max-turns 1
-    run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" \
+    run_provider_test "anthropic" "ANTHROPIC_API_KEY,CLAUDE_CODE_USE_BEDROCK,CLAUDE_CODE_USE_VERTEX" \
+        "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py \
             --prompt "Explain one Kitaru streamed checkpoint in one short sentence. Do not use tools, Bash, or files." \
             --max-turns 1
 else
-    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
-    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set"
+    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set" "anthropic" "ANTHROPIC_API_KEY,CLAUDE_CODE_USE_BEDROCK,CLAUDE_CODE_USE_VERTEX"
+    skip_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py" "ANTHROPIC_API_KEY or Claude SDK provider mode not set" "anthropic" "ANTHROPIC_API_KEY,CLAUDE_CODE_USE_BEDROCK,CLAUDE_CODE_USE_VERTEX"
 fi
 
 section_header "Gemini Interactions adapter"
@@ -470,22 +881,24 @@ run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_ad
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
 
 if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
-    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
+    run_provider_test "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY" \
+        "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
         timed 120 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
             --mode model \
             --prompt "Explain one Kitaru checkpoint in one short sentence."
 elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
-    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke"
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
 else
-    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set"
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
 fi
 
 if [[ "$HAS_GEMINI" != true ]]; then
-    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "GEMINI_API_KEY/GOOGLE_API_KEY or Vertex ADC config not set"
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "GEMINI_API_KEY/GOOGLE_API_KEY or Vertex ADC config not set" "gemini-antigravity" "GEMINI_API_KEY,GOOGLE_API_KEY,GOOGLE_GENAI_USE_VERTEXAI,GOOGLE_CLOUD_PROJECT,GOOGLE_CLOUD_LOCATION,KITARU_SMOKE_GEMINI_ANTIGRAVITY"
 elif [[ "${KITARU_SMOKE_GEMINI_ANTIGRAVITY:-}" != "1" ]]; then
-    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run; accepts Gemini API key or Vertex ADC config"
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" "set KITARU_SMOKE_GEMINI_ANTIGRAVITY=1 to run; accepts Gemini API key or Vertex ADC config" "gemini-antigravity" "KITARU_SMOKE_GEMINI_ANTIGRAVITY"
 else
-    run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
+    run_provider_test "gemini-antigravity" "GEMINI_API_KEY,GOOGLE_API_KEY,GOOGLE_GENAI_USE_VERTEXAI,GOOGLE_CLOUD_PROJECT,GOOGLE_CLOUD_LOCATION,KITARU_SMOKE_GEMINI_ANTIGRAVITY" \
+        "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode antigravity" \
         timed 360 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
             --mode antigravity \
             --timeout 300 \
@@ -493,11 +906,12 @@ else
 fi
 
 if [[ "$HAS_OPENAI" != true ]]; then
-    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "OPENAI_API_KEY not set"
+    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "OPENAI_API_KEY not set" "research-bot" "OPENAI_API_KEY,KITARU_SMOKE_RESEARCH_BOT"
 elif [[ "${KITARU_SMOKE_RESEARCH_BOT:-}" != "1" ]]; then
-    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "set KITARU_SMOKE_RESEARCH_BOT=1 to run the real web-search smoke test"
+    skip_test "examples/end_to_end/openai_research_bot/research_bot.py" "set KITARU_SMOKE_RESEARCH_BOT=1 to run the real web-search smoke test" "research-bot" "KITARU_SMOKE_RESEARCH_BOT"
 else
-    run_test "examples/end_to_end/openai_research_bot/research_bot.py" \
+    run_provider_test "research-bot" "OPENAI_API_KEY,KITARU_SMOKE_RESEARCH_BOT" \
+        "examples/end_to_end/openai_research_bot/research_bot.py" \
         timed 180 $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py \
             "AI agent durability in one paragraph" --max-searches 2 \
             --fail-on-search-error
@@ -535,7 +949,10 @@ run_test "Flow with logging"       timed 60 $UV_RUN examples/features/basic_flow
 run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow/flow_with_artifacts.py
 run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
 run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
+run_test "Checkpoint streaming example" timed 60 $UV_RUN examples/features/checkpoint_streaming/checkpoint_streaming.py
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
+run_test "Wait/resume example import contract" \
+    $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'
 run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
 
 # ---------------------------------------------------------------------------
@@ -567,13 +984,13 @@ fi
 section_header "Model registration"
 
 if [[ "$HAS_OPENAI" == true ]]; then
-    run_test "model register fast" \
-        $UV_RUN kitaru model register fast --model openai/gpt-4o-mini
-    run_test "model list (verify alias)" \
-        $UV_RUN kitaru model list
+    run_provider_test "openai" "OPENAI_API_KEY" "model register fast" \
+        timed 30 $UV_RUN kitaru model register fast --model openai/gpt-4o-mini
+    run_provider_test "openai" "OPENAI_API_KEY" "model list (verify alias)" \
+        timed 30 $UV_RUN kitaru model list
 else
-    skip_test "model register fast" "OPENAI_API_KEY not set"
-    skip_test "model list (verify alias)" "OPENAI_API_KEY not set"
+    skip_test "model register fast" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
+    skip_test "model list (verify alias)" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
 fi
 
 # ---------------------------------------------------------------------------
@@ -582,10 +999,10 @@ fi
 section_header "LLM flow"
 
 if [[ "$HAS_OPENAI" == true ]]; then
-    run_test "LLM flow (flow_with_llm)" \
+    run_provider_test "openai" "OPENAI_API_KEY" "LLM flow (flow_with_llm)" \
         timed 30 $UV_RUN examples/features/llm/flow_with_llm.py
 else
-    skip_test "LLM flow (flow_with_llm)" "OPENAI_API_KEY not set"
+    skip_test "LLM flow (flow_with_llm)" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
 fi
 
 # ---------------------------------------------------------------------------
@@ -624,6 +1041,22 @@ fi  # LOGIN_RC == 0
 printf "\n${BOLD}═══════════════════════════════════════════════${RESET}\n"
 printf "${BOLD}  Kitaru Smoke Test Summary${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════════════${RESET}\n"
+
+validate_required_provider_area_records
+
+if [[ "$RECORDING_FAILED" == true ]]; then
+    FAILED+=("structured result recording failed")
+fi
+
+if [[ -n "$JSON_OUT" ]]; then
+    if write_json_results; then
+        printf "  Structured results: %s\n" "$JSON_OUT"
+    else
+        printf "  ${RED}✗${RESET} Failed to write structured results: %s\n" "$JSON_OUT" >&2
+        FAILED+=("structured results write failed")
+    fi
+fi
+
 printf "  ${GREEN}Passed : %d${RESET}\n" "${#PASSED[@]}"
 printf "  ${RED}Failed : %d${RESET}\n" "${#FAILED[@]}"
 printf "  ${YELLOW}Skipped: %d${RESET}\n" "${#SKIPPED[@]}"
@@ -644,9 +1077,29 @@ if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     done
 fi
 
+if [[ "$RELEASE_MODE" == true ]]; then
+    printf "${BOLD}───────────────────────────────────────────────${RESET}\n"
+    printf "  ${CYAN}PROVIDER ATTESTATION:${RESET}\n"
+    printf "    OpenAI credentials: %s\n" "$HAS_OPENAI"
+    printf "    Anthropic/Claude credentials: %s\n" "$HAS_CLAUDE_AGENT_SDK"
+    printf "    Gemini direct API credentials: %s\n" "$HAS_GEMINI_API_KEY"
+    printf "    Gemini Vertex config: %s\n" "$HAS_GEMINI_VERTEX"
+    if [[ ${#REQUIRED_PROVIDER_AREAS[@]} -gt 0 ]]; then
+        printf "    Required provider areas: %s\n" "${REQUIRED_PROVIDER_AREAS[*]}"
+    else
+        printf "    Required provider areas: none\n"
+    fi
+    if [[ ${#RELEASE_RELEVANT_SKIPPED[@]} -gt 0 ]]; then
+        printf "  ${RED}RELEASE-RELEVANT SKIPS:${RESET}\n"
+        for label in "${RELEASE_RELEVANT_SKIPPED[@]}"; do
+            printf "    ${RED}✗${RESET} %s\n" "$label"
+        done
+    fi
+fi
+
 printf "${BOLD}═══════════════════════════════════════════════${RESET}\n"
 
-if [[ ${#FAILED[@]} -gt 0 ]]; then
+if [[ ${#FAILED[@]} -gt 0 ]] || [[ ${#RELEASE_RELEVANT_SKIPPED[@]} -gt 0 ]]; then
     exit 1
 fi
 exit 0

@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+- Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
 
 ### Fixed
+- Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 
 ## [0.15.0] - 2026-06-04

@@ -9,7 +9,8 @@ The test suite mixes a few different layers of coverage:
 - `tests/test_*.py`: unit, contract, and integration tests for the Python SDK and CLI
 - `tests/test_phase*.py`: example-driven end-to-end tests that exercise the runnable flows in `examples/`
 - `tests/mcp/test_*.py`: MCP-specific tests for the optional `kitaru[mcp]` surface
-- `tests/conftest.py`: the shared isolation harness for Kitaru + ZenML state
+- `tests/live/test_*.py`: paid/external provider checks, always marked `live_llm` and excluded from default pytest runs
+- `tests/conftest.py`: the shared isolation harness for Kitaru + ZenML state and provider-call guard
 - `tests/mcp/conftest.py`: MCP-only fixtures and sample objects
 
 When adding a new test file, mirror the source area it protects where possible. Examples:
@@ -29,8 +30,9 @@ Use the repo-level commands from the project root:
 
 Important repo defaults:
 
-- `pytest` is configured with `-vv -n auto`, so tests should be safe under `xdist`
+- `pytest` is configured with `-vv -n auto -m 'not live_llm'`, so default runs are deterministic and tests should be safe under `xdist`
 - `pythonpath = ["scripts"]`, so tests may import helpers from `scripts/` without ad hoc path hacks
+- live provider tests are selected explicitly, for example `uv run pytest -m live_openai`, `uv run pytest -m live_anthropic`, or `uv run pytest -m "live_llm and not provider_extended"`. In GitHub, those checks belong in `.github/workflows/llm-integration.yml` only; do not wire them into PR CI or `release.yml`.
 
 Useful debugging pattern:
 
@@ -44,13 +46,14 @@ Extra installation notes:
 
 ## Shared Isolation Rules
 
-`tests/conftest.py` is the heart of the safety story. It does three important things before tests run:
+`tests/conftest.py` is the heart of the safety story. It does four important things before tests run:
 
 1. clears Kitaru- and ZenML-related environment variables that could leak in from a developer machine
 2. redirects config and home-directory lookups into `tmp_path`
 3. resets global Kitaru and ZenML client/config singletons between tests
+4. blocks accidental provider calls from unmarked tests while still allowing localhost/Kitaru/ZenML local traffic
 
-That means the suite is designed to avoid touching a real local config directory or real user state. Keep it that way. When you need exact fixture names, config paths, or the environment-variable denylist, read `tests/conftest.py` and `tests/mcp/conftest.py`; this file intentionally keeps the rule at a higher level.
+That means the suite is designed to avoid touching a real local config directory, real user state, or paid provider APIs during default runs. Keep it that way. When you need exact fixture names, config paths, provider markers, or the environment-variable denylist, read `tests/conftest.py` and `tests/mcp/conftest.py`; this file intentionally keeps the rule at a higher level.
 
 When writing new tests:
 
@@ -106,6 +109,19 @@ When adding or updating one:
 - assert on persisted execution state, metadata, checkpoints, or artifacts, not just a return value
 
 Good example: `tests/test_phase12_llm_example.py` registers a model alias, injects fake API credentials, runs the example flow, and then inspects the recorded metadata in ZenML.
+
+### Live provider tests
+
+Live provider tests live under `tests/live/` and are off by default. They are for trusted manual or scheduled runs, not normal PR CI.
+
+Rules:
+
+- mark every live provider test with `@pytest.mark.live_llm` plus the provider marker: `live_openai`, `live_anthropic`, or `live_gemini`
+- put slower or higher-cost checks under `@pytest.mark.provider_extended` as well
+- skip cleanly when the required key is absent; the shared guard already skips `live_openai` without `OPENAI_API_KEY`, `live_anthropic` without `ANTHROPIC_API_KEY`, and `live_gemini` without `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+- keep prompts tiny and bounded; set max-turns or equivalent limits explicitly
+- do not add live provider tests to fork PR workflows
+- do not bypass the provider guard in deterministic tests; fake the provider or patch Kitaru's local call point instead
 
 ### MCP tests
 
