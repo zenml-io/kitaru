@@ -101,9 +101,13 @@ From the repository root:
 ```bash
 uv sync --extra local --extra claude-agent-sdk
 uv run kitaru init
+uv run kitaru stack create claude-sandbox --sandbox local
 export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
 uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
 ```
+
+If you already have a stack with exactly one sandbox component, use
+`uv run kitaru stack use <stack-name>` instead of creating `claude-sandbox`.
 
 This example gives Claude one MCP tool named `mcp__kitaru__run_command` and
 denies Claude's built-in `Bash`. When Claude calls that tool, Kitaru runs the
