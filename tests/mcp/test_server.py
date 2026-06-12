@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,9 +57,40 @@ from kitaru.mcp.server import (
     kitaru_status,
     kitaru_stop_local_server,
     manage_stack,
+    mcp,
     tracked_mcp_tool,
 )
 from kitaru.secrets import SecretSummary
+
+_REGISTERED_MCP_TOOL_FUNCTIONS = (
+    kitaru_executions_list,
+    kitaru_executions_statistics,
+    kitaru_executions_get,
+    kitaru_executions_latest,
+    get_execution_logs,
+    kitaru_executions_run,
+    kitaru_deployments_deploy,
+    kitaru_deployments_invoke,
+    kitaru_deployments_list,
+    kitaru_deployments_get,
+    kitaru_deployments_delete,
+    kitaru_deployments_tag,
+    kitaru_deployments_untag,
+    kitaru_executions_cancel,
+    kitaru_executions_input,
+    kitaru_executions_retry,
+    kitaru_executions_replay,
+    kitaru_secrets_create,
+    kitaru_artifacts_list,
+    kitaru_artifacts_get,
+    kitaru_start_local_server,
+    kitaru_stop_local_server,
+    kitaru_status,
+    kitaru_stacks_list,
+    manage_stack,
+    kitaru_info,
+    kitaru_clean_preview,
+)
 
 
 def _write_flow_target_module(path: Path, *, marker: str) -> None:
@@ -79,6 +111,48 @@ def _load_mcp_flow_target(target: str) -> Any:
         target,
         module_name_prefix="_kitaru_mcp_run_target_",
     )
+
+
+def _mcp_tool_schemas_by_name() -> dict[str, dict[str, Any]]:
+    """Return FastMCP input schemas from the in-process registry."""
+    tools = asyncio.run(mcp.list_tools())
+    return {tool.name: tool.inputSchema for tool in tools}
+
+
+def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
+    tool_schemas = _mcp_tool_schemas_by_name()
+    expected_names = {func.__name__ for func in _REGISTERED_MCP_TOOL_FUNCTIONS}
+
+    assert set(tool_schemas) == expected_names
+    assert "_wrapper" not in tool_schemas
+
+    input_schema = tool_schemas["kitaru_executions_input"]
+    assert set(input_schema["properties"]) == {"exec_id", "wait", "value"}
+    assert input_schema["required"] == ["exec_id", "wait", "value"]
+
+    invoke_schema = tool_schemas["kitaru_deployments_invoke"]
+    assert set(invoke_schema["properties"]) == {
+        "flow",
+        "version",
+        "tag",
+        "inputs",
+    }
+    assert invoke_schema["required"] == ["flow"]
+    assert invoke_schema["properties"]["version"]["default"] is None
+    assert invoke_schema["properties"]["tag"]["default"] is None
+    assert invoke_schema["properties"]["inputs"]["default"] is None
+
+    stack_schema = tool_schemas["manage_stack"]
+    assert {"action", "name"}.issubset(stack_schema["properties"])
+    assert stack_schema["required"] == ["action", "name"]
+    assert stack_schema["properties"]["action"]["enum"] == ["create", "delete"]
+    assert stack_schema["properties"]["stack_type"]["default"] == "local"
+    assert stack_schema["properties"]["activate"]["default"] is True
+    assert stack_schema["properties"]["recursive"]["default"] is False
+    assert stack_schema["properties"]["force"]["default"] is False
+    assert stack_schema["properties"]["async_mode"]["default"] is False
+    assert stack_schema["properties"]["verify"]["default"] is True
+    assert "extra" in stack_schema["properties"]
 
 
 def test_load_flow_target_supports_module_paths(

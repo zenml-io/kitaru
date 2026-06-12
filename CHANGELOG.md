@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
 
 ### Fixed
+- Fixed `kitaru executions retry` and resume-style execution restarts so failed or paused runs reopen to `RESUMING` before submission, avoiding local no-op retries and server token failures while guarding rollback with a Kitaru ownership marker.
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 
 ## [0.15.0] - 2026-06-04

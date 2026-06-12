@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast, runtime_checkable
+from uuid import uuid4
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -33,7 +34,7 @@ from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.login.credentials_store import get_credentials_store
-from zenml.models import PipelineRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
@@ -162,6 +163,11 @@ logger = logging.getLogger(__name__)
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
+_RETRY_RESUMING_REASON = "Manual retry requested by user."
+_RESUME_RESUMING_REASON = "Manual resume requested by user."
+_RETRY_ROLLBACK_REASON = "Retry submission failed."
+_RESUME_ROLLBACK_REASON = "Manual resume failed."
+_RESTART_OWNER_REASON_PREFIX = " Kitaru restart owner: "
 _REPLAY_IMPORT_LOCK = threading.RLock()
 
 
@@ -736,11 +742,166 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
     return pipeline_obj
 
 
+class _RestartOwnershipError(KitaruBackendError):
+    """Restart ownership could not be verified, so submission must stop."""
+
+
+def _raw_status_value(status: Any) -> str:
+    """Return the string value of a ZenML status-like object."""
+    return str(getattr(status, "value", status))
+
+
+def _restart_status_reason(base_reason: str, owner_id: str) -> str:
+    """Return a transient RESUMING reason tied to this process."""
+    return f"{base_reason}{_RESTART_OWNER_REASON_PREFIX}{owner_id}"
+
+
+def _run_has_restart_owner(run: PipelineRunResponse, status_reason: str) -> bool:
+    """Return whether a run is still the RESUMING run this process reopened."""
+    return (
+        _raw_status_value(run.status) == ZenMLExecutionStatus.RESUMING.value
+        and getattr(run, "status_reason", None) == status_reason
+    )
+
+
+def _load_latest_restart_run(
+    *,
+    run_id: Any,
+    client: KitaruClient,
+    operation_name: str,
+    original_error: Exception | None = None,
+) -> PipelineRunResponse:
+    """Load latest run state for restart ownership checks."""
+    try:
+        return client._get_pipeline_run(str(run_id), hydrate=True)
+    except Exception as refresh_error:
+        message = (
+            f"Kitaru could not verify the latest run status for execution "
+            f"'{run_id}', so it did not attempt rollback or submission: "
+            f"{refresh_error}"
+        )
+        if original_error is not None:
+            message = (
+                f"Failed to {operation_name} execution '{run_id}': "
+                f"{original_error}. {message}"
+            )
+        raise _RestartOwnershipError(message) from (original_error or refresh_error)
+
+
+def _ensure_restart_owner(
+    *,
+    run_id: Any,
+    client: KitaruClient,
+    operation_name: str,
+    status_reason: str,
+) -> PipelineRunResponse:
+    """Confirm that this process still owns the reopened RESUMING run."""
+    latest_run = _load_latest_restart_run(
+        run_id=run_id,
+        client=client,
+        operation_name=operation_name,
+    )
+    if _run_has_restart_owner(latest_run, status_reason):
+        return latest_run
+
+    raise _RestartOwnershipError(
+        f"Unable to {operation_name} execution '{run_id}' because another "
+        "retry/resume attempt or the runner changed the run after Kitaru "
+        "reopened it. No rollback was attempted."
+    )
+
+
+def _update_run_status(
+    *,
+    client: KitaruClient,
+    run_id: Any,
+    status: ZenMLExecutionStatus,
+    status_reason: str,
+) -> PipelineRunResponse:
+    """Update one ZenML run status through the active store."""
+    return client._client().zen_store.update_run(
+        run_id=run_id,
+        run_update=PipelineRunUpdate(
+            status=status,
+            status_reason=status_reason,
+        ),
+    )
+
+
+def _raise_restart_failure(
+    *,
+    run_id: Any,
+    operation_name: str,
+    original_error: Exception,
+    rollback_error: Exception | None = None,
+) -> None:
+    """Raise the public restart error, optionally including rollback failure."""
+    if rollback_error is None:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run_id}': {original_error}"
+        ) from original_error
+
+    raise KitaruBackendError(
+        f"Failed to {operation_name} execution '{run_id}': {original_error}. "
+        "Kitaru also failed to roll the run back from RESUMING: "
+        f"{rollback_error}. The run may remain RESUMING."
+    ) from original_error
+
+
+def _rollback_reopened_run(
+    *,
+    run_id: Any,
+    client: KitaruClient,
+    operation_name: str,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
+    original_error: Exception,
+    expected_resuming_reason: str,
+) -> None:
+    """Roll back a reopened run only while this process still owns it."""
+    latest_run = _load_latest_restart_run(
+        run_id=run_id,
+        client=client,
+        operation_name=operation_name,
+        original_error=original_error,
+    )
+    if not _run_has_restart_owner(latest_run, expected_resuming_reason):
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run_id}': {original_error}. "
+            "Kitaru did not roll the run back because another retry/resume "
+            "attempt or the runner changed it after this process reopened it."
+        ) from original_error
+
+    try:
+        _update_run_status(
+            client=client,
+            run_id=run_id,
+            status=rollback_status,
+            status_reason=rollback_reason,
+        )
+    except Exception as rollback_error:
+        _raise_restart_failure(
+            run_id=run_id,
+            operation_name=operation_name,
+            original_error=original_error,
+            rollback_error=rollback_error,
+        )
+
+    _raise_restart_failure(
+        run_id=run_id,
+        operation_name=operation_name,
+        original_error=original_error,
+    )
+
+
 def _restart_run_from_snapshot(
     *,
     run: PipelineRunResponse,
     client: KitaruClient,
     operation_name: str,
+    resuming_reason: str,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
 ) -> None:
     """Restart an execution from its stored snapshot metadata."""
     snapshot = run.snapshot
@@ -754,20 +915,61 @@ def _restart_run_from_snapshot(
             f"Unable to {operation_name} execution because snapshot stack "
             "metadata is missing."
         )
+    snapshot_stack_id = getattr(snapshot.stack, "id", None)
+    if not snapshot_stack_id:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot stack "
+            "ID is missing."
+        )
 
+    restart_owner = uuid4().hex
+    owned_resuming_reason = _restart_status_reason(resuming_reason, restart_owner)
     try:
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = client._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.resume_run(
-                snapshot=snapshot,
-                run=run,
-                stack=active_stack,
-            )
+        reopened_run = _update_run_status(
+            client=client,
+            run_id=run.id,
+            status=ZenMLExecutionStatus.RESUMING,
+            status_reason=owned_resuming_reason,
+        )
     except Exception as exc:
         raise KitaruBackendError(
-            f"Failed to {operation_name} execution '{run.id}': {exc}"
+            f"Failed to reopen execution '{run.id}' for {operation_name}: {exc}"
         ) from exc
+
+    submission_completed = False
+    try:
+        with _temporary_active_stack(str(snapshot_stack_id)):
+            active_stack = client._client().active_stack
+            orchestrator = cast(Any, active_stack.orchestrator)
+            reopened_run = _ensure_restart_owner(
+                run_id=reopened_run.id,
+                client=client,
+                operation_name=operation_name,
+                status_reason=owned_resuming_reason,
+            )
+            orchestrator.resume_run(
+                snapshot=snapshot,
+                run=reopened_run,
+                stack=active_stack,
+            )
+            submission_completed = True
+    except _RestartOwnershipError:
+        raise
+    except Exception as exc:
+        if submission_completed:
+            raise KitaruBackendError(
+                f"Submitted {operation_name} execution '{run.id}', but failed "
+                f"to restore the previous active stack: {exc}"
+            ) from exc
+        _rollback_reopened_run(
+            run_id=reopened_run.id,
+            client=client,
+            operation_name=operation_name,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+            original_error=exc,
+            expected_resuming_reason=owned_resuming_reason,
+        )
 
 
 def _validate_event_filter_values(
@@ -1151,7 +1353,7 @@ class _ExecutionsAPI:
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
-        run_status_value = str(getattr(run.status, "value", run.status))
+        run_status_value = _raw_status_value(run.status)
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
                 "Only failed executions can be retried. "
@@ -1162,6 +1364,9 @@ class _ExecutionsAPI:
             run=run,
             client=self._client_ref,
             operation_name="retry",
+            resuming_reason=_RETRY_RESUMING_REASON,
+            rollback_status=ZenMLExecutionStatus.FAILED,
+            rollback_reason=_RETRY_ROLLBACK_REASON,
         )
         track(AnalyticsEvent.EXECUTION_RETRIED, {})
         return self.get(exec_id)
@@ -1178,8 +1383,8 @@ class _ExecutionsAPI:
                 f"Resolve pending wait input before resuming execution '{exec_id}'."
             )
 
-        run_status_value = str(getattr(run.status, "value", run.status))
-        if run_status_value != "paused":
+        run_status_value = _raw_status_value(run.status)
+        if run_status_value != ZenMLExecutionStatus.PAUSED.value:
             raise KitaruStateError(
                 "Only paused executions can be resumed. "
                 f"Execution '{exec_id}' is currently '{run_status_value}'."
@@ -1189,6 +1394,9 @@ class _ExecutionsAPI:
             run=run,
             client=self._client_ref,
             operation_name="resume",
+            resuming_reason=_RESUME_RESUMING_REASON,
+            rollback_status=ZenMLExecutionStatus.PAUSED,
+            rollback_reason=_RESUME_ROLLBACK_REASON,
         )
         track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
@@ -1204,13 +1412,13 @@ class _ExecutionsAPI:
         """Replay an execution from a checkpoint boundary."""
         source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
 
-        run_status_value = str(getattr(source_run.status, "value", source_run.status))
+        run_status_value = _raw_status_value(source_run.status)
         if run_status_value in {
-            "initializing",
-            "provisioning",
-            "running",
-            "retrying",
-            "stopping",
+            ZenMLExecutionStatus.INITIALIZING.value,
+            ZenMLExecutionStatus.PROVISIONING.value,
+            ZenMLExecutionStatus.RUNNING.value,
+            ZenMLExecutionStatus.RETRYING.value,
+            ZenMLExecutionStatus.STOPPING.value,
         }:
             raise KitaruStateError(
                 "Replay requires a non-running source execution. "
