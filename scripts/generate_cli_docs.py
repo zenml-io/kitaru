@@ -4,7 +4,7 @@ Introspects the cyclopts App object, extracts command metadata, and writes
 structured MDX files with frontmatter + meta.json files for FumaDocs navigation.
 
 Output directory: docs/content/docs/cli/
-Generated files are tracked in git and should be regenerated after CLI changes.
+Generated files are gitignored and should be regenerated locally before docs builds or after CLI changes.
 
 Usage:
     uv run python scripts/generate_cli_docs.py

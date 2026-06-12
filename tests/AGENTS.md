@@ -50,7 +50,7 @@ Extra installation notes:
 2. redirects config and home-directory lookups into `tmp_path`
 3. resets global Kitaru and ZenML client/config singletons between tests
 
-That means the suite is designed to avoid touching a real local config directory or real user state. Keep it that way.
+That means the suite is designed to avoid touching a real local config directory or real user state. Keep it that way. When you need exact fixture names, config paths, or the environment-variable denylist, read `tests/conftest.py` and `tests/mcp/conftest.py`; this file intentionally keeps the rule at a higher level.
 
 When writing new tests:
 
