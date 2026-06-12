@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
+- `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side.
+- Redact credential values from LLM provider error messages raised by `kitaru.llm()`.
 - Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
 
 ## [0.15.0] - 2026-06-04
