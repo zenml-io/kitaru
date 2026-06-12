@@ -18,8 +18,8 @@ Tests run with `pytest-xdist` (`-n auto`) by default via `pyproject.toml` addopt
 
 Every test gets an isolated ZenML + Kitaru environment automatically via the `isolated_zenml_global_config` autouse fixture in `conftest.py`. This fixture:
 
-- Creates a fresh `tmp_path/.zenml/` config directory and redirects `ENV_ZENML_CONFIG_PATH` to it
-- Strips all `KITARU_*` and `ZENML_*` environment variables
+- Creates a fresh `tmp_path/kitaru-config/` config directory and redirects `ENV_ZENML_CONFIG_PATH` to it
+- Strips the Kitaru/ZenML environment variables listed in `tests/conftest.py`, plus any variables with the ZenML store prefix
 - Resets ZenML singletons (`GlobalConfiguration._reset_instance()`, `Client._reset_instance()`)
 - Resets Kitaru's runtime configuration (`_reset_runtime_configuration()`)
 - Redirects `Path.home()` and `click.get_app_dir()` into `tmp_path` so file-based config never touches real user state
@@ -68,7 +68,7 @@ These files import and run real example flows from the `examples/` directory. Th
 
 ### MCP tests (`tests/mcp/`)
 
-- Separate `conftest.py` with `mock_kitaru_client`, `sample_execution`, `sample_artifact` fixtures
+- Separate `conftest.py` with `mock_kitaru_client`, `sample_execution`, `sample_deployment`, and `sample_artifact` fixtures
 - Run in a dedicated CI lane with `kitaru[mcp]` installed
 - Import from `kitaru.mcp.server` — tests verify tool functions return correct dict shapes
 
@@ -120,6 +120,6 @@ class TestBuildPipelineRegistrationName:
 ## Gotchas
 
 - `pythonpath = ["scripts"]` in pytest config means `scripts/` modules are importable. Any module-level `sys.exit()` in scripts will crash pytest collection.
-- Environment variables are stripped at **module load time** in `conftest.py` (before fixtures run), not just inside fixtures. This prevents leakage from the host shell into test discovery.
+- The baseline Kitaru/ZenML environment variables are stripped at **module load time** in `conftest.py` (before fixtures run), not just inside fixtures. This prevents leakage from the host shell into test discovery. Treat `tests/conftest.py` as the source of truth for the exact list.
 - The `_SRC_PATH` insertion in `conftest.py` ensures `import kitaru` resolves to the local `src/kitaru/` even when running from the tests directory.
 - `primed_zenml` tests are slower and shouldn't be mixed into unit test files — keep them in `test_phase*` files.
