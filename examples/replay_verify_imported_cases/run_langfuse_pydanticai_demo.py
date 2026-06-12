@@ -12,6 +12,10 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from examples.replay_verify_imported_cases.demo_presentation import (
+    render_business_summary,
+    render_demo_summary,
+)
 from examples.replay_verify_imported_cases.prompt_config import (
     BASELINE_CONFIG,
     CANDIDATE_CONFIG,
@@ -41,7 +45,7 @@ from kitaru._replay_verify_imported_validation import (
 )
 
 DEMO_DIR = Path(__file__).resolve().parent
-DEFAULT_CASE_FILE = DEMO_DIR / "fixtures" / "support_copilot_imported_cases.jsonl"
+DEFAULT_CASE_FILE = DEMO_DIR / "fixtures" / "retail_support_imported_cases.jsonl"
 DEFAULT_REPORT_DIR = DEMO_DIR / "reports"
 
 
@@ -169,22 +173,13 @@ def main(argv: list[str] | None = None) -> int:
         baseline=args.baseline,
         candidate=args.candidate,
     )
-    print("Imported-input Replay Verify demo complete.")
+    print(render_demo_summary(result.summary))
+    print(render_business_summary(result.summary))
+    print("")
+    print("  Full reports written to:")
     for name, path in sorted(result.paths.items()):
-        print(f"{name}: {path}")
-    headline_summary = {
-        "imported_count": result.summary["imported_count"],
-        "eligible_count": result.summary["eligible_count"],
-        "stopped_count": result.summary["stopped_count"],
-        "candidate_execution_count": result.summary["candidate_execution_count"],
-        "candidate_executions_for_stopped_cases": result.summary[
-            "candidate_executions_for_stopped_cases"
-        ],
-        "unsafe_live_execution_count": result.summary["unsafe_live_execution_count"],
-        "verdict_counts": result.summary["verdict_counts"],
-    }
-    print("summary:")
-    print(json.dumps(headline_summary, indent=2, sort_keys=True))
+        print(f"    {name}: {path}")
+    print("")
     return 0
 
 

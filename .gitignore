@@ -284,6 +284,17 @@ examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/*
 !examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/.gitkeep
 !examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.json
 !examples/end_to_end/replay_lab/langgraph_requirements_triage/reports/requirements-triage-sample.html
+examples/end_to_end/replay_lab/pydantic_support/manifests/*
+!examples/end_to_end/replay_lab/pydantic_support/manifests/.gitkeep
+examples/end_to_end/replay_lab/pydantic_support/reports/*
+!examples/end_to_end/replay_lab/pydantic_support/reports/.gitkeep
+examples/end_to_end/replay_lab/requirements_triage_lab/manifests/*
+!examples/end_to_end/replay_lab/requirements_triage_lab/manifests/.gitkeep
+examples/end_to_end/replay_lab/requirements_triage_lab/reports/*
+!examples/end_to_end/replay_lab/requirements_triage_lab/reports/.gitkeep
+
+# Imported-cases verifier demo generated reports
+/replay-verify-reports/
 
 # Local PR review screenshots
 .pr-screenshots/

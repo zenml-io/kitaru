@@ -1,0 +1,9 @@
+{
+  "id": "cheaper-model",
+  "label": "Cheaper triage model",
+  "flow_inputs": {
+    "agent_profile": "candidate"
+  },
+  "checkpoint_overrides": {},
+  "notes": "Replay every requirements case from draft_response with a cheaper model. It reduces cost and latency, but watch the load-bearing bracket case: the cheaper model stops requiring an independent safety sign-off."
+}

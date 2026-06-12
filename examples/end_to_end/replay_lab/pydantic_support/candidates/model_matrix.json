@@ -1,0 +1,12 @@
+{
+  "description": "Candidate model-alias matrix for the PydanticAI support Replay Lab demo. Register the aliases locally first (kitaru model register cheap --model <provider/model>). Observed runs use the `current` alias; candidates replay the same cases with a cheaper alias so only the model differs.",
+  "candidates": [
+    {
+      "id": "cheap",
+      "label": "Cheaper model alias",
+      "flow_inputs": {"model": "cheap"},
+      "checkpoint_overrides": {},
+      "notes": "Lowest-cost alias. Watch the refund case: a cheaper model is most likely to claim the refund is done instead of escalating for verification."
+    }
+  ]
+}

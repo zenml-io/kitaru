@@ -14,18 +14,15 @@ from typing import Any, cast
 from typing_extensions import TypedDict
 
 import kitaru
-from kitaru import checkpoint, flow
+from kitaru import flow
 from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest
 from kitaru.config import resolve_model_selection
 from kitaru.errors import KitaruUsageError
 
 try:  # Package import path used by tests and repo-root execution.
-    from .requirements_cases import build_triage_prompt, get_case
+    from .requirements_cases import get_case
 except ImportError:  # Direct script path used by direct example execution.
-    from requirements_cases import (  # type: ignore[no-redef]
-        build_triage_prompt,
-        get_case,
-    )
+    from requirements_cases import get_case  # type: ignore[no-redef]
 
 RUNNER_NAME = "requirements_triage"
 REPLAY_ANCHOR = "requirements_triage_langgraph_call"
@@ -41,48 +38,31 @@ SYSTEM_PROMPT = (
 
 class TriageState(TypedDict, total=False):
     case: dict[str, Any]
+    known_requirements: str
+    gaps_and_risks: str
     final_response: str
-
-
-@checkpoint
-def load_requirements_case(case_id: str) -> dict[str, Any]:
-    """Load one synthetic requirements-triage case by stable ID."""
-    return get_case(case_id)
-
-
-@checkpoint
-def publish_triage_result(
-    *,
-    case: dict[str, Any],
-    final_response: str,
-    model: str,
-) -> str:
-    """Save artifacts that Replay Lab and the evaluator can inspect."""
-    scorecard = {
-        "case_id": case["case_id"],
-        "scenario_version": "requirements_triage_v1",
-        "model_alias": model,
-        "llm_call_count": 1,
-        "tool_call_count": 0,
-    }
-    kitaru.save(SUMMARY_ARTIFACT, scorecard, type="output")
-    kitaru.save(FINAL_RESPONSE_ARTIFACT, final_response, type="response")
-    return final_response
 
 
 @flow(cache=False)
 def requirements_triage_case(case_id: str, model: str) -> str:
-    """Run one live requirements-triage case through a LangGraph graph."""
+    """Run one live requirements-triage case through a LangGraph graph.
+
+    The LangGraph call (wrapped by the Kitaru adapter) is the single checkpoint
+    and the flow's result sink. The graph node saves the Replay Lab artifacts,
+    so there is no second terminal checkpoint to disambiguate.
+    """
     _require_registered_alias(model)
-    case = load_requirements_case(case_id)
     runner = KitaruGraphRunner(
         _build_requirements_graph(model),
         name=RUNNER_NAME,
+        # One checkpoint for the whole graph; the 3 reasoning model calls are
+        # tracked as child events under it. (Per-call checkpoints would each be
+        # an unchained terminal, so the flow result can't be auto-extracted.)
         checkpoint_strategy="graph_call",
     )
     result = runner.invoke(
         LangGraphRunRequest.start(
-            {"case": case},
+            {"case": get_case(case_id)},
             thread_id=f"requirements-triage-{case_id}",
         )
     )
@@ -92,16 +72,13 @@ def requirements_triage_case(case_id: str, model: str) -> str:
     final_response = str(output.get("final_response") or "")
     if not final_response.strip():
         raise RuntimeError("Requirements triage graph returned an empty response.")
-    return publish_triage_result(
-        case=case,
-        final_response=final_response,
-        model=model,
-    )
+    return final_response
 
 
 def _build_requirements_graph(model: str) -> Any:
     """Build a fresh LangGraph graph for one execution/replay."""
     try:
+        from langgraph.checkpoint.memory import InMemorySaver
         from langgraph.graph import END, START, StateGraph
     except ImportError as error:  # pragma: no cover - exercised only without extra.
         raise SystemExit(
@@ -110,23 +87,86 @@ def _build_requirements_graph(model: str) -> Any:
             "or another LangGraph provider extra used by your model aliases."
         ) from error
 
-    def triage_requirements(state: TriageState) -> TriageState:
+    def extract_requirements(state: TriageState) -> TriageState:
+        """Step 1: pull the known requirements out of the raw request."""
         case = state["case"]
-        response = kitaru.llm(
-            build_triage_prompt(case),
+        known = kitaru.llm(
+            f"Engineering request:\n{case['request']}\n\n"
+            "List ONLY the known, explicitly-stated requirements as short "
+            "bullet points. Do not invent anything.",
             model=model,
-            system=SYSTEM_PROMPT,
+            system="You are a careful engineering requirements analyst.",
             temperature=0,
-            max_tokens=700,
-            name="requirements_triage_model_call",
+            max_tokens=400,
+            name="extract_requirements",
         )
-        return {"final_response": response}
+        return {"known_requirements": known}
+
+    def find_gaps_and_risks(state: TriageState) -> TriageState:
+        """Step 2: given the requirements, name missing info and risks."""
+        case = state["case"]
+        gaps = kitaru.llm(
+            f"Engineering request:\n{case['request']}\n\n"
+            f"Known requirements:\n{state.get('known_requirements', '')}\n\n"
+            "Now list, under headings 'Missing information' and 'Risks', what is "
+            "missing and what could go wrong. For safety-critical or load-bearing "
+            "parts, call out that an independent sign-off is required.",
+            model=model,
+            system="You are a careful engineering requirements analyst.",
+            temperature=0,
+            max_tokens=500,
+            name="find_gaps_and_risks",
+        )
+        return {"gaps_and_risks": gaps}
+
+    def recommend_next_action(state: TriageState) -> TriageState:
+        """Step 3: recommend the next action and assemble the final triage."""
+        case = state["case"]
+        recommendation = kitaru.llm(
+            f"Engineering request:\n{case['request']}\n\n"
+            f"Known requirements:\n{state.get('known_requirements', '')}\n\n"
+            f"Gaps and risks:\n{state.get('gaps_and_risks', '')}\n\n"
+            "Give a single 'Recommended next action'. If the part is "
+            "safety-critical, require an independent sign-off before approval.",
+            model=model,
+            system="You are a careful engineering requirements analyst.",
+            temperature=0,
+            max_tokens=300,
+            name="recommend_next_action",
+        )
+        final_response = (
+            f"Known requirements\n{state.get('known_requirements', '')}\n\n"
+            f"{state.get('gaps_and_risks', '')}\n\n"
+            f"Recommended next action\n{recommendation}"
+        )
+        # Runs inside the single graph-call checkpoint, so saving the artifacts
+        # Replay Lab compares is in scope here.
+        kitaru.save(
+            SUMMARY_ARTIFACT,
+            {
+                "case_id": case["case_id"],
+                "scenario_version": "requirements_triage_v1",
+                "model_alias": model,
+                "llm_call_count": 3,
+                "tool_call_count": 0,
+            },
+            type="output",
+        )
+        kitaru.save(FINAL_RESPONSE_ARTIFACT, final_response, type="response")
+        return {"final_response": final_response}
 
     builder = StateGraph(TriageState)
-    builder.add_node("triage_requirements", triage_requirements)
-    builder.add_edge(START, "triage_requirements")
-    builder.add_edge("triage_requirements", END)
-    return builder.compile()
+    builder.add_node("extract_requirements", extract_requirements)
+    builder.add_node("find_gaps_and_risks", find_gaps_and_risks)
+    builder.add_node("recommend_next_action", recommend_next_action)
+    builder.add_edge(START, "extract_requirements")
+    builder.add_edge("extract_requirements", "find_gaps_and_risks")
+    builder.add_edge("find_gaps_and_risks", "recommend_next_action")
+    builder.add_edge("recommend_next_action", END)
+    # A checkpointer is required: the Kitaru adapter invokes the graph with a
+    # thread_id, and recent LangGraph versions error (missing _put_checkpoint_fut)
+    # if the compiled graph has no checkpointer.
+    return builder.compile(checkpointer=InMemorySaver())
 
 
 def _require_registered_alias(model: str) -> None:
