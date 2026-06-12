@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import ValidationError
@@ -70,6 +71,20 @@ _RAW_STATUS_TO_PUBLIC_STATUS: dict[str, ExecutionStatus] = {
     for public_status, raw_statuses in _RAW_STATUSES_BY_PUBLIC_STATUS.items()
     for raw_status in raw_statuses
 }
+
+
+def _backend_filter_value(values: Sequence[str]) -> str:
+    """Format values for ZenML backend string-filter fields."""
+    if len(values) == 1:
+        return values[0]
+    return f"oneof:{json.dumps(list(values), separators=(',', ':'))}"
+
+
+def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
+    """Map a public status filter to the backend string-filter syntax."""
+    if public_status is None:
+        return None
+    return _backend_filter_value(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
 
 
 def _to_plain_dict(values: Mapping[str, Any]) -> dict[str, Any]:

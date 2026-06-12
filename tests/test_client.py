@@ -28,6 +28,7 @@ from kitaru._client._deployments import (
     parse_deployment_snapshot_name,
 )
 from kitaru._client._mappers import (
+    _PIPELINE_SOURCE_ALIAS_PREFIX,
     _RAW_STATUS_TO_PUBLIC_STATUS,
     _RAW_STATUSES_BY_PUBLIC_STATUS,
     _to_public_status,
@@ -122,6 +123,12 @@ def _as_step_run(step: _DummyStep) -> StepRunResponse:
 
 def _as_artifact(artifact: _DummyArtifact) -> ArtifactVersionResponse:
     return cast(ArtifactVersionResponse, artifact)
+
+
+def _backend_filter_for_values(values: tuple[str, ...]) -> str:
+    if len(values) == 1:
+        return values[0]
+    return f"oneof:{json.dumps(list(values), separators=(',', ':'))}"
 
 
 class _DummyArtifact:
@@ -2420,6 +2427,154 @@ def test_list_filters_flow_status_and_limit() -> None:
     assert executions[0].exec_id == str(run_1.id)
 
 
+def test_list_forwards_flow_filter_to_backend() -> None:
+    run = _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="my_flow")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(run)]
+        )
+
+        client = KitaruClient()
+        client.executions.list(flow="my_flow")
+
+    pipeline_name = client_mock.list_pipeline_runs.call_args.kwargs["pipeline_name"]
+    pipeline_names = _backend_filter_values(pipeline_name)
+    assert set(pipeline_names) == {
+        "my_flow",
+        f"{_PIPELINE_SOURCE_ALIAS_PREFIX}my_flow",
+    }
+    assert len(pipeline_names) == 2
+
+
+def test_list_forwards_terminal_status_filter_to_backend() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.list(status="completed")
+
+    status_filter = client_mock.list_pipeline_runs.call_args.kwargs["status"]
+    assert status_filter == _backend_filter_for_values(
+        _RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.COMPLETED]
+    )
+
+
+def test_list_waiting_and_running_filters_fetch_shared_raw_statuses() -> None:
+    wait_condition = _dummy_wait_condition(
+        name="approve_release",
+        question="Approve release?",
+    )
+    waiting_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+    running_run = _DummyRun(status=ZenMLExecutionStatus.RUNNING, flow_name="flow_a")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(waiting_run), _as_pipeline_run(running_run)]
+        )
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        waiting_executions = client.executions.list(status="waiting")
+        running_executions = client.executions.list(status="running")
+
+    assert [execution.exec_id for execution in waiting_executions] == [
+        str(waiting_run.id)
+    ]
+    assert [execution.exec_id for execution in running_executions] == [
+        str(running_run.id)
+    ]
+    shared_status_filter = _backend_filter_for_values(
+        (
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING],
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.WAITING],
+        )
+    )
+    assert (
+        client_mock.list_pipeline_runs.call_args_list[0].kwargs["status"]
+        == shared_status_filter
+    )
+    assert (
+        client_mock.list_pipeline_runs.call_args_list[1].kwargs["status"]
+        == shared_status_filter
+    )
+
+
+def test_list_without_filters_does_not_forward_filter_kwargs() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.list()
+
+    kwargs = client_mock.list_pipeline_runs.call_args.kwargs
+    assert "pipeline_name" not in kwargs
+    assert "status" not in kwargs
+
+
+def test_list_keeps_client_side_flow_filter_as_backstop() -> None:
+    non_matching_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_b",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(non_matching_run)]
+        )
+
+        client = KitaruClient()
+        executions = client.executions.list(flow="flow_a")
+
+    assert executions == []
+    pipeline_name = client_mock.list_pipeline_runs.call_args.kwargs["pipeline_name"]
+    pipeline_names = _backend_filter_values(pipeline_name)
+    assert set(pipeline_names) == {
+        "flow_a",
+        f"{_PIPELINE_SOURCE_ALIAS_PREFIX}flow_a",
+    }
+    assert len(pipeline_names) == 2
+
+
 def test_list_paginates_after_client_side_filters() -> None:
     """Execution pagination should apply after Kitaru flow/status filters."""
     run_1 = _DummyRun(
@@ -2502,6 +2657,12 @@ def test_list_pagination_finds_matches_across_backend_pages() -> None:
 
     assert len(executions) == 1
     assert executions[0].exec_id == str(matching_run.id)
+    expected_pipeline_filter = _backend_filter_for_values(
+        ("flow_a", f"{_PIPELINE_SOURCE_ALIAS_PREFIX}flow_a")
+    )
+    expected_status_filter = _backend_filter_for_values(
+        _RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.COMPLETED]
+    )
     client_mock.list_pipeline_runs.assert_has_calls(
         [
             call(
@@ -2510,6 +2671,8 @@ def test_list_pagination_finds_matches_across_backend_pages() -> None:
                 size=50,
                 project=None,
                 hydrate=True,
+                pipeline_name=expected_pipeline_filter,
+                status=expected_status_filter,
             ),
             call(
                 sort_by="desc:created",
@@ -2517,6 +2680,8 @@ def test_list_pagination_finds_matches_across_backend_pages() -> None:
                 size=50,
                 project=None,
                 hydrate=True,
+                pipeline_name=expected_pipeline_filter,
+                status=expected_status_filter,
             ),
         ]
     )
@@ -3087,7 +3252,7 @@ def test_statistics_fetches_metrics_from_zen_store() -> None:
     )
 
 
-def _raw_statuses_from_backend_filter(filter_value: str) -> tuple[str, ...]:
+def _backend_filter_values(filter_value: str) -> tuple[str, ...]:
     if filter_value.startswith("oneof:"):
         return tuple(json.loads(filter_value.removeprefix("oneof:")))
     return (filter_value,)
@@ -3182,8 +3347,7 @@ def test_status_grouping_without_status_filter_splits_by_public_status() -> None
     ]
     assert len(requests) == len(ExecutionStatus)
     assert {
-        frozenset(_raw_statuses_from_backend_filter(request.filter.status))
-        for request in requests
+        frozenset(_backend_filter_values(request.filter.status)) for request in requests
     } == {
         frozenset(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
         for public_status in ExecutionStatus
