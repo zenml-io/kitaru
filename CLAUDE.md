@@ -64,8 +64,11 @@ Kitaru docs live on three surfaces — know which one a task touches:
    `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
 
 Do **not** add hand-written pages to the FumaDocs app (`docs/content/docs/`) —
-they belong in `docs/book/` (GitBook). The changelog is owned by the changelog
-repo (published to `docs.zenml.io/changelog`), not by either surface here.
+they belong in `docs/book/` (GitBook). The public changelog is owned by the
+changelog repo (published to `docs.zenml.io/changelog`), not by either docs
+surface here. This repo may still generate a gitignored
+`docs/content/docs/changelog.mdx` for local/reference builds; do not hand-edit
+or commit that generated output.
 
 The public marketing/runtime site for Kitaru lives in the sibling `zenml-io-v2`
 repository. If a task involves Astro pages, public site assets, marketing
@@ -186,8 +189,8 @@ just server-dev-image                          # Build dev server image (require
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, Docker server smoke, wheel packaging, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
-| `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Generate, build, and deploy the SDK+CLI reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`); create/clean same-repo PR preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
+| `ci.yml` | Push/PR to `develop` | PRs run Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes. Pushes also run Docker server smoke and wheel packaging because those jobs may need trusted UI release credentials. |
+| `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Regenerate the CLI/SDK reference and build the static docs app on every run. Deploy the SDK+CLI reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`) only on `main` push or manual dispatch. PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
 | `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release |
 | `ui-prerelease-smoke.yml` | Manual dispatch | Tests an explicit prerelease Kitaru UI bundle against a Kitaru ref without publishing PyPI, Docker, Helm, tags, or releases |
 | `spellcheck.yml` | Manual/reusable runs, push to `develop`, non-draft PRs | Separate typo/spell checking |
