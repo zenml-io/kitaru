@@ -34,7 +34,7 @@ Kitaru docs live on three surfaces — know which one a task touches:
 2. **Generated SDK + CLI reference → `sdkdocs.kitaru.ai`.** The FumaDocs app in `docs/` is now reference-only (generated `content/docs/cli/` + `content/docs/reference/python/` + a landing). Built/deployed to the `kitaru-sdkdocs` worker (root `wrangler.toml`). See `docs/CLAUDE.md`.
 3. **`kitaru.ai/docs` → redirects.** The `kitaru-site` worker (`docs/worker/redirect.mjs`, `wrangler.redirect.toml`) 301-redirects old `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
 
-Do not add hand-written pages to the FumaDocs app (`docs/content/docs/`) — they belong in `docs/book/`. The changelog is owned by the changelog repo (`docs.zenml.io/changelog`).
+Do not add hand-written pages to the FumaDocs app (`docs/content/docs/`) — they belong in `docs/book/`. The public changelog is owned by the changelog repo (`docs.zenml.io/changelog`); this repo may still generate a gitignored `docs/content/docs/changelog.mdx` for local/reference builds, but agents should not hand-edit or commit it.
 
 The public marketing/runtime site for Kitaru now lives in `zenml-io-v2`. If a task involves Astro pages, public site assets, marketing Cloudflare Pages deployment, or runtime web APIs such as waitlist/get-started/newsletter endpoints, switch to that repository instead of adding that code back here.
 
@@ -157,13 +157,13 @@ When adding a new CLI command, MCP tool, or SDK feature:
 
 ### Python CI (`ci.yml`)
 
-Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, dependency audit, link check, Docker server smoke test, wheel-packaging check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
+Runs on push/PR to `develop`. PR jobs run lint + format check + yaml check, typos, type check, dependency audit, link check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12). Push jobs also run Docker server smoke and wheel-packaging checks, because those paths may need trusted UI release credentials.
 
 When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard packaging, or release UI selection, read `FRONTEND-TESTING.md` first. It is the runbook for stable vs prerelease `kitaru-ui-v*` bundle testing and the trusted-event/token boundaries.
 
 ### Docs CI (`docs.yml`)
 
-Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generation scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or `wrangler.toml`. It generates the CLI/SDK reference, builds the FumaDocs static export, and deploys the **SDK+CLI reference site to `sdkdocs.kitaru.ai`** (worker `kitaru-sdkdocs`) plus the **`kitaru.ai/docs` redirect worker** (`kitaru-site`, `wrangler.redirect.toml`); it also creates/cleans same-repo PR preview Workers. Hand-written docs (`docs/book/`) publish separately to `docs.zenml.io/kitaru` via GitBook Git Sync (not this workflow). Marketing site deployment is handled from `zenml-io-v2`.
+Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generation scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or Wrangler config. It regenerates the CLI/SDK reference and builds the FumaDocs static export on all runs. It deploys the **SDK+CLI reference site to `sdkdocs.kitaru.ai`** (worker `kitaru-sdkdocs`) plus the **`kitaru.ai/docs` redirect worker** (`kitaru-site`, `wrangler.redirect.toml`) only on `main` push or manual dispatch; PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately to `docs.zenml.io/kitaru` via GitBook Git Sync (not this workflow). Marketing site deployment is handled from `zenml-io-v2`.
 
 ### Other workflows
 
