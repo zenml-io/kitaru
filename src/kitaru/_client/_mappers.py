@@ -525,6 +525,7 @@ def _map_execution(
     run: PipelineRunResponse,
     client: KitaruClient,
     include_details: bool,
+    resolve_wait_status: bool = False,
 ) -> Execution:
     """Map a ZenML pipeline run into a Kitaru execution model."""
     status = _to_public_status(run.status)
@@ -536,7 +537,9 @@ def _map_execution(
         active_wait = _get_active_wait_condition(run)
         if active_wait is not None:
             pending_wait = _map_pending_wait(active_wait)
-        elif include_details:
+        elif include_details or resolve_wait_status:
+            # Some ZenML responses only expose pending waits through
+            # list_run_wait_conditions(...), not through active_wait_condition.
             pending_wait = _first_pending_wait(run=run, client=client)
 
     if pending_wait is not None:

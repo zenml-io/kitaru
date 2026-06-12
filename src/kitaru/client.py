@@ -1356,6 +1356,9 @@ class _ExecutionsAPI:
         if size is not None and page is None:
             page = 1
 
+        if flow is not None and _normalize_flow_name(flow) is None:
+            return []
+
         start_index = 0
         stop_index: int | None = None
         if limit is not None:
@@ -1380,6 +1383,10 @@ class _ExecutionsAPI:
             server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
         if status_filter is not None:
             server_filters["status"] = _list_status_filter_value(status_filter)
+        resolve_wait_status = status_filter in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.WAITING,
+        }
 
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
@@ -1399,6 +1406,7 @@ class _ExecutionsAPI:
                     run=run,
                     client=self._client_ref,
                     include_details=False,
+                    resolve_wait_status=resolve_wait_status,
                 )
 
                 # Server filters only reduce fetched runs; these public checks
