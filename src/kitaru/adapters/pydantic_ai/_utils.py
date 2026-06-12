@@ -52,9 +52,19 @@ class AdapterCheckpointArtifactRefs:
     output_artifacts: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class AdapterStreamingFallbackCheckpoint:
+    """Private marker for adapter-owned streamed calls-strategy fallback turns."""
+
+    allow_sync_tool_body_waits: bool
+
+
 _ADAPTER_CHECKPOINT_ARTIFACT_REFS: ContextVar[AdapterCheckpointArtifactRefs | None] = (
     ContextVar("kitaru_adapter_checkpoint_artifact_refs", default=None)
 )
+_ADAPTER_STREAMING_FALLBACK_CHECKPOINT: ContextVar[
+    AdapterStreamingFallbackCheckpoint | None
+] = ContextVar("kitaru_adapter_streaming_fallback_checkpoint", default=None)
 
 if f"src.{__name__}" not in sys.modules:
     sys.modules[f"src.{__name__}"] = sys.modules[__name__]
@@ -90,6 +100,59 @@ def get_adapter_checkpoint_artifact_refs() -> AdapterCheckpointArtifactRefs | No
     return _ADAPTER_CHECKPOINT_ARTIFACT_REFS.get()
 
 
+@contextmanager
+def adapter_streaming_fallback_checkpoint(
+    *, allow_sync_tool_body_waits: bool
+) -> Iterator[AdapterStreamingFallbackCheckpoint]:
+    """Mark an adapter-owned whole-turn checkpoint created for streaming fallback."""
+    marker = AdapterStreamingFallbackCheckpoint(
+        allow_sync_tool_body_waits=allow_sync_tool_body_waits
+    )
+    token = _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.set(marker)
+    try:
+        yield marker
+    finally:
+        _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.reset(token)
+
+
+def get_adapter_streaming_fallback_checkpoint() -> (
+    AdapterStreamingFallbackCheckpoint | None
+):
+    """Return the active streamed calls-strategy fallback marker, if any."""
+    return _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.get()
+
+
+@contextmanager
+def suspend_adapter_streaming_fallback_checkpoint() -> Iterator[None]:
+    """Temporarily hide the streamed fallback marker from nested user code."""
+    token = _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.set(None)
+    try:
+        yield
+    finally:
+        _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.reset(token)
+
+
+def has_explicit_tool_checkpoint_opt_out(
+    tool_name: str,
+    by_name: ToolCheckpointOverrides | None,
+) -> bool:
+    """Return whether ``tool_name`` has an explicit per-tool ``False`` override."""
+    return bool(by_name and by_name.get(tool_name) is False)
+
+
+def has_any_explicit_tool_checkpoint_opt_out(
+    by_name: ToolCheckpointOverrides | None,
+) -> bool:
+    """Return whether any named tool has an explicit per-tool ``False`` override."""
+    return bool(
+        by_name
+        and any(
+            has_explicit_tool_checkpoint_opt_out(tool_name, by_name)
+            for tool_name in by_name
+        )
+    )
+
+
 def resolve_tool_checkpoint_config(
     tool_name: str,
     *,
@@ -101,9 +164,11 @@ def resolve_tool_checkpoint_config(
     Per-tool override in ``by_name`` wins (``False`` opts the tool out entirely);
     otherwise falls back to ``default``, or ``None`` when neither is set.
     """
+    if has_explicit_tool_checkpoint_opt_out(tool_name, by_name):
+        return None
     if by_name and tool_name in by_name:
         override = by_name[tool_name]
-        return None if override is False else override
+        return cast(CheckpointConfig, override)
     return default
 
 

@@ -60,7 +60,9 @@ from ._utils import (
     CheckpointConfig,
     CheckpointStrategy,
     ToolCheckpointOverrides,
+    adapter_streaming_fallback_checkpoint,
     checkpoint_input_value,
+    has_any_explicit_tool_checkpoint_opt_out,
     run_async_in_checkpoint,
     run_sync_in_checkpoint,
     turn_cache_key,
@@ -95,6 +97,7 @@ class _TurnCheckpointCallConfig:
     checkpoint_inputs: dict[str, Any]
     checkpoint_config: CheckpointConfig
     force_turn_checkpoint: bool
+    mark_streaming_fallback_checkpoint: bool
 
 
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
@@ -109,13 +112,6 @@ _AUTO_FLOW_LOCK = threading.Lock()
 
 if f"src.{__name__}" not in sys.modules:
     sys.modules[f"src.{__name__}"] = sys.modules[__name__]
-
-
-def _has_tool_checkpoint_opt_out(
-    overrides: ToolCheckpointOverrides | None,
-) -> bool:
-    """Return whether any named tool explicitly opts out of checkpointing."""
-    return bool(overrides and any(override is False for override in overrides.values()))
 
 
 def _strategy_from_granular_checkpoints(
@@ -474,7 +470,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 "`granular_checkpoints=True`, and a matching checkpoint opt-out "
                 'such as `tool_checkpoint_config_by_name={"tool_name": False}`.'
             )
-        if allow_sync_tool_body_waits and not _has_tool_checkpoint_opt_out(
+        if allow_sync_tool_body_waits and not has_any_explicit_tool_checkpoint_opt_out(
             tool_checkpoint_config_by_name
         ):
             raise KitaruUsageError(
@@ -794,6 +790,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 disable_cache=force_turn_checkpoint,
             ),
             force_turn_checkpoint=force_turn_checkpoint,
+            mark_streaming_fallback_checkpoint=(
+                force_turn_checkpoint and self._uses_calls_strategy
+            ),
         )
 
     async def _auto_checkpoint_async(
@@ -803,11 +802,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         cache_key: str | None = None,
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        mark_streaming_fallback_checkpoint: bool = False,
     ) -> Any:
+        checkpoint_body = body
+        if mark_streaming_fallback_checkpoint:
+
+            async def _marked_body() -> Any:
+                with adapter_streaming_fallback_checkpoint(
+                    allow_sync_tool_body_waits=self._allow_sync_tool_body_waits
+                ):
+                    return await body()
+
+            checkpoint_body = _marked_body
+
         return await run_async_in_checkpoint(
             config=checkpoint_config or self._turn_checkpoint_config,
             step_name=self._name or "agent",
-            body=body,
+            body=checkpoint_body,
             cache_key=cache_key,
             checkpoint_inputs=checkpoint_inputs,
         )
@@ -819,11 +830,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         cache_key: str | None = None,
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
+        mark_streaming_fallback_checkpoint: bool = False,
     ) -> Any:
+        checkpoint_body = body
+        if mark_streaming_fallback_checkpoint:
+
+            def _marked_body() -> Any:
+                with adapter_streaming_fallback_checkpoint(
+                    allow_sync_tool_body_waits=self._allow_sync_tool_body_waits
+                ):
+                    return body()
+
+            checkpoint_body = _marked_body
+
         return run_sync_in_checkpoint(
             config=checkpoint_config or self._turn_checkpoint_config,
             step_name=self._name or "agent",
-            body=body,
+            body=checkpoint_body,
             cache_key=cache_key,
             checkpoint_inputs=checkpoint_inputs,
         )
@@ -958,9 +981,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         This is deliberately run-wide rather than per-tool. Pydantic AI decides
         whether to offload sync tools before Kitaru reaches an individual tool
-        body, so the safe compatibility seam is the agent run boundary. The
-        checkpoint opt-out remains checkpoint-only; this separate flag controls
-        the private Pydantic AI threading compatibility path.
+        body, so Kitaru enables or disables the private threading hook around
+        the whole agent run. The checkpoint opt-out remains checkpoint-only;
+        this separate flag controls the private Pydantic AI threading
+        compatibility path.
         """
         return self._allow_sync_tool_body_waits
 
@@ -999,6 +1023,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
         auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
+        mark_streaming_fallback_checkpoint: bool = False,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
@@ -1008,6 +1033,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
+                mark_streaming_fallback_checkpoint=mark_streaming_fallback_checkpoint,
             )
 
         self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
@@ -1023,6 +1049,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
                 auto_flow_toolsets=auto_flow_toolsets,
+                mark_streaming_fallback_checkpoint=mark_streaming_fallback_checkpoint,
             )
 
         loop = asyncio.get_running_loop()
@@ -1040,6 +1067,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         checkpoint_inputs: Mapping[str, Any] | None = None,
         checkpoint_config: CheckpointConfig | None = None,
         auto_flow_toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
+        mark_streaming_fallback_checkpoint: bool = False,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
@@ -1049,6 +1077,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
+                mark_streaming_fallback_checkpoint=mark_streaming_fallback_checkpoint,
             )
         self._ensure_auto_flow_mcp_lifecycle_safe(call_toolsets=auto_flow_toolsets)
         return self._invoke_in_auto_flow(
@@ -1059,6 +1088,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_inputs=checkpoint_inputs,
                 checkpoint_config=checkpoint_config,
                 auto_flow_toolsets=auto_flow_toolsets,
+                mark_streaming_fallback_checkpoint=mark_streaming_fallback_checkpoint,
             )
         )
 
@@ -1179,6 +1209,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_inputs=turn_call_config.checkpoint_inputs,
                 checkpoint_config=turn_call_config.checkpoint_config,
                 auto_flow_toolsets=prepared_toolsets,
+                mark_streaming_fallback_checkpoint=(
+                    turn_call_config.mark_streaming_fallback_checkpoint
+                ),
             )
             self._remember_messages(result)
             return result
@@ -1298,6 +1331,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 checkpoint_inputs=turn_call_config.checkpoint_inputs,
                 checkpoint_config=turn_call_config.checkpoint_config,
                 auto_flow_toolsets=prepared_toolsets,
+                mark_streaming_fallback_checkpoint=(
+                    turn_call_config.mark_streaming_fallback_checkpoint
+                ),
             )
             self._remember_messages(result)
             return result
@@ -1351,6 +1387,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._kitaru_overrides(),
             self._tracking_scope(),
             stream_surface("run_stream"),
+            _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
             model_cache_run_context(
                 conversation_id=conversation_id, message_history=message_history
             ),
@@ -1428,6 +1465,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._kitaru_overrides(),
             self._tracking_scope(),
             stream_surface("iter"),
+            _inline_sync_tool_execution(enabled=self._should_inline_sync_tools()),
             model_cache_run_context(
                 conversation_id=conversation_id, message_history=message_history
             ),
