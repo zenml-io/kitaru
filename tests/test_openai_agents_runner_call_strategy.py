@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import dataclass
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -312,6 +313,393 @@ def test_runner_call_cache_identity_varies_by_agent_instructions() -> None:
     assert (
         behavior_identity["instructions"] == "You may run sandbox commands when useful."
     )
+
+
+def test_runner_call_cache_identity_uses_stable_callable_instructions() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_instructions(message: str) -> Any:
+        def instructions(_context: Any, _agent: Any) -> str:
+            return message
+
+        return instructions
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="callable-instructions-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    same_runner_a = make_runner(make_instructions("Use the sandbox when helpful."))
+    same_runner_b = make_runner(make_instructions("Use the sandbox when helpful."))
+    different_runner = make_runner(make_instructions("Never run shell commands."))
+
+    same_key_a = same_runner_a._runner_call_cache_key(
+        request,
+        agent=same_runner_a.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    same_key_b = same_runner_b._runner_call_cache_key(
+        request,
+        agent=same_runner_b.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    different_key = different_runner._runner_call_cache_key(
+        request,
+        agent=different_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = same_runner_a._agent_cache_identity(same_runner_a.agent)[
+        "behavior"
+    ]
+
+    assert same_key_a == same_key_b
+    assert different_key != same_key_a
+    assert "object_id" not in json.dumps(behavior_identity)
+
+
+def test_runner_call_cache_identity_includes_callable_private_instance_state() -> None:
+    class Instructions:
+        def __init__(self, message: str) -> None:
+            self._message = message
+
+        def __call__(self, _context: Any, _agent: Any) -> str:
+            return self._message
+
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="callable-instance-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    sandbox_runner = make_runner(Instructions("Use the sandbox."))
+    no_shell_runner = make_runner(Instructions("Never run shell commands."))
+
+    sandbox_key = sandbox_runner._runner_call_cache_key(
+        request,
+        agent=sandbox_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    no_shell_key = no_shell_runner._runner_call_cache_key(
+        request,
+        agent=no_shell_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = sandbox_runner._agent_cache_identity(sandbox_runner.agent)[
+        "behavior"
+    ]
+
+    assert sandbox_key != no_shell_key
+    assert behavior_identity["instructions"]["instance_state"]["_message"] == (
+        "Use the sandbox."
+    )
+
+
+def test_runner_call_cache_identity_includes_slotted_callable_state() -> None:
+    class Instructions:
+        __slots__ = ("_message",)
+
+        def __init__(self, message: str) -> None:
+            self._message = message
+
+        def __call__(self, _context: Any, _agent: Any) -> str:
+            return self._message
+
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="slotted-callable-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    sandbox_runner = make_runner(Instructions("Use the sandbox."))
+    no_shell_runner = make_runner(Instructions("Never run shell commands."))
+
+    sandbox_key = sandbox_runner._runner_call_cache_key(
+        request,
+        agent=sandbox_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    no_shell_key = no_shell_runner._runner_call_cache_key(
+        request,
+        agent=no_shell_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = sandbox_runner._agent_cache_identity(sandbox_runner.agent)[
+        "behavior"
+    ]
+
+    assert sandbox_key != no_shell_key
+    assert behavior_identity["instructions"]["instance_state"]["_message"] == (
+        "Use the sandbox."
+    )
+
+
+def test_runner_call_cache_identity_includes_bound_method_private_state() -> None:
+    class InstructionSource:
+        def __init__(self, message: str) -> None:
+            self._message = message
+
+        def instructions(self, _context: Any, _agent: Any) -> str:
+            return self._message
+
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="bound-method-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    sandbox_runner = make_runner(InstructionSource("Use the sandbox.").instructions)
+    no_shell_runner = make_runner(
+        InstructionSource("Never run shell commands.").instructions
+    )
+
+    sandbox_key = sandbox_runner._runner_call_cache_key(
+        request,
+        agent=sandbox_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    no_shell_key = no_shell_runner._runner_call_cache_key(
+        request,
+        agent=no_shell_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = sandbox_runner._agent_cache_identity(sandbox_runner.agent)[
+        "behavior"
+    ]
+
+    assert sandbox_key != no_shell_key
+    assert (
+        behavior_identity["instructions"]["bound_to"]["instance_state"]["_message"]
+        == "Use the sandbox."
+    )
+
+
+def test_runner_call_cache_identity_handles_builtin_callables() -> None:
+    identity = openai_agent_module._behavior_value_cache_identity(len)
+
+    assert identity["module"] == "builtins"
+    assert "object_id" not in json.dumps(identity)
+
+
+def test_runner_call_cache_identity_includes_referenced_globals() -> None:
+    source = "def instructions(_context, _agent):\n    return SYSTEM_PROMPT"
+    sandbox_namespace = {"SYSTEM_PROMPT": "Use the sandbox."}
+    no_shell_namespace = {"SYSTEM_PROMPT": "Never run shell commands."}
+    exec(source, sandbox_namespace)
+    exec(source, no_shell_namespace)
+    sandbox_instructions = sandbox_namespace["instructions"]
+    no_shell_instructions = no_shell_namespace["instructions"]
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="global-callable-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    sandbox_runner = make_runner(sandbox_instructions)
+    no_shell_runner = make_runner(no_shell_instructions)
+
+    sandbox_key = sandbox_runner._runner_call_cache_key(
+        request,
+        agent=sandbox_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    no_shell_key = no_shell_runner._runner_call_cache_key(
+        request,
+        agent=no_shell_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    behavior_identity = sandbox_runner._agent_cache_identity(sandbox_runner.agent)[
+        "behavior"
+    ]
+
+    assert sandbox_key != no_shell_key
+    assert behavior_identity["instructions"]["globals"]["SYSTEM_PROMPT"] == (
+        "Use the sandbox."
+    )
+
+
+def test_runner_call_cache_identity_includes_callable_bytecode() -> None:
+    namespace: dict[str, Any] = {}
+    exec(
+        "def build():\n    return (lambda value: value + 1, lambda value: value - 1)",
+        namespace,
+    )
+    add_instruction, subtract_instruction = namespace["build"]()
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="bytecode-callable-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    add_runner = make_runner(add_instruction)
+    subtract_runner = make_runner(subtract_instruction)
+
+    add_key = add_runner._runner_call_cache_key(
+        request,
+        agent=add_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    subtract_key = subtract_runner._runner_call_cache_key(
+        request,
+        agent=subtract_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    add_code = add_runner._agent_cache_identity(add_runner.agent)["behavior"][
+        "instructions"
+    ]["code"]
+    subtract_code = subtract_runner._agent_cache_identity(subtract_runner.agent)[
+        "behavior"
+    ]["instructions"]["code"]
+
+    assert add_key != subtract_key
+    assert add_code["bytecode"] != subtract_code["bytecode"]
+    assert "filename" not in add_code
+    assert "firstlineno" not in add_code
+
+
+def test_runner_call_cache_identity_includes_callable_defaults_and_partials() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+
+    def make_default_instructions(message: str) -> Any:
+        def instructions(_context: Any, _agent: Any, text: str = message) -> str:
+            return text
+
+        return instructions
+
+    def parameterized_instructions(
+        _context: Any,
+        _agent: Any,
+        *,
+        message: str,
+    ) -> str:
+        return message
+
+    def make_runner(instructions: Any) -> KitaruRunner:
+        return KitaruRunner(
+            Agent(
+                name="callable-defaults-cache-agent",
+                model=StaticTextModel("ok"),
+                instructions=instructions,
+            ),
+            checkpoint_strategy="runner_call",
+            run_config_factory=lambda: run_config,
+        )
+
+    default_runner = make_runner(make_default_instructions("Use the sandbox."))
+    other_default_runner = make_runner(
+        make_default_instructions("Never run shell commands.")
+    )
+    partial_runner = make_runner(
+        partial(parameterized_instructions, message="Use the sandbox.")
+    )
+    other_partial_runner = make_runner(
+        partial(parameterized_instructions, message="Never run shell commands.")
+    )
+
+    default_key = default_runner._runner_call_cache_key(
+        request,
+        agent=default_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    other_default_key = other_default_runner._runner_call_cache_key(
+        request,
+        agent=other_default_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    partial_key = partial_runner._runner_call_cache_key(
+        request,
+        agent=partial_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    other_partial_key = other_partial_runner._runner_call_cache_key(
+        request,
+        agent=other_partial_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+
+    assert default_key != other_default_key
+    assert partial_key != other_partial_key
 
 
 def test_runner_call_cache_identity_varies_by_string_agent_model_value() -> None:
@@ -876,13 +1264,14 @@ def test_behavior_cache_identity_bounds_depth_but_keeps_callables_distinct() -> 
     first_marker = first
     for _ in range(openai_agent_module._MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH):
         first_marker = first_marker["items"][0]
-    assert first_marker == {
-        "python_type": (
-            f"{type(first_callback).__module__}.{type(first_callback).__qualname__}"
-        ),
-        "serialization_error": "max_depth_exceeded",
-        "object_id": id(first_callback),
-    }
+    assert first_marker["python_type"] == (
+        f"{type(first_callback).__module__}.{type(first_callback).__qualname__}"
+    )
+    assert first_marker["module"] == first_callback.__module__
+    assert first_marker["qualname"].endswith("first_callback")
+    assert "code" not in first_marker
+    assert first_marker["serialization_error"] == "max_depth_exceeded"
+    assert "object_id" not in first_marker
 
 
 def test_opaque_context_cache_identity_is_distinct_per_object() -> None:

@@ -1,9 +1,14 @@
 """Public runner wrapper for the OpenAI Agents SDK adapter foundation."""
 
 import asyncio
+import json
 import weakref
 from collections.abc import Callable, Coroutine
+from contextlib import suppress
 from dataclasses import replace
+from functools import partial
+from hashlib import sha256
+from types import ModuleType
 from typing import Any, cast
 
 from kitaru._llm_usage import (
@@ -53,6 +58,7 @@ from ._utils import (
 _MAX_HANDOFF_CACHE_IDENTITY_DEPTH = 32
 _MAX_BEHAVIOR_CACHE_IDENTITY_DEPTH = 16
 _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS = 64
+_MAX_BEHAVIOR_CACHE_IDENTITY_CODE_BYTES = 8192
 _HANDOFF_BEHAVIOR_CACHE_ATTRIBUTES = (
     "input_filter",
     "on_invoke_handoff",
@@ -154,13 +160,12 @@ def _behavior_value_cache_identity(
 
 
 def _bounded_behavior_cache_identity(value: Any, *, reason: str) -> dict[str, Any]:
-    identity: dict[str, Any] = {
-        "python_type": KitaruRunner._python_type(type(value)),
-        "serialization_error": reason,
-    }
-    if callable(value):
-        identity["object_id"] = id(value)
-    return identity
+    identity = (
+        _callable_static_cache_identity(value, include_code=False)
+        if callable(value)
+        else {"python_type": KitaruRunner._python_type(type(value))}
+    )
+    return {**identity, "serialization_error": reason}
 
 
 def _bounded_collection_cache_identity(
@@ -175,25 +180,129 @@ def _bounded_collection_cache_identity(
     }
 
 
+def _callable_static_cache_identity(
+    value: Any,
+    *,
+    include_code: bool = True,
+) -> dict[str, Any]:
+    identity: dict[str, Any] = {
+        "python_type": KitaruRunner._python_type(type(value)),
+        "module": getattr(value, "__module__", None),
+        "qualname": getattr(value, "__qualname__", None),
+    }
+    code = getattr(value, "__code__", None)
+    if include_code and code is not None:
+        identity["code"] = {
+            "name": getattr(code, "co_name", None),
+            "argcount": getattr(code, "co_argcount", None),
+            "posonlyargcount": getattr(code, "co_posonlyargcount", None),
+            "kwonlyargcount": getattr(code, "co_kwonlyargcount", None),
+            "flags": getattr(code, "co_flags", None),
+            "bytecode": _code_bytes_cache_identity(getattr(code, "co_code", b"")),
+            "exceptiontable": _code_bytes_cache_identity(
+                getattr(code, "co_exceptiontable", b""),
+            ),
+            "constants": stable_cache_identity(
+                getattr(code, "co_consts", ()),
+                opaque_objects_unique=False,
+                max_depth=3,
+                max_items=_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS,
+            ),
+            "names": _code_sequence_cache_identity(getattr(code, "co_names", ())),
+            "varnames": _code_sequence_cache_identity(getattr(code, "co_varnames", ())),
+            "freevars": _code_sequence_cache_identity(getattr(code, "co_freevars", ())),
+            "cellvars": _code_sequence_cache_identity(getattr(code, "co_cellvars", ())),
+        }
+    return identity
+
+
+def _code_bytes_cache_identity(code_bytes: bytes) -> str | dict[str, Any]:
+    if len(code_bytes) <= _MAX_BEHAVIOR_CACHE_IDENTITY_CODE_BYTES:
+        return code_bytes.hex()
+    return {
+        "byte_count": len(code_bytes),
+        "sha256": sha256(code_bytes).hexdigest(),
+        "serialization_error": "max_bytes_exceeded",
+    }
+
+
+def _code_sequence_cache_identity(
+    values: tuple[str, ...],
+) -> list[str] | dict[str, Any]:
+    items = list(values)
+    if len(items) <= _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
+        return items
+    return {
+        "collection_type": "tuple",
+        "item_count": len(items),
+        "included_items": items[:_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS],
+        "sha256": _cache_identity_digest(items),
+        "serialization_error": "max_items_exceeded",
+    }
+
+
+def _cache_identity_digest(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return sha256(payload).hexdigest()
+
+
 def _callable_cache_identity(
     value: Any,
     *,
     seen_ids: set[int],
     depth: int,
 ) -> dict[str, Any]:
-    identity: dict[str, Any] = {
-        "python_type": KitaruRunner._python_type(type(value)),
-        "module": getattr(value, "__module__", None),
-        "qualname": getattr(value, "__qualname__", None),
-        "object_id": id(value),
-    }
-    code = getattr(value, "__code__", None)
-    if code is not None:
-        identity["code"] = {
-            "filename": getattr(code, "co_filename", None),
-            "firstlineno": getattr(code, "co_firstlineno", None),
-            "name": getattr(code, "co_name", None),
+    identity = _callable_static_cache_identity(value)
+    if isinstance(value, partial):
+        identity["partial"] = {
+            "function": _behavior_value_cache_identity(
+                value.func,
+                seen_ids=seen_ids,
+                depth=depth + 1,
+            ),
+            "args": _behavior_value_cache_identity(
+                value.args,
+                seen_ids=seen_ids,
+                depth=depth + 1,
+            ),
+            "keywords": _behavior_value_cache_identity(
+                value.keywords or {},
+                seen_ids=seen_ids,
+                depth=depth + 1,
+            ),
         }
+    defaults = getattr(value, "__defaults__", None)
+    if defaults:
+        identity["defaults"] = _behavior_value_cache_identity(
+            defaults,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
+    kwdefaults = getattr(value, "__kwdefaults__", None)
+    if kwdefaults:
+        identity["kwdefaults"] = _behavior_value_cache_identity(
+            kwdefaults,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
+    globals_identity = _callable_referenced_globals_cache_identity(
+        value,
+        seen_ids=seen_ids,
+        depth=depth + 1,
+    )
+    if globals_identity:
+        identity["globals"] = globals_identity
+    if not hasattr(value, "__code__") and not isinstance(value, partial):
+        identity["call_method"] = _behavior_value_cache_identity(
+            type(value).__call__,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
     func = getattr(value, "__func__", None)
     if func is not None:
         identity["function"] = _behavior_value_cache_identity(
@@ -203,10 +312,11 @@ def _callable_cache_identity(
         )
     self_obj = getattr(value, "__self__", None)
     if self_obj is not None:
-        identity["bound_to"] = {
-            "python_type": KitaruRunner._python_type(type(self_obj)),
-            "object_id": id(self_obj),
-        }
+        identity["bound_to"] = _bound_self_cache_identity(
+            self_obj,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
     closure = getattr(value, "__closure__", None)
     if closure:
         if len(closure) > _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
@@ -224,7 +334,110 @@ def _callable_cache_identity(
                 )
                 for cell in closure
             ]
+    instance_attrs = _callable_instance_attributes(value)
+    if instance_attrs:
+        identity["instance_state"] = _behavior_value_cache_identity(
+            instance_attrs,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
     return identity
+
+
+def _callable_referenced_globals_cache_identity(
+    value: Any,
+    *,
+    seen_ids: set[int],
+    depth: int,
+) -> dict[str, Any] | None:
+    code = getattr(value, "__code__", None)
+    globals_dict = getattr(value, "__globals__", None)
+    if code is None or not isinstance(globals_dict, dict):
+        return None
+
+    names = sorted(
+        {name for name in getattr(code, "co_names", ()) if name in globals_dict}
+    )
+    if not names:
+        return None
+    globals_identity = {
+        name: _global_value_cache_identity(
+            globals_dict[name],
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        )
+        for name in names
+    }
+    if len(names) > _MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS:
+        return {
+            "collection_type": "dict",
+            "item_count": len(names),
+            "included_keys": names[:_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS],
+            "sha256": _cache_identity_digest(globals_identity),
+            "serialization_error": "max_items_exceeded",
+        }
+    return globals_identity
+
+
+def _global_value_cache_identity(
+    value: Any,
+    *,
+    seen_ids: set[int],
+    depth: int,
+) -> Any:
+    if isinstance(value, ModuleType):
+        return {
+            "python_type": KitaruRunner._python_type(type(value)),
+            "module": value.__name__,
+        }
+    if isinstance(value, type):
+        return {
+            "python_type": KitaruRunner._python_type(value),
+            "module": getattr(value, "__module__", None),
+            "qualname": getattr(value, "__qualname__", None),
+        }
+    return _behavior_value_cache_identity(
+        value,
+        seen_ids=seen_ids,
+        depth=depth,
+    )
+
+
+def _bound_self_cache_identity(
+    value: Any,
+    *,
+    seen_ids: set[int],
+    depth: int,
+) -> Any:
+    instance_attrs = _callable_instance_attributes(value)
+    if not instance_attrs:
+        return stable_cache_identity(value, opaque_objects_unique=False)
+    return {
+        "python_type": KitaruRunner._python_type(type(value)),
+        "instance_state": _behavior_value_cache_identity(
+            instance_attrs,
+            seen_ids=seen_ids,
+            depth=depth + 1,
+        ),
+    }
+
+
+def _callable_instance_attributes(value: Any) -> dict[str, Any]:
+    attrs: dict[str, Any] = {}
+    with suppress(TypeError):
+        attrs.update(vars(value))
+    for cls in type(value).__mro__:
+        slots = getattr(cls, "__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        for slot in slots:
+            if slot in {"__dict__", "__weakref__"} or slot in attrs:
+                continue
+            try:
+                attrs[slot] = getattr(value, slot)
+            except AttributeError:
+                continue
+    return attrs
 
 
 def _closure_cell_cache_identity(
