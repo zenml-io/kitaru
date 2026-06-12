@@ -74,7 +74,9 @@ from kitaru._client._logs import (
 from kitaru._client._mappers import (
     _CHECKPOINT_SOURCE_ALIAS_PREFIX,
     _PIPELINE_SOURCE_ALIAS_PREFIX,
+    _RAW_STATUSES_BY_PUBLIC_STATUS,
     _WAIT_CONDITION_STATUS_PENDING,
+    _backend_filter_value,
     _checkpoint_lineage_key,
     _coerce_status_filter,
     _first_pending_wait,
@@ -90,6 +92,7 @@ from kitaru._client._mappers import (
     _map_pending_wait,
     _parse_frozen_execution_spec,
     _select_pending_wait_condition,
+    _status_filter_value,
     _to_plain_dict,
     _to_public_status,
 )
@@ -1009,6 +1012,25 @@ def _run_has_complete_step_list(run: Any) -> bool:
     return _to_public_status(run.status).is_finished
 
 
+def _pipeline_name_filter_value(flow: str) -> str:
+    """Return the backend filter value for both stored names of a Kitaru flow."""
+    candidates = [flow, f"{_PIPELINE_SOURCE_ALIAS_PREFIX}{flow}"]
+    return _backend_filter_value(candidates)
+
+
+def _list_status_filter_value(public_status: ExecutionStatus) -> str:
+    """Return the safest backend status filter for execution listing."""
+    if public_status in {ExecutionStatus.RUNNING, ExecutionStatus.WAITING}:
+        raw_statuses = (
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING],
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.WAITING],
+        )
+        return _backend_filter_value(raw_statuses)
+    status_value = _status_filter_value(public_status)
+    assert status_value is not None
+    return status_value
+
+
 class _ExecutionsAPI:
     """Namespace for execution lifecycle and inspection operations."""
 
@@ -1523,6 +1545,9 @@ class _ExecutionsAPI:
         if size is not None and page is None:
             page = 1
 
+        if flow is not None and _normalize_flow_name(flow) is None:
+            return []
+
         start_index = 0
         stop_index: int | None = None
         if limit is not None:
@@ -1542,6 +1567,16 @@ class _ExecutionsAPI:
         else:
             page_size = 50
 
+        server_filters: dict[str, Any] = {}
+        if flow is not None:
+            server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
+        if status_filter is not None:
+            server_filters["status"] = _list_status_filter_value(status_filter)
+        resolve_wait_status = status_filter in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.WAITING,
+        }
+
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
                 sort_by="desc:created",
@@ -1549,6 +1584,7 @@ class _ExecutionsAPI:
                 size=page_size,
                 project=self._client_ref._project,
                 hydrate=True,
+                **server_filters,
             )
             runs = list(run_page.items)
             if not runs:
@@ -1559,8 +1595,11 @@ class _ExecutionsAPI:
                     run=run,
                     client=self._client_ref,
                     include_details=False,
+                    resolve_wait_status=resolve_wait_status,
                 )
 
+                # Server filters only reduce fetched runs; these public checks
+                # still decide the final result because flow/status can be derived.
                 if flow is not None and execution.flow_name != flow:
                     continue
                 if status_filter is not None and execution.status != status_filter:
