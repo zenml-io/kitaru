@@ -341,6 +341,14 @@ jobs:
           errors=$(grep '^errors=' "$counts_path" | cut -d= -f2)
           if [ "$status" -eq 5 ]; then
             echo "No pytest tests were selected for marker expression: $MARKER_EXPR" | tee -a "$log_path"
+            if [ "$SUITE" = "provider-extended" ] && [ "$INCLUDE_RESEARCH_BOT" = "true" ]; then
+              # No provider_extended-marked pytest tests exist yet; the
+              # research-bot command is currently the only extended check.
+              # Record a visible skip instead of a failure so extended
+              # dispatches that include the research bot stay usable.
+              echo "status=skipped-no-tests" > ../llm-integration-results/pytest.status
+              exit 0
+            fi
             echo "status=no-tests" > ../llm-integration-results/pytest.status
             echo "No live pytest tests selected for $SUITE." > ../llm-integration-results/pytest.failure
             exit 0
