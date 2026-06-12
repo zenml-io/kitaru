@@ -28,7 +28,7 @@ In this paradigm — where the runtime is smart enough to release compute during
 
 ```bash
 cd examples/chatbot
-uv sync --extra pydantic-ai
+uv sync --extra pydantic-ai --extra openai
 uv add --dev gradio
 ```
 
