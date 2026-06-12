@@ -137,6 +137,15 @@ ui-smoke:
     test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
     KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
 
+# Run release-grade smoke with structured results.
+# Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
+release-smoke *ARGS:
+    ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
+
+# Audit the public example coverage manifest without running examples or providers.
+example-coverage-audit:
+    uv run --with pyyaml python scripts/audit-example-coverage.py
+
 # Build dev base image for remote stack testing (K8s, etc.)
 # The image bakes in kitaru from local source + ZenML from PyPI.
 # Pass REPO to override the target registry/image.

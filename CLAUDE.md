@@ -106,11 +106,12 @@ The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do n
 
 1. Ensure `develop` has all changes for the release.
 2. Ensure `CHANGELOG.md` `[Unreleased]` section is complete — cross-check against `git log v<prev>..develop` for any missing user-facing changes.
-3. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
-4. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
-5. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-6. The workflow bundles the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo` into the Python package, bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes. Docker copies the UI from the installed Kitaru package; it does not download UI assets itself.
-7. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
+3. Run release-grade smoke: `./scripts/smoke-test.sh --release --json-out smoke-results.json` plus any `--required-provider-area <area>` flags for changed provider-backed behavior. Inspect failed checks, skipped checks with reasons, release-relevant skips, and provider attestation. Bare `./scripts/smoke-test.sh` is still useful during development, but it is not enough to prove a provider-relevant release because optional provider skips do not fail outside `--release`.
+4. Check `.github/workflows/llm-integration.yml` before release dispatch. Weekly-green `develop` is a canary. If OpenAI or Anthropic adapter/example behavior changed, run the workflow manually for the exact release ref/SHA and require it to pass, or record an explicit waiver. Gemini remains local release-smoke evidence or waiver for v1. The workflow's secret-bearing jobs use the GitHub Environment `live-provider-tests`; configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as Environment secrets there, with `kitaru-admins` approval/restrictions. Do not add provider calls to `.github/workflows/release.yml`.
+5. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
+6. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
+7. The workflow bundles the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo` into the Python package, bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes. Docker copies the UI from the installed Kitaru package; it does not download UI assets itself. It does not run live provider checks.
+8. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
 
 ## Development commands
 
@@ -140,7 +141,13 @@ just test                             # Run all tests
 just test tests/test_foo.py           # Run a single test file
 just test tests/test_foo.py::test_bar # Run a single test
 just test -x                          # Stop on first failure
+uv run pytest -m live_openai          # Explicit live OpenAI checks (requires key)
+uv run pytest -m live_anthropic       # Explicit live Anthropic checks (requires key)
 just fix                              # Auto-fix formatting, lint, and yaml
+
+# Default pytest excludes live provider tests with -m 'not live_llm'.
+# Tests under tests/live/ are paid/external checks and must be selected
+# explicitly with provider credentials available.
 
 # Agent tip: the full suite takes ~4 minutes. When running it through a
 # pager/truncated stream that may drop the failure list, pipe through
@@ -159,6 +166,7 @@ just actions-lint                     # Lint GitHub Actions workflows (requires 
 just zizmor                           # Audit GitHub Actions workflow security
 just audit                            # Audit Python dependencies with pip-audit
 just links                            # Check markdown links offline (requires lychee)
+just example-coverage-audit           # Validate example metadata and required waivers; audit-only, no provider calls
 just build                            # Build wheel + sdist locally
 
 # Docs workflows (require Node 22+ and pnpm)
@@ -191,7 +199,8 @@ just server-dev-image                          # Build dev server image (require
 |---|---|---|
 | `ci.yml` | Push/PR to `develop` | PRs run Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes. Pushes also run Docker server smoke and wheel packaging because those jobs may need trusted UI release credentials. |
 | `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Regenerate the CLI/SDK reference and build the static docs app on every run. Deploy the SDK+CLI reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`) only on `main` push or manual dispatch. PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
-| `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release |
+| `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release. No live provider calls. |
+| `llm-integration.yml` | Weekly schedule; manual dispatch | Trusted live OpenAI/Anthropic provider checks outside PR CI. Manual runs can target an exact Kitaru ref/SHA and select `provider-core`, `provider-extended`, OpenAI, Anthropic, and the opt-in research bot. Uploads logs/results only and sends Discord failure alerts. Secret-bearing jobs use the GitHub Environment `live-provider-tests`; put `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` in that Environment with `kitaru-admins` approval/restrictions. |
 | `ui-prerelease-smoke.yml` | Manual dispatch | Tests an explicit prerelease Kitaru UI bundle against a Kitaru ref without publishing PyPI, Docker, Helm, tags, or releases |
 | `spellcheck.yml` | Manual/reusable runs, push to `develop`, non-draft PRs | Separate typo/spell checking |
 | `image-optimiser.yml` | PRs changing JPG/JPEG/PNG/WebP files | Image compression for same-repo non-draft PRs |
@@ -290,6 +299,7 @@ Kitaru collects anonymous usage analytics for users who have opted in (via ZenML
 - **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
 - **Update the smoke test** (`scripts/smoke-test.sh`) when adding new CLI commands, MCP tools, or SDK features that can be exercised non-interactively. New commands should have at least a `--dry-run` or `--help` invocation in the smoke script so pre-release validation catches regressions. Use `--dry-run` where available to keep the smoke test non-destructive.
+- **Update the example coverage manifest** (`examples/example-coverage.yaml`) when adding, removing, renaming, or publicly documenting examples under `examples/`. Then run `just example-coverage-audit`; it validates paths, coverage metadata, and explicit waivers for missing/planned/manual-only coverage only, without running examples or provider calls. A passing audit does not mean every example executed.
 - **Review analytics coverage** when expanding the CLI, MCP, or SDK surface. Check whether the new feature needs a tracking event in `AnalyticsEvent` and whether the event is wired into the appropriate surface (CLI handler, `@tracked_mcp_tool`, or SDK lifecycle point). See the [Analytics instrumentation](#analytics-instrumentation) section for patterns. If multi-word CLI commands are added, update `_MULTI_TOKEN_COMMANDS` in `cli.py` to avoid leaking positional arguments into analytics.
 - Never include a "[Codex] " or "feat: " prefix to PR titles.
 

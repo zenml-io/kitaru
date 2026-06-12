@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+- Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
 
 ### Fixed
+- Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
 - Fixed `kitaru executions retry` and `kitaru executions resume` so failed or paused executions are reopened correctly before continuation is submitted, preventing local no-ops and server-token failures.
 - `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side.
 - Redact credential values from LLM provider error messages raised by `kitaru.llm()`.
