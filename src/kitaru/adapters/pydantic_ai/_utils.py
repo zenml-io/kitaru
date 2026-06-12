@@ -122,6 +122,16 @@ def get_adapter_streaming_fallback_checkpoint() -> (
     return _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.get()
 
 
+@contextmanager
+def suspend_adapter_streaming_fallback_checkpoint() -> Iterator[None]:
+    """Temporarily hide the streamed fallback marker from nested user code."""
+    token = _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.set(None)
+    try:
+        yield
+    finally:
+        _ADAPTER_STREAMING_FALLBACK_CHECKPOINT.reset(token)
+
+
 def has_explicit_tool_checkpoint_opt_out(
     tool_name: str,
     by_name: ToolCheckpointOverrides | None,

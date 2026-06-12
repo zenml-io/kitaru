@@ -4,7 +4,6 @@ import inspect
 import re
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import Any
 from typing import get_type_hints
@@ -51,6 +50,7 @@ from ._utils import (
     has_explicit_tool_checkpoint_opt_out,
     resolve_tool_checkpoint_config,
     run_async_in_checkpoint,
+    suspend_adapter_streaming_fallback_checkpoint,
     with_default_type,
 )
 
@@ -474,13 +474,13 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         tool: ToolsetTool[AgentDepsT],
         suspend_checkpoint_scope: bool,
     ) -> Any:
-        checkpoint_scope = (
-            _suspend_checkpoint_scope()
-            if suspend_checkpoint_scope
-            else nullcontext()
-        )
-        with checkpoint_scope:
-            return await super().call_tool(name, tool_args, ctx, tool)
+        if suspend_checkpoint_scope:
+            with (
+                _suspend_checkpoint_scope(),
+                suspend_adapter_streaming_fallback_checkpoint(),
+            ):
+                return await super().call_tool(name, tool_args, ctx, tool)
+        return await super().call_tool(name, tool_args, ctx, tool)
 
     async def _handle_deferred(
         self,

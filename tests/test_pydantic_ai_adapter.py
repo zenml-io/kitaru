@@ -25,6 +25,7 @@ from kitaru.adapters.pydantic_ai._utils import (
     has_explicit_tool_checkpoint_opt_out,
     reject_isolated_runtime,
     resolve_tool_checkpoint_config,
+    suspend_adapter_streaming_fallback_checkpoint,
     turn_cache_key,
     validate_checkpoint_config,
     validate_checkpoint_strategy,
@@ -564,6 +565,16 @@ class TestAdapterStreamingFallbackCheckpointMarker:
             assert marker.allow_sync_tool_body_waits is True
 
         assert get_adapter_streaming_fallback_checkpoint() is None
+
+    def test_suspending_marker_restores_outer_marker(self) -> None:
+        with adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True):
+            outer_marker = get_adapter_streaming_fallback_checkpoint()
+            assert outer_marker is not None
+
+            with suspend_adapter_streaming_fallback_checkpoint():
+                assert get_adapter_streaming_fallback_checkpoint() is None
+
+            assert get_adapter_streaming_fallback_checkpoint() is outer_marker
 
     def test_marker_resets_after_exception(self) -> None:
         with (
@@ -2821,14 +2832,20 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
         _is_inside_checkpoint,
     )
 
-    observed_body_scope: list[tuple[bool, bool]] = []
+    observed_body_scope: list[tuple[bool, bool, bool]] = []
     saved_artifacts: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     tracker = EventTracker(agent_name="streaming_tool_agent", run_label="unit")
     toolset: FunctionToolset[None] = FunctionToolset()
 
     @toolset.tool_plain
     def ask_user() -> str:
-        observed_body_scope.append((_is_inside_checkpoint(), StepContext.is_active()))
+        observed_body_scope.append(
+            (
+                _is_inside_checkpoint(),
+                StepContext.is_active(),
+                get_adapter_streaming_fallback_checkpoint() is not None,
+            )
+        )
         return "human answer"
 
     wrapped = kitaruify_toolset(
@@ -2859,16 +2876,19 @@ async def test_streaming_fallback_suspends_scope_for_opted_out_sync_function_too
             ),
             adapter_streaming_fallback_checkpoint(allow_sync_tool_body_waits=True),
         ):
+            outer_marker = get_adapter_streaming_fallback_checkpoint()
+            assert outer_marker is not None
             assert _is_inside_checkpoint()
             assert StepContext.is_active()
             result = await wrapped.call_tool("ask_user", {}, ctx, tool)
+            assert get_adapter_streaming_fallback_checkpoint() is outer_marker
             assert _is_inside_checkpoint()
             assert StepContext.is_active()
     finally:
         step_context_var.reset(step_context_token)
 
     assert result == "human answer"
-    assert observed_body_scope == [(False, False)]
+    assert observed_body_scope == [(False, False, False)]
     tool_events = [event for event in tracker.events if event.kind == "tool_call"]
     assert len(tool_events) == 1
     tool_event = cast(Any, tool_events[0])
