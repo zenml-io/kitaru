@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -15,7 +17,8 @@ from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
-from zenml.enums import ArtifactSaveType, StackComponentType
+from zenml.client import Client as ZenMLClient
+from zenml.enums import ArtifactSaveType, RunWaitConditionResolution, StackComponentType
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse, StepRunResponse
@@ -6333,3 +6336,399 @@ def test_abort_wait_emits_wait_resolved_event() -> None:
             "resolution": "abort",
         },
     )
+
+
+# Contract-test strict objects kept separate from the looser dummy helpers above.
+# They intentionally expose only the fields Kitaru reads from ZenML-shaped objects.
+@dataclass(slots=True)
+class _StrictTag:
+    name: str
+
+
+@dataclass(slots=True)
+class _StrictStack:
+    name: str | None = None
+    id: str | None = None
+
+
+@dataclass(slots=True)
+class _StrictSnapshotResources:
+    tags: list[Any]
+    stack: Any | None = None
+
+
+@dataclass(slots=True)
+class _StrictSnapshot:
+    id: UUID
+    name: str
+    tags: list[Any] | None = None
+    resources: _StrictSnapshotResources | None = None
+    metadata: dict[str, Any] | None = None
+    run_metadata: dict[str, Any] | None = None
+    stack: Any | None = None
+    build: Any | None = None
+    body: Any | None = None
+    kitaru_deployment: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class _StrictWaitCondition:
+    id: UUID
+    name: str
+    question: str | None = None
+    data_schema: dict[str, Any] | None = None
+    run_metadata: dict[str, Any] | None = None
+    created: datetime | None = None
+
+
+def _strict_wait_condition(
+    *,
+    name: str,
+    wait_id: UUID | None = None,
+    question: str | None = None,
+    data_schema: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> _StrictWaitCondition:
+    return _StrictWaitCondition(
+        id=wait_id or uuid4(),
+        name=name,
+        question=question,
+        data_schema=data_schema,
+        run_metadata=metadata or {},
+    )
+
+
+def test_deployment_snapshot_mapping_contract_sources() -> None:
+    direct_tags_snapshot = _StrictSnapshot(
+        id=uuid4(),
+        name="kitaru::direct_tags::v1",
+        tags=[
+            deployment_public_tag("stable", exclusive=True),
+            _StrictTag(deployment_public_tag("canary", exclusive=False)),
+        ],
+        resources=_StrictSnapshotResources(tags=[], stack=None),
+        metadata={
+            "kitaru_deployment": {
+                "commit_sha": "abc123",
+                "commit_dirty": "true",
+            },
+            "config_schema": {"type": "object", "properties": {"x": {}}},
+        },
+        stack=_StrictStack(name="direct-stack"),
+    )
+    direct_tags = map_deployment_snapshot(direct_tags_snapshot)
+
+    assert direct_tags is not None
+    assert direct_tags.tags == {"stable": True, "canary": False}
+    assert direct_tags.commit_sha == "abc123"
+    assert direct_tags.commit_dirty is True
+    assert direct_tags.schema == {"type": "object", "properties": {"x": {}}}
+    assert direct_tags.stack == "direct-stack"
+
+    resources_snapshot = _StrictSnapshot(
+        id=uuid4(),
+        name="kitaru::resources_tags::v2",
+        resources=_StrictSnapshotResources(
+            tags=[_StrictTag(deployment_public_tag("blue", exclusive=False))],
+            stack=_StrictStack(id="resource-stack-id"),
+        ),
+    )
+    resources_deployment = map_deployment_snapshot(resources_snapshot)
+
+    assert resources_deployment is not None
+    assert resources_deployment.tags == {"blue": False}
+    assert resources_deployment.stack == "resource-stack-id"
+
+    run_metadata_snapshot = _StrictSnapshot(
+        id=uuid4(),
+        name="kitaru::run_metadata::v3",
+        resources=_StrictSnapshotResources(tags=[], stack=None),
+        run_metadata={
+            "kitaru_deployment": {
+                "image_digest": "sha256:feed",
+                "stack": "metadata-stack",
+            }
+        },
+    )
+    run_metadata_deployment = map_deployment_snapshot(run_metadata_snapshot)
+
+    assert run_metadata_deployment is not None
+    assert run_metadata_deployment.image_digest == "sha256:feed"
+    assert run_metadata_deployment.stack == "metadata-stack"
+
+
+def test_deployments_list_snapshots_contract_and_pagination() -> None:
+    first_page = [
+        _StrictSnapshot(id=uuid4(), name=f"kitaru::flow::v{i}") for i in range(100)
+    ]
+    second_page = [_StrictSnapshot(id=uuid4(), name="kitaru::flow::v101")]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="proj"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.side_effect = [
+            SimpleNamespace(items=first_page),
+            SimpleNamespace(items=second_page),
+        ]
+
+        client = KitaruClient()
+        snapshots = client.deployments._list_snapshots()
+
+    assert snapshots == [*first_page, *second_page]
+    assert client_mock.list_snapshots.call_args_list == [
+        call(
+            sort_by="asc:created",
+            page=1,
+            size=100,
+            project="proj",
+            named_only=True,
+            hydrate=True,
+        ),
+        call(
+            sort_by="asc:created",
+            page=2,
+            size=100,
+            project="proj",
+            named_only=True,
+            hydrate=True,
+        ),
+    ]
+
+
+def test_zenml_trigger_pipeline_signature_accepts_kitaru_kwargs() -> None:
+    parameters = inspect.signature(ZenMLClient.trigger_pipeline).parameters
+
+    assert "snapshot_name_or_id" in parameters
+    assert "run_configuration" in parameters
+    assert "project" in parameters
+    assert "synchronous" in parameters
+
+
+def test_deployments_invoke_without_inputs_sends_no_run_configuration() -> None:
+    run = _as_pipeline_run(
+        _DummyRun(status=ZenMLExecutionStatus.RUNNING, flow_name="research_flow")
+    )
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="proj"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.ensure_stack_is_server_runnable"),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline.return_value = run
+
+        client = KitaruClient()
+        handle = client.deployments.invoke(flow="research_flow", version=1)
+
+    assert handle.exec_id == str(run.id)
+    client_mock.trigger_pipeline.assert_called_once_with(
+        snapshot_name_or_id=str(snapshot.id),
+        run_configuration=None,
+        project="proj",
+        synchronous=False,
+    )
+
+
+def test_deployments_invoke_rejects_missing_pipeline_run_response() -> None:
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="proj"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.ensure_stack_is_server_runnable"),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline.return_value = None
+
+        client = KitaruClient()
+        with pytest.raises(KitaruBackendError, match="did not produce"):
+            client.deployments.invoke(flow="research_flow", version=1)
+
+
+def test_input_selects_pending_wait_by_id() -> None:
+    run_id = uuid4()
+    wait_condition = _strict_wait_condition(name="approve_deploy")
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        active_wait_condition=None,
+    )
+    resumed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(resumed_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.input(
+            str(run_id),
+            wait=str(wait_condition.id),
+            value={"approved": True},
+        )
+
+    client_mock.resolve_run_wait_condition.assert_called_once_with(
+        run_wait_condition_id=wait_condition.id,
+        resolution=RunWaitConditionResolution.CONTINUE.value,
+        result={"approved": True},
+    )
+    assert execution.status == ExecutionStatus.RUNNING
+
+
+def test_input_rejects_duplicate_pending_wait_names() -> None:
+    wait_one = _strict_wait_condition(name="approve")
+    wait_two = _strict_wait_condition(name="approve")
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=None,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_one, wait_two]
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="Multiple pending waits"):
+            client.executions.input(str(run.id), wait="approve", value=True)
+
+    client_mock.resolve_run_wait_condition.assert_not_called()
+
+
+def test_zenml_wait_resolution_signature_accepts_kitaru_kwargs() -> None:
+    parameters = inspect.signature(ZenMLClient.resolve_run_wait_condition).parameters
+
+    assert "run_wait_condition_id" in parameters
+    assert "resolution" in parameters
+    assert "result" in parameters
+    assert RunWaitConditionResolution.CONTINUE.value == "continue"
+    assert RunWaitConditionResolution.ABORT.value == "abort"
+
+
+def test_abort_wait_selects_pending_wait_by_id() -> None:
+    run_id = uuid4()
+    wait_condition = _strict_wait_condition(name="approve_deploy")
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+    aborted_run = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(aborted_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.abort_wait(
+            str(run_id),
+            wait=str(wait_condition.id),
+        )
+
+    client_mock.resolve_run_wait_condition.assert_called_once_with(
+        run_wait_condition_id=wait_condition.id,
+        resolution=RunWaitConditionResolution.ABORT.value,
+        result=None,
+    )
+    assert execution.status == ExecutionStatus.FAILED
+
+
+def test_abort_wait_rejects_duplicate_pending_wait_names() -> None:
+    wait_one = _strict_wait_condition(name="approve")
+    wait_two = _strict_wait_condition(name="approve")
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=None,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_one, wait_two]
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="Multiple pending waits"):
+            client.executions.abort_wait(str(run.id), wait="approve")
+
+    client_mock.resolve_run_wait_condition.assert_not_called()
+
+
+def test_zenml_status_finished_contract_for_retry_resume() -> None:
+    assert ZenMLExecutionStatus.FAILED.is_finished is True
+    assert ZenMLExecutionStatus.RESUMING.is_finished is False
