@@ -270,3 +270,11 @@ skills-lock.json
 
 # Local scratch — single-developer scratch flow files at repo root
 /my_flow.py
+.claude/skills/logfire-instrumentation
+.clawpatch/
+docs/investigations/
+docs/plans/
+docs/reviews/
+plans/
+replay-verify-reports-live/
+replay-verify-reports/
