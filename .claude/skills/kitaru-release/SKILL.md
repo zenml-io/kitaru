@@ -41,6 +41,7 @@ Copy and track progress in your todo / task list:
 - [ ] Step 5: Update CHANGELOG [Unreleased] block
 - [ ] Step 6: ★ Pause — show CHANGELOG diff, await confirmation, then commit + push
 - [ ] Step 7: Run smoke test
+- [ ] Step 7b (optional): Offer directed ad-hoc testing of the release's headline changes (large merge windows / flagship features)
 - [ ] Step 8: ★ Pause — verify smoke test and live-provider evidence, await confirmation to trigger release
 - [ ] Step 9: Trigger release workflow via gh, watch to completion
 - [ ] Step 10: Draft structured release notes
@@ -167,6 +168,9 @@ Present a summary table to the user covering:
 2. Whether a new Kitaru UI bundle ships (tag only, no contents)
 3. File-level diff stats
 4. Version bump suggestion with reasoning
+5. If the window is large or ships a flagship feature, note that you can run
+   optional directed ad-hoc verification of the headline changes after smoke
+   (Step 7b), and ask whether the user wants it.
 
 Version semantics:
 
@@ -276,7 +280,17 @@ export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1  # opt in to the Gemini `--mode antigra
 | `--mode model` (raw response) | ✅ runs a real call automatically | ❌ **skipped** — Vertex ADC is *not* accepted on this path |
 | `--mode antigravity` (managed-agent preset) | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` |
 
-So if the release machine authenticates Gemini through **Vertex** (common for `zenml-core`-style setups), `--mode model` will skip no matter what, and the *only* way to get a real Gemini round-trip is to set `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` so the antigravity test runs against Vertex ADC. Don't report "Gemini covered" off a Vertex run unless you opted into antigravity. (Vertex ADC must actually be available — `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS` — or the antigravity test will fail rather than skip.)
+So if the release machine authenticates Gemini through **Vertex** (common for `zenml-core`-style setups), `--mode model` will skip no matter what, and the *only* way to get a real Gemini round-trip is to set `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` so the antigravity test runs against Vertex ADC. Don't report "Gemini covered" off a Vertex run unless you opted into antigravity. (Vertex ADC must actually be available, via `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`, or the antigravity test will fail rather than skip.)
+
+**On Vertex, the antigravity managed-agent path requires `GOOGLE_CLOUD_LOCATION=global`, not a regional value.** A regional endpoint (`europe-north1`, `us-central1`, etc.) rejects the managed-agent resource creation with a misleading `400 BadRequestError: "Resource setup has just started. Please try again shortly."` raised from `google.genai._interactions ... interaction_resource.create()`. It fails *instantly*, not after a wait, so it is NOT a transient retry case; switching the location to `global` is the fix. A working Vertex env for the antigravity smoke (project `zenml-core`):
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=$HOME/.keys/google/zenml/gcp_credentials.json
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=zenml-core
+export GOOGLE_CLOUD_LOCATION=global
+export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1
+```
 
 Parse the final summary and `smoke-results.json`. **Tell the user exactly which checks were SKIPPED and why** (which key or opt-in was unset), which provider areas were required, and whether any release-relevant skips occurred. A bare run with no keys is a weak provider gate — flag that explicitly rather than reporting "all passed" when half the adapter suite was skipped.
 
@@ -297,6 +311,56 @@ just UI_TAG=kitaru-ui-v<X.Y.Z> ui-smoke     # runs the smoke test with that UI a
 `ui-smoke` runs `KITARU_UI_DIST_PATH=<prepared-dist> ./scripts/smoke-test.sh --keep-server`, so after it passes the server stays up and prints a dashboard URL for manual click-through. This UI helper is not the same as release-grade smoke; run the `--release --json-out ...` command above separately for the release gate. `KITARU_UI_RELEASE_TOKEN` is required because `ui-bundle` downloads from the **private** `zenml-io/zenml-frontend-monorepo`; without it you get a `curl: (22) ... 404`. Read **`FRONTEND-TESTING.md`** (repo root) for the full stable/prerelease bundle runbook.
 
 **If running from a git worktree:** a fresh worktree may not have `src/kitaru/_ui/dist/` populated yet. The same `just ui-bundle` / `just ui-smoke` path above prepares it, or run `bash scripts/download-ui.sh` before `./scripts/smoke-test.sh`. The direct override path is `KITARU_UI_DIST_PATH=/path/to/dist ./scripts/smoke-test.sh --keep-server`.
+
+## Step 7b (optional): Directed ad-hoc testing of the release's headline changes
+
+The smoke test proves the surfaces still respond; it does **not** prove a big
+new feature is *correct*. When a release window merged a lot (many PRs since the
+last tag) or shipped a flagship feature, **offer the user directed ad-hoc
+verification** beyond smoke. This is opt-in: ask first, and only run it if the
+user agrees (it costs time and, for provider-backed features, real API calls).
+
+When to offer it (use judgement, surface the offer at the Step 4 pause and again
+here):
+
+- Many PRs since the last tag, or a diff that touches a lot of `src/kitaru/**`.
+- A new or substantially changed user-facing feature (new SDK surface, new CLI
+  command, new MCP tool, new cross-cutting behavior like usage/cost tracking).
+- A feature whose **correctness** matters and is not covered by deterministic
+  pytest in an obvious way (aggregations, math, replay/resume semantics,
+  cross-surface consistency between SDK / CLI / MCP).
+
+How to run it (the pattern that worked well; adapt to the feature):
+
+1. **Generate a controlled dataset inline first** (do this yourself, not in a
+   subagent, so it is reliable and you capture exact IDs). Define a
+   uniquely-named flow so its executions do not mix with smoke runs, run it a few
+   times, and exercise any special path (e.g. replay) you want to verify. Capture
+   the execution IDs.
+2. **Fan out verification with a workflow** (this is a legitimate `ultracode`
+   use; only run a workflow when the user has opted into multi-agent
+   orchestration). Pass the dataset IDs as `args`. Good shape:
+   - One agent per surface (SDK / CLI / MCP) runs the *identical* query and
+     returns structured results. Kitaru's MCP server is **not** a connected MCP
+     tool; agents must drive it via fastmcp like the smoke test does:
+     `uv run --with fastmcp fastmcp call --command "uv run kitaru-mcp" --target <tool> --input-json '{...}' --json`.
+   - A barrier, then adversarial verifiers in parallel: cross-surface
+     consistency (do SDK/CLI/MCP agree exactly?), aggregation math (hand-sum the
+     per-execution metadata and compare to the endpoint's SUM), replay/resume
+     semantics (incurred vs reused, no double-count), and edge cases / error
+     handling (empty filter returns clean zero; malformed input returns a clean
+     error, not a traceback).
+3. **Triage findings.** A correctness failure on the core path blocks the
+   release; a narrow, safe edge-case inconsistency does not. For anything real
+   but non-blocking, **file a follow-up GitHub issue** (`gh issue create`) and
+   proceed. Tell the user the verdict and the issue link.
+4. **Clean up** any temporary generator files and scratch JSON you created, and
+   note if a `--keep-server` smoke left a local server running (offer
+   `uv run kitaru logout`).
+
+This step does not gate the release on its own, but a confirmed core-path
+correctness failure found here should stop the release the same as a smoke
+failure.
 
 ## Step 8: ★ Pause — verify smoke test and live-provider evidence
 
@@ -470,7 +534,7 @@ Auto-notes list every merged PR including site-only ones. Rewrite into:
 ```markdown
 ## Highlights
 
-[1-2 sentence summary framed relative to the previous release. For a patch, say "A small maintenance release on top of v<prev>". For a minor with a flagship feature, foreground that feature. Mention the new kitaru-ui only if step 3 found a newer one: "This release also bundles the latest Kitaru UI (<ui-tag>)." — do not describe UI changes.]
+[1-2 sentence summary framed relative to the previous release. For a patch, say "A small maintenance release on top of v<prev>". For a minor with a flagship feature, foreground that feature. Mention the new kitaru-ui only if step 3 found a newer one: "This release also bundles the latest Kitaru UI (<ui-tag>)." Do not describe UI changes. Keep each paragraph on one physical line (no hard wrapping) and use no em-dashes (see Formatting rules below).]
 
 ## Added
 - [if any new user-facing capability — use bullet text from CHANGELOG]
@@ -489,7 +553,18 @@ Rules:
 - **Skip empty sections.** If there's nothing Fixed, omit the Fixed heading entirely.
 - **Keep it proportional.** Patch releases get a short Highlights paragraph; minor/major releases can have richer Highlights with subsections + code samples (see the `v0.4.0` release for the flagship-feature pattern).
 - **Do not include** site-only PRs (launch blog, lightbox, redirects, sitemap), dependabot action bumps, or no-op revert pairs. These were already filtered from CHANGELOG; the release notes should follow the same filter.
-- **UI release line placement**: if mentioning the new UI, put it as the last sentence of the Highlights paragraph — not a separate section, not in a PR list.
+- **UI release line placement**: if mentioning the new UI, put it as the last sentence of the Highlights paragraph, not a separate section and not in a PR list.
+
+### Formatting rules (GitHub renders the notes as Markdown)
+
+These exist because hard-wrapped notes render with awkward mid-sentence breaks
+and em-dashes read as AI-generated text. Follow them exactly when composing the
+`gh release edit` body.
+
+- **One physical line per bullet and per paragraph. Do NOT hard-wrap at ~72/80 columns.** When you write the heredoc body, keep each bullet on a single long line and each Highlights paragraph on a single line. A newline inside a sentence becomes a stray soft break on the rendered page, which is the "weird line breaks" failure mode. Only put a newline between distinct bullets, between paragraphs, and around headings/code fences.
+- **No em-dashes (`—`) anywhere in the notes.** Rewrite with a comma, colon, or a restructured sentence. (Em-dashes are a known AI-text tell and are banned in user-facing Kitaru copy.) After applying, verify with `gh release view v<VERSION> --json body --jq .body | grep -c '—'` and expect `0`.
+- **Avoid en-dashes (`–`) too**; use a hyphen or "to" (e.g. "1 to 10000", not "1–10000").
+- Code identifiers (commands, flags, methods, env vars, file paths) go in backticks, as in the CHANGELOG.
 
 ## Step 11: ★ Pause — show drafted notes
 
