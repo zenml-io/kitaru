@@ -55,6 +55,46 @@ test model first:
 PROSPECT_SCOUT_MODEL=test python prospector.py
 ```
 
+## Example output
+
+With a real model (`gpt-5-nano` here) and a live Exa search, the qualifier
+returns a typed `ProspectAssessment` for each company and the writer drafts one
+email per approved prospect. One prospect from a real run, abridged:
+
+Qualifier verdict (the typed agent output):
+
+```text
+[HOT] Helios Energy
+  hiring_signals:
+    - "We here at Helios Energy are growing - fast ... we are looking to add four (4) Energy Consultants"
+    - "Solar Energy Consultant Job at Helios Energy Inc. Van Nuys, CA 91411"
+    - "Helios Energy Secures $3.6 Million for Presidio Project Expansion"
+  summary: "Recent signals show explicit hiring momentum at Helios Energy in 2026,
+    with a May 28 posting for Solar Energy Consultant in Van Nuys and a plan to add
+    four Energy Consultants [...] active growth and hiring activity rather than
+    stagnation, making it a hot prospect for staffing outreach."
+```
+
+Outreach draft for that prospect:
+
+```text
+Hi Helios Energy Team,
+
+BrightPath Talent specializes in energy and sustainability roles, and we're seeing
+strong fit with your hot growth signals. You posted a Solar Energy Consultant in
+Van Nuys on May 28 and plan to add four Energy Consultants to meet rising demand.
+Your $3.6 million Presidio Project expansion and the fully underwritten entitlement
+offer signal solid capital to back growth. We can accelerate your hiring with
+pre-screened Solar and Energy Consultant candidates in Van Nuys, matched to your
+culture and timeline.
+
+Best regards,
+BrightPath Talent
+```
+
+The output is model-generated over live search results, so the exact companies,
+signals, and wording vary from run to run.
+
 ## The durability demo
 
 Simulate a crash partway through the sweep, then resume it:
