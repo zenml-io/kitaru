@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata. (#378)
-- Added LLM token and cost tracking: every `kitaru.llm()` call now records input/output/total token counts plus actual, estimated, and display USD cost as execution metadata, which feeds the new execution statistics metrics. (#378)
+- Added LLM token tracking: tracked LLM calls (`kitaru.llm()` and the framework adapters) record input/output/total token counts as execution metadata, split into freshly-incurred vs. replay-reused, feeding the new execution statistics metrics. (#378)
+- Added LLM cost tracking where a trustworthy cost source exists: the Claude Agent SDK adapter records provider-reported USD cost automatically, and the LangGraph and OpenAI Agents adapters accept a cost calculator. Calls with no cost source (such as plain `kitaru.llm()`) are tallied under a records-without-cost count rather than reported as free. (#378)
 - Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
 
 ### Fixed
