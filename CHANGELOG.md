@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-15
+
 ### Added
 - Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata. (#378)
 - Added LLM token tracking: tracked LLM calls (`kitaru.llm()` and the framework adapters) record input/output/total token counts as execution metadata, split into freshly-incurred vs. replay-reused, feeding the new execution statistics metrics. (#378)
