@@ -8,15 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata. (#378)
+- Added LLM token and cost tracking: every `kitaru.llm()` call now records input/output/total token counts plus actual, estimated, and display USD cost as execution metadata, which feeds the new execution statistics metrics. (#378)
 - Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
 
 ### Fixed
 - Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
-- Fixed `kitaru executions retry` and `kitaru executions resume` so failed or paused executions are reopened correctly before continuation is submitted, preventing local no-ops and server-token failures.
-- `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side.
-- Redact credential values from LLM provider error messages raised by `kitaru.llm()`.
-- Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
+- Fixed `kitaru executions retry` and `kitaru executions resume` so failed or paused executions are reopened correctly before continuation is submitted, preventing local no-ops and server-token failures. (#442)
+- `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side. (#440)
+- Redact credential values from LLM provider error messages raised by `kitaru.llm()`. (#439)
+- Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#409)
+- Fixed duplicate PydanticAI stream events so watched `KitaruAgent` runs no longer emit repeated stream updates. (#428)
+- Fixed streaming wait tools so human-in-the-loop tool calls behave correctly during streamed adapter runs. (#431)
+- Fixed agent instruction drift so adapter-managed agents keep their configured instructions across turns. (#435)
+- Fixed the chatbot example image build so its PydanticAI dependencies resolve correctly. (#427)
 
 ## [0.15.0] - 2026-06-04
 
