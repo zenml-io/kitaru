@@ -33,6 +33,7 @@ deterministic ``TestModel`` so you can try the durability mechanics first.
 import argparse
 import os
 import sys
+from datetime import date
 from enum import StrEnum
 from typing import Annotated
 
@@ -44,7 +45,7 @@ import kitaru
 from kitaru import ImageSettings, checkpoint, flow
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-MODEL = os.environ.get("PROSPECT_SCOUT_MODEL", "openai:gpt-4o-mini")
+MODEL = os.environ.get("PROSPECT_SCOUT_MODEL", "openai:gpt-5-nano")
 
 EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search"
 
@@ -164,11 +165,13 @@ qualifier = KitaruAgent(
         output_type=ProspectAssessment,
         instructions=(
             "You are a sales-intelligence analyst for a staffing agency. "
-            "Given recent web snippets about a company, assess its fit for "
-            "staffing outreach. hot = actively hiring or expanding, "
-            "warm = growth signals but no explicit hiring, cold = freezes, "
-            "layoffs, or no signals. Quote concrete signals from the "
-            "snippets; do not invent any."
+            "Given web snippets about a company (each may be from a "
+            "different date), assess its fit for staffing outreach. "
+            "hot = actively hiring or expanding, warm = growth signals but "
+            "no explicit hiring, cold = freezes, layoffs, or no signals. "
+            "Quote concrete signals from the snippets; do not invent any. "
+            "Weigh recent signals over older ones, and flag in your summary "
+            "when a hiring signal predates more recent layoffs or closures."
         ),
     )
 )
@@ -202,8 +205,9 @@ def research_prospect(company: str) -> ProspectAssessment:
     signals = search_company_signals(company)
     kitaru.log(company=company, signal_count=len(signals))
     prompt = (
-        f"Qualify {company} as a staffing prospect based on these "
-        f"research snippets:\n- " + "\n- ".join(signals)
+        f"Today is {date.today().isoformat()}. Qualify {company} as a "
+        f"staffing prospect based on these research snippets:\n- "
+        + "\n- ".join(signals)
     )
     return qualifier.run_sync(prompt).output
 
