@@ -44,9 +44,9 @@ def _load_prospector_from_path() -> ModuleType:
 def prospector_module(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Import the example with ``PROSPECT_SCOUT_MODEL=test``.
 
-    The module builds two PydanticAI agents at import time. ``test`` resolves
-    to PydanticAI's deterministic ``TestModel``, so no provider key is needed.
-    Any ambient ``EXA_API_KEY`` is cleared so search stays on fixtures.
+    ``test`` resolves to PydanticAI's deterministic ``TestModel``, so the agent
+    factories build without a provider key. Any ambient ``EXA_API_KEY`` is
+    cleared so search stays on fixtures.
     """
     monkeypatch.setenv("PROSPECT_SCOUT_MODEL", "test")
     monkeypatch.delenv("EXA_API_KEY", raising=False)
@@ -59,28 +59,59 @@ def prospector_module(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def test_module_imports_and_wires_typed_agents(prospector_module: Any) -> None:
-    """Importing the module builds the qualifier/outreach agents + flow."""
+    """The agent factories build typed KitaruAgents, and the flow is defined."""
     from kitaru.adapters.pydantic_ai import KitaruAgent
 
-    assert isinstance(prospector_module.qualifier, KitaruAgent)
-    assert isinstance(prospector_module.outreach_writer, KitaruAgent)
-    assert prospector_module.qualifier.name == "prospect_qualifier"
+    qualifier = prospector_module.new_qualifier()
+    outreach_writer = prospector_module.new_outreach_writer()
+    assert isinstance(qualifier, KitaruAgent)
+    assert isinstance(outreach_writer, KitaruAgent)
+    assert qualifier.name == "prospect_qualifier"
 
     # The qualifier is constrained to the typed assessment so misclassified
     # or free-text answers fail validation instead of leaking downstream.
-    assert prospector_module.qualifier.output_type is (
-        prospector_module.ProspectAssessment
-    )
+    assert qualifier.output_type is prospector_module.ProspectAssessment
 
     assert prospector_module.prospect_scout is not None
 
 
-def test_image_pins_pydantic_ai_below_180(prospector_module: Any) -> None:
-    """PROSPECTOR_IMAGE keeps the otel-sdk-compatible pydantic-ai pin."""
+def test_module_imports_without_provider_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Importing the module must not need a provider key.
+
+    The remote runner pod imports this module before the run's secret is
+    applied to the environment. If an agent were built at module scope, the
+    eager OpenAI client construction would crash the import with a missing-key
+    error. Agents are built inside checkpoints instead, so import must succeed
+    with the default model and no key present.
+    """
+    monkeypatch.delenv("PROSPECT_SCOUT_MODEL", raising=False)  # default gpt-5-nano
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+
+    monkeypatch.syspath_prepend(str(_EXAMPLE_DIR))
+    monkeypatch.delitem(sys.modules, "prospector", raising=False)
+
+    module = _load_prospector_from_path()
+    assert module.MODEL == "openai:gpt-5-nano"
+    assert module.prospect_scout is not None
+
+
+def test_image_requires_adapter_compatible_pydantic_ai(
+    prospector_module: Any,
+) -> None:
+    """PROSPECTOR_IMAGE must install a pydantic-ai the adapter can import.
+
+    The remote image installs bare ``kitaru``, whose pydantic-ai constraint
+    sits behind an optional extra, so the example pins pydantic-ai itself.
+    Kitaru's bundled PydanticAI adapter imports names added in pydantic-ai
+    1.89; a floor below that crashes the pod at import time before any
+    checkpoint runs.
+    """
     requirements = prospector_module.PROSPECTOR_IMAGE.requirements or []
-    assert any("pydantic-ai-slim" in req for req in requirements)
-    # Pinned below 1.80 for ZenML otel-sdk compatibility — don't regress.
-    assert any("<1.80" in req for req in requirements)
+    assert any("pydantic-ai-slim[openai]" in req for req in requirements)
+    assert any(">=1.89" in req for req in requirements)
 
 
 @pytest.mark.parametrize(

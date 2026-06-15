@@ -49,11 +49,13 @@ MODEL = os.environ.get("PROSPECT_SCOUT_MODEL", "openai:gpt-5-nano")
 
 EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search"
 
-# Pydantic-AI is pinned to <1.80 because 1.80+ bumped its opentelemetry-sdk
-# floor past the version ZenML (Kitaru's backend) hard-pins. The `-slim`
-# variant with an explicit provider extra keeps remote images small.
+# The remote image is built fresh, so it needs PydanticAI installed with the
+# OpenAI provider extra. The range must overlap Kitaru's own pydantic-ai pin
+# (>=1.89,<1.104) so the bundled adapter's imports resolve inside the
+# container; the `-slim` variant keeps the image small.
 PROSPECTOR_IMAGE = ImageSettings(
-    requirements=["pydantic-ai-slim[openai]>=1.75,<1.80"],
+    requirements=["pydantic-ai-slim[openai]>=1.89,<1.104"],
+    secret_environment_from=["prospect-scout-keys"],
 )
 
 # ---------------------------------------------------------------------------
@@ -154,40 +156,55 @@ def search_company_signals(company: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Agents — wrapped in KitaruAgent so model requests and validation retries
-# are tracked as child events under each enclosing checkpoint.
+# Agents — built by factories, not at module scope.
+#
+# Constructing ``Agent("openai:...")`` eagerly builds the OpenAI client, which
+# reads ``OPENAI_API_KEY`` at that moment. On a remote stack the runner pod
+# imports this module before the run's secret is applied to the environment, so
+# a module-scope agent would crash at import with a missing-key error. Building
+# the agent inside the checkpoint defers that to run time, once the secret is
+# present. (Same pattern as the openai_research_bot example.) Each agent is
+# wrapped in KitaruAgent so model requests and validation retries are tracked as
+# child events under the enclosing checkpoint.
 # ---------------------------------------------------------------------------
 
-qualifier = KitaruAgent(
-    Agent(
-        MODEL,
-        name="prospect_qualifier",
-        output_type=ProspectAssessment,
-        instructions=(
-            "You are a sales-intelligence analyst for a staffing agency. "
-            "Given web snippets about a company (each may be from a "
-            "different date), assess its fit for staffing outreach. "
-            "hot = actively hiring or expanding, warm = growth signals but "
-            "no explicit hiring, cold = freezes, layoffs, or no signals. "
-            "Quote concrete signals from the snippets; do not invent any. "
-            "Weigh recent signals over older ones, and flag in your summary "
-            "when a hiring signal predates more recent layoffs or closures."
-        ),
-    )
-)
 
-outreach_writer = KitaruAgent(
-    Agent(
-        MODEL,
-        name="outreach_writer",
-        output_type=str,
-        instructions=(
-            "Write a short, specific outreach email (under 120 words) from a "
-            "staffing agency to the given company. Reference the hiring "
-            "signals provided. No subject line, no placeholders."
-        ),
+def new_qualifier() -> KitaruAgent:
+    """Build the typed qualifier agent that classifies a company's fit."""
+    return KitaruAgent(
+        Agent(
+            MODEL,
+            name="prospect_qualifier",
+            output_type=ProspectAssessment,
+            instructions=(
+                "You are a sales-intelligence analyst for a staffing agency. "
+                "Given web snippets about a company (each may be from a "
+                "different date), assess its fit for staffing outreach. "
+                "hot = actively hiring or expanding, warm = growth signals but "
+                "no explicit hiring, cold = freezes, layoffs, or no signals. "
+                "Quote concrete signals from the snippets; do not invent any. "
+                "Weigh recent signals over older ones, and flag in your summary "
+                "when a hiring signal predates more recent layoffs or closures."
+            ),
+        )
     )
-)
+
+
+def new_outreach_writer() -> KitaruAgent:
+    """Build the agent that drafts a short outreach email."""
+    return KitaruAgent(
+        Agent(
+            MODEL,
+            name="outreach_writer",
+            output_type=str,
+            instructions=(
+                "Write a short, specific outreach email (under 120 words) from a "
+                "staffing agency to the given company. Reference the hiring "
+                "signals provided. No subject line, no placeholders."
+            ),
+        )
+    )
+
 
 # ---------------------------------------------------------------------------
 # Checkpoints
@@ -209,7 +226,7 @@ def research_prospect(company: str) -> ProspectAssessment:
         f"staffing prospect based on these research snippets:\n- "
         + "\n- ".join(signals)
     )
-    return qualifier.run_sync(prompt).output
+    return new_qualifier().run_sync(prompt).output
 
 
 @checkpoint
@@ -237,7 +254,7 @@ def draft_outreach(assessment: ProspectAssessment) -> str:
         f"Hiring signals: {'; '.join(assessment.hiring_signals)}\n"
         f"Qualification summary: {assessment.summary}"
     )
-    return outreach_writer.run_sync(prompt).output
+    return new_outreach_writer().run_sync(prompt).output
 
 
 @checkpoint

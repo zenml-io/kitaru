@@ -99,7 +99,14 @@ kitaru secrets set prospect-scout-keys \
 
 ```python
 PROSPECTOR_IMAGE = ImageSettings(
-    requirements=["pydantic-ai-slim[openai]>=1.75,<1.80"],
+    requirements=["pydantic-ai-slim[openai]>=1.89,<1.104"],
     secret_environment_from=["prospect-scout-keys"],
 )
 ```
+
+The agents are built inside the checkpoints (via `new_qualifier()` /
+`new_outreach_writer()`), not at module scope. Constructing
+`Agent("openai:...")` builds the OpenAI client and reads `OPENAI_API_KEY`
+immediately — and the runner pod imports this module *before* the secret is
+applied, so a module-scope agent would crash at import. Building it inside the
+checkpoint defers that until the secret is present.
