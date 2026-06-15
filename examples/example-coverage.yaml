@@ -559,6 +559,48 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: prospect-scout
+    path: examples/end_to_end/prospect_scout/prospector.py
+    public_docs: [examples/README.md]
+    owner_area: durable PydanticAI prospect-research sweep with HITL approval
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_prospect_scout_example.py
+        notes: wiring, fixture-backed search, shortlist ranking, and CLI contract
+          without provider or network calls
+      local_smoke:
+        status: missing
+        command:
+        requires_server: false
+        waiver:
+          reason: The full sweep pauses on a kitaru.wait() approval gate, so there
+            is no non-interactive local smoke command yet; it is exercised manually
+            with PROSPECT_SCOUT_MODEL=test plus a CLI input resolution.
+          reviewer_action: If this example changes, run it with PROSPECT_SCOUT_MODEL=test
+            and resolve the approval with kitaru executions input, or record a release
+            waiver.
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: A real qualification/outreach run makes provider (and optionally
+            Exa) calls and requires resolving the human approval gate, so it stays
+            manual until a bounded release command exists.
+          reviewer_action: If this example changes, run it manually with OPENAI_API_KEY
+            (and optionally EXA_API_KEY) or record a release waiver.
+        provider: openai
+        command: cd examples/end_to_end/prospect_scout && uv run python prospector.py
+          --companies "Acme,Initech"
+        command_paths: [examples/end_to_end/prospect_scout/prospector.py]
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 300
+        cost_class: low
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: compliance-review
     path: examples/end_to_end/compliance_review/
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
