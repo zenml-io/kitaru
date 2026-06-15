@@ -110,3 +110,29 @@ The agents are built inside the checkpoints (via `new_qualifier()` /
 immediately — and the runner pod imports this module *before* the secret is
 applied, so a module-scope agent would crash at import. Building it inside the
 checkpoint defers that until the secret is present.
+
+### The durability demo on a remote stack
+
+`PROSPECT_SCOUT_CRASH_AFTER` is read inside the flow body. Locally that body
+runs in the same process you launched, so it sees the variable from your shell.
+On a remote stack the body runs in a pod that never sees your shell — so
+deliver the marker through the same secret the pod already reads, and flip it
+off before retrying:
+
+```bash
+# Arm the crash by adding the marker to the secret (existing keys are kept):
+kitaru secrets set prospect-scout-keys --PROSPECT_SCOUT_CRASH_AFTER=4
+python prospector.py                       # crashes after 4 companies, in the pod
+
+# Disarm before retrying, then resume:
+kitaru secrets set prospect-scout-keys --PROSPECT_SCOUT_CRASH_AFTER=0
+kitaru executions list                     # find the failed execution id
+kitaru executions retry <execution-id>     # the 4 done companies come back cached
+```
+
+This works because the execution stores the secret *name*, but Kitaru resolves
+its *value* at run time on every attempt. The first attempt reads `4` and
+crashes; once you set it to `0`, the retry reads `0`, skips the crash, and runs
+to completion with the already-researched companies served from their cached
+checkpoints. (Setting it to `0` disarms the marker — `done` never equals `0` —
+without removing the key.)
