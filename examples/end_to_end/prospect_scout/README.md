@@ -76,10 +76,24 @@ Without `--companies` it runs the bundled list of eight.
   On a remote stack it snapshots and releases compute while it waits, then
   resumes in a fresh pod — no worker billing while a human takes a day to answer.
 
-## Remote stacks
+## Deploy on your stack
 
-On a remote stack (Kubernetes, Vertex, SageMaker, AzureML) the checkpoint pods
-can't read your shell. Store provider keys in a Kitaru secret and attach it:
+Locally this runs on Kitaru's default stack. To run it on your own
+infrastructure — Kubernetes, Vertex, SageMaker, AzureML — point Kitaru at a
+[stack](https://docs.zenml.io/kitaru/stacks) (a stack is where your flow's
+execution actually runs) and deploy the flow onto it:
+
+```bash
+uv run kitaru deploy \
+    examples/end_to_end/prospect_scout/prospector.py:prospect_scout --stack <your-stack>
+uv run kitaru invoke prospect_scout --input '{"companies": ["Acme Robotics", "Initech"]}'
+```
+
+See [Deploy and Invoke Flows](https://docs.zenml.io/kitaru/guides/deployments)
+for the full path.
+
+One deployment detail worth knowing: the checkpoint pods can't read your shell,
+so store provider keys in a Kitaru secret and attach it to the image.
 
 ```bash
 uv run kitaru secrets set prospect-scout-keys --OPENAI_API_KEY=sk-... --EXA_API_KEY=...
