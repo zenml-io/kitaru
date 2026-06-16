@@ -17,6 +17,11 @@ otherwise, so the whole thing runs end to end without any accounts.
 
 ## The aha moments
 
+Each aha moment below is framed the same way: the failure mode you hit
+**without** Kitaru, then exactly what Kitaru (or the PydanticAI it wraps) adds
+to remove it. See ["What's Kitaru vs what's PydanticAI"](#whats-kitaru-vs-whats-pydanticai)
+at the end for the honest boundary.
+
 ### 1. It's an agent — it chooses its own searches
 
 `research_prospect` builds a PydanticAI agent and hands it a `search_web` tool.
@@ -31,15 +36,20 @@ def research_prospect(company: str) -> ProspectAssessment:
     ).output
 ```
 
-Because the agent runs through `KitaruAgent`, **every `search_web` call it makes
-is tracked as a child event under that company's checkpoint** — you see the
-queries the agent actually ran, not just its conclusion. `CapturePolicy(
-tool_capture="full")` records the arguments and results too.
+**Without it:** if you hard-code the searches, it isn't an agent — it's a
+workflow — and once it *is* an agent, its internal tool calls are an opaque box
+you can't inspect, debug, or replay.
+
+**What Kitaru adds:** running through `KitaruAgent`, **every `search_web` call
+the agent makes is tracked as a child event under that company's checkpoint**,
+so you see the queries it actually ran, not just its verdict.
+`CapturePolicy(tool_capture="full")` records the arguments and results too.
 
 ### 2. Crash at company 7 of 10 → don't pay for the first 7 again
 
-A research sweep is a long row of paid search and model calls. Each company is
-its own `@checkpoint`, so a crash loses only the company in flight:
+**Without it:** a research sweep is a long row of paid search and model calls;
+a crash at company 7 re-runs all 7. **What Kitaru adds:** each company is its
+own `@checkpoint`, so a crash loses only the company in flight:
 
 ```bash
 PROSPECT_SCOUT_MODEL=test PROSPECT_SCOUT_CRASH_AFTER=3 python prospector.py
@@ -80,16 +90,21 @@ class ProspectAssessment(BaseModel):
     ...
 ```
 
-A free-text or out-of-vocabulary answer fails validation, and PydanticAI retries
-the model **before** anything reaches `build_shortlist` or your downstream desk
-routing. Type safety is enforced at the boundary, not hoped for.
+**Without it:** a free-text or out-of-vocabulary classification silently corrupts
+your shortlist and downstream desk routing.
+
+**What PydanticAI adds** (not Kitaru): the answer fails validation and the model
+is retried **before** anything reaches `build_shortlist`. **What Kitaru adds on
+top:** the validated, typed result is persisted as the checkpoint's artifact, so
+a retry or replay serves back *exactly* the value that passed validation rather
+than re-rolling the dice.
 
 ### 4. A human approves — without a pod idling on the clock
 
-`kitaru.wait()` pauses the flow for shortlist approval. On a remote stack the
-execution snapshots its state and **releases compute** while it waits; when you
-answer via the CLI it resumes in a fresh pod exactly where it paused. You do not
-pay for an idle worker while a human takes an hour — or a day — to respond.
+**Without it:** a worker pod keeps billing while a human takes an hour — or a day
+— to approve. **What Kitaru adds:** `kitaru.wait()` pauses the flow for approval;
+on a remote stack the execution snapshots its state and **releases compute**
+while it waits, then resumes in a fresh pod exactly where it paused.
 
 ```bash
 kitaru executions input <execution-id> --value true   # or false to reject
@@ -131,6 +146,25 @@ PROSPECT_SCOUT_MODEL=test python prospector.py
 | `KitaruAgent` + `search_web` | Agentic search, tracked per tool call under the checkpoint |
 | `kitaru.wait("approve_shortlist")` | Human approval that releases compute               |
 | `build_shortlist` / `publish_report` | Ranking and the single report-producing sink     |
+
+## What's Kitaru vs what's PydanticAI
+
+It's worth being precise about where the value comes from, because they compose
+rather than overlap:
+
+- **PydanticAI** owns the agent: the reasoning loop, tool calling, and the typed
+  output validation + retry. You could swap it for LangGraph, the OpenAI Agents
+  SDK, or a raw provider — Kitaru is framework-agnostic.
+- **Kitaru core** (`@flow`, `@checkpoint`, `kitaru.wait`) adds what the agent
+  framework does not: durability and caching across crashes/retries/replays, and
+  human-in-the-loop that releases compute instead of idling a pod.
+- **The `KitaruAgent` adapter** is the thin bridge between the two: it runs the
+  PydanticAI agent inside a checkpoint and tracks each model request and tool
+  call as a child event, so the agent stops being an opaque box.
+
+So the durability and cost wins are Kitaru's; the agent and its type safety are
+PydanticAI's; the adapter is what makes the agent's internals observable and
+replayable under Kitaru.
 
 ## Remote stacks
 
