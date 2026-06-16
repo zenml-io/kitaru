@@ -76,18 +76,6 @@ Without `--companies` it runs the bundled list of eight.
   On a remote stack it snapshots and releases compute while it waits, then
   resumes in a fresh pod — no worker billing while a human takes a day to answer.
 
-## What's Kitaru vs what's PydanticAI
-
-They compose rather than overlap:
-
-- **PydanticAI** owns the agent — the reasoning loop, tool calling, and typed
-  output validation. Swap it for LangGraph, the OpenAI Agents SDK, or a raw
-  provider; Kitaru is framework-agnostic.
-- **Kitaru** adds what the agent framework doesn't: durability and caching across
-  crashes/retries/replays, and human-in-the-loop that releases compute. The
-  `KitaruAgent` adapter is the bridge — it runs the agent inside a checkpoint and
-  records each model and tool call so the agent isn't an opaque box.
-
 ## Remote stacks
 
 On a remote stack (Kubernetes, Vertex, SageMaker, AzureML) the checkpoint pods
