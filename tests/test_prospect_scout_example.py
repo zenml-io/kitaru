@@ -105,12 +105,15 @@ def test_qualifier_actually_calls_search_web(
     assert isinstance(result.output.line_of_business, prospector_module.LineOfBusiness)
 
 
-def test_image_pins_pydantic_ai_below_180(prospector_module: Any) -> None:
-    """PROSPECTOR_IMAGE keeps the otel-sdk-compatible pydantic-ai pin."""
+def test_image_pins_adapter_compatible_pydantic_ai(prospector_module: Any) -> None:
+    """PROSPECTOR_IMAGE pins a pydantic-ai the Kitaru adapter can import.
+
+    The adapter imports names that only exist in pydantic-ai >=1.89, so a
+    too-old pin (e.g. <1.80) builds a remote image whose agent import fails.
+    """
     requirements = prospector_module.PROSPECTOR_IMAGE.requirements or []
     assert any("pydantic-ai-slim" in req for req in requirements)
-    # Pinned below 1.80 for ZenML otel-sdk compatibility — don't regress.
-    assert any("<1.80" in req for req in requirements)
+    assert any(">=1.89" in req for req in requirements)
 
 
 @pytest.mark.parametrize(

@@ -60,11 +60,12 @@ MODEL = os.environ.get("PROSPECT_SCOUT_MODEL", "openai:gpt-4o-mini")
 
 EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search"
 
-# Pydantic-AI is pinned to <1.80 because 1.80+ bumped its opentelemetry-sdk
-# floor past the version ZenML (Kitaru's backend) hard-pins. The `-slim`
-# variant with an explicit provider extra keeps remote images small.
+# Match the Pydantic-AI range Kitaru's adapter supports — the adapter imports
+# names (AgentNativeTool, DeferredToolResults) that only exist in >=1.89, so an
+# older pin builds a remote image whose agent import fails. The `-slim` variant
+# with an explicit provider extra keeps remote images small.
 PROSPECTOR_IMAGE = ImageSettings(
-    requirements=["pydantic-ai-slim[openai]>=1.75,<1.80"],
+    requirements=["pydantic-ai-slim[openai]>=1.89,<1.104"],
 )
 
 # ---------------------------------------------------------------------------
