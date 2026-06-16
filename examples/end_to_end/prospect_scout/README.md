@@ -5,11 +5,9 @@ outreach: for each target company an **agent researches the web**, classifies
 the company against the team's lines of business, and judges whether it is worth
 pursuing. A human approves the shortlist, and only then is outreach drafted.
 
-It is a real **agent**, not a workflow. The qualifier is handed a company name
-and a `search_web` tool and decides for itself which searches to run — hiring,
-funding, expansion, layoffs — and how many. Nothing is pre-fetched and
-spoon-fed into the prompt; the model contemplates tool choice, which is what
-makes it an agent.
+The qualifier is a real agent: it's handed a `search_web` tool and a company
+name, and decides for itself which searches to run — hiring, funding, expansion,
+layoffs — and how many. Nothing is pre-fetched for it.
 
 ## Quickstart — run it locally, no API keys
 
@@ -79,7 +77,7 @@ what Kitaru (or the PydanticAI it wraps) adds. See
 ["What's Kitaru vs what's PydanticAI"](#whats-kitaru-vs-whats-pydanticai) for the
 honest boundary.
 
-### 1. It's an agent — it chooses its own searches
+### 1. You can see what the agent searched for
 
 `research_prospect` hands a PydanticAI agent a `search_web` tool; the model, not
 your code, decides what to look up:
@@ -93,11 +91,10 @@ def research_prospect(company: str) -> ProspectAssessment:
     ).output
 ```
 
-**Without it:** if you hard-code the searches it isn't an agent, it's a workflow
-— and once it *is* an agent, its internal tool calls are an opaque box you can't
-inspect, debug, or replay. **What Kitaru adds:** running through `KitaruAgent`,
-every `search_web` call is tracked as a child event under that company's
-checkpoint, so you see the queries it actually ran (open the `Execution URL`).
+Because it runs through `KitaruAgent`, each `search_web` call is recorded under
+that company's checkpoint. Open the `Execution URL` and you can see exactly which
+queries the agent ran and what came back — so when a verdict looks wrong, you can
+tell whether the search or the reasoning was at fault.
 
 ### 2. Crash at company 7 of 10 → don't pay for the first 7 again
 
@@ -157,16 +154,6 @@ back *exactly* the value that passed validation rather than re-rolling the dice.
 its state and **releases compute** while it waits, then resumes in a fresh pod
 exactly where it paused.
 
-## How it maps to ZenML
-
-| Example primitive            | What it does                                              |
-| ---------------------------- | -------------------------------------------------------- |
-| `@flow prospect_scout`       | The sweep — a `@pipeline(dynamic=True)`, plain `for` loop |
-| `@checkpoint research_prospect` | One durable unit of paid work per company             |
-| `KitaruAgent` + `search_web` | Agentic search, tracked per tool call under the checkpoint |
-| `kitaru.wait("approve_shortlist")` | Human approval that releases compute               |
-| `build_shortlist` / `publish_report` | Ranking and the single report-producing sink     |
-
 ## What's Kitaru vs what's PydanticAI
 
 It's worth being precise about where the value comes from, because they compose
@@ -210,25 +197,3 @@ The agents are built inside the checkpoints (via `new_qualifier()` /
 reads `OPENAI_API_KEY` immediately, and the runner pod imports this module
 *before* the secret is applied — so a module-scope agent would crash at import.
 Building it inside the checkpoint defers that until the secret is present.
-
-### The crash demo on a remote stack
-
-`PROSPECT_SCOUT_CRASH_AFTER` is read inside the flow body. Locally that body runs
-in your process and sees your shell. On a remote stack the body runs in a pod
-that never sees your shell, so deliver the marker through the same secret the pod
-already reads, and flip it off before retrying:
-
-```bash
-# Arm the crash by adding the marker to the secret (existing keys are kept):
-uv run kitaru secrets set prospect-scout-keys --PROSPECT_SCOUT_CRASH_AFTER=3
-uv run python .../prospector.py            # crashes after 3 companies, in the pod
-
-# Disarm before retrying, then retry:
-uv run kitaru secrets set prospect-scout-keys --PROSPECT_SCOUT_CRASH_AFTER=0
-uv run kitaru executions retry <execution-id>   # done companies come back cached
-```
-
-The execution stores the secret *name*, but Kitaru resolves its *value* at run
-time on every attempt: the first attempt reads `3` and crashes; the retry reads
-`0`, skips the crash (`done` never equals `0`), and runs to completion with the
-already-researched companies served from their cached checkpoints.
