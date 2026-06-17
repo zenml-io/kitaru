@@ -1,10 +1,14 @@
 """LLM calls and tool selection for the reference support agent."""
 
 import json
-from typing import Any
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any, TypeVar
 
 from .config import AgentVariant, Scenario, SupportDecision
 from .tools import SupportTools, ToolExecution, blocked_tool_execution
+
+ResultT = TypeVar("ResultT")
 
 
 def collect_evidence_with_llm_tools(
@@ -37,9 +41,14 @@ def collect_evidence_with_llm_tools(
     executions: list[ToolExecution] = []
 
     for _turn in range(variant.max_tool_calls + 1):
-        response = model.invoke(
-            messages,
-            config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+        response = run_model_with_kitaru_calls_mode(
+            model=model,
+            model_input=messages,
+            callbacks=callbacks,
+            metadata=metadata,
+            tags=tags,
+            node_name="collect_evidence_with_tools",
+            tools=_tool_schemas(),
         )
         messages.append(response)
         requested_calls = getattr(response, "tool_calls", None) or []
@@ -91,9 +100,13 @@ def summarize_evidence_with_llm(
         f"User request:\n{scenario.user_request}\n\n"
         f"Tool evidence JSON:\n{_tool_json(tool_executions)}"
     )
-    response = model.invoke(
-        prompt,
-        config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+    response = run_model_with_kitaru_calls_mode(
+        model=model,
+        model_input=prompt,
+        callbacks=callbacks,
+        metadata=metadata,
+        tags=tags,
+        node_name="summarize_evidence",
     )
     content = _message_content(response).strip()
     if content:
@@ -139,9 +152,13 @@ def decide_with_llm(
         f"Evidence summary:\n{evidence_summary}\n\n"
         f"Tool records JSON:\n{_tool_json(tool_executions)}"
     )
-    decision = model.invoke(
-        prompt,
-        config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+    decision = run_model_with_kitaru_calls_mode(
+        model=model,
+        model_input=prompt,
+        callbacks=callbacks,
+        metadata=metadata,
+        tags=tags,
+        node_name="decide_action",
     )
     if isinstance(decision, SupportDecision):
         return decision
@@ -156,28 +173,122 @@ def _execute_requested_tool(
     args: dict[str, Any],
     executed_tool_count: int,
 ) -> ToolExecution:
+    tool_call_id = f"{name}-{executed_tool_count + 1}"
     if executed_tool_count >= variant.max_tool_calls:
-        return blocked_tool_execution(
-            name,
-            args,
-            f"max_tool_calls={variant.max_tool_calls} reached",
+        return run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name=name,
+            args=args,
+            tool_call_id=tool_call_id,
+            handler=lambda: blocked_tool_execution(
+                name,
+                args,
+                f"max_tool_calls={variant.max_tool_calls} reached",
+            ),
         )
     if not variant.allows_tool(name):
-        return blocked_tool_execution(
-            name,
-            args,
-            f"tool not allowed by {variant.tool_policy_name}",
+        return run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name=name,
+            args=args,
+            tool_call_id=tool_call_id,
+            handler=lambda: blocked_tool_execution(
+                name,
+                args,
+                f"tool not allowed by {variant.tool_policy_name}",
+            ),
         )
     if variant.dry_run_writes and name in tools.write_tool_names:
-        return blocked_tool_execution(
-            name,
-            args,
-            f"dry_run_writes blocked {name}",
+        return run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name=name,
+            args=args,
+            tool_call_id=tool_call_id,
+            handler=lambda: blocked_tool_execution(
+                name,
+                args,
+                f"dry_run_writes blocked {name}",
+            ),
         )
     try:
-        return tools.run(name, args)
+        return run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name=name,
+            args=args,
+            tool_call_id=tool_call_id,
+            handler=lambda: tools.run(name, args),
+        )
     except (KeyError, TypeError, ValueError) as error:
-        return blocked_tool_execution(name, args, f"tool execution failed: {error}")
+        reason = f"tool execution failed: {error}"
+        return run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name=name,
+            args=args,
+            tool_call_id=tool_call_id,
+            handler=lambda: blocked_tool_execution(name, args, reason),
+        )
+
+
+def run_model_with_kitaru_calls_mode(
+    *,
+    model: Any,
+    model_input: Any,
+    callbacks: list[Any],
+    metadata: dict[str, Any],
+    tags: list[str],
+    node_name: str,
+    tools: list[Any] | None = None,
+    handler: Callable[[], ResultT] | None = None,
+) -> ResultT:
+    """Run a model-like call through Kitaru calls-mode when active."""
+    from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
+
+    request = SimpleNamespace(
+        model=model,
+        messages=model_input if isinstance(model_input, list) else [model_input],
+        system_message=None,
+        tool_choice=None,
+        tools=tools or [],
+        response_format=None,
+        model_settings={},
+        runtime=SimpleNamespace(node_name=node_name),
+    )
+
+    def _handler(_request: Any) -> ResultT:
+        if handler is not None:
+            return handler()
+        return model.invoke(
+            model_input,
+            config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+        )
+
+    return KitaruLangGraphMiddleware().wrap_model_call(request, _handler)
+
+
+def run_tool_with_kitaru_calls_mode(
+    *,
+    tools: SupportTools,
+    name: str,
+    args: dict[str, Any],
+    tool_call_id: str,
+    handler: Callable[[], ToolExecution] | None = None,
+) -> ToolExecution:
+    """Run a local support tool through Kitaru calls-mode when active."""
+    from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
+
+    request = SimpleNamespace(
+        tool_call={"name": name, "args": args, "id": tool_call_id},
+        tool=SimpleNamespace(name=name),
+        state={},
+        runtime=SimpleNamespace(node_name="collect_evidence_with_tools"),
+    )
+
+    def _handler(_request: Any) -> ToolExecution:
+        if handler is not None:
+            return handler()
+        return tools.run(name, args)
+
+    return KitaruLangGraphMiddleware().wrap_tool_call(request, _handler)
 
 
 def _chat_model(model_name: str) -> Any:

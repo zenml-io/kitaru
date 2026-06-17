@@ -42,6 +42,8 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.KitaruGraphRunner
     assert langgraph_adapter.LangGraphRunRequest
     assert langgraph_adapter.LangGraphRunResult
+    assert langgraph_adapter.LangGraphCheckpointSelector
+    assert langgraph_adapter.LangGraphForkResult
     assert langgraph_adapter.LangGraphCallCheckpointPolicy
     assert langgraph_adapter.LangGraphCapturePolicy
     assert langgraph_adapter.LangGraphDurabilityPolicy
@@ -229,6 +231,110 @@ def test_structural_checkpoint_artifact_refs_are_adapter_local(
         assert refs.input_artifacts == {"model_input": "model_input"}
         assert refs.output_artifacts == {"output": "output"}
     assert utils.get_adapter_checkpoint_artifact_refs() is None
+
+
+def test_checkpoint_selector_validation(langgraph_adapter: types.ModuleType) -> None:
+    selector = langgraph_adapter.LangGraphCheckpointSelector(
+        next_nodes=("summarize_evidence",),
+        match_index=1,
+    )
+
+    assert selector.next_nodes == ("summarize_evidence",)
+    assert selector.match_index == 1
+    assert selector.checkpoint_ns is None
+
+    with pytest.raises(ValidationError, match="checkpoint_id or next_nodes"):
+        langgraph_adapter.LangGraphCheckpointSelector()
+    with pytest.raises(ValidationError, match="next_nodes must be non-empty"):
+        langgraph_adapter.LangGraphCheckpointSelector(next_nodes=())
+    with pytest.raises(ValidationError, match="match_index"):
+        langgraph_adapter.LangGraphCheckpointSelector(
+            next_nodes=("summarize_evidence",),
+            match_index=-1,
+        )
+
+
+def test_runner_fork_sanitizes_resume_config_and_keeps_config_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    config_checkpointer = object()
+    update_config_seen: dict[str, object] = {}
+    invoke_config_seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def get_state_history(self, _config: object) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(
+                    config={
+                        "configurable": {
+                            "thread_id": "thread-1",
+                            "checkpoint_id": "selected",
+                            "checkpoint_ns": "",
+                        }
+                    },
+                    next=("summarize",),
+                )
+            ]
+
+        def update_state(
+            self, config: dict[str, object], *, values: object
+        ) -> dict[str, object]:
+            _ = values
+            update_config_seen.update(config)
+            return {
+                "configurable": {
+                    "thread_id": "thread-1",
+                    "checkpoint_id": "fork",
+                    "checkpoint_ns": "",
+                }
+            }
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            _ = input
+            invoke_config_seen.update(cast(dict[str, object], kwargs["config"]))
+            return {"ok": True}
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
+    )
+
+    fork = runner.fork(
+        thread_id="thread-1",
+        select=langgraph_adapter.LangGraphCheckpointSelector(next_nodes=("summarize",)),
+        update_values={"variant": "candidate"},
+        config={
+            "configurable": {
+                "tenant": "acme",
+                "checkpoint_id": "stale-config-id",
+                "checkpoint_ns": "stale-config-ns",
+            }
+        },
+        configurable={
+            "user": "alex",
+            "checkpoint_id": "stale-configurable-id",
+            "checkpoint_ns": "stale-configurable-ns",
+        },
+    )
+
+    update_configurable = cast(dict[str, object], update_config_seen["configurable"])
+    invoke_configurable = cast(dict[str, object], invoke_config_seen["configurable"])
+
+    assert fork.fork_checkpoint_ns is None
+    assert update_configurable[agent_module.LANGGRAPH_CONFIG_CHECKPOINTER_KEY] is (
+        config_checkpointer
+    )
+    assert invoke_configurable["tenant"] == "acme"
+    assert invoke_configurable["user"] == "alex"
+    assert invoke_configurable["thread_id"] == "thread-1"
+    assert "checkpoint_id" not in invoke_configurable
+    assert "checkpoint_ns" not in invoke_configurable
 
 
 def test_run_request_start_resume_and_config_merge(
@@ -818,6 +924,54 @@ def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(
     assert summary_metadata["artifact_name"] == result.run_summary_artifact_name
     assert summary_metadata["status"] == "completed"
     assert summary_metadata["thread_id"] == "thread-1"
+
+
+def test_request_metadata_is_redacted_in_summary_not_event_payload(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    saved: list[tuple[str, object, str]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(
+        tracking.kitaru,
+        "save",
+        lambda name, value, *, type: saved.append((name, value, type)),
+    )
+    monkeypatch.setattr(tracking.kitaru, "log", lambda **_kwargs: None)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+            metadata={"run_role": "baseline", "api_key": "SECRET"},
+        )
+    )
+
+    event_log = cast(list[dict[str, object]], saved[0][1])
+    run_summary = cast(dict[str, object], saved[1][1])
+
+    event_metadata = cast(dict[str, object], event_log[0]["metadata"])
+
+    assert run_summary["request_metadata"] == {
+        "run_role": "baseline",
+        "api_key": "[REDACTED]",
+    }
+    assert event_metadata["request_metadata_keys"] == [
+        "api_key",
+        "run_role",
+    ]
+    assert "SECRET" not in repr(event_metadata)
 
 
 def test_find_usages_ignores_application_usage_dict_without_token_fields(
@@ -1595,6 +1749,7 @@ def test_metadata_records_forwarded_durability(
         "has_store": False,
         "thread_id_present": True,
         "configurable_keys": ["thread_id"],
+        "request_metadata_keys": [],
     }
     assert analytics_metadata["durability"] == "sync"
     assert analytics_metadata["forwarded_durability"] == expected_forwarded_durability

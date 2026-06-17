@@ -21,10 +21,13 @@ from kitaru import flow
 from kitaru.adapters.langgraph import (
     KitaruGraphRunner,
     LangGraphCapturePolicy,
+    LangGraphCheckpointSelector,
+    LangGraphDurabilityPolicy,
     LangGraphRunRequest,
     LangGraphRunResult,
     build_resume_request,
 )
+from kitaru.errors import KitaruUsageError
 
 
 def _wait_for_hydrated_run(exec_id: str) -> Any:
@@ -188,3 +191,87 @@ def test_interrupt_result_and_resume_helper() -> None:
     output = cast(dict[str, Any], resumed.output)
     assert output["answer"] == {"approved": True}
     assert output["value"] == 2
+
+
+class ForkState(TypedDict, total=False):
+    count: int
+    variant: str
+    summary: str
+
+
+def _forkable_graph(*, with_checkpointer: bool = True) -> tuple[Any, list[str]]:
+    calls: list[str] = []
+    builder = StateGraph(cast(Any, ForkState))
+
+    def collect(state: ForkState) -> ForkState:
+        calls.append("collect")
+        return {"count": state["count"] + 1}
+
+    def summarize(state: ForkState) -> ForkState:
+        calls.append(f"summarize:{state['variant']}")
+        return {"summary": f"variant={state['variant']}; count={state['count']}"}
+
+    builder.add_node("collect", collect)
+    builder.add_node("summarize", summarize)
+    builder.add_edge(START, "collect")
+    builder.add_edge("collect", "summarize")
+    builder.add_edge("summarize", END)
+    if not with_checkpointer:
+        return builder.compile(), calls
+    return builder.compile(checkpointer=InMemorySaver()), calls
+
+
+def test_runner_fork_updates_state_and_resumes_without_checkpoint_id() -> None:
+    graph, calls = _forkable_graph()
+    runner = KitaruGraphRunner(
+        graph,
+        name="forkable",
+        durability=LangGraphDurabilityPolicy(require_checkpointer=True),
+        capture=LangGraphCapturePolicy(save_state_values=True),
+    )
+    thread_id = f"fork-thread-{uuid4().hex[:8]}"
+
+    baseline = runner.invoke(
+        LangGraphRunRequest.start(
+            {"count": 1, "variant": "baseline"},
+            thread_id=thread_id,
+        )
+    )
+    fork = runner.fork(
+        thread_id=thread_id,
+        select=LangGraphCheckpointSelector(next_nodes=("summarize",)),
+        update_values={"variant": "candidate"},
+        metadata={"run_role": "candidate_fork"},
+    )
+
+    assert baseline.output == {
+        "count": 2,
+        "variant": "baseline",
+        "summary": "variant=baseline; count=2",
+    }
+    assert fork.run_result.output == {
+        "count": 2,
+        "variant": "candidate",
+        "summary": "variant=candidate; count=2",
+    }
+    assert fork.selected_checkpoint_id
+    assert fork.selected_next_nodes == ["summarize"]
+    assert fork.fork_checkpoint_id
+    assert fork.fork_checkpoint_ns is None
+    assert fork.updated_state_keys == ["variant"]
+    assert fork.checkpoint_strategy == "graph_call"
+    assert calls == ["collect", "summarize:baseline", "summarize:candidate"]
+
+
+def test_runner_fork_requires_langgraph_checkpointer() -> None:
+    graph, _calls = _forkable_graph(with_checkpointer=False)
+    runner = KitaruGraphRunner(graph, name="forkable")
+
+    with pytest.raises(
+        KitaruUsageError, match="requires a real LangGraph checkpointer"
+    ):
+        runner.fork(
+            thread_id="thread-1",
+            select=LangGraphCheckpointSelector(next_nodes=("summarize",)),
+            update_values={"variant": "candidate"},
+        )

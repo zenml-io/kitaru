@@ -65,6 +65,52 @@ class LangGraphPendingState(BaseModel):
         return value
 
 
+class LangGraphCheckpointSelector(BaseModel):
+    """Describe which LangGraph history checkpoint should be forked."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    next_nodes: tuple[str, ...] | None = None
+    match_index: int = 0
+
+    @field_validator("checkpoint_id", "checkpoint_ns")
+    @classmethod
+    def _normalize_optional_string(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = str(value)
+        return value or None
+
+    @field_validator("next_nodes")
+    @classmethod
+    def _validate_next_nodes(
+        cls, value: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("next_nodes must be non-empty when provided.")
+        return tuple(str(node) for node in value)
+
+    @field_validator("match_index")
+    @classmethod
+    def _validate_match_index(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("match_index must be >= 0.")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_selector_contract(self) -> "LangGraphCheckpointSelector":
+        if self.checkpoint_id is None and self.next_nodes is None:
+            raise ValueError(
+                "LangGraphCheckpointSelector requires checkpoint_id or next_nodes."
+            )
+        return self
+
+
 class LangGraphRunRequest(BaseModel):
     """Serializable input to ``KitaruGraphRunner.invoke(...)``."""
 
@@ -205,6 +251,8 @@ class LangGraphRunResult(BaseModel):
     usage: LangGraphUsageSummary | None = None
     estimated_cost_usd: float | None = None
     warnings: list[str] = Field(default_factory=list)
+    model_call_count: int = 0
+    tool_call_count: int = 0
 
     @model_validator(mode="after")
     def _validate_status_contract(self) -> "LangGraphRunResult":
@@ -222,3 +270,23 @@ class LangGraphRunResult(BaseModel):
                 "Completed LangGraph run results must not include pending_state."
             )
         return self
+
+
+class LangGraphForkResult(BaseModel):
+    """Serializable result from a LangGraph native fork run through Kitaru."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    thread_id: str
+    selected_checkpoint_id: str | None
+    selected_checkpoint_ns: str | None
+    selected_next_nodes: list[str]
+    fork_checkpoint_id: str | None
+    fork_checkpoint_ns: str | None
+    updated_state_keys: list[str]
+    matched_snapshot_count: int
+    selected_match_index: int
+    checkpoint_strategy: Literal["graph_call", "calls"]
+    run_result: LangGraphRunResult
+    warnings: list[str] = Field(default_factory=list)

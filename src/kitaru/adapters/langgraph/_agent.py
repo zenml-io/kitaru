@@ -19,6 +19,14 @@ from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
 from ._constants import LANGGRAPH_CONFIG_CHECKPOINTER_KEY
+from ._forking import (
+    config_checkpoint_id,
+    config_checkpoint_ns,
+    select_history_snapshot,
+    snapshot_checkpoint_id,
+    snapshot_checkpoint_ns,
+    snapshot_next_nodes,
+)
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import (
     LangGraphCallCheckpointPolicy,
@@ -40,6 +48,8 @@ from ._streaming import (
 )
 from ._tracking import EventTracker, tracker_scope
 from ._types import (
+    LangGraphCheckpointSelector,
+    LangGraphForkResult,
     LangGraphInterruptSummary,
     LangGraphPendingState,
     LangGraphRunRequest,
@@ -188,6 +198,117 @@ class KitaruGraphRunner:
         result = canonicalize_result_model(result, LangGraphRunResult)
         self._track_result("invoke", result, request=request, config=config)
         return result
+
+    def fork(
+        self,
+        *,
+        thread_id: str,
+        select: LangGraphCheckpointSelector,
+        update_values: Mapping[str, Any],
+        metadata: Mapping[str, Any] | None = None,
+        context: Any | None = None,
+        configurable: Mapping[str, Any] | None = None,
+        config: Mapping[str, Any] | None = None,
+        durability: str | None = None,
+    ) -> LangGraphForkResult:
+        """Create a LangGraph-native fork and resume it through this runner.
+
+        Kitaru chooses the history snapshot, labels the resumed request, and
+        records the resumed graph call. LangGraph reads checkpoint history,
+        applies ``update_state(...)``, creates the fork checkpoint, and resumes
+        from the resulting thread state.
+        """
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise KitaruUsageError("LangGraph fork requires a non-empty thread_id.")
+        if not isinstance(update_values, Mapping) or not update_values:
+            raise KitaruUsageError("LangGraph fork requires non-empty update_values.")
+        get_state_history = getattr(self._graph, "get_state_history", None)
+        if not callable(get_state_history):
+            raise KitaruUsageError(
+                "Wrapped LangGraph object does not expose `get_state_history(config)`; "
+                "Kitaru cannot select a native LangGraph fork point."
+            )
+        update_state = getattr(self._graph, "update_state", None)
+        if not callable(update_state):
+            raise KitaruUsageError(
+                "Wrapped LangGraph object does not expose "
+                "`update_state(config, values=...)`; Kitaru cannot ask "
+                "LangGraph to create a fork checkpoint."
+            )
+
+        history_request = LangGraphRunRequest.start(
+            None,
+            thread_id=thread_id,
+            context=context,
+            configurable=dict(configurable or {}),
+            config=dict(config or {}),
+            durability=cast(Any, durability),
+            metadata=dict(metadata or {}),
+        )
+        self._validate_request(history_request, required_method="invoke")
+        prepared_config = self._prepared_config(history_request)
+        if not self._has_effective_checkpointer_saver(prepared_config):
+            raise KitaruUsageError(
+                "LangGraph fork requires a real LangGraph checkpointer on the "
+                "wrapped graph or prepared config. Kitaru records the fork run, "
+                "but LangGraph must store the checkpoint history that is being forked."
+            )
+        self._validate_checkpointer_requirement(prepared_config)
+
+        selected_snapshot, matched_snapshot_count = select_history_snapshot(
+            get_state_history(prepared_config), select
+        )
+        selected_checkpoint_id = snapshot_checkpoint_id(selected_snapshot)
+        selected_checkpoint_ns = snapshot_checkpoint_ns(selected_snapshot)
+        fork_config = update_state(
+            self._fork_update_config(
+                selected_snapshot.config,
+                prepared_config=prepared_config,
+            ),
+            values=dict(update_values),
+        )
+        fork_checkpoint_id = config_checkpoint_id(fork_config)
+        fork_checkpoint_ns = config_checkpoint_ns(fork_config)
+        update_keys = sorted(str(key) for key in update_values)
+        resume_metadata = {
+            **dict(metadata or {}),
+            "source": "langgraph_native_fork",
+            "fork_source_checkpoint_id": selected_checkpoint_id,
+            "fork_checkpoint_id": fork_checkpoint_id,
+            "fork_update_keys": update_keys,
+            "checkpoint_strategy": self._checkpoint_strategy,
+        }
+        resume_request = LangGraphRunRequest.start(
+            None,
+            thread_id=thread_id,
+            checkpoint_ns=fork_checkpoint_ns,
+            context=context,
+            configurable=_without_checkpoint_keys(configurable),
+            config=_without_checkpoint_pointer(config),
+            durability=cast(Any, durability),
+            metadata=resume_metadata,
+        )
+        run_result = self.invoke(resume_request)
+        warnings = []
+        if fork_checkpoint_id is None:
+            warnings.append(
+                "LangGraph `update_state(...)` did not return a checkpoint_id in "
+                "its config; the fork still resumed through the requested thread."
+            )
+        return LangGraphForkResult(
+            thread_id=thread_id,
+            selected_checkpoint_id=selected_checkpoint_id,
+            selected_checkpoint_ns=selected_checkpoint_ns,
+            selected_next_nodes=list(snapshot_next_nodes(selected_snapshot)),
+            fork_checkpoint_id=fork_checkpoint_id,
+            fork_checkpoint_ns=fork_checkpoint_ns,
+            updated_state_keys=update_keys,
+            matched_snapshot_count=matched_snapshot_count,
+            selected_match_index=select.match_index,
+            checkpoint_strategy=self._checkpoint_strategy,
+            run_result=run_result,
+            warnings=warnings,
+        )
 
     async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
         """Invoke the wrapped graph asynchronously when the graph supports it."""
@@ -775,6 +896,12 @@ class KitaruGraphRunner:
             usage=usage,
             estimated_cost_usd=estimated_cost,
             warnings=warnings,
+            model_call_count=sum(
+                1 for event in tracker.events if event.kind == "model_call"
+            ),
+            tool_call_count=sum(
+                1 for event in tracker.events if event.kind == "tool_call"
+            ),
         )
         return result
 
@@ -1532,6 +1659,7 @@ class KitaruGraphRunner:
             "config": redact_config(config) if self._capture.save_config else None,
             "context": redact_config(context) if self._capture.save_context else None,
             "input": self._captured_input(request),
+            "request_metadata": redact_config(request.metadata),
         }
 
     def _captured_input(self, request: LangGraphRunRequest) -> Any | None:
@@ -1572,6 +1700,7 @@ class KitaruGraphRunner:
             "configurable_keys": _safe_key_labels(
                 _mapping_get(config, "configurable", {})
             ),
+            "request_metadata_keys": _safe_key_labels(request.metadata),
         }
 
     def _analytics_metadata(
@@ -1659,6 +1788,45 @@ class KitaruGraphRunner:
         if state_summary is not None and state_summary.checkpoint_ns is not None:
             return state_summary.checkpoint_ns
         return request.checkpoint_ns
+
+    def _fork_update_config(
+        self,
+        snapshot_config: Any,
+        *,
+        prepared_config: Mapping[str, Any],
+    ) -> Any:
+        config_checkpointer = self._config_checkpointer_saver(prepared_config)
+        if config_checkpointer is None:
+            return snapshot_config
+        if self._config_checkpointer_saver(snapshot_config) is not None:
+            return snapshot_config
+        if not isinstance(snapshot_config, Mapping):
+            return snapshot_config
+        configurable = _mapping_get(snapshot_config, "configurable", {}) or {}
+        if not isinstance(configurable, Mapping):
+            configurable = {}
+        return {
+            **dict(snapshot_config),
+            "configurable": {
+                **dict(configurable),
+                LANGGRAPH_CONFIG_CHECKPOINTER_KEY: config_checkpointer,
+            },
+        }
+
+
+def _without_checkpoint_pointer(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    sanitized = dict(config or {})
+    configurable = sanitized.get("configurable")
+    if isinstance(configurable, Mapping):
+        sanitized["configurable"] = _without_checkpoint_keys(configurable)
+    return sanitized
+
+
+def _without_checkpoint_keys(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    sanitized = dict(value or {})
+    sanitized.pop("checkpoint_id", None)
+    sanitized.pop("checkpoint_ns", None)
+    return sanitized
 
 
 def _calls_mode_input_capture(value: Any) -> Any:

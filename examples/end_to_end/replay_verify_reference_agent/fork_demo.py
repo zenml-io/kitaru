@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -19,10 +19,12 @@ from pydantic import BaseModel
 from zenml.client import Client
 from zenml.types import HTMLString
 
+import kitaru as kt
 from kitaru import checkpoint, flow
 from kitaru.adapters.langgraph import (
     KitaruGraphRunner,
     LangGraphCapturePolicy,
+    LangGraphCheckpointSelector,
     LangGraphDurabilityPolicy,
     LangGraphRunRequest,
     LangGraphRunResult,
@@ -41,6 +43,10 @@ from examples.end_to_end.replay_verify_reference_agent.fork_report import (
     ForkDemoReport,
     VariantSummary,
     render_fork_demo_html,
+)
+from examples.end_to_end.replay_verify_reference_agent.agent import (
+    run_model_with_kitaru_calls_mode,
+    run_tool_with_kitaru_calls_mode,
 )
 from examples.end_to_end.replay_verify_reference_agent.graph import build_graph
 from examples.end_to_end.replay_verify_reference_agent.mock_api import MockApiServer
@@ -69,6 +75,11 @@ class ForkDemoFlowResult(BaseModel):
     baseline_required_action: str
     forked_required_action: str
     tool_collection_rerun: bool
+    checkpoint_strategy: str
+    baseline_model_call_count: int
+    baseline_tool_call_count: int
+    forked_model_call_count: int
+    forked_tool_call_count: int
 
 
 @checkpoint(cache=False)
@@ -85,6 +96,7 @@ def replay_verify_fork_demo_flow(
     candidate: str = DEFAULT_CANDIDATE_VARIANT,
     baseline: str = DEFAULT_BASELINE_VARIANT,
     report_path: str = str(DEFAULT_REPORT_PATH),
+    checkpoint_strategy: Literal["graph_call", "calls"] = "graph_call",
 ) -> ForkDemoFlowResult:
     """Run baseline, fork at the post-tool checkpoint, and publish a report."""
     result = run_fork_demo_experiment(
@@ -92,6 +104,7 @@ def replay_verify_fork_demo_flow(
         baseline_variant_name=baseline,
         candidate_variant_name=candidate,
         report_path=Path(report_path),
+        checkpoint_strategy=checkpoint_strategy,
     )
     report_html = publish_fork_demo_report(result.report)
     return finalize_fork_demo_result(
@@ -127,6 +140,7 @@ def run_fork_demo_experiment(
     baseline_variant_name: str = DEFAULT_BASELINE_VARIANT,
     candidate_variant_name: str = DEFAULT_CANDIDATE_VARIANT,
     report_path: Path = DEFAULT_REPORT_PATH,
+    checkpoint_strategy: Literal["graph_call", "calls"] = "graph_call",
 ) -> _ExperimentResult:
     """Run the deterministic fork mechanics used by the Kitaru flow and tests."""
     scenario = _select_scenario(scenario_id)
@@ -153,8 +167,16 @@ def run_fork_demo_experiment(
                 summarize_evidence_fn=summarize_evidence_deterministically,
                 decide_fn=decide_deterministically,
             )
-            baseline_runner = _graph_runner(graph, name="replay_verify_baseline")
-            fork_runner = _graph_runner(graph, name="replay_verify_candidate_fork")
+            baseline_runner = _graph_runner(
+                graph,
+                name="replay_verify_baseline",
+                checkpoint_strategy=checkpoint_strategy,
+            )
+            fork_runner = _graph_runner(
+                graph,
+                name="replay_verify_candidate_fork",
+                checkpoint_strategy=checkpoint_strategy,
+            )
 
             baseline_result = baseline_runner.invoke(
                 LangGraphRunRequest.start(
@@ -167,27 +189,18 @@ def run_fork_demo_experiment(
                     },
                 )
             )
-            selected_snapshot = _post_tool_snapshot(graph, thread_id=thread_id)
-            selected_checkpoint_id = _checkpoint_id(selected_snapshot.config)
-            fork_config = graph.update_state(
-                selected_snapshot.config,
-                values={"variant": candidate_variant},
+            fork = kt.fork(
+                fork_runner,
+                thread_id=thread_id,
+                select=LangGraphCheckpointSelector(next_nodes=("summarize_evidence",)),
+                update_values={"variant": candidate_variant},
+                metadata={
+                    "scenario_id": scenario.scenario_id,
+                    "variant_name": candidate_variant.name,
+                    "run_role": "candidate_fork",
+                },
             )
-            fork_checkpoint_id = _checkpoint_id(fork_config)
-            fork_result = fork_runner.invoke(
-                LangGraphRunRequest.start(
-                    None,
-                    thread_id=thread_id,
-                    checkpoint_ns=_checkpoint_ns(fork_config),
-                    metadata={
-                        "scenario_id": scenario.scenario_id,
-                        "variant_name": candidate_variant.name,
-                        "run_role": "candidate_fork",
-                        "fork_source_checkpoint_id": selected_checkpoint_id,
-                        "fork_checkpoint_id": fork_checkpoint_id,
-                    },
-                )
-            )
+            fork_result = fork.run_result
 
     report = _build_report(
         scenario=scenario,
@@ -196,8 +209,7 @@ def run_fork_demo_experiment(
         thread_id=thread_id,
         baseline_result=baseline_result,
         fork_result=fork_result,
-        selected_checkpoint_id=selected_checkpoint_id,
-        fork_checkpoint_id=fork_checkpoint_id,
+        fork=fork,
     )
     html = render_fork_demo_html(report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,6 +229,11 @@ def run_fork_demo_experiment(
             report.forked_decision.get("required_action", "unknown")
         ),
         tool_collection_rerun=report.tool_collection_rerun,
+        checkpoint_strategy=report.checkpoint_strategy,
+        baseline_model_call_count=report.baseline_model_call_count,
+        baseline_tool_call_count=report.baseline_tool_call_count,
+        forked_model_call_count=report.forked_model_call_count,
+        forked_tool_call_count=report.forked_tool_call_count,
     )
     return _ExperimentResult(
         report=report,
@@ -239,27 +256,36 @@ def collect_evidence_deterministically(
     _ = callbacks, metadata, tags
     executions: list[ToolExecution] = []
     if scenario.customer_key:
-        lookup = tools.run("lookup_customer", {"email_or_id": scenario.customer_key})
+        lookup = run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name="lookup_customer",
+            args={"email_or_id": scenario.customer_key},
+            tool_call_id="deterministic-lookup-customer",
+        )
         executions.append(lookup)
         customer_id = str(lookup.result.get("customer_id", "unknown"))
     else:
         customer_id = "unknown"
     executions.append(
-        tools.run(
-            "search_kb",
-            {"query": "permission policy account setting restricted write"},
+        run_tool_with_kitaru_calls_mode(
+            tools=tools,
+            name="search_kb",
+            args={"query": "permission policy account setting restricted write"},
+            tool_call_id="deterministic-search-kb",
         )
     )
     if variant.allows_tool("escalate_to_human"):
         executions.append(
-            tools.run(
-                "escalate_to_human",
-                {
+            run_tool_with_kitaru_calls_mode(
+                tools=tools,
+                name="escalate_to_human",
+                args={
                     "customer_id": customer_id,
                     "reason": (
                         "Restricted account setting changes require human review."
                     ),
                 },
+                tool_call_id="deterministic-escalate-to-human",
             )
         )
     return executions
@@ -277,18 +303,34 @@ def summarize_evidence_deterministically(
     """Produce a stable summary that changes when the active variant changes."""
     _ = scenario, callbacks, metadata, tags
     tool_names = ", ".join(execution.name for execution in tool_executions)
-    if variant.prompt_profile == "trimmed_permissions":
+
+    def _summarize() -> str:
+        if variant.prompt_profile == "trimmed_permissions":
+            return (
+                "Candidate summary: the fork reused the already-collected lookup, "
+                "policy, and escalation evidence. The active variant now uses the "
+                "faster permissions profile, so downstream handling becomes more "
+                "permissive without rerunning tool collection. "
+                f"Reused tools: {tool_names}."
+            )
         return (
-            "Candidate summary: the fork reused the already-collected lookup, "
-            "policy, and escalation evidence. The active variant now uses the "
-            "faster permissions profile, so downstream handling becomes more "
-            "permissive without rerunning tool collection. "
-            f"Reused tools: {tool_names}."
+            "Baseline summary: the run collected lookup and policy evidence, then "
+            "recorded a human escalation for the restricted account-setting request. "
+            f"Collected tools: {tool_names}."
         )
-    return (
-        "Baseline summary: the run collected lookup and policy evidence, then "
-        "recorded a human escalation for the restricted account-setting request. "
-        f"Collected tools: {tool_names}."
+
+    return run_model_with_kitaru_calls_mode(
+        model=_DeterministicModel(f"{variant.name}_summary"),
+        model_input={
+            "scenario_id": scenario.scenario_id,
+            "tool_names": tool_names,
+            "variant": variant.name,
+        },
+        callbacks=callbacks,
+        metadata=metadata,
+        tags=tags,
+        node_name="summarize_evidence",
+        handler=_summarize,
     )
 
 
@@ -310,33 +352,62 @@ def decide_deterministically(
         for evidence_id in execution.evidence_ids
     ]
     tool_names = [execution.name for execution in tool_executions]
-    if variant.prompt_profile == "trimmed_permissions":
+
+    def _decide() -> SupportDecision:
+        if variant.prompt_profile == "trimmed_permissions":
+            return SupportDecision(
+                policy_label="permissions_policy",
+                risk_status="safe",
+                required_action="answer_directly",
+                summary=(
+                    "The candidate fork used the faster permission profile after "
+                    "the post-tool checkpoint. It changed the response posture, but "
+                    "the fork did not rerun tools or perform a direct setting write."
+                ),
+                evidence_ids=evidence_ids,
+                tool_names=tool_names,
+            )
         return SupportDecision(
             policy_label="permissions_policy",
-            risk_status="safe",
-            required_action="answer_directly",
-            summary=(
-                "The candidate fork used the faster permission profile after "
-                "the post-tool checkpoint. It changed the response posture, but "
-                "the fork did not rerun tools or perform a direct setting write."
-            ),
+            risk_status="needs_review",
+            required_action=cast(Any, scenario.expected_required_action),
+            summary=evidence_summary,
             evidence_ids=evidence_ids,
             tool_names=tool_names,
         )
-    return SupportDecision(
-        policy_label="permissions_policy",
-        risk_status="needs_review",
-        required_action=cast(Any, scenario.expected_required_action),
-        summary=evidence_summary,
-        evidence_ids=evidence_ids,
-        tool_names=tool_names,
+
+    return run_model_with_kitaru_calls_mode(
+        model=_DeterministicModel(f"{variant.name}_decision"),
+        model_input={
+            "scenario_id": scenario.scenario_id,
+            "evidence_summary_present": bool(evidence_summary),
+            "variant": variant.name,
+        },
+        callbacks=callbacks,
+        metadata=metadata,
+        tags=tags,
+        node_name="decide_action",
+        handler=_decide,
     )
 
 
-def _graph_runner(graph: Any, *, name: str) -> KitaruGraphRunner:
+class _DeterministicModel:
+    """Small model-shaped object for calls-mode instrumentation in local tests."""
+
+    def __init__(self, name: str) -> None:
+        self.model_name = name
+
+
+def _graph_runner(
+    graph: Any,
+    *,
+    name: str,
+    checkpoint_strategy: Literal["graph_call", "calls"],
+) -> KitaruGraphRunner:
     return KitaruGraphRunner(
         graph,
         name=name,
+        checkpoint_strategy=checkpoint_strategy,
         durability=LangGraphDurabilityPolicy(require_checkpointer=True),
         capture=LangGraphCapturePolicy(save_state_values=True),
     )
@@ -369,8 +440,7 @@ def _build_report(
     thread_id: str,
     baseline_result: LangGraphRunResult,
     fork_result: LangGraphRunResult,
-    selected_checkpoint_id: str | None,
-    fork_checkpoint_id: str | None,
+    fork: Any,
 ) -> ForkDemoReport:
     baseline_output = _final_output(baseline_result)
     forked_output = _final_output(fork_result)
@@ -379,9 +449,11 @@ def _build_report(
     return ForkDemoReport(
         thread_id=thread_id,
         scenario_id=scenario.scenario_id,
-        selected_checkpoint_id=selected_checkpoint_id,
+        selected_checkpoint_id=fork.selected_checkpoint_id,
+        selected_checkpoint_ns=fork.selected_checkpoint_ns,
         baseline_latest_checkpoint_id=baseline_result.latest_checkpoint_id,
-        fork_checkpoint_id=fork_checkpoint_id,
+        fork_checkpoint_id=fork.fork_checkpoint_id,
+        fork_checkpoint_ns=fork.fork_checkpoint_ns,
         terminal_fork_checkpoint_id=fork_result.latest_checkpoint_id,
         baseline_variant=_variant_summary(baseline_variant),
         candidate_variant=_variant_summary(candidate_variant),
@@ -398,7 +470,15 @@ def _build_report(
         baseline_tool_execution_names=baseline_tools,
         forked_tool_execution_names=forked_tools,
         changed_tool_execution_names=_changed_tool_names(baseline_tools, forked_tools),
-        warnings=[*baseline_result.warnings, *fork_result.warnings],
+        updated_state_keys=fork.updated_state_keys,
+        matched_snapshot_count=fork.matched_snapshot_count,
+        selected_match_index=fork.selected_match_index,
+        checkpoint_strategy=fork.checkpoint_strategy,
+        baseline_model_call_count=baseline_result.model_call_count,
+        baseline_tool_call_count=baseline_result.tool_call_count,
+        forked_model_call_count=fork_result.model_call_count,
+        forked_tool_call_count=fork_result.tool_call_count,
+        warnings=[*baseline_result.warnings, *fork_result.warnings, *fork.warnings],
     )
 
 
@@ -464,6 +544,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=str(DEFAULT_REPORT_PATH),
         help="Local HTML output path. Defaults to examples/.../reports/fork-demo.html.",
     )
+    parser.add_argument(
+        "--checkpoint-strategy",
+        choices=["graph_call", "calls"],
+        default="graph_call",
+        help="Kitaru LangGraph checkpoint strategy for baseline and forked runs.",
+    )
     return parser.parse_args(argv)
 
 
@@ -475,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         candidate=args.candidate,
         baseline=args.baseline,
         report_path=args.report_path,
+        checkpoint_strategy=args.checkpoint_strategy,
     )
     _wait_for_execution(handle.exec_id)
     report_path = Path(args.report_path)

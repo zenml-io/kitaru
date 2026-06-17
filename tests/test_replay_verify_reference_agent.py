@@ -124,6 +124,7 @@ def test_fork_demo_uses_langgraph_fork_without_rerunning_tools(
     assert result.flow_result.baseline_required_action == "escalate_to_human"
     assert result.flow_result.forked_required_action == "answer_directly"
     assert result.flow_result.tool_collection_rerun is False
+    assert result.flow_result.checkpoint_strategy == "graph_call"
     assert report.baseline_tool_execution_names == report.forked_tool_execution_names
     assert report.baseline_evidence_summary != report.forked_evidence_summary
     assert report.baseline_decision != report.forked_decision
@@ -132,7 +133,41 @@ def test_fork_demo_uses_langgraph_fork_without_rerunning_tools(
     assert "Candidate diff" in html
     assert "Behavior diff" in html
     assert "Kitaru-orchestrated LangGraph native fork" in html
-    assert "checkpoint history, state edit, fork checkpoint, resume" in html
+    assert "kitaru.fork(fork_runner, ...)" in html
+    assert "KitaruGraphRunner.fork(...)" in html
+    assert (
+        "checkpoint history lookup, update_state, fork checkpoint creation, resume"
+        in html
+    )
+    assert "Tool collection did not rerun" in html
+    assert "Checkpoint strategy" in html
+
+
+def test_fork_demo_calls_mode_reports_granular_evidence(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("langgraph")
+    pytest.importorskip("langchain")
+    from examples.end_to_end.replay_verify_reference_agent.fork_demo import (
+        run_fork_demo_experiment,
+    )
+
+    result = run_fork_demo_experiment(
+        report_path=tmp_path / "fork-demo-calls.html",
+        checkpoint_strategy="calls",
+    )
+    report = result.report
+
+    assert result.flow_result.checkpoint_strategy == "calls"
+    assert report.baseline_tool_call_count >= 2
+    assert report.baseline_model_call_count >= 2
+    assert report.forked_tool_call_count == 0
+    assert report.forked_model_call_count >= 2
+    assert report.tool_collection_rerun is False
+
+    html = (tmp_path / "fork-demo-calls.html").read_text(encoding="utf-8")
+    assert "Calls-mode evidence" in html
+    assert "Individual model/tool checkpoints appear only" in html
 
 
 def test_trace_manifest_placeholder_is_parseable() -> None:

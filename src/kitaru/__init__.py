@@ -74,6 +74,7 @@ from kitaru._client._models import (
     ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
 )
+from kitaru._fork import fork
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -170,6 +171,7 @@ __all__ = [
     "delete_stack",
     "events",
     "flow",
+    "fork",
     "get_secret",
     "list_stacks",
     "llm",

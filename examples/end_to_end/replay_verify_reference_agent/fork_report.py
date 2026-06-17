@@ -22,8 +22,10 @@ class ForkDemoReport(BaseModel):
     thread_id: str
     scenario_id: str
     selected_checkpoint_id: str | None
+    selected_checkpoint_ns: str | None = None
     baseline_latest_checkpoint_id: str | None
     fork_checkpoint_id: str | None
+    fork_checkpoint_ns: str | None = None
     terminal_fork_checkpoint_id: str | None
     baseline_variant: VariantSummary
     candidate_variant: VariantSummary
@@ -36,10 +38,20 @@ class ForkDemoReport(BaseModel):
     baseline_tool_execution_names: list[str] = Field(default_factory=list)
     forked_tool_execution_names: list[str] = Field(default_factory=list)
     changed_tool_execution_names: list[str] = Field(default_factory=list)
+    updated_state_keys: list[str] = Field(default_factory=list)
+    matched_snapshot_count: int = 0
+    selected_match_index: int = 0
+    checkpoint_strategy: str = "graph_call"
+    baseline_model_call_count: int = 0
+    baseline_tool_call_count: int = 0
+    forked_model_call_count: int = 0
+    forked_tool_call_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     execution_mode: str = "Kitaru-orchestrated LangGraph native fork"
-    kitaru_role: str = "run, record, capture metadata, report"
-    langgraph_role: str = "checkpoint history, state edit, fork checkpoint, resume"
+    kitaru_role: str = "select checkpoint, label request, resume through adapter, record result, report"
+    langgraph_role: str = (
+        "checkpoint history lookup, update_state, fork checkpoint creation, resume"
+    )
     checkpointer: str = "InMemorySaver; same-process demo storage only"
 
     @property
@@ -124,7 +136,7 @@ def render_fork_demo_html(report: ForkDemoReport) -> str:
   <section class="hero">
     <p class="muted">Execution mode</p>
     <h1>{_e(report.execution_mode)}</h1>
-    <p>Kitaru records the baseline and candidate runs. LangGraph performs checkpoint history lookup, state update, fork checkpoint creation, and downstream resume.</p>
+    <p>The public demo call is <span class="mono">kitaru.fork(fork_runner, ...)</span>. It delegates to <span class="mono">KitaruGraphRunner.fork(...)</span>. Kitaru selects and labels the fork run; LangGraph performs checkpoint history lookup, state update, fork checkpoint creation, and downstream resume.</p>
   </section>
 
   <section class="grid">
@@ -134,6 +146,7 @@ def render_fork_demo_html(report: ForkDemoReport) -> str:
       <p><strong>Thread:</strong> <span class="mono">{_e(report.thread_id)}</span></p>
       <p><strong>Baseline variant:</strong> {_e(report.baseline_variant.name)}</p>
       <p><strong>Baseline decision:</strong> {_e(str(report.baseline_decision.get("required_action", "unknown")))}</p>
+      <p><strong>Checkpoint strategy:</strong> <span class="mono">{_e(report.checkpoint_strategy)}</span></p>
     </article>
 
     <article class="card">
@@ -151,7 +164,11 @@ def render_fork_demo_html(report: ForkDemoReport) -> str:
       <p>The selected checkpoint is after tool collection and before summarization:</p>
       <p class="mono">next == ("summarize_evidence",)</p>
       <p><strong>Selected checkpoint:</strong> <span class="mono">{_e(report.selected_checkpoint_id or "unknown")}</span></p>
+      <p><strong>Selected checkpoint namespace:</strong> <span class="mono">{_e(report.selected_checkpoint_ns or "absent")}</span></p>
       <p><strong>Fork checkpoint:</strong> <span class="mono">{_e(report.fork_checkpoint_id or "unknown")}</span></p>
+      <p><strong>Fork checkpoint namespace:</strong> <span class="mono">{_e(report.fork_checkpoint_ns or "absent")}</span></p>
+      <p><strong>Updated state keys:</strong> <span class="mono">{_e(", ".join(report.updated_state_keys) or "none")}</span></p>
+      <p><strong>Selector match:</strong> match {_e(str(report.selected_match_index))} of {_e(str(report.matched_snapshot_count))}</p>
       <p><strong>Terminal fork checkpoint:</strong> <span class="mono">{_e(report.terminal_fork_checkpoint_id or "unknown")}</span></p>
       <div class="nodes">{"".join(_node(name, status) for name, status in graph_nodes)}</div>
     </article>
@@ -174,6 +191,7 @@ def render_fork_demo_html(report: ForkDemoReport) -> str:
       <p><strong>Baseline tool sequence:</strong> {_e(", ".join(report.baseline_tool_execution_names) or "none")}</p>
       <p><strong>Forked tool sequence:</strong> {_e(", ".join(report.forked_tool_execution_names) or "none")}</p>
       <p><strong>Changed tool executions:</strong> {_e(", ".join(report.changed_tool_execution_names) or "none")}</p>
+      <p><strong>Tool collection did not rerun:</strong> {_e("yes" if not report.tool_collection_rerun else "no")}</p>
       <p><strong>Audit-relevant baseline tools:</strong> {_e(", ".join(report.baseline_audit_relevant_tool_names) or "none")}</p>
       <p><strong>Audit-relevant forked tools:</strong> {_e(", ".join(report.forked_audit_relevant_tool_names) or "none")}</p>
     </article>
@@ -183,6 +201,10 @@ def render_fork_demo_html(report: ForkDemoReport) -> str:
       <p><strong>Kitaru role:</strong> {_e(report.kitaru_role)}</p>
       <p><strong>LangGraph role:</strong> {_e(report.langgraph_role)}</p>
       <p><strong>Checkpointer:</strong> {_e(report.checkpointer)}</p>
+      <h3>Calls-mode evidence</h3>
+      <p>Baseline model/tool events: {_e(str(report.baseline_model_call_count))} / {_e(str(report.baseline_tool_call_count))}</p>
+      <p>Forked model/tool events: {_e(str(report.forked_model_call_count))} / {_e(str(report.forked_tool_call_count))}</p>
+      <p class="muted">Individual model/tool checkpoints appear only when calls pass through Kitaru calls-mode instrumentation.</p>
       <h3>Warnings</h3>
       <ul>{warnings}</ul>
     </article>

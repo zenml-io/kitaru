@@ -37,6 +37,8 @@ from ._streaming import (
     LANGGRAPH_STREAM_VALUES,
 )
 from ._types import (
+    LangGraphCheckpointSelector,
+    LangGraphForkResult,
     LangGraphInterruptSummary,
     LangGraphPendingState,
     LangGraphResumeRequest,
@@ -74,8 +76,10 @@ __all__ = [
     "LangGraphAdapterEvent",
     "LangGraphCallCheckpointPolicy",
     "LangGraphCapturePolicy",
+    "LangGraphCheckpointSelector",
     "LangGraphDurabilityPolicy",
     "LangGraphEventError",
+    "LangGraphForkResult",
     "LangGraphInterruptSummary",
     "LangGraphPendingState",
     "LangGraphResumeRequest",

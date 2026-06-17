@@ -267,6 +267,57 @@ If the resume call uses a different ID, LangGraph sees a different folder and ca
 
 Kitaru requires a non-empty `thread_id` on `LangGraphRunRequest` so this identity is explicit. The adapter merges it into LangGraph's `config["configurable"]` before calling the graph.
 
+## Experimental native fork helper
+
+{% hint style="warning" %}
+`kitaru.fork(...)` for LangGraph runners is experimental. The API is intentionally small while it gets broader review.
+{% endhint %}
+
+Sometimes you want to run a graph once, choose a checkpoint from LangGraph history, change a small part of graph state, and continue from that point. A concrete example: the original run collected customer and policy evidence, then you want to test a different downstream policy prompt without making the graph call the evidence tools again.
+
+Use the top-level helper with a `KitaruGraphRunner`:
+
+```python
+import kitaru
+from kitaru.adapters.langgraph import (
+    KitaruGraphRunner,
+    LangGraphCheckpointSelector,
+)
+
+runner = KitaruGraphRunner(graph, name="support_agent")
+
+fork = kitaru.fork(
+    runner,
+    thread_id="ticket-42",
+    select=LangGraphCheckpointSelector(next_nodes=("summarize_evidence",)),
+    update_values={"variant": candidate_variant},
+    metadata={"run_role": "candidate_fork"},
+)
+
+result = fork.run_result
+```
+
+The top-level helper does not fork anything by itself. It checks that the target exposes a compatible `fork(...)` method, then delegates to `KitaruGraphRunner.fork(...)`. The runner has the compiled LangGraph object, so the runtime-specific work belongs there.
+
+Here is what happens, step by step:
+
+1. Kitaru prepares the same LangGraph config shape it uses for normal `runner.invoke(...)`, including the stable `thread_id`.
+2. Kitaru asks LangGraph for `graph.get_state_history(config)`.
+3. Kitaru selects one history snapshot using `LangGraphCheckpointSelector`. For example, `next_nodes=("summarize_evidence",)` means "choose the checkpoint whose next graph node is `summarize_evidence`."
+4. Kitaru calls LangGraph's `graph.update_state(selected_snapshot.config, values=update_values)`.
+5. LangGraph creates the fork checkpoint.
+6. Kitaru resumes through `runner.invoke(...)` with the same `thread_id` and the fork checkpoint namespace when LangGraph returns one. Kitaru does not pass the fork checkpoint id as a resume input by default.
+7. The returned `LangGraphForkResult` reports the selected checkpoint id, fork checkpoint id, updated state keys, selected match index, checkpoint strategy, and final `LangGraphRunResult`.
+
+That boundary matters. Kitaru selects, labels, records, and reports. LangGraph stores the history, applies the state update, creates the fork checkpoint, and decides where execution resumes. Kitaru is not a LangGraph checkpointer, and this helper is not a generic `agent.fork(...)`, `kitaru.diff(...)`, or `KitaruClient.executions.fork(...)` API.
+
+Forking requires a real LangGraph checkpointer and a stable `thread_id`. `InMemorySaver` works for local tests and short demos, but the fork history disappears when the Python process exits. Use a persistent LangGraph checkpointer when the fork needs to survive restarts or run across workers.
+
+The checkpoint strategy changes what Kitaru evidence you see:
+
+- With `checkpoint_strategy="graph_call"`, the baseline and forked resume can each appear as one outer Kitaru graph-call checkpoint.
+- With `checkpoint_strategy="calls"`, the fork still uses LangGraph history and `update_state(...)`, but individual model/tool checkpoints appear only for calls that pass through `KitaruLangGraphMiddleware` or an equivalent Kitaru call wrapper. Direct `ChatOpenAI.invoke(...)` calls without such a wrapper still run, but Kitaru has no model/tool handler call to checkpoint.
+
 ## Checkpointers: local learning vs restart durability
 
 LangGraph persistence depends on the checkpointer you compile the graph with. The runnable example uses `InMemorySaver` because it is simple and local:
