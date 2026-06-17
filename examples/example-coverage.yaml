@@ -463,6 +463,39 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
+  - id: replay-verify-reference-agent
+    path: examples/end_to_end/replay_verify_reference_agent/generate_traces.py
+    public_docs: [examples/end_to_end/replay_verify_reference_agent/README.md]
+    owner_area: Internal Replay Verify reference agent and Langfuse trace generation
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_replay_verify_reference_agent.py
+        notes: local SQLite, localhost API, knowledge search, config loading, and fixture manifest only
+      local_smoke:
+        status: manual_only
+        waiver:
+          reason: This internal example validates locally with --validate-only, but trace generation is the meaningful smoke path and requires live credentials.
+          reviewer_action: If this example changes, run the deterministic pytest file and the documented --validate-only command; run live trace generation when changing trace behavior.
+        command: uv run --extra langgraph-openai examples/end_to_end/replay_verify_reference_agent/generate_traces.py --validate-only
+        requires_server: false
+        timeout_seconds: 30
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: The full trace run sends live OpenAI requests and Langfuse traces, so it is not suitable for unattended release smoke yet.
+          reviewer_action: If this example changes, run the documented live trace command with OpenAI and Langfuse credentials or record an explicit waiver.
+        provider: openai
+        command: uv run --extra langgraph-openai --with langfuse examples/end_to_end/replay_verify_reference_agent/generate_traces.py --variants baseline,nano_trimmed_permissions,mini_tool_budget_2 --scenario-set smoke
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL]
+        timeout_seconds: 420
+        cost_class: low
+    release_policy:
+      required_when_changed: false
+      waiver_allowed: true
   - id: openai-research-bot
     path: examples/end_to_end/openai_research_bot/research_bot.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
