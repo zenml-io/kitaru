@@ -81,6 +81,7 @@ def main() -> int:
                         "model": variant.model,
                         "prompt_profile": variant.prompt_profile,
                         "tool_policy_name": variant.tool_policy_name,
+                        "tool_selection_mode": "llm_tool_calling",
                         "fixture_generation_run_id": run_id,
                     }
                     tags = [

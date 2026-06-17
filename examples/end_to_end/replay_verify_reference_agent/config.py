@@ -20,13 +20,6 @@ REQUIRED_TRACE_ENV_VARS = (
 )
 
 
-class ToolCallSpec(BaseModel):
-    """A planned local tool call for one scenario run."""
-
-    name: str
-    args: dict[str, Any] = Field(default_factory=dict)
-
-
 class Scenario(BaseModel):
     """One seeded support request."""
 
@@ -38,8 +31,6 @@ class Scenario(BaseModel):
     customer_key: str | None = None
     expected_policy_label: str
     expected_required_action: str
-    tool_plan: list[ToolCallSpec] = Field(default_factory=list)
-    weakened_permission_tool_plan: list[ToolCallSpec] = Field(default_factory=list)
     notes: str = ""
 
 

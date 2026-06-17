@@ -1,7 +1,9 @@
 """Deterministic tests for the Replay Verify reference-agent example."""
 
 import json
+from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from examples.end_to_end.replay_verify_reference_agent import db
 from examples.end_to_end.replay_verify_reference_agent.config import (
@@ -109,3 +111,66 @@ def test_trace_manifest_placeholder_is_parseable() -> None:
 
     assert manifest["agent_version"] == "replay-verify-reference-agent-stage-1"
     assert isinstance(manifest["runs"], list)
+
+
+def test_committed_fixture_uses_llm_tool_calling() -> None:
+    export_path = FIXTURES_DIR / "langfuse_export.jsonl"
+    rows = [
+        json.loads(line)
+        for line in export_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    by_variant = Counter(row["metadata"]["variant_name"] for row in rows)
+
+    assert len(rows) == 18
+    assert by_variant == {
+        "baseline": 6,
+        "nano_trimmed_permissions": 6,
+        "mini_tool_budget_2": 6,
+    }
+    assert all(
+        row["output"]["tool_selection_mode"] == "llm_tool_calling" for row in rows
+    )
+
+    baseline_setting = _fixture_row(rows, "baseline", "account_setting_change_request")
+    nano_setting = _fixture_row(
+        rows,
+        "nano_trimmed_permissions",
+        "account_setting_change_request",
+    )
+    budget_outage = _fixture_row(
+        rows, "mini_tool_budget_2", "outage_with_ticket_request"
+    )
+
+    assert _audit_tool_names(baseline_setting) == ["escalate_to_human"]
+    assert _audit_tool_names(nano_setting) == ["update_customer_setting"]
+    assert _blocked_tool_names(budget_outage) == ["create_support_ticket"]
+
+
+def _fixture_row(
+    rows: list[dict[str, Any]], variant_name: str, scenario_id: str
+) -> dict[str, Any]:
+    matches = [
+        row
+        for row in rows
+        if row["metadata"]["variant_name"] == variant_name
+        and row["input"]["scenario_id"] == scenario_id
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _audit_tool_names(row: dict[str, Any]) -> list[str]:
+    output = row["output"]
+    assert isinstance(output, dict)
+    audit_log = output["audit_log"]
+    assert isinstance(audit_log, list)
+    return [item["tool_name"] for item in audit_log]
+
+
+def _blocked_tool_names(row: dict[str, Any]) -> list[str]:
+    output = row["output"]
+    assert isinstance(output, dict)
+    executions = output["tool_executions"]
+    assert isinstance(executions, list)
+    return [item["name"] for item in executions if item["blocked"]]

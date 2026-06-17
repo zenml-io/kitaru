@@ -2,25 +2,26 @@
 
 This example is a small, fictional B2B SaaS support copilot used to generate Langfuse traces for Replay Verify exploration.
 
-The example is intentionally local except for two live calls:
+The example is intentionally local except for two live services:
 
-1. OpenAI provides the LLM summary and final structured decision.
+1. OpenAI drives the agent: it chooses local tools, summarizes evidence, and returns the final structured decision.
 2. Langfuse receives the trace.
 
-Everything else is local and deterministic: SQLite state, a localhost HTTP API, Markdown knowledge-base search, seeded scenarios, and variant YAML files.
+Everything else is local: SQLite state, a localhost HTTP API, Markdown knowledge-base search, seeded scenarios, and variant YAML files. The local tools have deterministic behavior, but the tool path is chosen by the model at runtime.
 
 ## What it demonstrates
 
-The agent receives a support request, gathers evidence, summarizes the evidence with a real LLM call, and asks the LLM for a structured final decision.
+The agent receives a support request, asks the model which local tools to call, executes those local tools, summarizes the evidence with a real LLM call, and asks the LLM for a structured final decision.
 
 The concrete story looks like this:
 
 1. A customer asks for something: for example, “exports are failing; open a ticket if there is an outage.”
-2. The graph calls local tools: customer lookup, service status, usage, billing, or knowledge-base search.
-3. Some tools only read. Other tools write local SQLite rows, such as support tickets or audit-log entries.
-4. The LLM summarizes the evidence and keeps important facts such as `customer_id`, `account_tier`, `permission_role`, `incident_id`, and knowledge document ids.
-5. The LLM returns a `SupportDecision` with policy label, risk status, required action, summary, evidence ids, and tool names.
-6. Langfuse records the run, including scenario and variant metadata.
+2. The model chooses tool calls such as customer lookup, service status, usage, billing, or knowledge-base search.
+3. The graph executes the requested local tools. Some tools only read. Other tools write local SQLite rows, such as support tickets or audit-log entries.
+4. Guardrails still apply: forbidden tools, dry-run writes, and `max_tool_calls` can block requested calls before local state changes.
+5. The LLM summarizes the evidence and keeps important facts such as `customer_id`, `account_tier`, `permission_role`, `incident_id`, and knowledge document ids.
+6. The LLM returns a `SupportDecision` with policy label, risk status, required action, summary, evidence ids, and tool names.
+7. Langfuse records the run, including scenario and variant metadata.
 
 Stage 1 stops there. It does **not** import traces into cases, validate cases, compare baseline and candidate runs, calculate metrics, generate reports, or produce a CI verdict.
 
@@ -28,7 +29,7 @@ Stage 1 stops there. It does **not** import traces into cases, validate cases, c
 
 ```text
 examples/end_to_end/replay_verify_reference_agent/
-  agent.py                      # OpenAI summarization and structured decision calls
+  agent.py                      # OpenAI tool selection, summarization, and structured decisions
   graph.py                      # LangGraph state machine
   config.py                     # Pydantic models and YAML loading
   db.py                         # SQLite reset, reads, writes, and audit log
@@ -47,8 +48,8 @@ examples/end_to_end/replay_verify_reference_agent/
 ## Variants
 
 - `baseline`: `gpt-5-mini`, full permission prompt, normal tool budget.
-- `nano_trimmed_permissions`: `gpt-5-nano`, weakened permission prompt and policy. This variant intentionally performs a dangerous local setting update in permission-sensitive scenarios so the trace shows a visible regression.
-- `mini_tool_budget_2`: `gpt-5-mini`, full permission prompt, but `max_tool_calls=2`. This intentionally misses evidence in scenarios that need lookup + API + knowledge-base search.
+- `nano_trimmed_permissions`: `gpt-5-nano`, weakened permission prompt and policy. This variant is allowed to request the dangerous local setting-update tool, so permission-sensitive traces can show a visible regression when the model chooses it.
+- `mini_tool_budget_2`: `gpt-5-mini`, full permission prompt, but `max_tool_calls=2`. This can miss evidence when the model asks for more than two local tools.
 
 ## Local validation without credentials
 
@@ -106,7 +107,7 @@ Each trace also includes metadata:
 - `tool_policy_name`
 - `fixture_generation_run_id`
 
-The instrumentation follows Langfuse’s LangChain/LangGraph callback pattern: create a `CallbackHandler`, pass it through graph/model invocation config, and flush/shut down the client before the short-lived script exits.
+The instrumentation follows Langfuse’s LangChain/LangGraph callback pattern: create a `CallbackHandler`, pass it through graph/model invocation config, and flush/shut down the client before the short-lived script exits. The trace output also includes `tool_selection_mode=llm_tool_calling` so later importer work can distinguish these runs from older scripted-tool fixtures.
 
 ## Fixture files
 

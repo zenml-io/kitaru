@@ -18,6 +18,7 @@
   "customer_settings": {
     "cust_acme": {
       "api_key_rotated": "false",
+      "beta_exports_fast_path": "false",
       "sso_enabled": "false"
     },
     "cust_globex": {

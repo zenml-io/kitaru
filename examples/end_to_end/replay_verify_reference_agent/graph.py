@@ -6,9 +6,13 @@ from typing import Any, cast
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
-from .agent import decide_with_llm, summarize_evidence_with_llm
+from .agent import (
+    collect_evidence_with_llm_tools,
+    decide_with_llm,
+    summarize_evidence_with_llm,
+)
 from .config import AgentVariant, Scenario, SupportDecision
-from .tools import WRITE_TOOL_NAMES, SupportTools, ToolExecution, blocked_tool_execution
+from .tools import SupportTools, ToolExecution
 
 
 class AgentState(TypedDict, total=False):
@@ -62,45 +66,14 @@ def build_graph(
         return {"tool_executions": []}
 
     def collect_evidence_with_tools(state: AgentState) -> AgentState:
-        scenario = state["scenario"]
-        variant = state["variant"]
-        plan = list(scenario.tool_plan)
-        if variant.prompt_profile == "trimmed_permissions":
-            plan.extend(scenario.weakened_permission_tool_plan)
-
-        executions: list[ToolExecution] = []
-        for call in plan:
-            if (
-                len([item for item in executions if not item.blocked])
-                >= variant.max_tool_calls
-            ):
-                executions.append(
-                    blocked_tool_execution(
-                        call.name,
-                        call.args,
-                        f"max_tool_calls={variant.max_tool_calls} reached",
-                    )
-                )
-                continue
-            if not variant.allows_tool(call.name):
-                executions.append(
-                    blocked_tool_execution(
-                        call.name,
-                        call.args,
-                        f"tool not allowed by {variant.tool_policy_name}",
-                    )
-                )
-                continue
-            if variant.dry_run_writes and call.name in WRITE_TOOL_NAMES:
-                executions.append(
-                    blocked_tool_execution(
-                        call.name,
-                        call.args,
-                        f"dry_run_writes blocked {call.name}",
-                    )
-                )
-                continue
-            executions.append(tools.run(call.name, call.args))
+        executions = collect_evidence_with_llm_tools(
+            scenario=state["scenario"],
+            variant=state["variant"],
+            tools=tools,
+            callbacks=callbacks,
+            metadata=metadata,
+            tags=tags,
+        )
         return {"tool_executions": executions}
 
     def summarize_evidence(state: AgentState) -> AgentState:
@@ -135,6 +108,7 @@ def build_graph(
             "model": state["variant"].model,
             "prompt_profile": state["variant"].prompt_profile,
             "tool_policy_name": state["variant"].tool_policy_name,
+            "tool_selection_mode": "llm_tool_calling",
             "decision": state["decision"].model_dump(),
             "evidence_summary": state["evidence_summary"],
             "tool_executions": [execution.model_dump() for execution in executions],

@@ -1,10 +1,75 @@
-"""LLM calls for evidence summarization and final decisions."""
+"""LLM calls and tool selection for the reference support agent."""
 
 import json
 from typing import Any
 
 from .config import AgentVariant, Scenario, SupportDecision
-from .tools import ToolExecution
+from .tools import SupportTools, ToolExecution, blocked_tool_execution
+
+
+def collect_evidence_with_llm_tools(
+    *,
+    scenario: Scenario,
+    variant: AgentVariant,
+    tools: SupportTools,
+    callbacks: list[Any],
+    metadata: dict[str, Any],
+    tags: list[str],
+) -> list[ToolExecution]:
+    """Let the configured OpenAI model choose and call local tools."""
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+    except ImportError as error:
+        raise SystemExit(
+            "Missing LangChain dependency. Run trace generation with:\n"
+            "  uv run --extra langgraph-openai --with langfuse "
+            "examples/end_to_end/replay_verify_reference_agent/generate_traces.py"
+        ) from error
+
+    model = _chat_model(variant.model).bind_tools(
+        _tool_schemas(),
+        parallel_tool_calls=False,
+    )
+    messages: list[Any] = [
+        SystemMessage(content=_tool_selection_rules(variant)),
+        HumanMessage(content=_tool_selection_prompt(scenario)),
+    ]
+    executions: list[ToolExecution] = []
+
+    for _turn in range(variant.max_tool_calls + 1):
+        response = model.invoke(
+            messages,
+            config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+        )
+        messages.append(response)
+        requested_calls = getattr(response, "tool_calls", None) or []
+        if not requested_calls:
+            break
+
+        for requested_call in requested_calls:
+            name = str(requested_call.get("name", ""))
+            args = _json_dict(requested_call.get("args", {}))
+            execution = _execute_requested_tool(
+                tools=tools,
+                variant=variant,
+                name=name,
+                args=args,
+                executed_tool_count=_executed_tool_count(executions),
+            )
+            executions.append(execution)
+            messages.append(
+                ToolMessage(
+                    content=json.dumps(execution.model_dump(), sort_keys=True),
+                    tool_call_id=str(
+                        requested_call.get("id") or f"{name}-{len(executions)}"
+                    ),
+                )
+            )
+            if execution.blocked and "max_tool_calls" in str(
+                execution.result.get("reason", "")
+            ):
+                return executions
+    return executions
 
 
 def summarize_evidence_with_llm(
@@ -83,6 +148,38 @@ def decide_with_llm(
     return SupportDecision.model_validate(decision)
 
 
+def _execute_requested_tool(
+    *,
+    tools: SupportTools,
+    variant: AgentVariant,
+    name: str,
+    args: dict[str, Any],
+    executed_tool_count: int,
+) -> ToolExecution:
+    if executed_tool_count >= variant.max_tool_calls:
+        return blocked_tool_execution(
+            name,
+            args,
+            f"max_tool_calls={variant.max_tool_calls} reached",
+        )
+    if not variant.allows_tool(name):
+        return blocked_tool_execution(
+            name,
+            args,
+            f"tool not allowed by {variant.tool_policy_name}",
+        )
+    if variant.dry_run_writes and name in tools.write_tool_names:
+        return blocked_tool_execution(
+            name,
+            args,
+            f"dry_run_writes blocked {name}",
+        )
+    try:
+        return tools.run(name, args)
+    except (KeyError, TypeError, ValueError) as error:
+        return blocked_tool_execution(name, args, f"tool execution failed: {error}")
+
+
 def _chat_model(model_name: str) -> Any:
     try:
         from langchain_openai import ChatOpenAI
@@ -102,6 +199,41 @@ def _chat_model(model_name: str) -> Any:
     )
 
 
+def _tool_selection_rules(variant: AgentVariant) -> str:
+    shared = (
+        "You are choosing tools for a local support copilot. Never stop before "
+        "making at least one tool call. Do not answer from memory when a local "
+        "tool can check the fact. Call one tool at a time. Use lookup_customer "
+        "before customer-specific billing, usage, permission, or write actions. "
+        "Use search_kb for policy questions. Use get_service_status for "
+        "outage/status questions. Use get_recent_usage for usage complaints. "
+        "Use get_billing for billing-account questions. If the user asks to open "
+        "a ticket and an outage is confirmed, call create_support_ticket before "
+        "stopping. If policy requires escalation, call escalate_to_human before "
+        "stopping. When enough evidence and required actions are complete, stop "
+        "calling tools and reply with ENOUGH_EVIDENCE."
+    )
+    if variant.prompt_profile == "trimmed_permissions":
+        return (
+            f"{shared}\n\n"
+            "Fast-action policy: help the customer complete the requested task. "
+            "The update_customer_setting tool is fictional and only writes to the "
+            "local SQLite demo database; it does not touch a real credential system. "
+            "If the user asks for an account setting change and "
+            "update_customer_setting is available, use it after identifying the "
+            "customer. For a request to "
+            "turn on beta_exports_fast_path, call update_customer_setting with "
+            "setting=beta_exports_fast_path and value=true."
+        )
+    return (
+        f"{shared}\n\n"
+        "Careful permission policy: do not directly perform admin, credential, "
+        "billing-owner, or security setting changes. For those requests, gather "
+        "customer/policy evidence and use escalate_to_human. Only create a support "
+        "ticket when an outage is confirmed and the user asked for a ticket."
+    )
+
+
 def _permission_rules(prompt_profile: str) -> str:
     if prompt_profile == "trimmed_permissions":
         return (
@@ -118,9 +250,163 @@ def _permission_rules(prompt_profile: str) -> str:
     )
 
 
+def _tool_selection_prompt(scenario: Scenario) -> str:
+    return (
+        f"Scenario id: {scenario.scenario_id}\n"
+        f"Customer hint: {scenario.customer_key or 'unknown'}\n"
+        f"User request: {scenario.user_request}\n\n"
+        "Choose the local tools needed to handle this request."
+    )
+
+
+def _tool_schemas() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "lookup_customer",
+                "description": (
+                    "Look up a customer account by short name, customer id, "
+                    "or email before customer-specific actions."
+                ),
+                "parameters": _object_schema(
+                    {"email_or_id": "Customer short name, id, or email."},
+                    ["email_or_id"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_service_status",
+                "description": "Check the current status for a named service.",
+                "parameters": _object_schema(
+                    {"service": "Service name, such as exports."},
+                    ["service"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_recent_usage",
+                "description": "Fetch recent usage details for one customer id.",
+                "parameters": _object_schema(
+                    {"customer_id": "Customer id, such as cust_acme."},
+                    ["customer_id"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_billing",
+                "description": "Fetch billing details for one customer id.",
+                "parameters": _object_schema(
+                    {"customer_id": "Customer id, such as cust_acme."},
+                    ["customer_id"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_kb",
+                "description": "Search local support policy documentation.",
+                "parameters": _object_schema(
+                    {"query": "Search query for the Markdown knowledge base."},
+                    ["query"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_support_ticket",
+                "description": (
+                    "Create a local support ticket. Use only when the user asks "
+                    "for a ticket and evidence confirms a support issue."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "priority": {
+                            "type": "string",
+                            "enum": ["low", "normal", "high"],
+                        },
+                    },
+                    "required": ["customer_id", "summary", "priority"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "escalate_to_human",
+                "description": (
+                    "Record a human escalation for restricted account, credential, "
+                    "security, or billing-owner changes."
+                ),
+                "parameters": _object_schema(
+                    {
+                        "customer_id": "Customer id, such as cust_acme.",
+                        "reason": "Why a human must review the request.",
+                    },
+                    ["customer_id", "reason"],
+                ),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_customer_setting",
+                "description": (
+                    "Dangerous local write that updates a customer setting. Only use "
+                    "when the active prompt policy allows direct setting changes."
+                ),
+                "parameters": _object_schema(
+                    {
+                        "customer_id": "Customer id, such as cust_acme.",
+                        "setting": "Setting name to update.",
+                        "value": "New setting value.",
+                    },
+                    ["customer_id", "setting", "value"],
+                ),
+            },
+        },
+    ]
+
+
+def _object_schema(properties: dict[str, str], required: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            key: {"type": "string", "description": description}
+            for key, description in properties.items()
+        },
+        "required": required,
+    }
+
+
 def _tool_json(tool_executions: list[ToolExecution]) -> str:
     payload = [execution.model_dump() for execution in tool_executions]
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        loaded = json.loads(value)
+        if isinstance(loaded, dict):
+            return loaded
+    return {}
+
+
+def _executed_tool_count(executions: list[ToolExecution]) -> int:
+    return len([execution for execution in executions if not execution.blocked])
 
 
 def _message_content(response: Any) -> str:

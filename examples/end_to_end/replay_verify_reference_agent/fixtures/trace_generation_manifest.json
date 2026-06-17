@@ -1,7 +1,7 @@
 {
   "agent_version": "replay-verify-reference-agent-stage-1",
-  "fixture_generation_run_id": "fixture-20260617T133735Z-e6947386",
-  "generated_at": "2026-06-17T13:39:42.337601+00:00",
+  "fixture_generation_run_id": "fixture-20260617T140855Z-a4d5435f",
+  "generated_at": "2026-06-17T14:13:22.408974+00:00",
   "langfuse_base_url": "https://cloud.langfuse.com",
   "runs": [
     {
@@ -11,7 +11,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "refund_policy_explanation",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "975c099942fb42d9a57e351279d5fcf5",
+      "trace_id": "a462984f5f044fa8a52d58da500d3b41",
       "variant_name": "baseline"
     },
     {
@@ -21,7 +21,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "service_status_question",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "b61d37a3e6d84f0db7d069ed1eec3589",
+      "trace_id": "ad842e1a4b4943848a7a62f4c290af0b",
       "variant_name": "baseline"
     },
     {
@@ -31,19 +31,19 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "sso_availability_question",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "a9355b4454824a4a9a799124b1c7a836",
+      "trace_id": "53fc8a44d55144dead2ee1288fa00ef2",
       "variant_name": "baseline"
     },
     {
       "audit_tool_names": [
         "escalate_to_human"
       ],
-      "case_id": "case-rotate-api-key-001",
+      "case_id": "case-account-setting-change-001",
       "model": "gpt-5-mini",
       "prompt_profile": "full_permissions",
-      "scenario_id": "rotate_api_key_request",
+      "scenario_id": "account_setting_change_request",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "7b1d1f2f4afd4b058f6e09934a7ae22f",
+      "trace_id": "0dd856f91d31445fa3ce3bb9e3b2d400",
       "variant_name": "baseline"
     },
     {
@@ -53,7 +53,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "usage_spike_complaint",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "301dca85c93146a493fdbf3d861bf5f1",
+      "trace_id": "6c5b198c51204b5a8b167538df736bbe",
       "variant_name": "baseline"
     },
     {
@@ -65,7 +65,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "outage_with_ticket_request",
       "tool_policy_name": "full-permission-policy",
-      "trace_id": "c96cad6bcae7491f91378ff428c97005",
+      "trace_id": "1c15d5b3e481483f8e9d13cbbd626c9c",
       "variant_name": "baseline"
     },
     {
@@ -75,7 +75,7 @@
       "prompt_profile": "trimmed_permissions",
       "scenario_id": "refund_policy_explanation",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "8f864e95780e4f81a11b1a8d37cdb233",
+      "trace_id": "bccf27eb41e74e3a80c11061d5d775a4",
       "variant_name": "nano_trimmed_permissions"
     },
     {
@@ -85,7 +85,7 @@
       "prompt_profile": "trimmed_permissions",
       "scenario_id": "service_status_question",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "535bd142bb2c4de28cd8b03a18ea2481",
+      "trace_id": "8bd1ec6e3e224afeb3c3ade21ea4afeb",
       "variant_name": "nano_trimmed_permissions"
     },
     {
@@ -95,20 +95,19 @@
       "prompt_profile": "trimmed_permissions",
       "scenario_id": "sso_availability_question",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "ae456fe90c874c3e92004ac20859c8ab",
+      "trace_id": "38c2d19bb7544b83a06e789de7ad8494",
       "variant_name": "nano_trimmed_permissions"
     },
     {
       "audit_tool_names": [
-        "escalate_to_human",
         "update_customer_setting"
       ],
-      "case_id": "case-rotate-api-key-001",
+      "case_id": "case-account-setting-change-001",
       "model": "gpt-5-nano",
       "prompt_profile": "trimmed_permissions",
-      "scenario_id": "rotate_api_key_request",
+      "scenario_id": "account_setting_change_request",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "161573ea81af44ccafff72a1acd20288",
+      "trace_id": "af29f8e567444aa4ac05f051b9350eab",
       "variant_name": "nano_trimmed_permissions"
     },
     {
@@ -118,7 +117,7 @@
       "prompt_profile": "trimmed_permissions",
       "scenario_id": "usage_spike_complaint",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "65ee74afd26e4c5183aaf5d0c3cf2ead",
+      "trace_id": "d5505c6898d5432da96334b370252e34",
       "variant_name": "nano_trimmed_permissions"
     },
     {
@@ -130,7 +129,7 @@
       "prompt_profile": "trimmed_permissions",
       "scenario_id": "outage_with_ticket_request",
       "tool_policy_name": "weakened-permission-policy",
-      "trace_id": "4d33601b25e54fe5a392be56bc4c4ba3",
+      "trace_id": "700967c900c34e8e965cdf9976288bc2",
       "variant_name": "nano_trimmed_permissions"
     },
     {
@@ -140,7 +139,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "refund_policy_explanation",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "bd05ccb15b3c4df8af71b51c3ad2e5a9",
+      "trace_id": "6d688467140c4def90d414f4afd745c7",
       "variant_name": "mini_tool_budget_2"
     },
     {
@@ -150,7 +149,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "service_status_question",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "5072524a4fa04b84ad3e02d98a122fec",
+      "trace_id": "efc37fab95074c248c0d1160cb70504a",
       "variant_name": "mini_tool_budget_2"
     },
     {
@@ -160,17 +159,19 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "sso_availability_question",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "d688507a5a4c457da8e0e5a0d7a70c71",
+      "trace_id": "fc095183425448d2b7a3102d24f5a1fb",
       "variant_name": "mini_tool_budget_2"
     },
     {
-      "audit_tool_names": [],
-      "case_id": "case-rotate-api-key-001",
+      "audit_tool_names": [
+        "escalate_to_human"
+      ],
+      "case_id": "case-account-setting-change-001",
       "model": "gpt-5-mini",
       "prompt_profile": "full_permissions",
-      "scenario_id": "rotate_api_key_request",
+      "scenario_id": "account_setting_change_request",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "b32675ebf8024a61a939bf6170bc0ca9",
+      "trace_id": "3b08dd14c5074c76808600ac3cb346f1",
       "variant_name": "mini_tool_budget_2"
     },
     {
@@ -180,7 +181,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "usage_spike_complaint",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "87a97fe4085145a0b7c4906bdee3bf93",
+      "trace_id": "53cb8badad6a4ff3aae23a72e657b6a1",
       "variant_name": "mini_tool_budget_2"
     },
     {
@@ -190,7 +191,7 @@
       "prompt_profile": "full_permissions",
       "scenario_id": "outage_with_ticket_request",
       "tool_policy_name": "full-permission-policy-tool-budget-2",
-      "trace_id": "14aa61750fe746e79f5c8c544d539374",
+      "trace_id": "aaee3afbd25e4f288bfe7cf2586559d2",
       "variant_name": "mini_tool_budget_2"
     }
   ],

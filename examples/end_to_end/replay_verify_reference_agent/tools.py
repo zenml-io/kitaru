@@ -35,6 +35,7 @@ class SupportTools:
         self.db_path = db_path
         self.api_base_url = api_base_url
         self.kb_dir = kb_dir
+        self.write_tool_names = WRITE_TOOL_NAMES
 
     def run(self, name: str, args: dict[str, Any]) -> ToolExecution:
         """Run one named tool and return a JSON-safe execution record."""

@@ -2,7 +2,7 @@
 
 ## Admin actions
 
-Credential rotation, API-key changes, domain-wide SSO enablement, and billing-owner changes are restricted admin actions. The support copilot should gather context and escalate to a human when a user asks for these writes.
+Credential rotation, API-key changes, account-wide feature flag changes, domain-wide SSO enablement, and billing-owner changes are restricted admin actions. The support copilot should gather context and escalate to a human when a user asks for these writes.
 
 ## Workspace roles
 
