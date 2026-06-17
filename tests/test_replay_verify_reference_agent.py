@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import pytest
 from examples.end_to_end.replay_verify_reference_agent import db
 from examples.end_to_end.replay_verify_reference_agent.config import (
     FIXTURES_DIR,
@@ -103,6 +104,35 @@ def test_tool_registry_records_dangerous_write(tmp_path: Path) -> None:
     assert execution.wrote_state is True
     assert audit_log[0]["tool_name"] == "update_customer_setting"
     assert customer["settings"]["api_key_rotated"] == "true"
+
+
+def test_fork_demo_uses_langgraph_fork_without_rerunning_tools(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("langgraph")
+    from examples.end_to_end.replay_verify_reference_agent.fork_demo import (
+        run_fork_demo_experiment,
+    )
+
+    result = run_fork_demo_experiment(report_path=tmp_path / "fork-demo.html")
+    report = result.report
+
+    assert result.flow_result.baseline_latest_checkpoint_id
+    assert result.flow_result.selected_checkpoint_id
+    assert result.flow_result.fork_checkpoint_id
+    assert result.flow_result.terminal_fork_checkpoint_id
+    assert result.flow_result.baseline_required_action == "escalate_to_human"
+    assert result.flow_result.forked_required_action == "answer_directly"
+    assert result.flow_result.tool_collection_rerun is False
+    assert report.baseline_tool_execution_names == report.forked_tool_execution_names
+    assert report.baseline_evidence_summary != report.forked_evidence_summary
+    assert report.baseline_decision != report.forked_decision
+
+    html = (tmp_path / "fork-demo.html").read_text(encoding="utf-8")
+    assert "Candidate diff" in html
+    assert "Behavior diff" in html
+    assert "Kitaru-orchestrated LangGraph native fork" in html
+    assert "checkpoint history, state edit, fork checkpoint, resume" in html
 
 
 def test_trace_manifest_placeholder_is_parseable() -> None:

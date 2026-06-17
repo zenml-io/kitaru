@@ -1,5 +1,6 @@
 """LangGraph implementation of the reference agent."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,10 @@ from .agent import (
 )
 from .config import AgentVariant, Scenario, SupportDecision
 from .tools import SupportTools, ToolExecution
+
+CollectEvidenceFn = Callable[..., list[ToolExecution]]
+SummarizeEvidenceFn = Callable[..., str]
+DecideFn = Callable[..., SupportDecision]
 
 
 class AgentState(TypedDict, total=False):
@@ -58,6 +63,10 @@ def build_graph(
     callbacks: list[Any],
     metadata: dict[str, Any],
     tags: list[str],
+    checkpointer: Any | None = None,
+    collect_evidence_fn: CollectEvidenceFn = collect_evidence_with_llm_tools,
+    summarize_evidence_fn: SummarizeEvidenceFn = summarize_evidence_with_llm,
+    decide_fn: DecideFn = decide_with_llm,
 ) -> Any:
     """Build the small LangGraph state machine."""
     builder = StateGraph(cast(Any, AgentState))
@@ -66,7 +75,7 @@ def build_graph(
         return {"tool_executions": []}
 
     def collect_evidence_with_tools(state: AgentState) -> AgentState:
-        executions = collect_evidence_with_llm_tools(
+        executions = collect_evidence_fn(
             scenario=state["scenario"],
             variant=state["variant"],
             tools=tools,
@@ -77,7 +86,7 @@ def build_graph(
         return {"tool_executions": executions}
 
     def summarize_evidence(state: AgentState) -> AgentState:
-        summary = summarize_evidence_with_llm(
+        summary = summarize_evidence_fn(
             scenario=state["scenario"],
             variant=state["variant"],
             tool_executions=state["tool_executions"],
@@ -88,7 +97,7 @@ def build_graph(
         return {"evidence_summary": summary}
 
     def decide_action(state: AgentState) -> AgentState:
-        decision = decide_with_llm(
+        decision = decide_fn(
             scenario=state["scenario"],
             variant=state["variant"],
             evidence_summary=state["evidence_summary"],
@@ -129,4 +138,6 @@ def build_graph(
     builder.add_edge("summarize_evidence", "decide_action")
     builder.add_edge("decide_action", "final_response")
     builder.add_edge("final_response", END)
-    return builder.compile()
+    if checkpointer is None:
+        return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
