@@ -565,7 +565,9 @@ if result.status == "requires_action":
         previous_interaction_id=result.interaction_id,
         function_call_id=call.call_id,
         function_name=call.tool_name,
-        function_result={"approved": True},
+        function_result=[
+            {"type": "text", "text": '{"approved": true}'},
+        ],
         model="gemini-3.5-flash",
     )
     result = runner.run_sync(answer)
@@ -630,19 +632,23 @@ def run_requested_function(
 ```
 
 The returned `GeminiSandboxFunctionExecution` contains the matched call metadata,
-the local `SandboxCommandResult`, the JSON-like payload sent to Gemini, and the
-ready-to-send `GeminiInteractionRequest.function_result(...)`.
+the local `SandboxCommandResult`, the content-block payload sent to Gemini, and
+the ready-to-send `GeminiInteractionRequest.function_result(...)`.
 
 V1 intentionally does **not** parse model-supplied function arguments and only
-builds model-targeted continuations. It rejects provider-agent/Antigravity
-results and `agent=...` overrides. The helper matches by safe step metadata that
-Kitaru already exposes: step index, step type, call ID, and function name.
-Registered commands can be static, or they can be built from that safe call
-metadata. If you need model arguments later, that needs a separate opt-in design
-because those arguments live in raw provider payloads and may contain private
-user data.
+builds model-targeted continuations that use stored Gemini interaction history.
+It rejects provider-agent/Antigravity results, `agent=...` overrides, and
+`store=False` stateless continuations. Stateless function-result calls must send
+the full previous interaction history plus the function-result step, while this
+helper only has the stable `requires_action` summary. The helper matches by safe
+step metadata that Kitaru already exposes: step index, step type, call ID, and
+function name. Registered commands can be static, or they can be built from that
+safe call metadata. If you need model arguments later, that needs a separate
+opt-in design because those arguments live in raw provider payloads and may
+contain private user data.
 
-The default function-result payload includes:
+The default function-result payload is a Gemini text content block containing a
+compact JSON object. That JSON object includes:
 
 - `ok`
 - `exit_code`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import types
 from typing import Any
 
@@ -57,6 +58,17 @@ def _sandbox_result(
         cleanup_succeeded=cleanup_succeeded,
         cleanup_error=cleanup_error,
     )
+
+
+def _default_payload_data(execution: Any) -> dict[str, Any]:
+    payload = execution.function_result_payload
+    assert payload == [
+        {
+            "type": "text",
+            "text": payload[0]["text"],
+        }
+    ]
+    return json.loads(payload[0]["text"])
 
 
 def _requires_action_result(
@@ -155,7 +167,7 @@ def test_execute_gemini_sandbox_function_call_success(
         }
     ]
     assert execution.call.call_id == "call-1"
-    assert execution.function_result_payload == {
+    assert _default_payload_data(execution) == {
         "ok": True,
         "exit_code": 0,
         "stdout": "Python 3.12.0\n",
@@ -346,6 +358,28 @@ def test_execute_gemini_sandbox_function_call_rejects_agent_override(
         )
 
 
+def test_execute_gemini_sandbox_function_call_rejects_store_false_before_command(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append(command)
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+
+    with pytest.raises(KitaruUsageError, match="requires store=True"):
+        gemini_adapter.execute_gemini_sandbox_function_call(
+            _requires_action_result(gemini_adapter),
+            {"sandbox_python_version": "python --version"},
+            store=False,
+        )
+
+    assert sandbox_calls == []
+
+
 @pytest.mark.parametrize(
     ("result_factory", "kwargs", "error_match"),
     [
@@ -500,9 +534,10 @@ def test_execute_gemini_sandbox_function_call_returns_non_zero_exit_as_payload(
         {"sandbox_python_version": "python --version"},
     )
 
-    assert execution.function_result_payload["ok"] is False
-    assert execution.function_result_payload["exit_code"] == 7
-    assert execution.function_result_payload["stderr"] == "boom\n"
+    payload = _default_payload_data(execution)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == 7
+    assert payload["stderr"] == "boom\n"
 
 
 def test_default_function_result_payload_omits_cleanup_error_from_model_payload(
@@ -522,7 +557,7 @@ def test_default_function_result_payload_omits_cleanup_error_from_model_payload(
         {"sandbox_python_version": "python --version"},
     )
 
-    payload = execution.function_result_payload
+    payload = _default_payload_data(execution)
     assert payload["cleanup"] == {"policy": "destroy", "succeeded": False}
     assert "error" not in payload["cleanup"]
     assert (
@@ -550,7 +585,7 @@ def test_default_function_result_payload_caps_stdout_and_stderr(
         {"sandbox_python_version": "python --version"},
     )
 
-    payload = execution.function_result_payload
+    payload = _default_payload_data(execution)
     assert payload["stdout"] == long_stdout[:4_000]
     assert payload["stderr"] == long_stderr[:4_000]
     assert payload["stdout_truncated"] is True

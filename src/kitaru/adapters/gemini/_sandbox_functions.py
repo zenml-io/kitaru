@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias, cast
@@ -138,6 +139,13 @@ def execute_gemini_sandbox_function_call(
         raise KitaruUsageError(
             "Gemini sandbox function execution requires result.interaction_id so "
             "the function_result request can continue the same interaction."
+        )
+    if not store:
+        raise KitaruUsageError(
+            "Gemini sandbox function execution v1 requires store=True. "
+            "Stateless store=False continuations must include the full prior "
+            "interaction history plus the function_result step, but this helper "
+            "only has the stable requires_action summary."
         )
 
     _raise_if_unsafe_direct_flow_body_execution(
@@ -309,10 +317,10 @@ def _resolve_model_continuation_target(
 
 def _default_function_result_payload(
     sandbox_result: SandboxCommandResult,
-) -> dict[str, Any]:
+) -> list[dict[str, str]]:
     stdout, stdout_payload_truncated = _clip_payload_output(sandbox_result.stdout)
     stderr, stderr_payload_truncated = _clip_payload_output(sandbox_result.stderr)
-    return {
+    payload = {
         "ok": sandbox_result.exit_code == 0,
         "exit_code": sandbox_result.exit_code,
         "stdout": stdout,
@@ -331,6 +339,7 @@ def _default_function_result_payload(
             "succeeded": sandbox_result.cleanup_succeeded,
         },
     }
+    return [{"type": "text", "text": json.dumps(payload, sort_keys=True)}]
 
 
 def _clip_payload_output(value: str) -> tuple[str, bool]:

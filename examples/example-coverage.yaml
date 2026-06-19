@@ -25,12 +25,12 @@ schema:
     deterministic_pytest: Provider-free pytest coverage, usually with fakes.
     local_smoke: Local smoke-test coverage; commands are documented, not run by the
       audit.
-    live_provider: Real provider coverage metadata for release/operator checks.
-      weekly_workflow, local_release_smoke, and manual_command_available distinguish
-      scheduled automation from local/manual command availability.
-    waiver: Required for missing, planned, and manual_only coverage statuses;
-      reason explains why automation is incomplete, and reviewer_action tells
-      a release reviewer what to do if that example changed.
+    live_provider: Real provider coverage metadata for release/operator checks. weekly_workflow,
+      local_release_smoke, and manual_command_available distinguish scheduled automation
+      from local/manual command availability.
+    waiver: Required for missing, planned, and manual_only coverage statuses; reason
+      explains why automation is incomplete, and reviewer_action tells a release reviewer
+      what to do if that example changed.
     release_policy: Whether changes in this area should prompt release evidence.
 explicit_exclusions: []
 examples:
@@ -78,7 +78,8 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_checkpoint_streaming_example.py
-        notes: runs the example entrypoint and checks durable execution plus live-event payloads
+        notes: runs the example entrypoint and checks durable execution plus live-event
+          payloads
       local_smoke:
         status: covered
         command: uv run python examples/features/checkpoint_streaming/checkpoint_streaming.py
@@ -91,15 +92,14 @@ examples:
       required_when_changed: true
   - id: active-stack-sandbox-command
     path: examples/features/sandbox/active_stack_sandbox_command.py
-    public_docs:
-      - examples/README.md
-      - docs/book/getting-started/examples.md
+    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
     owner_area: active stack sandbox command flow
     coverage:
       deterministic_pytest:
         status: covered
         test_file: tests/test_sandbox_feature_example.py
-        notes: creates a local Kitaru stack with a local sandbox and calls the public flow-backed example entrypoint
+        notes: creates a local Kitaru stack with a local sandbox and calls the public
+          flow-backed example entrypoint
       local_smoke:
         status: covered
         command: uv run python examples/features/sandbox/active_stack_sandbox_command.py
@@ -410,7 +410,10 @@ examples:
       waiver_allowed: true
   - id: gemini-interactions-adapter
     path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/gemini-interactions.md
     owner_area: Gemini Interactions adapter and Antigravity polling
     coverage:
       deterministic_pytest:
@@ -435,6 +438,41 @@ examples:
         opt_in_env: [KITARU_SMOKE_GEMINI_ANTIGRAVITY]
         timeout_seconds: 360
         cost_class: medium
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: gemini-sandbox-function
+    path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+    public_docs:
+      - examples/integrations/gemini_interactions_agent/README.md
+      - docs/book/adapters/gemini-interactions.md
+      - docs/book/stacks/README.md
+    owner_area: Gemini caller-owned custom function execution through Kitaru sandbox
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_gemini_sandbox_functions.py
+        notes: tests/test_gemini_interactions_example.py also covers the example dry-run,
+          request construction, Vertex rejection, and successful two-turn showcase
+          contract
+      local_smoke:
+        status: covered
+        command: uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --dry-run --mode sandbox-function
+        requires_server: false
+        timeout_seconds: 60
+      live_provider:
+        status: opt_in_extended
+        provider: gemini
+        command: KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION=1 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --mode sandbox-function
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env: [GEMINI_API_KEY, KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION]
+        opt_in_env: [KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION]
+        timeout_seconds: 180
+        cost_class: low
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -523,7 +561,8 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_coding_agent_example.py
-        notes: imports model/entrypoint contracts without running the provider agent loop
+        notes: imports model/entrypoint contracts without running the provider agent
+          loop
       local_smoke:
         status: import_contract
         command: uv run python -c 'import examples.end_to_end.coding_agent.models'
@@ -532,8 +571,10 @@ examples:
       live_provider:
         status: manual_only
         waiver:
-          reason: The coding agent is an interactive OpenAI loop with human approval, so it is not safe as an unattended release check.
-          reviewer_action: If this example changes, run the documented command manually with OPENAI_API_KEY or record a release waiver.
+          reason: The coding agent is an interactive OpenAI loop with human approval,
+            so it is not safe as an unattended release check.
+          reviewer_action: If this example changes, run the documented command manually
+            with OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/coding_agent && uv run python agent.py "Your
           task"
@@ -561,13 +602,17 @@ examples:
         command:
         requires_server: false
         waiver:
-          reason: No non-interactive local smoke command exists for the full news scout flow yet.
-          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
+          reason: No non-interactive local smoke command exists for the full news
+            scout flow yet.
+          reviewer_action: If this example changes, inspect the deterministic test
+            and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
         waiver:
-          reason: The news scout makes real provider and external-news calls, so it stays manual until a bounded release command exists.
-          reviewer_action: If this example changes, run the manual command with ANTHROPIC_API_KEY or record a release waiver.
+          reason: The news scout makes real provider and external-news calls, so it
+            stays manual until a bounded release command exists.
+          reviewer_action: If this example changes, run the manual command with ANTHROPIC_API_KEY
+            or record a release waiver.
         provider: anthropic
         command: cd examples/end_to_end/news_scout && uv run python scout.py
         command_paths: [examples/end_to_end/news_scout/scout.py]
@@ -634,8 +679,10 @@ examples:
       local_smoke:
         status: planned
         waiver:
-          reason: The current command is only a help-level placeholder until a safe local smoke path is added.
-          reviewer_action: If this example changes, run the deterministic compliance tests and decide whether a release waiver is needed.
+          reason: The current command is only a help-level placeholder until a safe
+            local smoke path is added.
+          reviewer_action: If this example changes, run the deterministic compliance
+            tests and decide whether a release waiver is needed.
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
           --help
         requires_server: false
@@ -643,8 +690,10 @@ examples:
       live_provider:
         status: manual_only
         waiver:
-          reason: The full compliance review is a multi-stage Anthropic run and is too costly for unattended release smoke today.
-          reviewer_action: If this example changes, run the manual stage command with ANTHROPIC_API_KEY or record a release waiver.
+          reason: The full compliance review is a multi-stage Anthropic run and is
+            too costly for unattended release smoke today.
+          reviewer_action: If this example changes, run the manual stage command with
+            ANTHROPIC_API_KEY or record a release waiver.
         provider: anthropic
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
         weekly_workflow: false
@@ -672,16 +721,21 @@ examples:
         command:
         requires_server: false
         waiver:
-          reason: No non-interactive local smoke command exists for the staged agent harness platform yet.
-          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
+          reason: No non-interactive local smoke command exists for the staged agent
+            harness platform yet.
+          reviewer_action: If this example changes, inspect the deterministic test
+            and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
         waiver:
-          reason: The staged platform starter kit can make real OpenAI calls and is still reviewed manually.
-          reviewer_action: If this example changes, run the manual stage command with OPENAI_API_KEY or record a release waiver.
+          reason: The staged platform starter kit can make real OpenAI calls and is
+            still reviewed manually.
+          reviewer_action: If this example changes, run the manual stage command with
+            OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/agent_harness_platform && uv run python stage_1_basic_agent.py
-        command_paths: [examples/end_to_end/agent_harness_platform/stage_1_basic_agent.py]
+        command_paths:
+          - examples/end_to_end/agent_harness_platform/stage_1_basic_agent.py
         weekly_workflow: false
         local_release_smoke: false
         manual_command_available: true

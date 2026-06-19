@@ -139,7 +139,8 @@ Gemini model interaction
 Kitaru checkpoint
   -> runs python --version in the active Kitaru sandbox
 Gemini model interaction
-  -> receives the function_result and writes the final answer
+  -> receives the function_result JSON as a text content block
+  -> writes the final answer
 ```
 
 Real runs need both pieces:
@@ -152,16 +153,20 @@ uv run kitaru stack create sandbox-demo
 uv run kitaru stack current
 ```
 
+The local sandbox is useful for learning, but it is not isolated from your
+machine. It runs commands with local filesystem and network access.
+
 Then run:
 
 ```bash
 uv run python gemini_interactions_adapter.py --mode sandbox-function
 ```
 
-V1 is deliberately static-command based and model-targeted. It does **not**
-parse model-supplied function arguments or continue provider-agent/Antigravity
-results. If Gemini asks for the registered function, the example runs the command
-your code registered for that function name.
+V1 is deliberately static-command based, model-targeted, and `store=True` only.
+It does **not** parse model-supplied function arguments, continue
+provider-agent/Antigravity results, or build stateless `store=False` histories.
+If Gemini asks for the registered function, the example runs the command your
+code registered for that function name.
 
 This does not redirect Antigravity internals, built-in Gemini code execution,
 hosted MCP, web execution, or any Google-owned tool body into Kitaru. It only

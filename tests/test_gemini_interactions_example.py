@@ -77,7 +77,9 @@ def test_gemini_interactions_example_sandbox_function_dry_run(
     assert "python --version" in output
     assert "payload_output_max_chars" in output
     assert "stdout_payload_truncated" in output
-    assert '"cleanup": {' in output
+    assert '"result_payload_sent_to_gemini": [' in output
+    assert '"type": "text"' in output
+    assert '\\"cleanup\\": {' in output
     assert '"error"' not in output
     assert "run the sandbox command from a @checkpoint" in output
     assert "Fake Gemini function_result request" in output
@@ -260,6 +262,100 @@ def test_gemini_interactions_example_sandbox_showcase_requires_action(
         )
 
     assert fake_runner.calls == 1
+
+
+def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_request = gemini_interactions_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+    first_result = gemini_interactions_adapter.GeminiInteractionResult(
+        status="requires_action",
+        interaction_id="interaction-1",
+        model="gemini-test",
+        steps=[
+            gemini_interactions_adapter.GeminiInteractionStepSummary(
+                index=0,
+                type="function_call",
+                call_id="call-1",
+                tool_name=gemini_interactions_adapter.SANDBOX_FUNCTION_NAME,
+            )
+        ],
+    )
+    requests: list[gemini_interactions_adapter.GeminiInteractionRequest] = []
+
+    class FakeRunner:
+        def run_sync(
+            self,
+            request: gemini_interactions_adapter.GeminiInteractionRequest,
+        ) -> gemini_interactions_adapter.GeminiInteractionResult:
+            requests.append(request)
+            if len(requests) == 1:
+                return first_result
+            return gemini_interactions_adapter.GeminiInteractionResult(
+                status="completed",
+                interaction_id="interaction-2",
+                previous_interaction_id=request.previous_interaction_id,
+                model="gemini-test",
+                output_text="The sandbox is running Python 3.12.0.",
+            )
+
+    def fake_run_sandbox_function(
+        result: gemini_interactions_adapter.GeminiInteractionResult,
+    ) -> gemini_interactions_adapter.GeminiSandboxFunctionExecution:
+        call = result.function_calls[0]
+        sandbox_result = gemini_interactions_adapter._fake_sandbox_command_result()
+        payload = (
+            gemini_interactions_adapter._sandbox_python_version_spec().build_payload(
+                call,
+                sandbox_result,
+            )
+        )
+        request = gemini_interactions_adapter.GeminiInteractionRequest.function_result(
+            previous_interaction_id=result.interaction_id or "interaction-1",
+            function_call_id=call.call_id,
+            function_name=call.function_name,
+            function_result=payload,
+            model=result.model,
+        )
+        return gemini_interactions_adapter.GeminiSandboxFunctionExecution(
+            call=call,
+            sandbox_result=sandbox_result,
+            function_result_payload=payload,
+            function_result_request=request,
+        )
+
+    monkeypatch.setattr(gemini_interactions_adapter, "RUNNER", FakeRunner())
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "run_sandbox_python_version_function",
+        fake_run_sandbox_function,
+    )
+
+    final_result = (
+        gemini_interactions_adapter.run_gemini_sandbox_function_showcase._func(
+            initial_request,
+        )
+    )
+
+    assert final_result.status == "completed"
+    assert len(requests) == 2
+    assert requests[0] is initial_request
+    continuation = requests[1]
+    assert continuation.kind == "function_result"
+    assert continuation.previous_interaction_id == "interaction-1"
+    assert continuation.function_call_id == "call-1"
+    assert continuation.input == [
+        {
+            "type": "function_result",
+            "call_id": "call-1",
+            "name": gemini_interactions_adapter.SANDBOX_FUNCTION_NAME,
+            "result": continuation.function_result_payload,
+        }
+    ]
+    assert continuation.function_result_payload[0]["type"] == "text"
 
 
 def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> None:
