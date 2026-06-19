@@ -1550,9 +1550,6 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     import kitaru.adapters.openai_agents._sandbox_tool as openai_sandbox_tool_module
     import kitaru.adapters.openai_agents._tools as openai_tools_module
 
-    monkeypatch.setattr(openai_agent_module, "is_inside_flow", lambda: False)
-    monkeypatch.setattr(openai_agent_module, "is_inside_checkpoint", lambda: False)
-
     sandbox_calls: list[dict[str, Any]] = []
     sdk_tool_results: list[dict[str, Any]] = []
 
@@ -1602,16 +1599,7 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
         "kitaruify_openai_tools",
         fail_tool_wrapper,
     )
-    monkeypatch.setattr(
-        openai_agent_module,
-        "run_openai_agent_sync",
-        fake_run_openai_agent_sync,
-    )
-    monkeypatch.setattr(
-        openai_agent_module,
-        "run_sync_in_checkpoint",
-        fake_run_sync_in_checkpoint,
-    )
+    assert runner_globals is openai_agent_module.__dict__
     monkeypatch.setitem(
         runner_globals,
         "run_openai_agent_sync",
