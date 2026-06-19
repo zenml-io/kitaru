@@ -260,6 +260,8 @@ You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 - `container_registry`
 - `sandbox`
 
+Sandbox overrides only apply when the created stack has a sandbox: remote stacks require `--sandbox FLAVOR` or top-level `sandbox: FLAVOR`, while local stacks default to `local`.
+
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
 ```bash

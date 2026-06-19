@@ -1707,6 +1707,28 @@ def test_manage_stack_create_kubernetes_passes_explicit_sandbox() -> None:
     assert payload["resources"] == {"sandbox": "local"}
 
 
+def test_manage_stack_create_remote_rejects_sandbox_extra_without_sandbox() -> None:
+    """MCP sandbox overrides require a sandbox on remote stacks."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError) as exc_info,
+    ):
+        manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/my-repo",
+            region="us-central1",
+            extra={"sandbox": {"forward_env": False}},
+        )
+
+    message = str(exc_info.value)
+    assert "sandbox" in message
+    assert "extra" in message
+    mock_create_stack.assert_not_called()
+
+
 def test_manage_stack_delete_rejects_sandbox_option() -> None:
     """Sandbox selection is only valid for create actions."""
     with (
