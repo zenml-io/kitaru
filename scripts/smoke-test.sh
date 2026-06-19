@@ -966,6 +966,39 @@ run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow
 run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
 run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
 run_test "Checkpoint streaming example" timed 60 $UV_RUN examples/features/checkpoint_streaming/checkpoint_streaming.py
+SANDBOX_SMOKE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-sandbox-smoke.XXXXXX")
+SANDBOX_SMOKE_CONFIG="$SANDBOX_SMOKE_TMP/config"
+SANDBOX_SMOKE_REPO="$SANDBOX_SMOKE_TMP/repo"
+SANDBOX_SMOKE_STACK="kitaru-smoke-sandbox-$$"
+mkdir -p "$SANDBOX_SMOKE_CONFIG" "$SANDBOX_SMOKE_REPO/.kitaru"
+printf '{}\n' > "$SANDBOX_SMOKE_REPO/.kitaru/config.yaml"
+# Keep this example on an isolated local ZenML config. The smoke script is
+# connected to a local server above, and that server may not have the local
+# sandbox flavor registered. The isolated config mirrors the deterministic
+# pytest path and guarantees later smoke checks keep using the main active stack.
+run_test "Create sandbox example stack" \
+    timed 60 env \
+        -u ZENML_SERVER \
+        -u ZENML_ACTIVE_PROJECT_ID \
+        -u ZENML_ACTIVE_STACK_ID \
+        -u ZENML_LOCAL_STORES_PATH \
+        -u KITARU_STACK \
+        STACK_NAME="$SANDBOX_SMOKE_STACK" \
+        ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
+        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_ANALYTICS_OPT_IN=false \
+        $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
+run_test "Active stack sandbox command" \
+    timed 60 env \
+        -u ZENML_SERVER \
+        -u ZENML_ACTIVE_PROJECT_ID \
+        -u ZENML_ACTIVE_STACK_ID \
+        -u ZENML_LOCAL_STORES_PATH \
+        -u KITARU_STACK \
+        ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
+        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_ANALYTICS_OPT_IN=false \
+        $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
 run_test "Wait/resume example import contract" \
     $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'

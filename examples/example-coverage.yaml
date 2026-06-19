@@ -89,6 +89,27 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
+  - id: active-stack-sandbox-command
+    path: examples/features/sandbox/active_stack_sandbox_command.py
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+    owner_area: active stack sandbox command flow
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_sandbox_feature_example.py
+        notes: creates a local Kitaru stack with a local sandbox and calls the public flow-backed example entrypoint
+      local_smoke:
+        status: covered
+        command: uv run python examples/features/sandbox/active_stack_sandbox_command.py
+        requires_server: false
+        timeout_seconds: 60
+      live_provider:
+        status: not_applicable
+        required: false
+    release_policy:
+      required_when_changed: true
   - id: artifacts
     path: examples/features/basic_flow/flow_with_artifacts.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
