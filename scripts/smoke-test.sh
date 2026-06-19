@@ -189,6 +189,7 @@ SECTION_NUM=0
 CURRENT_SECTION="Preflight"
 RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
+GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -569,6 +570,10 @@ cleanup() {
             "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
         timed 10 $UV_RUN kitaru auth service-accounts delete \
             "$SMOKE_AUTH_SA" --yes &>/dev/null || true
+    fi
+    if [[ -n "${GEMINI_SANDBOX_FUNCTION_SMOKE_STACK:-}" ]]; then
+        timed 60 $UV_RUN kitaru stack delete \
+            "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" --recursive &>/dev/null || true
     fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"

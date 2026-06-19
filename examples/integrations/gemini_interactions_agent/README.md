@@ -139,6 +139,14 @@ function body in a checkpoint when it is part of a flow: if the flow later
 replays, Kitaru can reuse the recorded sandbox command result instead of running
 the command twice.
 
+The default payload sent back to Gemini includes stdout and stderr. Kitaru
+redacts exact `GeminiSandboxFunctionSpec.env` values, common secret-like
+key/value patterns, and bearer or authorization tokens before sending that
+payload, and adds warning fields when it changes the text. This is best-effort,
+not a promise that every possible secret shape will be found. Do not design
+sandbox commands that print secrets, and redact your own output if you provide a
+custom `result_payload_builder`.
+
 ```text
 Gemini model interaction
   -> returns requires_action for sandbox_python_version
@@ -167,6 +175,10 @@ Then run:
 ```bash
 uv run python gemini_interactions_adapter.py --mode sandbox-function
 ```
+
+The release smoke script creates a temporary local stack for this mode and points
+`KITARU_STACK` at it for the one smoke invocation. If you run the example by
+hand, create or activate the sandbox stack yourself first.
 
 V1 is deliberately static-command based, model-targeted, and `store=True` only.
 It does **not** parse model-supplied function arguments, continue

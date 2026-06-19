@@ -656,11 +656,22 @@ compact JSON object. That JSON object includes:
 - stdout/stderr truncation flags, including whether the helper clipped the
   model-facing payload
 - cleanup policy and cleanup success
+- redaction flags and warnings when Kitaru changed model-facing stdout or
+  stderr before sending it back to Gemini
 
 It does not include environment variables, full stack IDs, sandbox IDs, session
 IDs, the command string, or a raw cleanup error string in the payload sent back
 to Gemini. The local `SandboxCommandResult` remains available to your own code
 for debugging.
+
+Kitaru redacts the default model-facing stdout and stderr before building that
+payload. It removes exact values provided through `GeminiSandboxFunctionSpec.env`,
+common secret-like key/value patterns, and bearer or authorization tokens. This
+is best-effort protection, not a guarantee: a command can still print sensitive
+text in a shape no generic redactor recognizes. Design sandbox commands so they
+do not print secrets. If you provide a custom `result_payload_builder`, that
+builder owns its own redaction before returning anything that will be sent to
+Gemini.
 
 This helper does not move Google-owned execution into Kitaru. Antigravity
 internals, built-in Gemini code execution, hosted MCP, web execution, and
@@ -935,15 +946,18 @@ To inspect the example without making a Gemini API call:
 ```bash
 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
+uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function
 ```
 
-The example includes:
+The example supports:
 
 - `--help` for smoke tests
 - `--dry-run` for a no-network preview
 - `--stream` to use `run_stream_sync(...)` for real calls and preview stream
   metadata in dry runs
 - `--mode model` using `gemini-3.5-flash`
+- `--mode sandbox-function` for caller-owned custom functions that run through
+  Kitaru's active sandbox
 - `--mode antigravity` as an explicit slower/costlier managed-agent demo
 
 ## Troubleshooting
