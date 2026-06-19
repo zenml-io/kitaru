@@ -123,7 +123,6 @@ That stack-create command uses your current Kitaru connection and configuration.
 kitaru stack use <stack-name>
 ```
 
-The release smoke test does that second option: it points Kitaru's local runtime at a throwaway local config and an explicit repository path for the checkout before creating the sandbox stack. That keeps the smoke test from changing your active stack and avoids depending on a logged-in server that may not have the local sandbox flavor available.
 
 The local sandbox is convenient for learning, but it is not isolated from your machine. Commands run as local subprocesses with local filesystem and network access.
 
@@ -666,7 +665,7 @@ export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
 
-The local sandbox used here is not isolated from your machine; it runs local subprocesses and is for local learning, not hostile code execution. The release smoke test uses a throwaway local config plus an explicit repository path pointing at the checkout, so it does not mutate your normal active stack.
+The local sandbox used here is not isolated from your machine; it runs local subprocesses and is for local learning, not hostile code execution.
 
 The sandbox example disables model-call checkpoints to keep the demo focused on the sandbox tool checkpoint. The proof checkpoint is the synchronous `run_sandbox_command` tool handler.
 
