@@ -579,6 +579,7 @@ def manage_stack(
     force: bool = False,
     stack_type: str = "local",
     artifact_store: str | None = None,
+    sandbox: str | None = None,
     container_registry: str | None = None,
     cluster: str | None = None,
     region: str | None = None,
@@ -593,7 +594,8 @@ def manage_stack(
     verify: bool = True,
 ) -> dict[str, Any]:
     """Create or delete a local, Kubernetes-backed, Vertex AI, SageMaker,
-    or AzureML stack. `async_mode` is the MCP equivalent of CLI `--async`."""
+    or AzureML stack. `sandbox` selects a sandbox flavor; local stacks default
+    to `local`. `async_mode` is the MCP equivalent of CLI `--async`."""
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(
@@ -604,6 +606,7 @@ def manage_stack(
             force=force,
             stack_type=stack_type,
             artifact_store=artifact_store,
+            sandbox=sandbox,
             container_registry=container_registry,
             cluster=cluster,
             region=region,

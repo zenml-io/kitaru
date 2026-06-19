@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.6",
+    "zenml[local]>=0.95.1",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +57,7 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.6",
+    "zenml[server]>=0.95.1",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.89.0,<1.104.0",
@@ -82,7 +82,7 @@ claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
 ]
 gemini = [
-    "google-genai>=1.55.0,<2",
+    "google-genai>=2.8.0,<3",
 ]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
@@ -104,6 +104,7 @@ Repository = "https://github.com/zenml-io/kitaru"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+
 [tool.hatch.build]
 artifacts = [
     "src/kitaru/_ui/dist/**",
@@ -122,7 +123,7 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.6",
+    "zenml[server]>=0.95.1",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
@@ -137,7 +138,7 @@ dev = [
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
-    "google-genai>=1.55.0,<2",
+    "google-genai>=2.8.0,<3",
     "pip-audit>=2.9.0",
 ]
 

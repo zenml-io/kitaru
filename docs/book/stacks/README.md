@@ -6,7 +6,7 @@ icon: layer-group
 # Stacks
 
 A **stack** is where the runner places work and where artifacts live. It
-bundles three concerns:
+bundles these concerns:
 
 - **Execution placement** — the compute backend the runner uses for the run
   itself and for any `runtime="isolated"` checkpoints (local, Kubernetes, AWS,
@@ -15,6 +15,10 @@ bundles three concerns:
   and saved data are written (local, S3, GCS, Azure Blob)
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
+- **Sandbox** — an execution environment Kitaru can use when a checkpoint
+  asks for sandboxed work. Some sandbox providers isolate execution. The
+  `local` sandbox does not: it runs local subprocesses with the filesystem and
+  network access available to your current user.
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -83,9 +87,21 @@ By default, Kitaru creates:
 
 - a local orchestrator named `dev`
 - a local artifact store named `dev`
+- a local sandbox named `dev`
 - a stack named `dev`
 
-Then it automatically activates the new stack.
+Then it automatically activates the new stack. The local sandbox uses Kitaru's
+installed local sandbox provider. Important: the `local` sandbox is for local
+development convenience, not for running untrusted code. It is not a security
+boundary; commands run on your machine and can access local files, environment
+variables, credentials, and the network available to your user. If a model
+controls the command, it can ask the local sandbox to print those visible values
+back through stdout or stderr. If another sandbox provider is installed in your
+environment, you can choose it explicitly:
+
+```bash
+kitaru stack create dev --sandbox <sandbox-flavor>
+```
 
 You will see output like:
 
@@ -170,6 +186,79 @@ kitaru stack create prod-azureml \
 
 AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
+Remote stacks do not get a sandbox by default. If you want one, pass
+`--sandbox FLAVOR`:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --sandbox local
+```
+
+Kitaru validates the sandbox name and configuration against the providers
+available in your current environment. It does not keep a separate hardcoded
+list of cloud sandbox providers. The practical consequence is: if the provider
+is installed and accepts the configuration, Kitaru can use it; if the provider is
+missing or rejects the configuration, Kitaru reports the validation error.
+
+## Use the active stack sandbox from Python
+
+`kitaru.run_sandbox_command(...)` uses the sandbox attached to the currently
+active stack. It does not choose by stack type. It reads the stack Kitaru is
+already using, finds the one attached sandbox component, creates a temporary
+session, runs the command, collects output, and then closes or destroys that
+session.
+
+If the attached sandbox is `local`, the command runs as a local subprocess.
+Treat it like running a command on your own machine, not like running inside a
+locked-down container. Anything visible to that subprocess — files, environment
+variables, credentials, and network access — can be returned through stdout or
+stderr if the command prints it. When a model chooses the command, use an
+isolated sandbox provider and minimal credentials unless you fully trust the
+model and prompt.
+
+```python
+import kitaru
+
+result = kitaru.run_sandbox_command("python --version")
+print(result.stdout)
+```
+
+For a runnable version of this pattern inside a tracked Kitaru flow, see the `features/sandbox/active_stack_sandbox_command.py` row in the [examples guide](../getting-started/examples.md#core-workflow-basics).
+
+If the active stack has no sandbox, Kitaru raises an error and does not run the
+command. If the active stack has more than one sandbox, Kitaru also raises an
+error instead of guessing. That avoids the bad version of the story: you thought
+the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
+sandbox and ran it somewhere expensive.
+
+If you use the OpenAI Agents SDK, `sandbox_command_tool(...)` turns this same
+stack-backed sandbox command path into a local OpenAI `FunctionTool`. See the
+[OpenAI Agents adapter guide](../adapters/openai-agents.md#sandbox-command-tool)
+for the agent-facing version and its hosted-tool limitations.
+
+The Gemini Interactions adapter can use the same current-stack sandbox for
+caller-owned custom functions. Gemini returns `requires_action`, your code
+matches the requested function name against an explicit registry, and Kitaru runs
+the registered command through `kitaru.run_sandbox_command(...)`. This does not
+redirect Antigravity internals, built-in Gemini code execution, hosted MCP, web
+execution, or Google-owned tools into Kitaru; it only covers the function body
+your application explicitly executes.
+
+The result is intentionally plain and serializable. Check `exit_code` yourself,
+and use `stdout_truncated` / `stderr_truncated` to detect when output hit the
+collection limit. If a provider does not support destroying sessions, Kitaru
+returns the command output with `cleanup_succeeded=False` and a `cleanup_error`
+message after best-effort close.
+
+Claude Agent SDK users can also expose this same command runner to Claude as a
+Kitaru-owned MCP tool while denying Claude's built-in `Bash`; see
+[the Claude Agent SDK adapter sandbox command section](../adapters/claude-agent-sdk.md#kitaru-owned-sandbox-command-tool).
+
 You can also keep the same inputs in a YAML file and create the stack with:
 
 ```bash
@@ -194,6 +283,9 @@ You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 - `orchestrator`
 - `artifact_store`
 - `container_registry`
+- `sandbox`
+
+Sandbox overrides only apply when the created stack has a sandbox: remote stacks require `--sandbox FLAVOR` or top-level `sandbox: FLAVOR`, while local stacks default to `local`.
 
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
@@ -229,12 +321,17 @@ type: vertex
 artifact_store: gs://my-bucket/kitaru
 container_registry: us-central1-docker.pkg.dev/my-project/my-repo
 region: us-central1
+sandbox: local
 async: true
 extra:
   orchestrator:
     pipeline_root: gs://my-bucket/vertex-root
   container_registry:
     default_repository: agents
+  sandbox:
+    forward_env: false
+    sandbox_environment:
+      MY_VAR: value
 ```
 
 CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.

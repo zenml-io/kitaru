@@ -1134,6 +1134,9 @@ def test_list_stack_entries_include_managed_flag() -> None:
                     StackComponentType.ARTIFACT_STORE: [
                         _stack_component("art-id", "local-storage", flavor="local")
                     ],
+                    StackComponentType.SANDBOX: [
+                        _stack_component("sandbox-id", "local-sandbox", flavor="local")
+                    ],
                 },
             ),
             "local",
@@ -1243,6 +1246,16 @@ def test_show_stack_operation_returns_local_stack_details() -> None:
                     configuration={"path": "/tmp/kitaru"},
                 )
             ],
+            StackComponentType.SANDBOX: [
+                _stack_component(
+                    "sandbox-dev-id",
+                    "dev-sandbox",
+                    flavor="local",
+                    configuration={
+                        "sandbox_environment": {"SECRET_VALUE": "do-not-print"}
+                    },
+                )
+            ],
         },
     )
     client_mock = Mock()
@@ -1261,11 +1274,15 @@ def test_show_stack_operation_returns_local_stack_details() -> None:
     assert [component.role for component in details.components] == [
         "runner",
         "storage",
+        "sandbox",
     ]
     assert details.components[0].name == "dev-runner"
     assert details.components[0].backend == "local"
     assert details.components[0].details == ()
     assert details.components[1].details == (("location", "/tmp/kitaru"),)
+    assert details.components[2].name == "dev-sandbox"
+    assert details.components[2].backend == "local"
+    assert details.components[2].details == ()
     client_mock.get_stack.assert_called_once_with("stack-dev-id", hydrate=True)
 
 
@@ -1556,6 +1573,7 @@ def test_create_stack_creates_local_components_and_activates() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -1581,6 +1599,12 @@ def test_create_stack_creates_local_components_and_activates() -> None:
                 component_type=StackComponentType.ARTIFACT_STORE,
                 configuration={},
             ),
+            call(
+                name="dev",
+                flavor="local",
+                component_type=StackComponentType.SANDBOX,
+                configuration={},
+            ),
         ]
     )
     assert result.stack.name == "dev"
@@ -1589,6 +1613,7 @@ def test_create_stack_creates_local_components_and_activates() -> None:
     assert result.components_created == (
         "dev (orchestrator)",
         "dev (artifact_store)",
+        "dev (sandbox)",
     )
     assert result.stack_type == "local"
     assert result.service_connectors_created == ()
@@ -1619,7 +1644,12 @@ def test_create_stack_dispatcher_defaults_to_local_flow() -> None:
     ) as mock_create_local:
         result = _create_stack_operation("dev")
 
-    mock_create_local.assert_called_once_with("dev", activate=True, labels=None)
+    mock_create_local.assert_called_once_with(
+        "dev",
+        activate=True,
+        labels=None,
+        sandbox_flavor="local",
+    )
     assert result is expected_result
 
 
@@ -2040,6 +2070,105 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
         "artifact_store": "gs://bucket/path",
         "container_registry": "europe-west4-docker.pkg.dev/demo-project/demo-repo",
     }
+
+
+def test_create_kubernetes_stack_operation_attaches_explicit_sandbox() -> None:
+    """Remote stack creation should attach a sandbox only when requested."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name="dev-aws",
+    )
+    created_stack.components[StackComponentType.SANDBOX] = [
+        _stack_component("sandbox-id", "dev-sandbox", flavor="local")
+    ]
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        sandbox={
+            "forward_env": False,
+            "sandbox_environment": {"MY_VAR": "value"},
+        }
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            activate=False,
+            sandbox_flavor="local",
+            component_overrides=overrides,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    sandbox = stack_request.components[StackComponentType.SANDBOX][0]
+    assert sandbox.flavor == "local"
+    assert getattr(sandbox, "service_connector_index", None) is None
+    assert sandbox.configuration == {
+        "forward_env": False,
+        "sandbox_environment": {"MY_VAR": "value"},
+    }
+    assert result.components_created == (
+        "dev-orchestrator (orchestrator)",
+        "dev-artifacts (artifact_store)",
+        "dev-registry (container_registry)",
+        "dev-sandbox (sandbox)",
+    )
+    assert result.resources == {
+        "provider": "aws",
+        "cluster": "demo-cluster",
+        "region": "eu-west-1",
+        "namespace": "default",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        "sandbox": "local",
+    }
+
+
+def test_create_kubernetes_stack_rejects_sandbox_overrides_without_sandbox() -> None:
+    """Remote backend calls must not drop sandbox overrides silently."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    client_mock = Mock()
+    client_mock.zen_store = Mock()
+    overrides = StackComponentConfigOverrides(sandbox={"forward_env": False})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    message = str(exc_info.value)
+    assert "sandbox" in message
+    assert "sandbox_flavor" in message
+    client_mock._validate_stack_configuration.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+    client_mock.create_service_connector.assert_not_called()
 
 
 def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
@@ -2942,6 +3071,7 @@ def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -2978,10 +3108,12 @@ def test_create_local_stack_operation_applies_component_overrides() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
     overrides = StackComponentConfigOverrides(
         artifact_store={"path": "/tmp/kitaru-artifacts"},
+        sandbox={"forward_env": False},
     )
 
     with patch("kitaru.config.Client", return_value=client_mock):
@@ -2993,6 +3125,8 @@ def test_create_local_stack_operation_applies_component_overrides() -> None:
     assert artifact_store_call.kwargs["configuration"] == {
         "path": "/tmp/kitaru-artifacts"
     }
+    sandbox_call = client_mock.create_stack_component.call_args_list[2]
+    assert sandbox_call.kwargs["configuration"] == {"forward_env": False}
 
 
 def test_create_stack_rejects_existing_stack_name() -> None:
@@ -3043,6 +3177,7 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.side_effect = RuntimeError("stack create failed")
 
@@ -3054,6 +3189,7 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
 
     client_mock.delete_stack_component.assert_has_calls(
         [
+            call("sandbox-dev-id", StackComponentType.SANDBOX),
             call("art-dev-id", StackComponentType.ARTIFACT_STORE),
             call("orc-dev-id", StackComponentType.ORCHESTRATOR),
         ]
@@ -3098,6 +3234,7 @@ def test_create_stack_applies_managed_label_and_preserves_extra_labels() -> None
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -3154,11 +3291,16 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
         labels={"kitaru.managed": "true"},
         orchestrator_id="orc-dev-id",
         artifact_store_id="art-dev-id",
+        components={
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-dev-id", "dev", flavor="local")
+            ]
+        },
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
     client_mock.get_stack.return_value = dev
-    client_mock.list_stacks.side_effect = [[dev], [dev]]
+    client_mock.list_stacks.side_effect = [[dev], [dev], [dev]]
 
     with patch("kitaru.config.Client", return_value=client_mock):
         result = _delete_stack_operation("dev", recursive=True)
@@ -3169,6 +3311,7 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
     assert result.components_deleted == (
         "dev (orchestrator)",
         "dev (artifact_store)",
+        "dev (sandbox)",
     )
     assert result.recursive is True
 

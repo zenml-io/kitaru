@@ -81,6 +81,7 @@ from kitaru.client import KitaruClient
 from kitaru.config import (
     ImageSettings,
     KitaruConfig,
+    SandboxCommandResult,
     StackInfo,
     configure,
     connect,
@@ -88,6 +89,7 @@ from kitaru.config import (
     current_stack,
     delete_stack,
     list_stacks,
+    run_sandbox_command,
     use_stack,
 )
 from kitaru.errors import (
@@ -156,6 +158,7 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "SandboxCommandResult",
     "Secret",
     "SecretSummary",
     "StackInfo",
@@ -176,6 +179,7 @@ __all__ = [
     "load",
     "log",
     "progress",
+    "run_sandbox_command",
     "save",
     "use_stack",
     "wait",

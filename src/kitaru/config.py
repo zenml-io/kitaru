@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
@@ -34,6 +34,8 @@ from kitaru._config import _execution_spec as _config_execution_spec
 from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
+from kitaru._config import _sandbox as _config_sandbox
+from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru._config import _stacks as _config_stacks
 from kitaru._env import ZENML_CONFIG_PATH_ENV as _ZENML_CONFIG_PATH_ENV
 from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
@@ -52,6 +54,7 @@ _LOG_STORE_BACKEND_PATTERN = _config_log_store._LOG_STORE_BACKEND_PATTERN
 _MODEL_ALIAS_PATTERN = _config_models._MODEL_ALIAS_PATTERN
 _STACK_MANAGED_LABEL_KEY = _config_stacks._STACK_MANAGED_LABEL_KEY
 _STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
+_LOCAL_SANDBOX_FLAVOR = _sandbox_components.LOCAL_SANDBOX_FLAVOR
 
 KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
 KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
@@ -98,6 +101,8 @@ ModelAliasConfig = _config_models.ModelAliasConfig
 ModelRegistryConfig = _config_models.ModelRegistryConfig
 ModelAliasEntry = _config_models.ModelAliasEntry
 ResolvedModelSelection = _config_models.ResolvedModelSelection
+
+SandboxCommandResult = _config_sandbox.SandboxCommandResult
 
 StackInfo = _config_stacks.StackInfo
 StackType = _config_stacks.StackType
@@ -150,6 +155,7 @@ _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 _normalize_model_alias = _config_models._normalize_model_alias
 _read_env_model_registry = _config_models._read_env_model_registry
 _normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
+DEFAULT_SANDBOX_COMMAND_MAX_CHARS = _config_sandbox.DEFAULT_SANDBOX_COMMAND_MAX_CHARS
 _extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
 _mask_environment_value = _config_log_store._mask_environment_value
 
@@ -512,6 +518,7 @@ def _create_kubernetes_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     return _config_stacks._create_kubernetes_stack_operation(
@@ -520,6 +527,7 @@ def _create_kubernetes_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -531,6 +539,7 @@ def _create_vertex_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Vertex AI stack via ZenML's one-shot stack API."""
     return _config_stacks._create_vertex_stack_operation(
@@ -539,6 +548,7 @@ def _create_vertex_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -550,6 +560,7 @@ def _create_sagemaker_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a SageMaker stack via ZenML's one-shot stack API."""
     return _config_stacks._create_sagemaker_stack_operation(
@@ -558,6 +569,7 @@ def _create_sagemaker_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -569,6 +581,7 @@ def _create_azureml_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create an AzureML stack via ZenML's one-shot stack API."""
     return _config_stacks._create_azureml_stack_operation(
@@ -577,6 +590,7 @@ def _create_azureml_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -589,6 +603,7 @@ def _create_stack_operation(
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     result = _config_stacks._create_stack_operation(
@@ -598,6 +613,7 @@ def _create_stack_operation(
         labels=labels,
         remote_spec=remote_spec,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         operation_overrides=cast(
             dict[StackType, Callable[..., _StackCreateResult]],
             {
@@ -628,6 +644,7 @@ def _create_local_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
     return _config_stacks._create_local_stack_operation(
@@ -635,6 +652,7 @@ def _create_local_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor or _LOCAL_SANDBOX_FLAVOR,
         client_factory=Client,
         current_stack_getter=current_stack,
     )
@@ -654,6 +672,51 @@ def _delete_stack_operation(
         client_factory=Client,
         current_stack_getter=current_stack,
     )
+
+
+def run_sandbox_command(
+    command: str | Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    timeout_seconds: float | None = None,
+    cleanup: Literal["destroy", "close"] = "destroy",
+) -> SandboxCommandResult:
+    """Execute one command through the active stack's sandbox component.
+
+    Args:
+        command: Command to execute, as a provider-interpreted string or an
+            argv-style command list. For exact argument splitting, pass a
+            sequence.
+        cwd: Optional working directory inside the sandbox.
+        env: Optional environment variables for the command. These values are
+            passed to the sandbox provider but are not included in the result.
+        max_chars: Maximum characters to collect from each output stream.
+        timeout_seconds: Optional application-owned timeout for command
+            execution. If the command does not finish in time, Kitaru asks the
+            process to stop, cleans up the session on a best-effort basis, and
+            returns a structured timeout result.
+        cleanup: Whether to destroy or close the fresh sandbox session after the
+            command completes.
+
+    Returns:
+        Structured command output and cleanup status.
+    """
+    return _config_sandbox.run_sandbox_command(
+        command,
+        cwd=cwd,
+        env=env,
+        max_chars=max_chars,
+        timeout_seconds=timeout_seconds,
+        cleanup=cleanup,
+        client_factory=Client,
+    )
+
+
+def _active_sandbox_cache_identity() -> dict[str, str | None]:
+    """Return cache identity for the active stack's single sandbox component."""
+    return _config_sandbox.active_sandbox_cache_identity(client_factory=Client)
 
 
 def list_stacks() -> list[StackInfo]:

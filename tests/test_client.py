@@ -141,7 +141,9 @@ def _backend_filter_for_values(values: tuple[str, ...]) -> str:
     return f"oneof:{json.dumps(list(values), separators=(',', ':'))}"
 
 
-def _backend_filter_values(filter_value: str) -> tuple[str, ...]:
+def _backend_filter_values(filter_value: str | list[str]) -> tuple[str, ...]:
+    if isinstance(filter_value, list):
+        return tuple(filter_value)
     if filter_value.startswith("oneof:"):
         return tuple(json.loads(filter_value.removeprefix("oneof:")))
     return (filter_value,)

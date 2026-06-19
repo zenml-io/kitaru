@@ -10,6 +10,14 @@ from typing import Any, cast
 from zenml.utils import yaml_utils
 
 _VERSION_PATTERN = r"[0-9]+(?:\.[0-9]+)+"
+_TEMPORARY_ZENML_SHA = "ee58baaa3174f98a2b69f2d4855ee0aa62aa8441"
+_TEMPORARY_ZENML_GIT_URL = (
+    f"git+https://github.com/zenml-io/zenml.git@{_TEMPORARY_ZENML_SHA}"
+)
+_TEMPORARY_ZENML_LOCK_GIT_URL = (
+    f"https://github.com/zenml-io/zenml.git?rev={_TEMPORARY_ZENML_SHA}"
+)
+_TEMPORARY_ZENML_RELEASE_GATE = "zenml==0.95.0"
 
 
 def _repo_root() -> Path:
@@ -51,16 +59,49 @@ def _extract_zenml_minimum(requirement: str) -> str:
     return match.group(1)
 
 
-def _expected_zenml_version() -> str:
+def _extract_temporary_zenml_sha(requirement: str) -> str | None:
+    match = re.fullmatch(
+        r"zenml(?:\[[^\]]+\])? @ "
+        r"git\+https://github\.com/zenml-io/zenml\.git@([0-9a-f]{40})",
+        requirement,
+    )
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _zenml_pyproject_requirements() -> list[str]:
     pyproject = _read_toml("pyproject.toml")
-    dependencies = pyproject["project"]["dependencies"]  # type: ignore[index]
-    zenml_requirements = [
-        requirement
-        for requirement in dependencies
-        if isinstance(requirement, str) and requirement.startswith("zenml[")
+    project_dependencies = pyproject["project"]["dependencies"]  # type: ignore[index]
+    local_extra = pyproject["project"]["optional-dependencies"]["local"]  # type: ignore[index]
+    dev_dependencies = pyproject["dependency-groups"]["dev"]  # type: ignore[index]
+    return [
+        next(req for req in project_dependencies if req.startswith("zenml[local]")),
+        next(req for req in local_extra if req.startswith("zenml[server]")),
+        next(req for req in dev_dependencies if req.startswith("zenml[server]")),
     ]
-    assert len(zenml_requirements) == 1
-    return _extract_zenml_minimum(zenml_requirements[0])
+
+
+def _uses_temporary_zenml_sha() -> bool:
+    shas = [
+        _extract_temporary_zenml_sha(req) for req in _zenml_pyproject_requirements()
+    ]
+    return shas == [_TEMPORARY_ZENML_SHA, _TEMPORARY_ZENML_SHA, _TEMPORARY_ZENML_SHA]
+
+
+def _expected_zenml_version() -> str:
+    if _uses_temporary_zenml_sha():
+        return str(_lock_package("zenml")["version"])
+
+    zenml_requirements = _zenml_pyproject_requirements()
+    assert len(zenml_requirements) == 3
+    expected = _extract_zenml_minimum(zenml_requirements[0])
+    assert [_extract_zenml_minimum(req) for req in zenml_requirements] == [
+        expected,
+        expected,
+        expected,
+    ]
+    return expected
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +110,20 @@ def _expected_zenml_version() -> str:
 
 
 def test_pyproject_has_no_zenml_git_refs() -> None:
-    """All ZenML dependencies should come from PyPI, not git refs."""
+    """ZenML git refs are forbidden except for the exact temporary SHA."""
     pyproject = _read_pyproject()
+    if _uses_temporary_zenml_sha():
+        assert pyproject.count(_TEMPORARY_ZENML_GIT_URL) == 3, (
+            "The temporary ZenML git allowance must point only at the exact "
+            f"{_TEMPORARY_ZENML_SHA} SHA. Replace it with "
+            f"{_TEMPORARY_ZENML_RELEASE_GATE} before merge/release."
+        )
+        for marker in ["@main", "@develop", "@HEAD", "@master"]:
+            assert marker not in pyproject, (
+                f"pyproject.toml contains moving ZenML git ref marker {marker!r}."
+            )
+        return
+
     assert "git+https://github.com/zenml-io/zenml.git" not in pyproject, (
         "pyproject.toml still contains a ZenML git direct reference. "
         "Use a PyPI version spec (e.g., zenml>=0.94.1) instead."
@@ -81,6 +134,13 @@ def test_pyproject_has_no_direct_reference_allowance() -> None:
     """The Hatch direct-reference escape hatch should be removed."""
     toml = tomllib.loads(_read_pyproject())
     hatch_meta = toml.get("tool", {}).get("hatch", {}).get("metadata", {})
+    if _uses_temporary_zenml_sha():
+        assert hatch_meta.get("allow-direct-references") is True, (
+            "Temporary ZenML git dependency requires Hatch direct references. "
+            f"Remove this when switching to {_TEMPORARY_ZENML_RELEASE_GATE}."
+        )
+        return
+
     assert not hatch_meta.get("allow-direct-references", False), (
         "tool.hatch.metadata.allow-direct-references should be removed "
         "now that all dependencies come from PyPI."
@@ -288,48 +348,62 @@ def _lock_package(name: str) -> dict[str, Any]:
     return matches[0]
 
 
-def _zenml_lock_specifiers(entries: object) -> list[str]:
+def _zenml_lock_references(entries: object) -> list[str]:
     assert isinstance(entries, list)
-    specifiers: list[str] = []
+    references: list[str] = []
     for entry in entries:
         if not isinstance(entry, Mapping):
             continue
         mapping = cast(Mapping[str, object], entry)
+        if mapping.get("name") != "zenml":
+            continue
         specifier = mapping.get("specifier")
-        if mapping.get("name") == "zenml" and isinstance(specifier, str):
-            specifiers.append(specifier)
-    return specifiers
+        git = mapping.get("git")
+        if isinstance(specifier, str):
+            references.append(specifier)
+        elif isinstance(git, str):
+            references.append(git)
+    return references
 
 
 def test_zenml_python_dependency_surfaces_are_aligned() -> None:
     """Python dependency specs and the lockfile should move together."""
     expected = _expected_zenml_version()
-    pyproject = _read_toml("pyproject.toml")
-
-    project_dependencies = pyproject["project"]["dependencies"]  # type: ignore[index]
-    local_extra = pyproject["project"]["optional-dependencies"]["local"]  # type: ignore[index]
-    dev_dependencies = pyproject["dependency-groups"]["dev"]  # type: ignore[index]
-
-    requirements = [
-        next(req for req in project_dependencies if req.startswith("zenml[local]")),
-        next(req for req in local_extra if req.startswith("zenml[server]")),
-        next(req for req in dev_dependencies if req.startswith("zenml[server]")),
-    ]
-    assert [_extract_zenml_minimum(req) for req in requirements] == [
-        expected,
-        expected,
-        expected,
-    ]
+    requirements = _zenml_pyproject_requirements()
+    if _uses_temporary_zenml_sha():
+        assert [_extract_temporary_zenml_sha(req) for req in requirements] == [
+            _TEMPORARY_ZENML_SHA,
+            _TEMPORARY_ZENML_SHA,
+            _TEMPORARY_ZENML_SHA,
+        ]
+    else:
+        assert [_extract_zenml_minimum(req) for req in requirements] == [
+            expected,
+            expected,
+            expected,
+        ]
 
     kitaru_package = _lock_package("kitaru")
     metadata = kitaru_package["metadata"]  # type: ignore[index]
-    lock_specs = [
-        *_zenml_lock_specifiers(metadata["requires-dist"]),  # type: ignore[index]
-        *_zenml_lock_specifiers(
+    lock_references = [
+        *_zenml_lock_references(metadata["requires-dist"]),  # type: ignore[index]
+        *_zenml_lock_references(
             metadata["requires-dev"]["dev"]  # type: ignore[index]
         ),
     ]
-    assert lock_specs == [f">={expected}", f">={expected}", f">={expected}"]
+    if _uses_temporary_zenml_sha():
+        assert lock_references == [
+            _TEMPORARY_ZENML_LOCK_GIT_URL,
+            _TEMPORARY_ZENML_LOCK_GIT_URL,
+            _TEMPORARY_ZENML_LOCK_GIT_URL,
+        ]
+        source = _lock_package("zenml").get("source")
+        assert isinstance(source, Mapping)
+        assert source.get("git") == (
+            f"{_TEMPORARY_ZENML_LOCK_GIT_URL}#{_TEMPORARY_ZENML_SHA}"
+        )
+    else:
+        assert lock_references == [f">={expected}", f">={expected}", f">={expected}"]
     assert _lock_package("zenml")["version"] == expected
 
 

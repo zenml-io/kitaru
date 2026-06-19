@@ -110,6 +110,10 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
 
+    sandbox = resources.get("sandbox")
+    if sandbox:
+        rows.append(("Sandbox:", str(sandbox)))
+
     execution_role = resources.get("execution_role")
     if stack_type == StackType.SAGEMAKER.value and execution_role:
         rows.append(("Execution role:", str(execution_role)))
@@ -161,6 +165,7 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
         "runner": "Runner",
         "storage": "Storage",
         "image_registry": "Image registry",
+        "sandbox": "Sandbox",
         "additional_component": "Additional component",
     }
     label_counts: dict[str, int] = {}
@@ -353,6 +358,16 @@ def create(
             )
         ),
     ] = None,
+    sandbox: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Sandbox flavor to attach. Local stacks default to `local`; remote "
+                "stacks attach a sandbox only when this option is provided. The "
+                "flavor must be available in the active ZenML installation/server."
+            )
+        ),
+    ] = None,
     container_registry: Annotated[
         str | None,
         Parameter(
@@ -410,7 +425,8 @@ def create(
             name=["--extra"],
             help=(
                 "Advanced component defaults as TARGET.FIELD=VALUE. "
-                "Valid targets: orchestrator, artifact_store, container_registry. "
+                "Valid targets: orchestrator, artifact_store, container_registry, "
+                "sandbox. "
                 "VALUE uses YAML parsing, so booleans, numbers, lists, and objects "
                 "are accepted."
             ),
@@ -449,6 +465,7 @@ def create(
                 type=type,
                 activate=False if no_activate else None,
                 artifact_store=artifact_store,
+                sandbox=sandbox,
                 container_registry=container_registry,
                 cluster=cluster,
                 region=region,

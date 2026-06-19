@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added sandbox stack component support and the public `kitaru.run_sandbox_command(...)` SDK helper. Local stacks now get a default local sandbox, stack creation accepts explicit sandbox flavors through CLI/YAML/MCP paths, and `examples/features/sandbox/active_stack_sandbox_command.py` shows a tracked flow checkpoint running a command through the sandbox on the current stack. (#416, #417)
+- Added a PydanticAI sandbox command toolset via `sandbox_command_toolset(...)`, plus docs, example coverage, and `examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py`, so PydanticAI agents can call `run_sandbox_command` through Kitaru's shared sandbox helper. (#429)
+- Added an OpenAI Agents SDK sandbox command tool via `sandbox_command_tool(...)`, plus docs and `examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py`, so OpenAI agents can call a local `FunctionTool` that runs commands through the sandbox on the current stack. (#430)
+- Added caller-owned Gemini custom function execution through Kitaru's sandbox helper, with explicit registered sandbox commands, a dry-run example showcase, and docs that keep Antigravity / Google-owned tool internals outside Kitaru's replay promise. This requires the Gemini extra's current Google GenAI SDK 2.x range (`google-genai>=2.8.0,<3`) for the Interactions step and function-result schema. (#433)
+- Added a LangGraph/LangChain sandbox command tool via `create_sandbox_command_tool(...)`, plus a sandbox strategy in the LangGraph example, so agents can run shell commands through the sandbox on the current stack. (#434)
+- Added a Claude Agent SDK sandbox MCP helper (`create_kitaru_sandbox_mcp_server`) and runnable example at `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`, letting Claude call the sandbox on the current stack through a Kitaru-owned MCP tool while Claude-owned `Bash` stays disabled. (#432)
+
 ### Changed
+- Bumped the ZenML dependency floor and aligned runtime surfaces to `zenml>=0.95.1`, which provides the sandbox stack component and sandbox session APIs used by this release.
 - Reworked the prospect scout example (`examples/end_to_end/prospect_scout/`) into a genuinely agentic sweep: the qualifier is now a real PydanticAI agent that calls a `search_web` tool and decides its own searches (instead of being handed pre-fetched snippets), classifies prospects against a `LineOfBusiness` enum, and is built lazily inside its checkpoint so remote runs can inject keys via a secret. The README is reorganized around the durability, agent-observability, type-safety, and human-in-the-loop "aha moments", and a regression test asserts the agent actually invokes its search tool.
+
+### Fixed
+- Rejected sandbox config overrides when stack creation did not also select a sandbox flavor, avoiding the confusing case where remote stack creation accepted sandbox-looking settings and then created no sandbox.
+- Fixed the LangGraph sandbox demo so its real-model run deterministically executes the documented demo command, and redacted static sandbox tool env values from wrapped provider error messages. (#434)
+- Kept the Claude Agent SDK sandbox MCP helper's default output limits and serialized JSON tool results within Claude Code's MCP result-size ceiling, so Kitaru's stdout/stderr truncation flags match what Claude actually receives. (#432)
 
 ## [0.16.0] - 2026-06-15
 

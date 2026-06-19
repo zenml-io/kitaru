@@ -13,7 +13,8 @@
 #   --required-provider-area AREA
 #                        Mark a provider area as required for this release.
 #                        Repeatable. Areas: openai, anthropic, gemini-model,
-#                        gemini-antigravity, research-bot
+#                        gemini-sandbox-function, gemini-antigravity,
+#                        research-bot
 #   --json-out PATH      Write structured smoke results to PATH
 #   -h, --help           Show this help message
 
@@ -39,7 +40,8 @@ Options:
   --required-provider-area AREA
                        Mark a provider area as required for this release.
                        Repeatable. Areas: openai, anthropic, gemini-model,
-                       gemini-antigravity, research-bot
+                       gemini-sandbox-function, gemini-antigravity,
+                       research-bot
   --json-out PATH      Write structured smoke results to PATH
   -h, --help           Show this help message
 EOF
@@ -139,16 +141,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --required-provider-area)
             if [[ $# -lt 2 ]]; then
-                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
                 write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--required-provider-area requires a value" "$RELEASE_MODE" || true
                 exit 1
             fi
             case "$2" in
-                openai|anthropic|gemini-model|gemini-antigravity|research-bot)
+                openai|anthropic|gemini-model|gemini-sandbox-function|gemini-antigravity|research-bot)
                     REQUIRED_PROVIDER_AREAS+=("$2")
                     ;;
                 *)
-                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
                     write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "unsupported provider area '$2'" "$RELEASE_MODE" || true
                     exit 1
                     ;;
@@ -187,6 +189,7 @@ SECTION_NUM=0
 CURRENT_SECTION="Preflight"
 RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
+GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -559,6 +562,17 @@ is_truthy_env_value() {
     esac
 }
 
+active_stack_has_single_sandbox() {
+    local current_json
+    local stack_name
+    local stack_json
+    current_json=$($UV_RUN kitaru stack current -o json 2>/dev/null) || return 1
+    stack_name=$(echo "$current_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["item"]["name"])' 2>/dev/null) || return 1
+    [[ -n "$stack_name" ]] || return 1
+    stack_json=$($UV_RUN kitaru stack show "$stack_name" -o json 2>/dev/null) || return 1
+    echo "$stack_json" | python3 -c 'import json,sys; components=json.load(sys.stdin)["item"].get("components", []); sandboxes=[component for component in components if component.get("role") == "sandbox"]; sys.exit(0 if len(sandboxes) == 1 else 1)'
+}
+
 cleanup() {
     rm -f "$RESULT_RECORDS_FILE"
 
@@ -567,6 +581,10 @@ cleanup() {
             "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
         timed 10 $UV_RUN kitaru auth service-accounts delete \
             "$SMOKE_AUTH_SA" --yes &>/dev/null || true
+    fi
+    if [[ -n "${GEMINI_SANDBOX_FUNCTION_SMOKE_STACK:-}" ]]; then
+        timed 60 $UV_RUN kitaru stack delete \
+            "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" --recursive &>/dev/null || true
     fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
@@ -682,6 +700,8 @@ run_test "execution event watcher API imports" \
     $UV_RUN python -c 'from kitaru import ExecutionEvent, KitaruClient; fields = ExecutionEvent.__dataclass_fields__; assert callable(KitaruClient); assert "cursor" in fields and "correlation_id" in fields and "stream_id" not in fields and "timestamp" not in fields'
 run_test "Claude Agent SDK stream API imports" \
     $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_EVENT_KINDS, CLAUDE_STREAM_FAILED, CLAUDE_STREAM_STARTED, CLAUDE_STREAM_TERMINAL_EVENT_KINDS, KitaruClaudeRunner; assert hasattr(KitaruClaudeRunner, "run_stream"); assert hasattr(KitaruClaudeRunner, "run_stream_sync"); assert CLAUDE_STREAM_STARTED == "claude_agent_sdk.stream.started"; assert CLAUDE_STREAM_EVENT == "claude_agent_sdk.stream.event"; assert CLAUDE_STREAM_COMPLETED == "claude_agent_sdk.stream.completed"; assert CLAUDE_STREAM_FAILED == "claude_agent_sdk.stream.failed"; assert CLAUDE_STREAM_EVENT_KINDS == (CLAUDE_STREAM_STARTED, CLAUDE_STREAM_EVENT, CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED); assert CLAUDE_STREAM_TERMINAL_EVENT_KINDS == (CLAUDE_STREAM_COMPLETED, CLAUDE_STREAM_FAILED)'
+run_test "Claude Agent SDK sandbox MCP API imports" \
+    $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS, KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME, create_kitaru_sandbox_mcp_server; assert callable(create_kitaru_sandbox_mcp_server); assert DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS > 0; assert KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME == "mcp__kitaru__run_command"'
 run_test "OpenAI Agents stream API imports" \
     $UV_RUN python -c 'from kitaru.adapters.openai_agents import OPENAI_STREAM_COMPLETED, OPENAI_STREAM_EVENT, OPENAI_STREAM_EVENT_KINDS, OPENAI_STREAM_FAILED, OPENAI_STREAM_STARTED, OPENAI_STREAM_TERMINAL_EVENT_KINDS, KitaruRunner; assert hasattr(KitaruRunner, "run_stream"); assert hasattr(KitaruRunner, "run_stream_sync"); assert OPENAI_STREAM_STARTED == "openai_agents.stream.started"; assert OPENAI_STREAM_EVENT == "openai_agents.stream.event"; assert OPENAI_STREAM_COMPLETED == "openai_agents.stream.completed"; assert OPENAI_STREAM_FAILED == "openai_agents.stream.failed"; assert OPENAI_STREAM_EVENT_KINDS == (OPENAI_STREAM_STARTED, OPENAI_STREAM_EVENT, OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED); assert OPENAI_STREAM_TERMINAL_EVENT_KINDS == (OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED)'
 
@@ -753,6 +773,7 @@ run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
 run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
+run_test "kitaru stack create --help"    $UV_RUN kitaru stack create --help
 run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
@@ -828,8 +849,16 @@ if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+    if active_stack_has_single_sandbox; then
+        run_provider_test "openai" "OPENAI_API_KEY" \
+            "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
+            timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    else
+        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example; --release --required-provider-area openai makes this prerequisite skip fail release smoke" "openai" "OPENAI_API_KEY"
+    fi
 else
     skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "OPENAI_API_KEY not set; provider credentials and one active-stack sandbox required for PydanticAI sandbox toolset example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "LangGraph adapter"
@@ -838,6 +867,8 @@ run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy 
     $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
 run_test "examples/integrations/langgraph_agent/langgraph_streaming.py" \
     timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_streaming.py
+run_test "LangGraph sandbox command tool factory" \
+    $UV_RUN python -c 'from kitaru.adapters.langgraph import DEFAULT_SANDBOX_COMMAND_TOOL_NAME, create_sandbox_command_tool; tool = create_sandbox_command_tool(); assert tool.name == DEFAULT_SANDBOX_COMMAND_TOOL_NAME; assert set(tool.args_schema.model_fields) == {"command", "cwd"}'
 if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
@@ -852,6 +883,8 @@ run_test "examples/end_to_end/openai_research_bot/research_bot.py --help" \
     $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py --help
 run_test "examples/end_to_end/coding_agent import/CLI contract" \
     $UV_RUN python -c 'import ast, sys; from pathlib import Path; root = Path("examples/end_to_end/coding_agent"); sys.path.insert(0, str(root)); from models import FollowUp, LLMResponse; import tools; assert FollowUp(is_finished=True).is_finished; assert LLMResponse(role="assistant", content="ok").to_message()["role"] == "assistant"; assert any(tool["function"]["name"] == "read_file" for tool in tools.ALL_TOOLS); tree = ast.parse((root / "agent.py").read_text()); funcs = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}; assert {"coding_agent", "main"} <= set(funcs); assert any(isinstance(dec, ast.Call) and getattr(dec.func, "attr", getattr(dec.func, "id", "")) == "command" for dec in funcs["main"].decorator_list)'
+run_test "OpenAI Agents sandbox tool import/contract" \
+    $UV_RUN python -c 'from examples.integrations.openai_agents_agent import openai_agents_sandbox_tool as ex; import kitaru.config as kc; kc._active_sandbox_cache_identity = lambda: {"kind":"active_sandbox","stack_id":"smoke-stack","stack_name":"smoke","sandbox_id":"smoke-sandbox","sandbox_name":"smoke"}; agent = ex._build_agent(); tool = agent.tools[0]; schema = tool.params_json_schema; identity = getattr(tool, "_kitaru_cache_identity")(); assert tool.name == "kitaru_sandbox_command"; assert set(schema["properties"]) == {"command", "cwd"}; assert "env" not in schema["properties"]; assert identity["max_chars"] == 4000; assert identity["active_sandbox"]["stack_id"] == "smoke-stack"'
 
 if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
@@ -869,6 +902,8 @@ section_header "Claude Agent SDK adapter"
 
 run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py --help" \
     $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py --help
+run_test "examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py --help" \
+    $UV_RUN python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py --help
 
 if [[ "$HAS_CLAUDE_AGENT_SDK" == true ]]; then
     run_provider_test "anthropic" "ANTHROPIC_API_KEY,CLAUDE_CODE_USE_BEDROCK,CLAUDE_CODE_USE_VERTEX" \
@@ -894,6 +929,8 @@ run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_ad
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
 run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream" \
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function
 
 if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
     run_provider_test "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY" \
@@ -905,6 +942,26 @@ elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
     skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
 else
     skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
+fi
+
+if [[ "$HAS_GEMINI_API_KEY" != true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" "sandbox-function smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC does not serve raw model interactions" "gemini-sandbox-function" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION"
+elif [[ "${KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION:-}" != "1" ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" "set KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION=1 to run the real Gemini custom-function plus Kitaru sandbox smoke" "gemini-sandbox-function" "KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION"
+else
+    GEMINI_SANDBOX_FUNCTION_SMOKE_STACK="kitaru-gemini-sandbox-function-smoke-$$"
+    run_test "Create Gemini sandbox function smoke stack" \
+        timed 60 $UV_RUN kitaru stack create "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" \
+            --type local \
+            --sandbox local \
+            --no-activate
+    run_provider_test "gemini-sandbox-function" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION" \
+        "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" \
+        timed 180 env \
+            KITARU_STACK="$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" \
+            $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+                --mode sandbox-function \
+                --prompt "Call the sandbox_python_version function, then answer in one short sentence."
 fi
 
 if [[ "$HAS_GEMINI" != true ]]; then
@@ -965,6 +1022,70 @@ run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow
 run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
 run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
 run_test "Checkpoint streaming example" timed 60 $UV_RUN examples/features/checkpoint_streaming/checkpoint_streaming.py
+SANDBOX_SMOKE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-sandbox-smoke.XXXXXX")
+SANDBOX_SMOKE_CONFIG="$SANDBOX_SMOKE_TMP/config"
+SANDBOX_SMOKE_REPO="$SANDBOX_SMOKE_TMP/repo"
+SANDBOX_SMOKE_STACK="kitaru-smoke-sandbox-$$"
+mkdir -p "$SANDBOX_SMOKE_CONFIG" "$SANDBOX_SMOKE_REPO/.kitaru"
+printf '{}\n' > "$SANDBOX_SMOKE_REPO/.kitaru/config.yaml"
+# Keep this example on an isolated local ZenML config. The smoke script is
+# connected to a local server above, and that server may not have the local
+# sandbox flavor registered. The isolated config mirrors the deterministic
+# pytest path and guarantees later smoke checks keep using the main active stack.
+run_test "Create sandbox example stack" \
+    timed 60 env \
+        -u ZENML_SERVER \
+        -u ZENML_ACTIVE_PROJECT_ID \
+        -u ZENML_ACTIVE_STACK_ID \
+        -u ZENML_LOCAL_STORES_PATH \
+        -u KITARU_STACK \
+        STACK_NAME="$SANDBOX_SMOKE_STACK" \
+        ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
+        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_ANALYTICS_OPT_IN=false \
+        $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
+run_test "Active stack sandbox command" \
+    timed 60 env \
+        -u ZENML_SERVER \
+        -u ZENML_ACTIVE_PROJECT_ID \
+        -u ZENML_ACTIVE_STACK_ID \
+        -u ZENML_LOCAL_STORES_PATH \
+        -u KITARU_STACK \
+        ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
+        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_ANALYTICS_OPT_IN=false \
+        $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
+if [[ "$HAS_OPENAI" == true ]]; then
+    LANGGRAPH_SANDBOX_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-langgraph-sandbox-smoke.XXXXXX")
+    LANGGRAPH_SANDBOX_SMOKE_STACK="kitaru-langgraph-sandbox-smoke-$$"
+    run_test "Create LangGraph sandbox example stack" \
+        timed 60 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            -u KITARU_STACK \
+            STACK_NAME="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
+            ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" \
+        timed 180 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            KITARU_STACK="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
+            LANGGRAPH_SANDBOX_AGENT_MODEL="${LANGGRAPH_SANDBOX_AGENT_MODEL:-gpt-5-nano}" \
+            ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
+else
+    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
+fi
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
 run_test "Wait/resume example import contract" \
     $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'

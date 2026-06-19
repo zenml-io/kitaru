@@ -3,7 +3,12 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from . import _tokens
 from ._serialization import to_json_safe
+
+CALL_ID_TYPE_FRAGMENTS = _tokens.CALL_ID_TYPE_FRAGMENTS
+normalize_token = _tokens.normalize_token
+normalized_token_contains_any = _tokens.normalized_token_contains_any
 
 _STREAM_RECONSTRUCTION_POLICY = "stream_accumulator_v1"
 
@@ -35,7 +40,6 @@ TEXT_DELTA_TYPES = frozenset({"text", "output_text", "text_delta"})
 ARGUMENT_DELTA_TYPES = frozenset({"arguments_delta", "input_json_delta"})
 THOUGHT_DELTA_TYPES = frozenset({"thought_summary", "thought_signature", "thinking"})
 MEDIA_DELTA_TYPES = frozenset({"image", "audio", "document", "video"})
-CALL_ID_TYPE_FRAGMENTS = ("function_call", "tool_call")
 SAFE_OUTPUT_ROLES = frozenset({"assistant", "model"})
 SAFE_OUTPUT_STEP_TYPES = frozenset(
     {
@@ -63,6 +67,7 @@ UNSAFE_TYPE_FRAGMENTS = (
     "web",
     "mcp",
 )
+USAGE_FIELD_NAMES = ("usage", "usage_metadata", "usageMetadata")
 
 
 def extract(value: Any, key: str) -> Any:
@@ -114,6 +119,15 @@ def dict_or_none(value: Any) -> dict[str, Any] | None:
         }
     safe = to_json_safe(value)
     return safe if isinstance(safe, dict) else {"value": safe}
+
+
+def usage_from(value: Any) -> dict[str, Any] | None:
+    """Return usage metadata from known Gemini SDK field aliases."""
+    for field_name in USAGE_FIELD_NAMES:
+        usage = dict_or_none(extract(value, field_name))
+        if usage is not None:
+            return usage
+    return None
 
 
 def event_type(event: Any) -> str:
@@ -185,6 +199,15 @@ def delta_text(delta: Any, *, include_arguments_delta: bool = False) -> str | No
     return None
 
 
+def function_name_from_step(value: Any) -> str | None:
+    """Return a Gemini function/tool name from known provider field names."""
+    for field_name in ("name", "tool_name", "function_name"):
+        function_name = coerce_string(extract(value, field_name))
+        if function_name is not None:
+            return function_name
+    return None
+
+
 def safe_event_identity(event: Any) -> dict[str, Any]:
     """Return safe id metadata for a stream event."""
     fields: dict[str, Any] = {}
@@ -218,14 +241,6 @@ def int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def normalize_token(value: str | None) -> str | None:
-    """Normalize provider event/type tokens for comparisons."""
-    if value is None:
-        return None
-    normalized = "_".join(value.strip().lower().replace("-", "_").split())
-    return normalized or None
 
 
 def environment_id(interaction: Any) -> str | None:

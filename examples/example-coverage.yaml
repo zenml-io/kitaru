@@ -25,12 +25,12 @@ schema:
     deterministic_pytest: Provider-free pytest coverage, usually with fakes.
     local_smoke: Local smoke-test coverage; commands are documented, not run by the
       audit.
-    live_provider: Real provider coverage metadata for release/operator checks.
-      weekly_workflow, local_release_smoke, and manual_command_available distinguish
-      scheduled automation from local/manual command availability.
-    waiver: Required for missing, planned, and manual_only coverage statuses;
-      reason explains why automation is incomplete, and reviewer_action tells
-      a release reviewer what to do if that example changed.
+    live_provider: Real provider coverage metadata for release/operator checks. weekly_workflow,
+      local_release_smoke, and manual_command_available distinguish scheduled automation
+      from local/manual command availability.
+    waiver: Required for missing, planned, and manual_only coverage statuses; reason
+      explains why automation is incomplete, and reviewer_action tells a release reviewer
+      what to do if that example changed.
     release_policy: Whether changes in this area should prompt release evidence.
 explicit_exclusions: []
 examples:
@@ -78,11 +78,32 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_checkpoint_streaming_example.py
-        notes: runs the example entrypoint and checks durable execution plus live-event payloads
+        notes: runs the example entrypoint and checks durable execution plus live-event
+          payloads
       local_smoke:
         status: covered
         command: uv run python examples/features/checkpoint_streaming/checkpoint_streaming.py
         requires_server: true
+        timeout_seconds: 60
+      live_provider:
+        status: not_applicable
+        required: false
+    release_policy:
+      required_when_changed: true
+  - id: active-stack-sandbox-command
+    path: examples/features/sandbox/active_stack_sandbox_command.py
+    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    owner_area: active stack sandbox command flow
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_sandbox_feature_example.py
+        notes: creates a local Kitaru stack with a local sandbox and calls the public
+          flow-backed example entrypoint
+      local_smoke:
+        status: covered
+        command: uv run python examples/features/sandbox/active_stack_sandbox_command.py
+        requires_server: false
         timeout_seconds: 60
       live_provider:
         status: not_applicable
@@ -273,6 +294,36 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: pydantic-ai-sandbox-toolset
+    path: examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    owner_area: PydanticAI active-stack sandbox toolset and per-tool checkpoints
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_pydantic_ai_sandbox_toolset.py
+        notes: validates toolset schema, constructor validation, example wiring, per-tool checkpoint config, and cache-disabled submit helper without provider calls
+      local_smoke:
+        status: smoke_only
+        command: uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        notes: smoke-test.sh runs this only when the active stack has exactly one sandbox component; otherwise it records an explicit prerequisite skip; in release mode, use --required-provider-area openai to make that skip fail the run
+      live_provider:
+        status: smoke_only
+        provider: openai
+        command: uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+        notes: also requires the active stack to have exactly one sandbox component
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: openai-agents-adapter
     path: examples/integrations/openai_agents_agent/openai_agents_adapter.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
@@ -297,6 +348,39 @@ examples:
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
         cost_class: low
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: openai-agents-sandbox-tool
+    path: examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/openai-agents.md
+    owner_area: OpenAI Agents SDK active-stack sandbox command tool
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_openai_agents_calls_strategy.py
+        notes: covers the sandbox_command_tool factory, model-visible JSON, timeout wiring, input validation, and tool-call checkpoint cache identity with fakes
+      local_smoke:
+        status: smoke_only
+        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        notes: Requires an active Kitaru stack with exactly one sandbox component.
+      live_provider:
+        status: smoke_only
+        provider: openai
+        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+        notes: Requires an active Kitaru stack with exactly one sandbox component.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -356,6 +440,41 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: claude-agent-sdk-sandbox-tool
+    path: examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+    public_docs:
+      - examples/integrations/claude_agent_sdk_agent/README.md
+      - docs/book/adapters/claude-agent-sdk.md
+    owner_area: Claude Agent SDK sandbox MCP helper and active-stack sandbox command example
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_claude_agent_sdk_sandbox_tool.py
+        notes: fake Claude SDK coverage for MCP registration, argument validation, error shaping, metadata/cache identity, and example defaults
+      local_smoke:
+        status: help_only
+        command: uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+          --help
+        requires_server: false
+        timeout_seconds: 30
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: The live check requires Anthropic/Claude credentials and an active Kitaru stack with exactly one sandbox component, so it is not safe as unattended release automation.
+          reviewer_action: If this example changes, select or create a sandbox-enabled stack, set ANTHROPIC_API_KEY or a supported Claude SDK provider mode, run the documented command manually, or record a release waiver.
+        provider: anthropic
+        command: uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+          --command "python --version" --max-turns 3
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [ANTHROPIC_API_KEY]
+        timeout_seconds: 180
+        cost_class: low
+        sandbox_policy: requires active stack with exactly one sandbox component; local sandbox is not a security boundary
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: claude-agent-sdk-streaming
     path: examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
@@ -389,7 +508,10 @@ examples:
       waiver_allowed: true
   - id: gemini-interactions-adapter
     path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/gemini-interactions.md
     owner_area: Gemini Interactions adapter and Antigravity polling
     coverage:
       deterministic_pytest:
@@ -399,7 +521,7 @@ examples:
         status: covered
         command: uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
           --dry-run --stream
-        requires_server: true
+        requires_server: false
         timeout_seconds: 60
       live_provider:
         status: opt_in_extended
@@ -410,16 +532,70 @@ examples:
         weekly_workflow: false
         local_release_smoke: true
         manual_command_available: true
-        required_env: [GEMINI_API_KEY, KITARU_SMOKE_GEMINI_ANTIGRAVITY]
+        required_env:
+          - GEMINI_API_KEY
+          - GOOGLE_API_KEY
+          - GOOGLE_GENAI_USE_VERTEXAI
+          - GOOGLE_CLOUD_PROJECT
+          - GOOGLE_CLOUD_LOCATION
+          - KITARU_SMOKE_GEMINI_ANTIGRAVITY
         opt_in_env: [KITARU_SMOKE_GEMINI_ANTIGRAVITY]
         timeout_seconds: 360
         cost_class: medium
+        notes: requires the opt-in env plus either GEMINI_API_KEY/GOOGLE_API_KEY
+          for Gemini Developer API or Vertex ADC config with GOOGLE_GENAI_USE_VERTEXAI,
+          GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION=global
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: gemini-sandbox-function
+    path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+    public_docs:
+      - examples/integrations/gemini_interactions_agent/README.md
+      - docs/book/adapters/gemini-interactions.md
+      - docs/book/stacks/README.md
+    owner_area: Gemini caller-owned custom function execution through Kitaru sandbox
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_gemini_sandbox_functions.py
+        notes: tests/test_gemini_interactions_example.py also covers the example dry-run,
+          request construction, Vertex rejection, and successful two-turn showcase
+          contract
+      local_smoke:
+        status: covered
+        command: uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --dry-run --mode sandbox-function
+        requires_server: false
+        timeout_seconds: 60
+      live_provider:
+        status: opt_in_extended
+        provider: gemini
+        command: KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION=1 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --mode sandbox-function
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env:
+          - GEMINI_API_KEY
+          - GOOGLE_API_KEY
+          - KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION
+        opt_in_env: [KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION]
+        timeout_seconds: 180
+        cost_class: low
+        notes: requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY;
+          Vertex ADC is not supported because this mode uses raw model interactions.
+          The release smoke script creates a temporary local sandbox stack and
+          points KITARU_STACK at it for the smoke command.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
   - id: langgraph-adapter
     path: examples/integrations/langgraph_agent/langgraph_adapter.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/langgraph.md
     owner_area: LangGraph local graph-call and OpenAI-backed calls strategy
     coverage:
       deterministic_pytest:
@@ -441,6 +617,39 @@ examples:
         manual_command_available: true
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
+        cost_class: low
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: langgraph-sandbox-strategy
+    path: examples/integrations/langgraph_agent/langgraph_adapter.py
+    public_docs:
+      - examples/integrations/langgraph_agent/README.md
+      - docs/book/adapters/langgraph.md
+    owner_area: LangGraph OpenAI-backed active-stack sandbox command strategy
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_langgraph_sandbox_example.py
+        notes: tests example middleware; tests/test_langgraph_sandbox_tool.py covers
+          the tool factory, and tests/test_langgraph_calls_strategy.py covers the
+          true tool checkpoint path
+      local_smoke:
+        status: import_contract
+        command: uv run python -c 'from kitaru.adapters.langgraph import create_sandbox_command_tool;
+          assert create_sandbox_command_tool().name == "run_sandbox_command"'
+        requires_server: false
+        timeout_seconds: 30
+      live_provider:
+        status: smoke_only
+        provider: openai
+        command: uv run python examples/integrations/langgraph_agent/langgraph_adapter.py
+          --strategy sandbox
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 180
         cost_class: low
     release_policy:
       required_when_changed: true
@@ -502,7 +711,8 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_coding_agent_example.py
-        notes: imports model/entrypoint contracts without running the provider agent loop
+        notes: imports model/entrypoint contracts without running the provider agent
+          loop
       local_smoke:
         status: import_contract
         command: uv run python -c 'import examples.end_to_end.coding_agent.models'
@@ -511,8 +721,10 @@ examples:
       live_provider:
         status: manual_only
         waiver:
-          reason: The coding agent is an interactive OpenAI loop with human approval, so it is not safe as an unattended release check.
-          reviewer_action: If this example changes, run the documented command manually with OPENAI_API_KEY or record a release waiver.
+          reason: The coding agent is an interactive OpenAI loop with human approval,
+            so it is not safe as an unattended release check.
+          reviewer_action: If this example changes, run the documented command manually
+            with OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/coding_agent && uv run python agent.py "Your
           task"
@@ -540,13 +752,17 @@ examples:
         command:
         requires_server: false
         waiver:
-          reason: No non-interactive local smoke command exists for the full news scout flow yet.
-          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
+          reason: No non-interactive local smoke command exists for the full news
+            scout flow yet.
+          reviewer_action: If this example changes, inspect the deterministic test
+            and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
         waiver:
-          reason: The news scout makes real provider and external-news calls, so it stays manual until a bounded release command exists.
-          reviewer_action: If this example changes, run the manual command with ANTHROPIC_API_KEY or record a release waiver.
+          reason: The news scout makes real provider and external-news calls, so it
+            stays manual until a bounded release command exists.
+          reviewer_action: If this example changes, run the manual command with ANTHROPIC_API_KEY
+            or record a release waiver.
         provider: anthropic
         command: cd examples/end_to_end/news_scout && uv run python scout.py
         command_paths: [examples/end_to_end/news_scout/scout.py]
@@ -613,8 +829,10 @@ examples:
       local_smoke:
         status: planned
         waiver:
-          reason: The current command is only a help-level placeholder until a safe local smoke path is added.
-          reviewer_action: If this example changes, run the deterministic compliance tests and decide whether a release waiver is needed.
+          reason: The current command is only a help-level placeholder until a safe
+            local smoke path is added.
+          reviewer_action: If this example changes, run the deterministic compliance
+            tests and decide whether a release waiver is needed.
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
           --help
         requires_server: false
@@ -622,8 +840,10 @@ examples:
       live_provider:
         status: manual_only
         waiver:
-          reason: The full compliance review is a multi-stage Anthropic run and is too costly for unattended release smoke today.
-          reviewer_action: If this example changes, run the manual stage command with ANTHROPIC_API_KEY or record a release waiver.
+          reason: The full compliance review is a multi-stage Anthropic run and is
+            too costly for unattended release smoke today.
+          reviewer_action: If this example changes, run the manual stage command with
+            ANTHROPIC_API_KEY or record a release waiver.
         provider: anthropic
         command: uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py
         weekly_workflow: false
@@ -651,16 +871,21 @@ examples:
         command:
         requires_server: false
         waiver:
-          reason: No non-interactive local smoke command exists for the staged agent harness platform yet.
-          reviewer_action: If this example changes, inspect the deterministic test and decide whether to add a smoke command or record a release waiver.
+          reason: No non-interactive local smoke command exists for the staged agent
+            harness platform yet.
+          reviewer_action: If this example changes, inspect the deterministic test
+            and decide whether to add a smoke command or record a release waiver.
       live_provider:
         status: manual_only
         waiver:
-          reason: The staged platform starter kit can make real OpenAI calls and is still reviewed manually.
-          reviewer_action: If this example changes, run the manual stage command with OPENAI_API_KEY or record a release waiver.
+          reason: The staged platform starter kit can make real OpenAI calls and is
+            still reviewed manually.
+          reviewer_action: If this example changes, run the manual stage command with
+            OPENAI_API_KEY or record a release waiver.
         provider: openai
         command: cd examples/end_to_end/agent_harness_platform && uv run python stage_1_basic_agent.py
-        command_paths: [examples/end_to_end/agent_harness_platform/stage_1_basic_agent.py]
+        command_paths:
+          - examples/end_to_end/agent_harness_platform/stage_1_basic_agent.py
         weekly_workflow: false
         local_release_smoke: false
         manual_command_available: true
