@@ -117,15 +117,21 @@ def run_sandbox_command(
         cleanup_succeeded, cleanup_error = _cleanup_after_failed_command(
             session, normalized_cleanup
         )
+        redacted_error = _redact_provider_message(
+            exc,
+            env=normalized_env,
+            command=normalized_command,
+        )
         error_message = (
             "Sandbox command execution failed on active stack "
-            f"'{stack_name}': {_redact_provider_message(exc, env=normalized_env)}"
+            f"'{stack_name}': {redacted_error}"
         )
         if not cleanup_succeeded:
             error_message = _append_cleanup_warning(
                 error_message,
                 cleanup_error,
                 env=normalized_env,
+                command=normalized_command,
             )
         raise KitaruBackendError(error_message) from None
 
@@ -136,6 +142,7 @@ def run_sandbox_command(
         session,
         normalized_cleanup,
         env=normalized_env,
+        command=normalized_command,
     )
     if not cleanup_succeeded and cleanup_error is None:
         cleanup_error = "Sandbox cleanup did not complete."
@@ -350,11 +357,41 @@ def _redact_provider_message(
     message: object,
     *,
     env: Mapping[str, str] | None,
+    command: str | Sequence[str] | None = None,
 ) -> str:
     text = str(message)
+    text = _redact_command_text(text, command=command)
     text = _redact_env_values(text, env=env)
     text = _redact_bearer_tokens(text)
     return _redact_secret_key_values(text)
+
+
+def _redact_command_text(
+    text: str,
+    *,
+    command: str | Sequence[str] | None,
+) -> str:
+    if command is None:
+        return text
+
+    if isinstance(command, str):
+        candidates = [command, repr(command)]
+    else:
+        command_items = list(command)
+        candidates = [str(command_items), repr(command_items), " ".join(command_items)]
+        candidates.extend(
+            item for item in command_items if _should_redact_command_item(item)
+        )
+
+    redacted = text
+    for candidate in sorted(set(candidates), key=len, reverse=True):
+        if candidate:
+            redacted = redacted.replace(candidate, _REDACTION_MARKER)
+    return redacted
+
+
+def _should_redact_command_item(item: str) -> bool:
+    return len(item) >= 8 or any(char in item for char in " '\"=(){}[]")
 
 
 def _redact_env_values(text: str, *, env: Mapping[str, str] | None) -> str:
@@ -411,13 +448,17 @@ def _append_cleanup_warning(
     cleanup_error: str | None,
     *,
     env: Mapping[str, str] | None,
+    command: str | Sequence[str] | None,
 ) -> str:
     warning = (
         "Cleanup warning: sandbox session cleanup after the failed command "
         "did not complete."
     )
     if cleanup_error:
-        warning = f"{warning} {_redact_provider_message(cleanup_error, env=env)}"
+        warning = (
+            f"{warning} "
+            f"{_redact_provider_message(cleanup_error, env=env, command=command)}"
+        )
     return f"{message}. {warning}"
 
 
@@ -460,6 +501,7 @@ def _cleanup_after_success(
     cleanup: SandboxCleanupPolicy,
     *,
     env: Mapping[str, str] | None,
+    command: str | Sequence[str] | None,
 ) -> tuple[bool, str | None]:
     if cleanup == CLEANUP_CLOSE:
         try:
@@ -467,7 +509,7 @@ def _cleanup_after_success(
         except Exception as exc:
             raise KitaruBackendError(
                 "Sandbox command completed, but closing the sandbox session failed: "
-                f"{_redact_provider_message(exc, env=env)}"
+                f"{_redact_provider_message(exc, env=env, command=command)}"
             ) from None
         return True, None
 
@@ -480,11 +522,15 @@ def _cleanup_after_success(
             session.close()
         raise KitaruBackendError(
             "Sandbox command completed, but destroying the sandbox session failed: "
-            f"{_redact_provider_message(exc, env=env)}"
+            f"{_redact_provider_message(exc, env=env, command=command)}"
         ) from None
 
     if cleanup_error is not None:
-        cleanup_error = _redact_provider_message(cleanup_error, env=env)
+        cleanup_error = _redact_provider_message(
+            cleanup_error,
+            env=env,
+            command=command,
+        )
     return cleanup_succeeded, cleanup_error
 
 

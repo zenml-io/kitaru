@@ -82,7 +82,9 @@ class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
         handler: Callable[[Any], Any],
     ) -> Any:
         if _message_history_has_tool_result(getattr(request, "messages", [])):
-            return handler(request)
+            response = handler(request)
+            _reject_followup_sandbox_tool_calls(response)
+            return response
 
         forced_request = request.override(
             tool_choice={
@@ -134,6 +136,25 @@ def _force_sandbox_tool_arguments(response: Any) -> None:
             f"{SANDBOX_COMMAND_TOOL_NAME} arguments before LangChain tool "
             "execution."
         ) from exc
+
+
+def _reject_followup_sandbox_tool_calls(response: Any) -> None:
+    """Reject a second sandbox command request after the first tool result."""
+    matching_tool_calls: list[Any] = []
+    for message in _response_messages(response):
+        matching_tool_calls.extend(
+            tool_call
+            for tool_call in _message_tool_calls(message)
+            if _tool_call_name(tool_call) == SANDBOX_COMMAND_TOOL_NAME
+        )
+
+    if matching_tool_calls:
+        raise RuntimeError(
+            f"Sandbox demo expected no additional {SANDBOX_COMMAND_TOOL_NAME} "
+            "tool calls after the first sandbox tool result, got "
+            f"{len(matching_tool_calls)}. The demo stops before running a "
+            "second sandbox command."
+        )
 
 
 def _response_messages(response: Any) -> list[Any]:

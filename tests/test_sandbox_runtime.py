@@ -468,6 +468,52 @@ def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> Non
     assert session.destroy_calls == 1
 
 
+def test_run_sandbox_command_redacts_string_command_from_provider_errors() -> None:
+    command = "python -c \"print('leaky-command-string')\""
+    session = FakeSession(
+        exec_error=RuntimeError(f"provider failed while running {command}")
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(command, client_factory=_client_factory(client))
+
+    message = _assert_secret_not_in_public_exception(exc_info.value, command)
+    assert "<redacted>" in message
+    assert session.exec_calls == [{"command": command, "cwd": None, "env": None}]
+
+
+def test_run_sandbox_command_redacts_list_command_from_cleanup_errors() -> None:
+    command = ["python", "-c", "print('leaky-list-command')"]
+    command_text = str(command)
+    command_item = "print('leaky-list-command')"
+    session = FakeSession(
+        exec_error=RuntimeError("exec failed"),
+        destroy_error=RuntimeError(
+            f"cleanup failed after {command_text}; binary=python flag=-c "
+            f"script={command_item}"
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(command, client_factory=_client_factory(client))
+
+    message = _assert_secret_not_in_public_exception(
+        exc_info.value,
+        command_text,
+        command_item,
+    )
+    assert "<redacted>" in message
+    assert "Cleanup warning" in message
+    assert "binary=python" in message
+    assert "flag=-c" in message
+    assert session.exec_calls == [{"command": command, "cwd": None, "env": None}]
+    assert session.destroy_calls == 1
+
+
 def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() -> None:
     secret_value = "close-token-from-tool-env"
     session = FakeSession(close_error=RuntimeError(f"close failed with {secret_value}"))

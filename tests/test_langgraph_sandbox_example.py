@@ -205,13 +205,51 @@ def test_force_sandbox_tool_choice_does_not_force_after_tool_result(
         ]
     )
     handled_requests: list[Any] = []
+    response = SimpleNamespace(result=[SimpleNamespace(content="done", tool_calls=[])])
 
     def handler(model_request: Any) -> Any:
         handled_requests.append(model_request)
-        return model_request
+        return response
 
     result = middleware.wrap_model_call(request, handler)
 
-    assert result is request
+    assert result is response
+    assert handled_requests == [request]
+    assert request.overrides == []
+
+
+def test_force_sandbox_tool_choice_rejects_sandbox_tool_after_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+    middleware = module.ForceSandboxToolChoiceMiddleware()
+    request = _FakeModelRequest(
+        [
+            {"role": "user", "content": "run the command"},
+            SimpleNamespace(type="tool", content='{"stdout": "hello\\n"}'),
+        ]
+    )
+    handled_requests: list[Any] = []
+    response = SimpleNamespace(
+        result=[
+            SimpleNamespace(
+                tool_calls=[
+                    {
+                        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+                        "args": {"command": "second-command"},
+                        "id": "sandbox-call-2",
+                    }
+                ]
+            )
+        ]
+    )
+
+    def handler(model_request: Any) -> Any:
+        handled_requests.append(model_request)
+        return response
+
+    with pytest.raises(RuntimeError, match="expected no additional"):
+        middleware.wrap_model_call(request, handler)
+
     assert handled_requests == [request]
     assert request.overrides == []

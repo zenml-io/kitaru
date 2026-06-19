@@ -1014,7 +1014,7 @@ run_test "Create LangGraph sandbox example stack" \
         ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
         ZENML_REPOSITORY_PATH="$PWD" \
         ZENML_ANALYTICS_OPT_IN=false \
-        $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"], activate=False)'
+        $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
 if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" \
