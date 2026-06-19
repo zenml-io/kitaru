@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 import kitaru
+from kitaru._config._sandbox import _redact_sensitive_text
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 
 DEFAULT_SANDBOX_COMMAND_TOOL_NAME = "run_sandbox_command"
@@ -21,12 +22,12 @@ _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_VERSION = 1
 DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION = """\
 Run one shell command in the active Kitaru stack sandbox. The tool returns JSON
 with stdout, stderr, exit code, output truncation flags, and sandbox/session
-metadata. The returned JSON redacts the command text instead of echoing it
-back to the model. A non-zero exit code is returned in that JSON and does not
-mean the tool itself failed. Use this for shell-shaped inspection, tests, scripts, or
-build commands. Do not use it for Deep Agents filesystem operations; this is
-not a Deep Agents backend. Avoid commands that intentionally exfiltrate secrets
-or depend on host-local files outside the sandbox.
+metadata. The returned JSON redacts the command text and supplied static env
+values instead of echoing them back to the model. A non-zero exit code is returned
+in that JSON and does not mean the tool itself failed. Use this for shell-shaped
+inspection, tests, scripts, or build commands. Do not use it for Deep Agents
+filesystem operations; this is not a Deep Agents backend. Avoid commands that
+intentionally exfiltrate secrets or depend on host-local files outside the sandbox.
 """
 
 
@@ -88,6 +89,11 @@ def create_sandbox_command_tool(
             cleanup=cleanup,
         )
         payload = result.model_dump(mode="json")
+        for field in ("stdout", "stderr", "cleanup_error"):
+            if isinstance(payload.get(field), str):
+                payload[field], _ = _redact_sensitive_text(
+                    payload[field], env=copied_env
+                )
         if payload.get("timed_out") is False:
             payload.pop("timed_out")
         payload["command"] = SANDBOX_COMMAND_TOOL_REDACTION_MARKER

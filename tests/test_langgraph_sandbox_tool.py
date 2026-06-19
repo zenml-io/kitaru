@@ -31,6 +31,8 @@ def _sandbox_result(
     stderr: str = "",
     exit_code: int = 0,
     cleanup: Literal["destroy", "close"] = "destroy",
+    cleanup_succeeded: bool = True,
+    cleanup_error: str | None = None,
 ) -> SandboxCommandResult:
     return SandboxCommandResult(
         command=command,
@@ -46,8 +48,8 @@ def _sandbox_result(
         sandbox_name="local",
         session_id="session-1",
         cleanup=cleanup,
-        cleanup_succeeded=True,
-        cleanup_error=None,
+        cleanup_succeeded=cleanup_succeeded,
+        cleanup_error=cleanup_error,
     )
 
 
@@ -161,6 +163,44 @@ def test_tool_forwards_command_options_and_returns_full_result_json(
         "cleanup_succeeded": True,
         "cleanup_error": None,
     }
+
+
+def test_tool_redacts_supplied_env_values_from_result_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_sandbox_command(
+        command: str,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        max_chars: int,
+        cleanup: str,
+    ) -> SandboxCommandResult:
+        return _sandbox_result(
+            command=command,
+            cwd=cwd,
+            stdout="API_TOKEN=SECRET-STATIC\n",
+            stderr="failed with SECRET-STATIC\n",
+            cleanup=cast(Literal["destroy", "close"], cleanup),
+            cleanup_succeeded=False,
+            cleanup_error="cleanup saw SECRET-STATIC",
+        )
+
+    monkeypatch.setattr(
+        _sandbox_tool.kitaru,
+        "run_sandbox_command",
+        fake_run_sandbox_command,
+    )
+
+    tool = create_sandbox_command_tool(env={"API_TOKEN": "SECRET-STATIC"})
+    raw_payload = tool.invoke({"command": "env && echo $API_TOKEN"})
+    payload = json.loads(raw_payload)
+
+    assert "SECRET-STATIC" not in raw_payload
+    assert payload["command"] == "[REDACTED]"
+    assert payload["stdout"] == "API_TOKEN=[REDACTED]\n"
+    assert payload["stderr"] == "failed with [REDACTED]\n"
+    assert payload["cleanup_error"] == "cleanup saw [REDACTED]"
 
 
 def test_factory_private_cache_identity_copies_hidden_execution_settings() -> None:
