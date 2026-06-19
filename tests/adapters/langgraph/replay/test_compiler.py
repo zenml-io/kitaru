@@ -29,6 +29,19 @@ def test_compile_returns_nodes_in_edge_order():
     assert topo.nodes == ["a", "b", "c"]
     assert set(topo.callables) == {"a", "b", "c"}
     assert callable(topo.callables["a"])
+    assert topo.fanout_node is None
+
+
+def test_multi_start_graph_is_rejected():
+    b = StateGraph(_S)
+    b.add_node("a", lambda s: {"x": 1})
+    b.add_node("b", lambda s: {"x": 2})
+    b.add_edge(START, "a")
+    b.add_edge(START, "b")
+    b.add_edge("a", END)
+    b.add_edge("b", END)
+    with pytest.raises(KitaruUsageError):
+        compile_topology(b.compile())
 
 
 def test_branching_graph_is_rejected():

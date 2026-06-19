@@ -106,10 +106,6 @@ def _node_callable(graph: object, name: str) -> Callable:
     if runnable is not None and callable(runnable):
         return runnable
 
-    # Last resort: the spec itself if it happens to be callable
-    if callable(spec):
-        return spec
-
     raise KitaruUsageError(
         f"Node {name!r} has no recoverable callable. "
         f"PregelNode attrs: {[a for a in dir(spec) if not a.startswith('__')]}"
