@@ -55,6 +55,17 @@ class StaticTextModel(Model):
         raise NotImplementedError
 
 
+class PublicStateTextModel(Model):
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
+        return _text_response(self.text, response_id="resp_public_state")
+
+    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
 def _text_response(text: str, *, response_id: str) -> ModelResponse:
     return ModelResponse(
         output=[
@@ -837,6 +848,45 @@ def test_runner_call_cache_identity_varies_by_custom_model_public_state() -> Non
     assert after_call_count_mutation_key == concise_key
     assert model_identity["python_type"].endswith(".StaticTextModel")
     assert model_identity["cache_identity"] == {"text": "short answer"}
+    assert "value" not in model_identity
+
+
+def test_model_cache_identity_uses_public_state_without_hook() -> None:
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    concise_model = PublicStateTextModel("short answer")
+    detailed_model = PublicStateTextModel("detailed answer")
+    concise_runner = KitaruRunner(
+        Agent(name="custom-model-public-state-cache-agent", model=concise_model),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+    detailed_runner = KitaruRunner(
+        Agent(name="custom-model-public-state-cache-agent", model=detailed_model),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    concise_key = concise_runner._runner_call_cache_key(
+        request,
+        agent=concise_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    detailed_key = detailed_runner._runner_call_cache_key(
+        request,
+        agent=detailed_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    model_identity = concise_runner._agent_cache_identity(concise_runner.agent)["model"]
+
+    assert concise_key != detailed_key
+    assert model_identity["python_type"].endswith(".PublicStateTextModel")
+    assert model_identity["value"]["python_type"].endswith(".PublicStateTextModel")
+    assert model_identity["public_state"] == {"text": "short answer"}
 
 
 def test_runner_call_cache_identity_varies_by_agent_model_settings() -> None:

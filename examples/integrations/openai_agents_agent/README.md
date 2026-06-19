@@ -9,11 +9,16 @@ checkpoints.
 ## Setup
 
 ```bash
-cd examples/integrations/openai_agents_agent
+# From the repository root:
 uv sync --extra local --extra openai-agents
 uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='sk-...'
+cd examples/integrations/openai_agents_agent
 ```
+
+`uv run kitaru init` creates the Kitaru project marker. `uv run kitaru stack
+create dev` creates and activates a local stack with a local sandbox.
 
 Default model is `gpt-5-nano`.
 
@@ -45,7 +50,8 @@ that tool, Kitaru runs the command through the sandbox attached to the active
 stack and returns compact JSON to the model. The prompt tells the model to check
 `exit_code` before trusting `stdout`.
 
-`uv run kitaru init` creates a local stack with a local sandbox for this example.
+For this local setup, the active `dev` stack has one local sandbox. If you switch
+to another stack, that active stack must have exactly one sandbox component.
 Remote stacks need an explicit sandbox component. If the active stack has no
 sandbox, or has more than one sandbox, Kitaru raises an error instead of guessing
 where to run the command.

@@ -1,7 +1,6 @@
 """Public runner wrapper for the OpenAI Agents SDK adapter foundation."""
 
 import asyncio
-import json
 import weakref
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
@@ -245,19 +244,9 @@ def _code_sequence_cache_identity(
         "collection_type": "tuple",
         "item_count": len(items),
         "included_items": items[:_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS],
-        "sha256": _cache_identity_digest(items),
+        "sha256": checkpoint_cache_key(items),
         "serialization_error": "max_items_exceeded",
     }
-
-
-def _cache_identity_digest(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode()
-    return sha256(payload).hexdigest()
 
 
 def _callable_cache_identity(
@@ -382,7 +371,7 @@ def _callable_referenced_globals_cache_identity(
             "collection_type": "dict",
             "item_count": len(names),
             "included_keys": names[:_MAX_BEHAVIOR_CACHE_IDENTITY_ITEMS],
-            "sha256": _cache_identity_digest(globals_identity),
+            "sha256": checkpoint_cache_key(globals_identity),
             "serialization_error": "max_items_exceeded",
         }
     return globals_identity
@@ -1303,15 +1292,16 @@ class KitaruRunner:
         identity: dict[str, Any] = {
             "name": getattr(model, "model_name", None),
             "python_type": self._python_type(model_type),
-            "value": stable_cache_identity(model),
         }
         explicit_identity = _explicit_model_cache_identity(model)
         if explicit_identity is not None:
             identity["cache_identity"] = stable_cache_identity(explicit_identity)
-        else:
-            public_state = self._public_model_state_cache_identity(model)
-            if public_state is not None:
-                identity["public_state"] = public_state
+            return identity
+
+        identity["value"] = stable_cache_identity(model)
+        public_state = self._public_model_state_cache_identity(model)
+        if public_state is not None:
+            identity["public_state"] = public_state
         return identity
 
     @staticmethod
