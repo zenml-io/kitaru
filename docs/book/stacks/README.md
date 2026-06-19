@@ -222,7 +222,7 @@ result = kitaru.run_sandbox_command("python --version")
 print(result.stdout)
 ```
 
-For a runnable version of this pattern inside a tracked Kitaru flow, see the [active stack sandbox command example](../../../examples/features/sandbox/README.md).
+For a runnable version of this pattern inside a tracked Kitaru flow, see `examples/features/sandbox/` in the repository.
 
 If the active stack has no sandbox, Kitaru raises an error and does not run the
 command. If the active stack has more than one sandbox, Kitaru also raises an
