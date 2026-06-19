@@ -317,23 +317,15 @@ def test_run_sandbox_command_reports_unsupported_destroy_and_closes() -> None:
 def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure() -> (
     None
 ):
-    secret_value = "destroy-token-from-tool-env"
-    session = FakeSession(
-        destroy_error=RuntimeError(f"provider exploded with {secret_value}")
-    )
+    session = FakeSession(destroy_error=RuntimeError("provider exploded"))
     sandbox = FakeSandbox(session)
     client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
 
     with pytest.raises(
         KitaruBackendError, match="destroying the sandbox session failed"
-    ) as exc_info:
-        run_sandbox_command(
-            "echo hi",
-            env={"API_TOKEN": secret_value},
-            client_factory=_client_factory(client),
-        )
+    ):
+        run_sandbox_command("echo hi", client_factory=_client_factory(client))
 
-    _ = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
     assert session.destroy_calls == 1
     assert session.close_calls == 1
 
@@ -392,6 +384,90 @@ def test_run_sandbox_command_maps_backend_failures(
     assert sandbox.session.destroy_calls == expected_destroy_calls
 
 
+@pytest.mark.parametrize(
+    ("session", "provider_error"),
+    [
+        (
+            FakeSession(
+                exec_error=RuntimeError("exec failed"),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "exec failed",
+        ),
+        (
+            FakeSession(
+                FakeProcess(collect_error=RuntimeError("collect failed")),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "collect failed",
+        ),
+    ],
+)
+def test_run_sandbox_command_reports_cleanup_warning_after_command_failure(
+    session: FakeSession,
+    provider_error: str,
+) -> None:
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command("echo hi", client_factory=_client_factory(client))
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert provider_error in message
+    assert "Cleanup warning" in message
+    assert "destroy failed" in message
+    assert session.destroy_calls == 1
+
+
+def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> None:
+    env = {"API_TOKEN": "env-secret-123"}
+    session = FakeSession(
+        exec_error=RuntimeError(
+            "exec failed with env-secret-123 password=provider-secret-456 "
+            "OPENAI_API_KEY=openai-secret-456 "
+            "AWS_SECRET_ACCESS_KEY=aws-secret-789 "
+            "GITHUB_TOKEN=github-secret-000 "
+            'MY_PASSWORD="password secret with spaces" '
+            "api_key='quoted,provider;secret' "
+            "Authorization: Basic basic-secret-111"
+        ),
+        destroy_error=RuntimeError(
+            "destroy failed with env-secret-123 access_key=cleanup-secret-000 "
+            'private_key="cleanup secret with spaces"'
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            ["printenv", "API_TOKEN"],
+            env=env,
+            client_factory=_client_factory(client),
+        )
+
+    assert exc_info.value.__cause__ is None
+    message = str(exc_info.value)
+    assert "<redacted>" in message
+    assert "env-secret-123" not in message
+    assert "provider-secret-456" not in message
+    assert "openai-secret-456" not in message
+    assert "aws-secret-789" not in message
+    assert "github-secret-000" not in message
+    assert "password secret with spaces" not in message
+    assert "basic-secret-111" not in message
+    assert "bearer-secret-789" not in message
+    assert "quoted,provider;secret" not in message
+    assert "cleanup-secret-000" not in message
+    assert "cleanup secret with spaces" not in message
+    assert session.exec_calls == [
+        {"command": ["printenv", "API_TOKEN"], "cwd": None, "env": env}
+    ]
+    assert session.destroy_calls == 1
+
+
 def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() -> None:
     secret_value = "close-token-from-tool-env"
     session = FakeSession(close_error=RuntimeError(f"close failed with {secret_value}"))
@@ -408,7 +484,8 @@ def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() ->
             client_factory=_client_factory(client),
         )
 
-    _ = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
+    message = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
+    assert message.endswith("close failed with <redacted>")
 
 
 def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
@@ -435,7 +512,7 @@ def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
         secret_value,
         public_value,
     )
-    assert message.endswith("provider rejected token [REDACTED] in mode [REDACTED]")
+    assert message.endswith("provider rejected token <redacted> in mode <redacted>")
 
 
 def test_public_sandbox_imports() -> None:
