@@ -1001,21 +1001,21 @@ run_test "Active stack sandbox command" \
         ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
-LANGGRAPH_SANDBOX_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-langgraph-sandbox-smoke.XXXXXX")
-LANGGRAPH_SANDBOX_SMOKE_STACK="kitaru-langgraph-sandbox-smoke-$$"
-run_test "Create LangGraph sandbox example stack" \
-    timed 60 env \
-        -u ZENML_SERVER \
-        -u ZENML_ACTIVE_PROJECT_ID \
-        -u ZENML_ACTIVE_STACK_ID \
-        -u ZENML_LOCAL_STORES_PATH \
-        -u KITARU_STACK \
-        STACK_NAME="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
-        ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
-        ZENML_REPOSITORY_PATH="$PWD" \
-        ZENML_ANALYTICS_OPT_IN=false \
-        $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
 if [[ "$HAS_OPENAI" == true ]]; then
+    LANGGRAPH_SANDBOX_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-langgraph-sandbox-smoke.XXXXXX")
+    LANGGRAPH_SANDBOX_SMOKE_STACK="kitaru-langgraph-sandbox-smoke-$$"
+    run_test "Create LangGraph sandbox example stack" \
+        timed 60 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            -u KITARU_STACK \
+            STACK_NAME="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
+            ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" \
         timed 180 env \
