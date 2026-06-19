@@ -362,7 +362,9 @@ def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
             "result": continuation.function_result_payload,
         }
     ]
-    assert continuation.function_result_payload[0]["type"] == "text"
+    payload = continuation.function_result_payload
+    assert isinstance(payload, list)
+    assert payload[0]["type"] == "text"
     assert continuation.tools == [gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL]
 
 

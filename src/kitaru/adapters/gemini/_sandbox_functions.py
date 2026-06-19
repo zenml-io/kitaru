@@ -389,9 +389,12 @@ def _redact_env_value_crossing_payload_boundary(
         return clipped, False
 
     boundary_index = len(clipped)
-    secrets = sorted(
-        {secret for secret in env.values() if secret}, key=len, reverse=True
-    )
+    secrets: list[str] = []
+    for secret_value in env.values():
+        if secret_value:
+            secrets.append(secret_value)
+    secrets.sort(key=len, reverse=True)
+
     for secret in secrets:
         earliest_start = max(0, boundary_index - len(secret) + 1)
         for start in range(earliest_start, boundary_index):
