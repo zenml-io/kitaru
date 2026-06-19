@@ -562,19 +562,32 @@ is_truthy_env_value() {
     esac
 }
 
-active_stack_has_single_sandbox() {
-    local current_json
-    local stack_name
-    local stack_json
-    current_json=$($UV_RUN kitaru stack current -o json 2>/dev/null) || return 1
-    stack_name=$(echo "$current_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["item"]["name"])' 2>/dev/null) || return 1
-    [[ -n "$stack_name" ]] || return 1
-    stack_json=$($UV_RUN kitaru stack show "$stack_name" -o json 2>/dev/null) || return 1
-    echo "$stack_json" | python3 -c 'import json,sys; components=json.load(sys.stdin)["item"].get("components", []); sandboxes=[component for component in components if component.get("role") == "sandbox"]; sys.exit(0 if len(sandboxes) == 1 else 1)'
+# The sandbox example checks run with ZENML_REPOSITORY_PATH=$PWD (so ZenML can
+# resolve their dynamic pipelines) but an isolated ZENML_CONFIG_PATH. Creating a
+# stack in that isolated config records it as the repo-local active stack in the
+# real repo's .kitaru/config.yaml, which then points at a stack ID that only
+# exists in the now-deleted isolated database. A later check that runs a flow
+# against the main config reads that stale pointer and Kitaru's stale-active-stack
+# guard refuses to run. Snapshot the marker before such a block and restore it
+# after so the pollution stays contained.
+REPO_ACTIVE_STACK_MARKER=".kitaru/config.yaml"
+REPO_ACTIVE_STACK_BACKUP=""
+backup_repo_active_stack() {
+    REPO_ACTIVE_STACK_BACKUP=$(mktemp "${TMPDIR:-/tmp}/kitaru-repo-marker.XXXXXX")
+    cp "$REPO_ACTIVE_STACK_MARKER" "$REPO_ACTIVE_STACK_BACKUP" 2>/dev/null || REPO_ACTIVE_STACK_BACKUP=""
+}
+restore_repo_active_stack() {
+    [[ -n "$REPO_ACTIVE_STACK_BACKUP" && -f "$REPO_ACTIVE_STACK_BACKUP" ]] || return 0
+    cp "$REPO_ACTIVE_STACK_BACKUP" "$REPO_ACTIVE_STACK_MARKER" 2>/dev/null || true
+    rm -f "$REPO_ACTIVE_STACK_BACKUP"
+    REPO_ACTIVE_STACK_BACKUP=""
 }
 
 cleanup() {
     rm -f "$RESULT_RECORDS_FILE"
+    # Restore the repo active-stack marker if a sandbox block was interrupted
+    # before its own restore ran, then drop the backup file.
+    restore_repo_active_stack
 
     if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
         timed 10 $UV_RUN kitaru auth api-keys delete \
@@ -849,16 +862,41 @@ if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
-    if active_stack_has_single_sandbox; then
-        run_provider_test "openai" "OPENAI_API_KEY" \
-            "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
-            timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
-    else
-        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example; --release --required-provider-area openai makes this prerequisite skip fail release smoke" "openai" "OPENAI_API_KEY"
-    fi
+    # The sandbox toolset example needs an active stack with exactly one sandbox
+    # component, which the server-backed smoke stack does not have. Give it a
+    # dedicated isolated sandbox stack (same pattern as the LangGraph sandbox
+    # check below) so it actually runs instead of skipping.
+    backup_repo_active_stack
+    PYDANTIC_SANDBOX_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-pydantic-sandbox-smoke.XXXXXX")
+    PYDANTIC_SANDBOX_SMOKE_STACK="kitaru-pydantic-sandbox-smoke-$$"
+    run_test "Create PydanticAI sandbox example stack" \
+        timed 60 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            -u KITARU_STACK \
+            STACK_NAME="$PYDANTIC_SANDBOX_SMOKE_STACK" \
+            ZENML_CONFIG_PATH="$PYDANTIC_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
+        timed 120 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            KITARU_STACK="$PYDANTIC_SANDBOX_SMOKE_STACK" \
+            ZENML_CONFIG_PATH="$PYDANTIC_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    restore_repo_active_stack
 else
     skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"
-    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "OPENAI_API_KEY not set; provider credentials and one active-stack sandbox required for PydanticAI sandbox toolset example" "openai" "OPENAI_API_KEY"
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI sandbox toolset example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "LangGraph adapter"
@@ -1022,16 +1060,19 @@ run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow
 run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
 run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
 run_test "Checkpoint streaming example" timed 60 $UV_RUN examples/features/checkpoint_streaming/checkpoint_streaming.py
+backup_repo_active_stack
 SANDBOX_SMOKE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-sandbox-smoke.XXXXXX")
 SANDBOX_SMOKE_CONFIG="$SANDBOX_SMOKE_TMP/config"
-SANDBOX_SMOKE_REPO="$SANDBOX_SMOKE_TMP/repo"
 SANDBOX_SMOKE_STACK="kitaru-smoke-sandbox-$$"
-mkdir -p "$SANDBOX_SMOKE_CONFIG" "$SANDBOX_SMOKE_REPO/.kitaru"
-printf '{}\n' > "$SANDBOX_SMOKE_REPO/.kitaru/config.yaml"
+mkdir -p "$SANDBOX_SMOKE_CONFIG"
 # Keep this example on an isolated local ZenML config. The smoke script is
 # connected to a local server above, and that server may not have the local
-# sandbox flavor registered. The isolated config mirrors the deterministic
-# pytest path and guarantees later smoke checks keep using the main active stack.
+# sandbox flavor registered. Isolating only ZENML_CONFIG_PATH gives the run its
+# own sandbox-enabled stack without disturbing the main active stack, while
+# ZENML_REPOSITORY_PATH stays on the real repo ($PWD) so ZenML can resolve the
+# example's dynamic pipeline by its dotted module path. Pointing the repository
+# path at an empty scratch dir instead makes the example file fall outside the
+# source root, which fails pipeline resolution before the sandbox command runs.
 run_test "Create sandbox example stack" \
     timed 60 env \
         -u ZENML_SERVER \
@@ -1041,7 +1082,7 @@ run_test "Create sandbox example stack" \
         -u KITARU_STACK \
         STACK_NAME="$SANDBOX_SMOKE_STACK" \
         ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
-        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_REPOSITORY_PATH="$PWD" \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
 run_test "Active stack sandbox command" \
@@ -1052,7 +1093,7 @@ run_test "Active stack sandbox command" \
         -u ZENML_LOCAL_STORES_PATH \
         -u KITARU_STACK \
         ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
-        ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
+        ZENML_REPOSITORY_PATH="$PWD" \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
 if [[ "$HAS_OPENAI" == true ]]; then
@@ -1086,6 +1127,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
 else
     skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
 fi
+restore_repo_active_stack
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
 run_test "Wait/resume example import contract" \
     $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'
