@@ -624,6 +624,85 @@ def test_default_function_result_payload_caps_stdout_and_stderr(
     assert execution.sandbox_result.stderr == long_stderr
 
 
+def test_default_function_result_payload_clips_before_redacting(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    visible_stdout = "o" * 4_000
+    hidden_secret = "explicit-env-secret"
+    stdout = f"{visible_stdout}{hidden_secret}"
+    monkeypatch.setattr(
+        "kitaru.run_sandbox_command",
+        lambda command, **kwargs: _sandbox_result(stdout=stdout),
+    )
+
+    execution = gemini_adapter.execute_gemini_sandbox_function_call(
+        _requires_action_result(gemini_adapter),
+        [
+            gemini_adapter.GeminiSandboxFunctionSpec(
+                function_name="sandbox_python_version",
+                command="python --version",
+                env={"TOKEN": hidden_secret},
+            )
+        ],
+    )
+
+    payload = _default_payload_data(execution)
+    assert payload["stdout"] == visible_stdout
+    assert payload["stdout_truncated"] is True
+    assert payload["stdout_payload_truncated"] is True
+    assert "stdout_redacted" not in payload
+    assert "warnings" not in payload
+    assert execution.sandbox_result.stdout == stdout
+
+
+def test_default_function_result_payload_redacts_env_secret_crossing_clip_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    visible_stdout = "o" * 3_998
+    visible_stderr = "e" * 3_998
+    boundary_secret = "explicit-env-secret"
+    monkeypatch.setattr(
+        "kitaru.run_sandbox_command",
+        lambda command, **kwargs: _sandbox_result(
+            stdout=f"{visible_stdout}{boundary_secret}",
+            stderr=f"{visible_stderr}{boundary_secret}",
+        ),
+    )
+
+    execution = gemini_adapter.execute_gemini_sandbox_function_call(
+        _requires_action_result(gemini_adapter),
+        [
+            gemini_adapter.GeminiSandboxFunctionSpec(
+                function_name="sandbox_python_version",
+                command="python --version",
+                env={"TOKEN": boundary_secret},
+            )
+        ],
+    )
+
+    payload = _default_payload_data(execution)
+    assert payload["stdout"] == f"{'o' * 3_990}<redacted>"
+    assert payload["stderr"] == f"{'e' * 3_990}<redacted>"
+    assert len(payload["stdout"]) == 4_000
+    assert len(payload["stderr"]) == 4_000
+    assert payload["stdout_truncated"] is True
+    assert payload["stderr_truncated"] is True
+    assert payload["stdout_payload_truncated"] is True
+    assert payload["stderr_payload_truncated"] is True
+    assert payload["stdout_redacted"] is True
+    assert payload["stderr_redacted"] is True
+    assert payload["warnings"] == [
+        "Potential secret-like values were redacted from sandbox stdout/stderr "
+        "before sending this payload to Gemini."
+    ]
+    assert boundary_secret not in payload["stdout"]
+    assert boundary_secret not in payload["stderr"]
+    assert not payload["stdout"].endswith("ex")
+    assert not payload["stderr"].endswith("ex")
+
+
 def test_default_function_result_payload_redacts_model_facing_output(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,

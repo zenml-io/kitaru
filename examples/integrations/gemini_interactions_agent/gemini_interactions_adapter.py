@@ -157,6 +157,12 @@ def _build_runner(
 RUNNER = _build_runner()
 
 
+def _runner_for_options(*, show_text_deltas: bool) -> KitaruGeminiInteractionsRunner:
+    if show_text_deltas:
+        return _build_runner(include_stream_text_deltas=True)
+    return RUNNER
+
+
 @flow
 def run_gemini_interaction(
     request: GeminiInteractionRequest,
@@ -165,9 +171,7 @@ def run_gemini_interaction(
     show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Run one Gemini interaction as one Kitaru checkpoint."""
-    runner = (
-        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
-    )
+    runner = _runner_for_options(show_text_deltas=show_text_deltas)
     if stream:
         return runner.run_stream_sync(request)
     return runner.run_sync(request)
@@ -245,9 +249,7 @@ def request_sandbox_python_version_function_call(
     show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Ask Gemini to call the showcased sandbox function."""
-    runner = (
-        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
-    )
+    runner = _runner_for_options(show_text_deltas=show_text_deltas)
     return runner.run_stream_sync(request) if stream else runner.run_sync(request)
 
 
@@ -279,9 +281,7 @@ def finish_sandbox_python_version_function(
     show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Send the sandbox function result back to Gemini."""
-    runner = (
-        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
-    )
+    runner = _runner_for_options(show_text_deltas=show_text_deltas)
     request = execution.function_result_request
     return runner.run_stream_sync(request) if stream else runner.run_sync(request)
 

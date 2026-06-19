@@ -36,6 +36,7 @@ SandboxFunctionRegistry: TypeAlias = (
     | Sequence["GeminiSandboxFunctionSpec"]
 )
 DEFAULT_GEMINI_FUNCTION_RESULT_OUTPUT_MAX_CHARS = 4_000
+_BOUNDARY_REDACTION_MARKER = "<redacted>"
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,49 @@ class GeminiSandboxFunctionExecution(BaseModel):
     sandbox_result: SandboxCommandResult
     function_result_payload: Any
     function_result_request: GeminiInteractionRequest
+
+
+@dataclass(frozen=True)
+class _FunctionResultContinuationOptions:
+    model: str
+    environment: str | dict[str, Any] | None
+    tools: list[dict[str, Any]] | None
+    system_instruction: str | None
+    generation_config: dict[str, Any] | None
+    agent_config: dict[str, Any] | None
+    response_format: dict[str, Any] | None
+    response_mime_type: str | None
+    background: bool
+    store: bool
+    timeout_s: float | None
+    metadata: dict[str, Any] | None
+
+    def build_request(
+        self,
+        *,
+        previous_interaction_id: str,
+        call: GeminiInteractionFunctionCall,
+        function_result: Any,
+    ) -> GeminiInteractionRequest:
+        return GeminiInteractionRequest.function_result(
+            previous_interaction_id=previous_interaction_id,
+            function_call_id=call.call_id,
+            function_name=call.function_name,
+            function_result=function_result,
+            model=self.model,
+            agent=None,
+            environment=self.environment,
+            tools=self.tools,
+            system_instruction=self.system_instruction,
+            generation_config=self.generation_config,
+            agent_config=self.agent_config,
+            response_format=self.response_format,
+            response_mime_type=self.response_mime_type,
+            background=self.background,
+            store=self.store,
+            timeout_s=self.timeout_s,
+            metadata=self.metadata,
+        )
 
 
 def execute_gemini_sandbox_function_call(
@@ -158,9 +202,7 @@ def execute_gemini_sandbox_function_call(
     registry = _normalize_function_registry(functions)
     call, spec = _select_function_call(result, registry, call_id=call_id)
     target_model = _resolve_model_continuation_target(result, model_override=model)
-    _preflight_validate_function_result_request(
-        previous_interaction_id=result.interaction_id,
-        call=call,
+    continuation = _FunctionResultContinuationOptions(
         model=target_model,
         environment=environment,
         tools=tools,
@@ -173,6 +215,11 @@ def execute_gemini_sandbox_function_call(
         store=store,
         timeout_s=timeout_s,
         metadata=metadata,
+    )
+    _preflight_validate_function_result_request(
+        previous_interaction_id=result.interaction_id,
+        call=call,
+        continuation=continuation,
     )
     (
         command,
@@ -195,22 +242,10 @@ def execute_gemini_sandbox_function_call(
         cleanup=cleanup,
     )
     payload = spec.build_payload(call, sandbox_result)
-    request = _build_function_result_request(
+    request = continuation.build_request(
         previous_interaction_id=result.interaction_id,
         call=call,
         function_result=payload,
-        model=target_model,
-        environment=environment,
-        tools=tools,
-        system_instruction=system_instruction,
-        generation_config=generation_config,
-        agent_config=agent_config,
-        response_format=response_format,
-        response_mime_type=response_mime_type,
-        background=background,
-        store=store,
-        timeout_s=timeout_s,
-        metadata=metadata,
     )
     return GeminiSandboxFunctionExecution(
         call=call,
@@ -224,74 +259,12 @@ def _preflight_validate_function_result_request(
     *,
     previous_interaction_id: str,
     call: GeminiInteractionFunctionCall,
-    model: str,
-    environment: str | dict[str, Any] | None,
-    tools: list[dict[str, Any]] | None,
-    system_instruction: str | None,
-    generation_config: dict[str, Any] | None,
-    agent_config: dict[str, Any] | None,
-    response_format: dict[str, Any] | None,
-    response_mime_type: str | None,
-    background: bool,
-    store: bool,
-    timeout_s: float | None,
-    metadata: dict[str, Any] | None,
+    continuation: _FunctionResultContinuationOptions,
 ) -> None:
-    _build_function_result_request(
+    continuation.build_request(
         previous_interaction_id=previous_interaction_id,
         call=call,
         function_result={"ok": True, "preflight": True},
-        model=model,
-        environment=environment,
-        tools=tools,
-        system_instruction=system_instruction,
-        generation_config=generation_config,
-        agent_config=agent_config,
-        response_format=response_format,
-        response_mime_type=response_mime_type,
-        background=background,
-        store=store,
-        timeout_s=timeout_s,
-        metadata=metadata,
-    )
-
-
-def _build_function_result_request(
-    *,
-    previous_interaction_id: str,
-    call: GeminiInteractionFunctionCall,
-    function_result: Any,
-    model: str,
-    environment: str | dict[str, Any] | None,
-    tools: list[dict[str, Any]] | None,
-    system_instruction: str | None,
-    generation_config: dict[str, Any] | None,
-    agent_config: dict[str, Any] | None,
-    response_format: dict[str, Any] | None,
-    response_mime_type: str | None,
-    background: bool,
-    store: bool,
-    timeout_s: float | None,
-    metadata: dict[str, Any] | None,
-) -> GeminiInteractionRequest:
-    return GeminiInteractionRequest.function_result(
-        previous_interaction_id=previous_interaction_id,
-        function_call_id=call.call_id,
-        function_name=call.function_name,
-        function_result=function_result,
-        model=model,
-        agent=None,
-        environment=environment,
-        tools=tools,
-        system_instruction=system_instruction,
-        generation_config=generation_config,
-        agent_config=agent_config,
-        response_format=response_format,
-        response_mime_type=response_mime_type,
-        background=background,
-        store=store,
-        timeout_s=timeout_s,
-        metadata=metadata,
     )
 
 
@@ -337,16 +310,14 @@ def _default_function_result_payload(
     *,
     env: Mapping[str, str] | None,
 ) -> list[dict[str, str]]:
-    redacted_stdout, stdout_redacted = _redact_sensitive_text(
+    stdout, stdout_payload_truncated, stdout_redacted = _clip_and_redact_payload_output(
         sandbox_result.stdout,
         env=env,
     )
-    redacted_stderr, stderr_redacted = _redact_sensitive_text(
+    stderr, stderr_payload_truncated, stderr_redacted = _clip_and_redact_payload_output(
         sandbox_result.stderr,
         env=env,
     )
-    stdout, stdout_payload_truncated = _clip_payload_output(redacted_stdout)
-    stderr, stderr_payload_truncated = _clip_payload_output(redacted_stderr)
     payload: dict[str, Any] = {
         "ok": sandbox_result.exit_code == 0,
         "exit_code": sandbox_result.exit_code,
@@ -380,10 +351,66 @@ def _default_function_result_payload(
     return [{"type": "text", "text": json.dumps(payload, sort_keys=True)}]
 
 
+def _clip_and_redact_payload_output(
+    value: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[str, bool, bool]:
+    clipped, payload_truncated = _clip_payload_output(value)
+    clipped, boundary_redacted = _redact_env_value_crossing_payload_boundary(
+        value,
+        clipped,
+        payload_truncated=payload_truncated,
+        env=env,
+    )
+    redacted, content_redacted = _redact_sensitive_text(clipped, env=env)
+    redacted, marker_truncated = _clip_payload_output(redacted)
+    return (
+        redacted,
+        payload_truncated or marker_truncated,
+        boundary_redacted or content_redacted,
+    )
+
+
 def _clip_payload_output(value: str) -> tuple[str, bool]:
     if len(value) <= DEFAULT_GEMINI_FUNCTION_RESULT_OUTPUT_MAX_CHARS:
         return value, False
     return value[:DEFAULT_GEMINI_FUNCTION_RESULT_OUTPUT_MAX_CHARS], True
+
+
+def _redact_env_value_crossing_payload_boundary(
+    value: str,
+    clipped: str,
+    *,
+    payload_truncated: bool,
+    env: Mapping[str, str] | None,
+) -> tuple[str, bool]:
+    if not payload_truncated or not env:
+        return clipped, False
+
+    boundary_index = len(clipped)
+    secrets = sorted(
+        {secret for secret in env.values() if secret}, key=len, reverse=True
+    )
+    for secret in secrets:
+        earliest_start = max(0, boundary_index - len(secret) + 1)
+        for start in range(earliest_start, boundary_index):
+            end = start + len(secret)
+            if end <= boundary_index or not value.startswith(secret, start):
+                continue
+            return _replace_payload_suffix_with_redaction_marker(clipped, start), True
+
+    return clipped, False
+
+
+def _replace_payload_suffix_with_redaction_marker(value: str, start: int) -> str:
+    max_prefix_length = max(
+        0,
+        DEFAULT_GEMINI_FUNCTION_RESULT_OUTPUT_MAX_CHARS
+        - len(_BOUNDARY_REDACTION_MARKER),
+    )
+    prefix = value[: min(start, max_prefix_length)]
+    return f"{prefix}{_BOUNDARY_REDACTION_MARKER}"
 
 
 def _normalize_function_registry(
