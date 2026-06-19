@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added sandbox stack component support for local stacks, the public `kitaru.run_sandbox_command(...)` SDK helper, and a provider-free tracked flow example at `examples/features/sandbox/active_stack_sandbox_command.py` that runs a command through the active stack's sandbox from inside a checkpoint.
+- Added a Claude Agent SDK sandbox MCP helper (`create_kitaru_sandbox_mcp_server`) and runnable example at `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`, letting Claude call the active Kitaru stack sandbox through a Kitaru-owned MCP tool while Claude-owned `Bash` stays disabled.
 
 ### Changed
 - Reworked the prospect scout example (`examples/end_to_end/prospect_scout/`) into a genuinely agentic sweep: the qualifier is now a real PydanticAI agent that calls a `search_web` tool and decides its own searches (instead of being handed pre-fetched snippets), classifies prospects against a `LineOfBusiness` enum, and is built lazily inside its checkpoint so remote runs can inject keys via a secret. The README is reorganized around the durability, agent-observability, type-safety, and human-in-the-loop "aha moments", and a regression test asserts the agent actually invokes its search tool.

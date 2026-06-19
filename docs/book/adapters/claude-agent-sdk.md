@@ -744,15 +744,17 @@ The MCP tool accepts these inputs from Claude:
 - `command`: a shell command string or argv-style list
 - `cwd`: optional working directory inside the sandbox
 - `env`: optional command environment
-- `max_chars`: optional output collection limit
+- `max_chars`: optional output collection limit; Claude may lower the per-call limit but cannot raise it above the helper's configured `default_max_chars`
 - `cleanup`: optional session cleanup policy, either `"destroy"` or `"close"`
 
 The tool output is JSON text. A successful sandbox call returns
 `status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
 flags, stack identity, sandbox identity, session ID, and cleanup status. The MCP
-tool advertises a Claude result-size limit based on Kitaru's `default_max_chars`,
-so Claude receives the large stdout/stderr text that Kitaru collected instead of
-quietly cutting it off at Claude's default MCP result threshold. A non-zero
+tool advertises a Claude result-size limit based on Kitaru's `default_max_chars`.
+Claude may request a smaller `max_chars` for one call, but it cannot raise that
+per-call limit above the helper's configured default. That means Claude receives
+the large stdout/stderr text that Kitaru collected instead of quietly cutting it
+off at Claude's default MCP result threshold. A non-zero
 `exit_code` is still `status="completed"`; the sandbox ran the command and
 returned process data, so Claude can decide what to do next.
 

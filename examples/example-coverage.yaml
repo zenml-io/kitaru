@@ -377,6 +377,41 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: claude-agent-sdk-sandbox-tool
+    path: examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+    public_docs:
+      - examples/integrations/claude_agent_sdk_agent/README.md
+      - docs/book/adapters/claude-agent-sdk.md
+    owner_area: Claude Agent SDK sandbox MCP helper and active-stack sandbox command example
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_claude_agent_sdk_sandbox_tool.py
+        notes: fake Claude SDK coverage for MCP registration, argument validation, error shaping, metadata/cache identity, and example defaults
+      local_smoke:
+        status: help_only
+        command: uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+          --help
+        requires_server: false
+        timeout_seconds: 30
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: The live check requires Anthropic/Claude credentials and an active Kitaru stack with exactly one sandbox component, so it is not safe as unattended release automation.
+          reviewer_action: If this example changes, select or create a sandbox-enabled stack, set ANTHROPIC_API_KEY or a supported Claude SDK provider mode, run the documented command manually, or record a release waiver.
+        provider: anthropic
+        command: uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
+          --command "python --version" --max-turns 3
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [ANTHROPIC_API_KEY]
+        timeout_seconds: 180
+        cost_class: low
+        sandbox_policy: requires active stack with exactly one sandbox component; local sandbox is not a security boundary
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: claude-agent-sdk-streaming
     path: examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

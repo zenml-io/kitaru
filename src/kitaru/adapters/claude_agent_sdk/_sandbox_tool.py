@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -49,6 +50,7 @@ _DEFAULT_DESCRIPTION = (
 # maxResultSizeChars from the MCP tool metadata before the model sees the result,
 # so include room for both collected streams plus ordinary JSON fields.
 _TOOL_RESULT_JSON_OVERHEAD_CHARS = 65_536
+_TOOL_ARGUMENT_KEYS = frozenset({"command", "cwd", "env", "max_chars", "cleanup"})
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -80,7 +82,11 @@ _INPUT_SCHEMA: dict[str, Any] = {
         },
         "max_chars": {
             "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}],
-            "description": "Optional per-stream output collection limit.",
+            "description": (
+                "Optional per-stream output collection limit. Claude may lower "
+                "this per-call limit, but cannot raise it above the helper's "
+                "configured default_max_chars."
+            ),
         },
         "cleanup": {
             "anyOf": [{"enum": ["destroy", "close"]}, {"type": "null"}],
@@ -158,7 +164,7 @@ def create_kitaru_sandbox_command_tool(
     return tool_factory(
         normalized_tool_name,
         description or _DEFAULT_DESCRIPTION,
-        dict(_INPUT_SCHEMA),
+        _input_schema(normalized_max_chars),
         annotations=_claude_tool_annotations(normalized_max_chars),
     )(handler)
 
@@ -232,6 +238,7 @@ def _tool_arguments(
         raise KitaruUsageError(
             "Claude sandbox command tool arguments must be a mapping."
         )
+    _validate_known_tool_arguments(arguments)
     command = _tool_command(arguments.get("command", _MISSING))
     cwd = _tool_optional_string(arguments.get("cwd"), "cwd")
     env = _tool_env(arguments.get("env"))
@@ -241,6 +248,29 @@ def _tool_arguments(
 
 
 _MISSING = object()
+
+
+def _input_schema(default_max_chars: int) -> dict[str, Any]:
+    schema = copy.deepcopy(_INPUT_SCHEMA)
+    max_chars_schema = schema["properties"]["max_chars"]
+    max_chars_schema["anyOf"][0]["maximum"] = default_max_chars
+    return schema
+
+
+def _validate_known_tool_arguments(arguments: Mapping[str, Any]) -> None:
+    unknown = [
+        key
+        for key in arguments
+        if not isinstance(key, str) or key not in _TOOL_ARGUMENT_KEYS
+    ]
+    if not unknown:
+        return
+    unknown_names = ", ".join(str(key) for key in sorted(unknown, key=str))
+    allowed_names = ", ".join(sorted(_TOOL_ARGUMENT_KEYS))
+    raise KitaruUsageError(
+        "Sandbox command tool received unknown argument(s): "
+        f"{unknown_names}. Allowed arguments are: {allowed_names}."
+    )
 
 
 def _tool_command(value: Any) -> SandboxCommand:
@@ -293,6 +323,11 @@ def _tool_max_chars(value: Any, default_max_chars: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise KitaruUsageError(
             "Sandbox command `max_chars` must be a positive integer or null."
+        )
+    if value > default_max_chars:
+        raise KitaruUsageError(
+            "Sandbox command `max_chars` must be a positive integer <= "
+            f"configured default_max_chars ({default_max_chars}), or null."
         )
     return value
 

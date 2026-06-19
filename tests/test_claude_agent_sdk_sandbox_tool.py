@@ -153,6 +153,14 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
             "annotations": ANY,
         }
     ]
+    schema = fake_claude_sdk.__dict__["tool_calls"][0]["input_schema"]
+    max_chars_integer_schema = schema["properties"]["max_chars"]["anyOf"][0]
+    assert max_chars_integer_schema["maximum"] == 123
+    assert (
+        "maximum"
+        not in sandbox_tool_module._INPUT_SCHEMA["properties"]["max_chars"]["anyOf"][0]
+    )
+
     annotation = fake_claude_sdk.__dict__["tool_calls"][0]["annotations"]
     assert annotation.maxResultSizeChars == (
         sandbox_tool_module._tool_result_max_size_chars(123)
@@ -490,6 +498,110 @@ def test_handler_rejects_malformed_inputs_before_offload(
     assert result["is_error"] is True
 
 
+def test_handler_rejects_max_chars_above_default_before_offload(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offloaded: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        raise AssertionError(f"sandbox helper should not run: {command!r}, {kwargs!r}")
+
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        offloaded.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    monkeypatch.setattr(sandbox_tool_module.asyncio, "to_thread", fake_to_thread)
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=10)
+
+    result = asyncio.run(
+        server["tools"][0].handler({"command": "echo hi", "max_chars": 11})
+    )
+
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["error"]["category"] == "usage"
+    assert "default_max_chars" in payload["error"]["message"]
+    assert offloaded == []
+    assert result["is_error"] is True
+
+
+def test_handler_accepts_max_chars_at_configured_default(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        calls.append({"command": command, **kwargs})
+        return _sandbox_result()
+
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    monkeypatch.setattr(sandbox_tool_module.asyncio, "to_thread", fake_to_thread)
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=10)
+
+    result = asyncio.run(
+        server["tools"][0].handler({"command": "echo hi", "max_chars": 10})
+    )
+
+    assert _payload(result)["status"] == "completed"
+    assert calls == [
+        {
+            "command": "echo hi",
+            "cwd": None,
+            "env": None,
+            "max_chars": 10,
+            "cleanup": "destroy",
+        }
+    ]
+    assert result["is_error"] is False
+
+
+def test_handler_rejects_unknown_arguments_before_offload(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offloaded: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        raise AssertionError(f"sandbox helper should not run: {command!r}, {kwargs!r}")
+
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        offloaded.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    monkeypatch.setattr(sandbox_tool_module.asyncio, "to_thread", fake_to_thread)
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+
+    result = asyncio.run(
+        server["tools"][0].handler({"command": "echo hi", "timeout_seconds": 5})
+    )
+
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["error"]["category"] == "usage"
+    assert "timeout_seconds" in payload["error"]["message"]
+    assert offloaded == []
+    assert result["is_error"] is True
+
+
 @pytest.mark.parametrize(
     ("exc", "category"),
     [
@@ -633,6 +745,26 @@ def test_sandbox_example_uses_cost_guarded_tool_capable_defaults(
     assert options.tools == []
     assert options.disallowed_tools == ["Bash"]
     assert options.allowed_tools == [example.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME]
+
+
+def test_sandbox_example_help_marks_sandbox_cwd_as_requested_not_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pytest.importorskip("claude_agent_sdk")
+    _purge_claude_adapter_modules(monkeypatch)
+    module_name = (
+        "examples.integrations.claude_agent_sdk_agent.claude_agent_sdk_sandbox_tool"
+    )
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    example = importlib.import_module(module_name)
+    monkeypatch.setattr(sys, "argv", ["claude_agent_sdk_sandbox_tool.py", "--help"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        example._parse_args()
+
+    assert exc_info.value.code == 0
+    assert "does not enforce" in capsys.readouterr().out
 
 
 def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
