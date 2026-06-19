@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -136,6 +137,20 @@ class FakeClient:
 
 def _client_factory(client: FakeClient) -> Any:
     return lambda: client
+
+
+def _assert_secret_not_in_public_exception(
+    exc: BaseException,
+    *secret_values: str,
+) -> str:
+    """Assert a public exception does not expose supplied secret values."""
+    message = str(exc)
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    for secret_value in secret_values:
+        assert secret_value not in message
+        assert secret_value not in formatted
+    assert exc.__cause__ is None
+    return message
 
 
 def test_run_sandbox_command_returns_stable_result_shape() -> None:
@@ -534,6 +549,99 @@ def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> Non
         {"command": ["printenv", "API_TOKEN"], "cwd": None, "env": env}
     ]
     assert session.destroy_calls == 1
+
+
+def test_run_sandbox_command_redacts_string_command_from_provider_errors() -> None:
+    command = "python -c \"print('leaky-command-string')\""
+    session = FakeSession(
+        exec_error=RuntimeError(f"provider failed while running {command}")
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(command, client_factory=_client_factory(client))
+
+    message = _assert_secret_not_in_public_exception(exc_info.value, command)
+    assert "<redacted>" in message
+    assert session.exec_calls == [{"command": command, "cwd": None, "env": None}]
+
+
+def test_run_sandbox_command_redacts_list_command_from_cleanup_errors() -> None:
+    command = ["python", "-c", "print('leaky-list-command')"]
+    command_text = str(command)
+    command_item = "print('leaky-list-command')"
+    session = FakeSession(
+        exec_error=RuntimeError("exec failed"),
+        destroy_error=RuntimeError(
+            f"cleanup failed after {command_text}; binary=python flag=-c "
+            f"script={command_item}"
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(command, client_factory=_client_factory(client))
+
+    message = _assert_secret_not_in_public_exception(
+        exc_info.value,
+        command_text,
+        command_item,
+    )
+    assert "<redacted>" in message
+    assert "Cleanup warning" in message
+    assert "binary=python" in message
+    assert "flag=-c" in message
+    assert session.exec_calls == [{"command": command, "cwd": None, "env": None}]
+    assert session.destroy_calls == 1
+
+
+def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() -> None:
+    secret_value = "close-token-from-tool-env"
+    session = FakeSession(close_error=RuntimeError(f"close failed with {secret_value}"))
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(
+        KitaruBackendError, match="closing the sandbox session failed"
+    ) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            cleanup="close",
+            env={"API_TOKEN": secret_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
+    assert message.endswith("close failed with <redacted>")
+
+
+def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
+    secret_value = "static-token-from-tool-env"
+    public_value = "demo-mode"
+    sandbox = FakeSandbox(
+        FakeSession(
+            exec_error=RuntimeError(
+                f"provider rejected token {secret_value} in mode {public_value}"
+            )
+        )
+    )
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"API_TOKEN": secret_value, "MODE": public_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = _assert_secret_not_in_public_exception(
+        exc_info.value,
+        secret_value,
+        public_value,
+    )
+    assert message.endswith("provider rejected token <redacted> in mode <redacted>")
 
 
 def test_public_sandbox_imports() -> None:
