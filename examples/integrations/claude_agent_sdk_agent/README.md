@@ -106,6 +106,14 @@ export ANTHROPIC_API_KEY='<your-anthropic-api-key>'
 uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
 ```
 
+The script gives Claude a small temporary working directory, uses Claude Code's
+`--bare` mode, selects the tool-capable `sonnet` model alias, and sets a `$0.10`
+Claude SDK budget cap by default. That keeps a tiny sandbox demo from
+accidentally loading your whole repository context into Claude Code. If you want
+Claude to see a specific project directory, pass `--claude-cwd /path/to/project`
+deliberately. Pass `--model <model>` to use another Claude model, and pass
+`--max-budget-usd 0` only when you want to disable the demo budget cap.
+
 If you already have a stack with exactly one sandbox component, use
 `uv run kitaru stack use <stack-name>` instead of creating `claude-sandbox`.
 
@@ -130,7 +138,9 @@ Optional overrides:
 uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py \
   --command "pwd" \
   --sandbox-cwd /workspace \
-  --max-turns 3
+  --max-turns 3 \
+  --model sonnet \
+  --max-budget-usd 0.10
 ```
 
 This is different from Claude built-in `Bash`: Kitaru does not secretly reroute
@@ -139,9 +149,10 @@ command tool instead.
 
 ## What to look for in Kitaru UI
 
-The flow contains one adapter-created checkpoint named like
-`claude_sdk_summary_claude_invocation`. That checkpoint is the replay boundary
-for the Claude SDK call.
+The flow contains one adapter-created checkpoint. In the sandbox command tool
+example, it is named like
+`claude_sdk_kitaru_sandbox_tool_claude_invocation`. That checkpoint is the
+replay boundary for the Claude SDK call.
 
 A good way to read the run is:
 
@@ -166,12 +177,14 @@ This adapter checkpoints the **outer invocation result**. It does not checkpoint
 Claude's internal model calls, Bash commands, built-in tool calls, MCP calls,
 custom tool side effects, hooks, file edits, or workspace snapshots one by one.
 
-In this example, we keep the run non-destructive by setting `allowed_tools=[]`
-and using a prompt that asks Claude not to use tools. In your own agent, if
-Claude uses tools that mutate the world, such as writing files or calling an MCP
-server that updates a ticket, Kitaru stores the final invocation output and
-captured audit envelope. It does not automatically replay or restore every
-internal side effect.
+In the baseline adapter example, we keep the run non-destructive by setting
+`allowed_tools=[]` and using a prompt that asks Claude not to use tools. In the
+sandbox command tool example, Claude is allowed to call only
+`mcp__kitaru__run_command`, and that command goes through the active Kitaru stack
+sandbox. In your own agent, if Claude uses tools that mutate the world, such as
+writing files or calling an MCP server that updates a ticket, Kitaru stores the
+final invocation output and captured audit envelope. It does not automatically
+replay or restore every internal side effect.
 
 For the concept walkthrough, see
 [Claude Agent SDK Adapter](https://docs.zenml.io/kitaru/adapters/claude-agent-sdk/).

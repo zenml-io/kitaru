@@ -10,6 +10,7 @@ Story:
 Run:
     uv sync --extra local --extra claude-agent-sdk
     uv run kitaru init
+    uv run kitaru stack create claude-sandbox --sandbox local
     export ANTHROPIC_API_KEY=<your-anthropic-api-key>
     uv run python \
         examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py
@@ -17,7 +18,9 @@ Run:
 
 import argparse
 import json
+import math
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +37,9 @@ from kitaru.adapters.claude_agent_sdk import (
 
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 DEFAULT_SANDBOX_COMMAND = "python --version"
+DEFAULT_MODEL = "sonnet"
+DEFAULT_MAX_BUDGET_USD = 0.10
+DEFAULT_CLAUDE_CWD_NAME = "kitaru-claude-sandbox-tool-demo"
 
 
 def _has_claude_credentials() -> bool:
@@ -58,7 +64,11 @@ def _require_claude_credentials() -> None:
     )
 
 
-def _build_runner() -> KitaruClaudeRunner:
+def _build_runner(
+    *,
+    model: str | None,
+    max_budget_usd: float | None,
+) -> KitaruClaudeRunner:
     sandbox_mcp_server = create_kitaru_sandbox_mcp_server()
     return KitaruClaudeRunner(
         name="claude_sdk_kitaru_sandbox_tool",
@@ -66,11 +76,24 @@ def _build_runner() -> KitaruClaudeRunner:
             cwd=request.cwd,
             resume=request.resume_session_id,
             max_turns=request.max_turns,
+            model=model,
+            max_budget_usd=max_budget_usd,
+            effort="low",
             mcp_servers={"kitaru": sandbox_mcp_server},
+            system_prompt=(
+                "You are testing Kitaru's sandbox command MCP tool. Use the "
+                "requested Kitaru MCP command tool, then summarize the command "
+                "result briefly."
+            ),
             # Built-in Bash remains Claude-owned. Deny it so this example proves
             # command execution goes through the Kitaru sandbox MCP tool instead.
             disallowed_tools=["Bash"],
             allowed_tools=[KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME],
+            # Keep this demo independent from the user's Claude Code project or
+            # local settings. The command itself still runs through Kitaru's
+            # active stack sandbox, not through Claude's working directory.
+            setting_sources=[],
+            extra_args={"bare": None},
         ),
         checkpoint_config={"cache": False},
     )
@@ -82,6 +105,8 @@ def inspect_sandbox_with_claude(
     sandbox_cwd: str | None,
     claude_cwd: str,
     max_turns: int,
+    model: str | None,
+    max_budget_usd: float | None,
 ) -> ClaudeRunResult:
     """Ask Claude to run one command through Kitaru's sandbox MCP tool."""
     prompt = (
@@ -99,7 +124,7 @@ def inspect_sandbox_with_claude(
         max_turns=max_turns,
         metadata={"example": "claude_agent_sdk_sandbox_tool"},
     )
-    runner = _build_runner()
+    runner = _build_runner(model=model, max_budget_usd=max_budget_usd)
     return runner.run_sync(request)
 
 
@@ -156,6 +181,24 @@ def _print_result(result: ClaudeRunResult) -> None:
             print(f"- {warning}")
 
 
+def _default_claude_cwd() -> str:
+    """Create and return a small Claude SDK working directory for this demo."""
+    path = Path(tempfile.gettempdir()) / DEFAULT_CLAUDE_CWD_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def _coerce_optional_budget(value: float) -> float | None:
+    """Return an SDK budget cap, treating 0 as an explicit opt-out."""
+    if not math.isfinite(value):
+        raise SystemExit("--max-budget-usd must be finite.")
+    if value < 0:
+        raise SystemExit("--max-budget-usd must be non-negative.")
+    if value == 0:
+        return None
+    return value
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -175,14 +218,35 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--claude-cwd",
-        default=str(Path.cwd()),
-        help="Working directory passed to the Claude SDK itself.",
+        default=None,
+        help=(
+            "Working directory passed to the Claude SDK itself. Defaults to a "
+            "small temp directory so Claude does not load your whole repository "
+            "context just to run the sandbox command."
+        ),
     )
     parser.add_argument(
         "--max-turns",
         type=int,
         default=3,
         help="Maximum Claude SDK turns. Defaults to 3 so Claude can call the tool.",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=(
+            "Claude model passed to ClaudeAgentOptions. Defaults to the "
+            f"tool-capable Claude Code alias {DEFAULT_MODEL!r}."
+        ),
+    )
+    parser.add_argument(
+        "--max-budget-usd",
+        type=float,
+        default=DEFAULT_MAX_BUDGET_USD,
+        help=(
+            "Claude SDK budget cap for this demo. Defaults to $0.10; pass 0 to "
+            "disable the cap."
+        ),
     )
     return parser.parse_args()
 
@@ -194,11 +258,16 @@ def main() -> None:
     if args.max_turns <= 0:
         raise SystemExit("--max-turns must be positive.")
 
+    claude_cwd = args.claude_cwd or _default_claude_cwd()
+    max_budget_usd = _coerce_optional_budget(args.max_budget_usd)
+
     handle = inspect_sandbox_with_claude.run(
         args.command,
         args.sandbox_cwd,
-        args.claude_cwd,
+        claude_cwd,
         args.max_turns,
+        args.model,
+        max_budget_usd,
     )
     result = _coerce_result(handle.wait())
     _print_result(result)

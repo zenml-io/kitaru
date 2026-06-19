@@ -6,6 +6,7 @@ import asyncio
 import importlib
 import json
 import sys
+import tempfile
 import types
 from types import SimpleNamespace
 from typing import Any, cast
@@ -562,3 +563,93 @@ def test_allowed_tool_name_rejects_invalid_components(
         sandbox_tool_module.allowed_tool_name("bad name", "run_command")
     with pytest.raises(KitaruUsageError, match="tool_name"):
         sandbox_tool_module.allowed_tool_name("kitaru", "run__command")
+
+
+def test_sandbox_example_uses_cost_guarded_tool_capable_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("claude_agent_sdk")
+    _purge_claude_adapter_modules(monkeypatch)
+    module_name = (
+        "examples.integrations.claude_agent_sdk_agent.claude_agent_sdk_sandbox_tool"
+    )
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    example = importlib.import_module(module_name)
+
+    assert example.DEFAULT_MODEL == "sonnet"
+    assert example.DEFAULT_MAX_BUDGET_USD == 0.10
+    assert example._coerce_optional_budget(0) is None
+    assert example._coerce_optional_budget(0.25) == 0.25
+    with pytest.raises(SystemExit, match="finite"):
+        example._coerce_optional_budget(float("nan"))
+    with pytest.raises(SystemExit, match="finite"):
+        example._coerce_optional_budget(float("inf"))
+
+    runner = example._build_runner(
+        model=example.DEFAULT_MODEL,
+        max_budget_usd=example.DEFAULT_MAX_BUDGET_USD,
+    )
+    options = runner._build_options(
+        example.ClaudeRunRequest.start("hello", cwd="/tmp", max_turns=3)
+    )
+    assert options is not None
+
+    assert options.model == "sonnet"
+    assert options.max_budget_usd == 0.10
+    assert options.effort == "low"
+    assert options.setting_sources == []
+    assert options.extra_args == {"bare": None}
+    assert options.disallowed_tools == ["Bash"]
+    assert options.allowed_tools == [example.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME]
+
+
+def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("claude_agent_sdk")
+    _purge_claude_adapter_modules(monkeypatch)
+    module_name = (
+        "examples.integrations.claude_agent_sdk_agent.claude_agent_sdk_sandbox_tool"
+    )
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    example = importlib.import_module(module_name)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(sys, "argv", ["claude_agent_sdk_sandbox_tool.py"])
+    monkeypatch.setattr(example, "_print_result", lambda result: None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_run(
+        command: str,
+        sandbox_cwd: str | None,
+        claude_cwd: str,
+        max_turns: int,
+        model: str | None,
+        max_budget_usd: float | None,
+    ) -> SimpleNamespace:
+        captured.update(
+            {
+                "command": command,
+                "sandbox_cwd": sandbox_cwd,
+                "claude_cwd": claude_cwd,
+                "max_turns": max_turns,
+                "model": model,
+                "max_budget_usd": max_budget_usd,
+            }
+        )
+        result = example.ClaudeRunResult(final_text="ok")
+        return SimpleNamespace(wait=lambda: result)
+
+    monkeypatch.setattr(example.inspect_sandbox_with_claude, "run", fake_run)
+
+    example.main()
+
+    assert captured == {
+        "command": example.DEFAULT_SANDBOX_COMMAND,
+        "sandbox_cwd": None,
+        "claude_cwd": example._default_claude_cwd(),
+        "max_turns": 3,
+        "model": "sonnet",
+        "max_budget_usd": 0.10,
+    }
+    assert captured["claude_cwd"].startswith(tempfile.gettempdir())

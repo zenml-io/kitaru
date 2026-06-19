@@ -775,6 +775,14 @@ returns.
 
 A runnable showcase lives in the repository at
 `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`.
+By default, that showcase passes a small temporary directory as Claude's own
+working directory, uses Claude Code's `--bare` mode, selects the tool-capable
+`sonnet` model alias, and sets a small Claude SDK budget cap. The sandbox command
+still runs through the active Kitaru stack sandbox. This default avoids the bad
+surprise where a tiny `python --version` demo causes Claude Code to load a large
+repository context. Pass `--claude-cwd /path/to/project` only when you actually
+want Claude to see that project, and pass `--model <model>` when you want a
+different Claude model.
 
 ## Claude file checkpointing is different
 
