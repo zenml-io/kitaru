@@ -39,6 +39,7 @@ GRAPH_CALL_RUNNER_NAME = "langgraph_local_interrupt_demo"
 CALLS_RUNNER_NAME = "langgraph_local_calls_demo"
 SANDBOX_RUNNER_NAME = "langgraph_sandbox_command_demo"
 SANDBOX_COMMAND_TOOL_NAME = DEFAULT_SANDBOX_COMMAND_TOOL_NAME
+SANDBOX_DEMO_TOOL_CALL_ID = "sandbox-demo-command"
 DEFAULT_LANGGRAPH_AGENT_MODEL = "gpt-5-nano"
 DEFAULT_SANDBOX_AGENT_MODEL = "gpt-5-nano"
 SANDBOX_DEMO_COMMAND = (
@@ -107,7 +108,7 @@ def _model_settings_with_single_tool_call(request: Any) -> dict[str, Any]:
 
 
 def _force_sandbox_tool_arguments(response: Any) -> None:
-    """Replace the single sandbox tool-call args with the demo command."""
+    """Pin the single sandbox tool-call identity and args for replay."""
     matching_tool_calls: list[Any] = []
     for message in _response_messages(response):
         matching_tool_calls.extend(
@@ -124,18 +125,36 @@ def _force_sandbox_tool_arguments(response: Any) -> None:
             "cannot report a different number of commands than actually ran."
         )
 
-    tool_call = matching_tool_calls[0]
+    _pin_sandbox_tool_call(matching_tool_calls[0])
+
+
+def _pin_sandbox_tool_call(tool_call: Any) -> None:
     if isinstance(tool_call, dict):
         tool_call["args"] = {"command": SANDBOX_DEMO_COMMAND}
+        tool_call["id"] = SANDBOX_DEMO_TOOL_CALL_ID
+        if "tool_call_id" in tool_call:
+            tool_call["tool_call_id"] = SANDBOX_DEMO_TOOL_CALL_ID
+        if "call_id" in tool_call:
+            tool_call["call_id"] = SANDBOX_DEMO_TOOL_CALL_ID
         return
+
     try:
         tool_call.args = {"command": SANDBOX_DEMO_COMMAND}
+        _pin_tool_call_id_attribute(tool_call)
     except Exception as exc:
         raise RuntimeError(
             "Sandbox demo could not pin the "
-            f"{SANDBOX_COMMAND_TOOL_NAME} arguments before LangChain tool "
-            "execution."
+            f"{SANDBOX_COMMAND_TOOL_NAME} identity and arguments before "
+            "LangChain tool execution."
         ) from exc
+
+
+def _pin_tool_call_id_attribute(tool_call: Any) -> None:
+    for attr in ("id", "tool_call_id", "call_id"):
+        if hasattr(tool_call, attr):
+            setattr(tool_call, attr, SANDBOX_DEMO_TOOL_CALL_ID)
+            return
+    tool_call.id = SANDBOX_DEMO_TOOL_CALL_ID
 
 
 def _reject_followup_sandbox_tool_calls(response: Any) -> None:

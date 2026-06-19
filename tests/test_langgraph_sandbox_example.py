@@ -139,6 +139,8 @@ def test_force_sandbox_tool_choice_rewrites_tool_args_to_demo_command(
         "name": module.SANDBOX_COMMAND_TOOL_NAME,
         "args": {"command": "python -c 'print(999)'", "cwd": "/tmp"},
         "id": "sandbox-call-1",
+        "tool_call_id": "sandbox-call-1",
+        "call_id": "sandbox-call-1",
     }
     other_tool_call = {
         "name": "other_tool",
@@ -155,7 +157,9 @@ def test_force_sandbox_tool_choice_rewrites_tool_args_to_demo_command(
     assert sandbox_tool_call == {
         "name": module.SANDBOX_COMMAND_TOOL_NAME,
         "args": {"command": module.SANDBOX_DEMO_COMMAND},
-        "id": "sandbox-call-1",
+        "id": module.SANDBOX_DEMO_TOOL_CALL_ID,
+        "tool_call_id": module.SANDBOX_DEMO_TOOL_CALL_ID,
+        "call_id": module.SANDBOX_DEMO_TOOL_CALL_ID,
     }
     assert other_tool_call == {
         "name": "other_tool",
