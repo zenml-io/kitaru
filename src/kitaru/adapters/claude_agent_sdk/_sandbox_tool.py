@@ -45,6 +45,10 @@ _DEFAULT_DESCRIPTION = (
     "stack's sandbox component. Use this instead of Claude's built-in Bash "
     "when command execution should be owned by Kitaru."
 )
+# The tool returns one JSON object with stdout and stderr. Claude reads
+# maxResultSizeChars from the MCP tool metadata before the model sees the result,
+# so include room for both collected streams plus ordinary JSON fields.
+_TOOL_RESULT_JSON_OVERHEAD_CHARS = 65_536
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -155,6 +159,7 @@ def create_kitaru_sandbox_command_tool(
         normalized_tool_name,
         description or _DEFAULT_DESCRIPTION,
         dict(_INPUT_SCHEMA),
+        annotations=_claude_tool_annotations(normalized_max_chars),
     )(handler)
 
 
@@ -353,6 +358,24 @@ def _claude_sdk_mcp_apis() -> tuple[Any, Any]:
             "a version that provides `tool(...)` and `create_sdk_mcp_server(...)`."
         ) from exc
     return tool, create_sdk_mcp_server
+
+
+def _claude_tool_annotations(default_max_chars: int) -> Any:
+    try:
+        from claude_agent_sdk import ToolAnnotations
+    except (ImportError, AttributeError) as exc:
+        raise KitaruFeatureNotAvailableError(
+            "The installed claude-agent-sdk does not expose ToolAnnotations, "
+            "which Kitaru uses to preserve large sandbox command results."
+        ) from exc
+    annotations_factory = cast(Any, ToolAnnotations)
+    return annotations_factory(
+        maxResultSizeChars=_tool_result_max_size_chars(default_max_chars)
+    )
+
+
+def _tool_result_max_size_chars(default_max_chars: int) -> int:
+    return (default_max_chars * 2) + _TOOL_RESULT_JSON_OVERHEAD_CHARS
 
 
 class _KitaruSandboxMcpServerConfig(dict[str, Any]):

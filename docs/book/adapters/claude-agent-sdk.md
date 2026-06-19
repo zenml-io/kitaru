@@ -709,6 +709,9 @@ runner = KitaruClaudeRunner(
         resume=request.resume_session_id,
         max_turns=request.max_turns,
         mcp_servers={"kitaru": sandbox_server},
+        strict_mcp_config=True,
+        tools=[],
+        permission_mode="dontAsk",
         disallowed_tools=["Bash"],
         allowed_tools=[KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME],
     ),
@@ -730,10 +733,11 @@ from kitaru.adapters.claude_agent_sdk import allowed_tool_name
 ```
 
 This helper does **not** transparently redirect Claude's built-in `Bash`. If you
-want command execution to be Kitaru-owned, deny or omit `Bash` and give Claude
-the Kitaru MCP tool instead. Claude's own `ClaudeAgentOptions(sandbox=...)` is
-also separate: it configures Claude-owned Bash sandboxing, not Kitaru stack
-sandbox execution.
+want command execution to be Kitaru-owned, disable Claude's built-in tools with
+`tools=[]`, pre-approve the Kitaru MCP tool with `allowed_tools=[...]`, and use
+`permission_mode="dontAsk"` so any non-approved tool request is denied instead of
+prompting. Claude's own `ClaudeAgentOptions(sandbox=...)` is also separate: it
+configures Claude-owned Bash sandboxing, not Kitaru stack sandbox execution.
 
 The MCP tool accepts these inputs from Claude:
 
@@ -745,9 +749,12 @@ The MCP tool accepts these inputs from Claude:
 
 The tool output is JSON text. A successful sandbox call returns
 `status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
-flags, stack identity, sandbox identity, session ID, and cleanup status. A
-non-zero `exit_code` is still `status="completed"`; the sandbox ran the command
-and returned process data, so Claude can decide what to do next.
+flags, stack identity, sandbox identity, session ID, and cleanup status. The MCP
+tool advertises a Claude result-size limit based on Kitaru's `default_max_chars`,
+so Claude receives the large stdout/stderr text that Kitaru collected instead of
+quietly cutting it off at Claude's default MCP result threshold. A non-zero
+`exit_code` is still `status="completed"`; the sandbox ran the command and
+returned process data, so Claude can decide what to do next.
 
 If Kitaru cannot run the command, the tool returns `status="failed"` with an
 error object containing the exception type, a category such as `usage`, `state`,

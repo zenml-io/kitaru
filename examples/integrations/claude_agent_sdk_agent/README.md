@@ -179,9 +179,10 @@ custom tool side effects, hooks, file edits, or workspace snapshots one by one.
 
 In the baseline adapter example, we keep the run non-destructive by setting
 `allowed_tools=[]` and using a prompt that asks Claude not to use tools. In the
-sandbox command tool example, Claude is allowed to call only
-`mcp__kitaru__run_command`, and that command goes through the active Kitaru stack
-sandbox. In your own agent, if Claude uses tools that mutate the world, such as
+sandbox command tool example, Claude gets `tools=[]`, `permission_mode="dontAsk"`,
+and only one pre-approved MCP tool: `mcp__kitaru__run_command`. That command goes
+through the active Kitaru stack sandbox. In your own agent, if Claude uses tools
+that mutate the world, such as
 writing files or calling an MCP server that updates a ticket, Kitaru stores the
 final invocation output and captured audit envelope. It does not automatically
 replay or restore every internal side effect.

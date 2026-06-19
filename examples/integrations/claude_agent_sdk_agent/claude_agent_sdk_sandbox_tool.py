@@ -80,6 +80,11 @@ def _build_runner(
             max_budget_usd=max_budget_usd,
             effort="low",
             mcp_servers={"kitaru": sandbox_mcp_server},
+            strict_mcp_config=True,
+            permission_mode="dontAsk",
+            # Disable Claude's built-in tools. The MCP server below still exposes
+            # mcp__kitaru__run_command as the one pre-approved command tool.
+            tools=[],
             system_prompt=(
                 "You are testing Kitaru's sandbox command MCP tool. Use the "
                 "requested Kitaru MCP command tool, then summarize the command "
@@ -148,9 +153,9 @@ def _json_block(value: Any) -> str:
 def _print_result(result: ClaudeRunResult) -> None:
     print("\n=== What happened ===")
     print(
-        "Claude was allowed to call the Kitaru sandbox MCP command tool, but "
-        "Claude's built-in Bash was denied. Kitaru still recorded one completed "
-        "Claude SDK invocation as one checkpoint."
+        "Claude was allowed to call the Kitaru sandbox MCP command tool, while "
+        "Claude's built-in tools were disabled. Kitaru still recorded one "
+        "completed Claude SDK invocation as one checkpoint."
     )
 
     print("\n=== Claude final text ===")

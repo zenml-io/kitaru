@@ -36,9 +36,23 @@ def fake_claude_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     sdk.__dict__["tool_calls"] = []
     sdk.__dict__["server_calls"] = []
 
-    def tool(name: str, description: str, input_schema: dict[str, Any]) -> Any:
+    class ToolAnnotations:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    def tool(
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        annotations: Any | None = None,
+    ) -> Any:
         sdk.__dict__["tool_calls"].append(
-            {"name": name, "description": description, "input_schema": input_schema}
+            {
+                "name": name,
+                "description": description,
+                "input_schema": input_schema,
+                "annotations": annotations,
+            }
         )
 
         def decorate(handler: Any) -> SimpleNamespace:
@@ -47,6 +61,7 @@ def fake_claude_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
                 description=description,
                 input_schema=input_schema,
                 handler=handler,
+                annotations=annotations,
             )
 
         return decorate
@@ -67,6 +82,7 @@ def fake_claude_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 
     sdk.__dict__["tool"] = tool
     sdk.__dict__["create_sdk_mcp_server"] = create_sdk_mcp_server
+    sdk.__dict__["ToolAnnotations"] = ToolAnnotations
     sdk.__dict__["ClaudeAgentOptions"] = ClaudeAgentOptions
     sdk.__dict__["ResultMessage"] = type("ResultMessage", (), {})
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", sdk)
@@ -134,11 +150,18 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
                 "required": ["command"],
                 "additionalProperties": False,
             },
+            "annotations": ANY,
         }
     ]
+    annotation = fake_claude_sdk.__dict__["tool_calls"][0]["annotations"]
+    assert annotation.maxResultSizeChars == (
+        sandbox_tool_module._tool_result_max_size_chars(123)
+    )
     assert fake_claude_sdk.__dict__["server_calls"][0]["name"] == "kitaru_custom"
-    assert (
-        fake_claude_sdk.__dict__["server_calls"][0]["tools"][0].name == "sandbox_exec"
+    sdk_tool = fake_claude_sdk.__dict__["server_calls"][0]["tools"][0]
+    assert sdk_tool.name == "sandbox_exec"
+    assert sdk_tool.annotations.maxResultSizeChars == (
+        sandbox_tool_module._tool_result_max_size_chars(123)
     )
 
     assert isinstance(server, dict)
@@ -184,6 +207,12 @@ def test_real_installed_sdk_server_shape_drives_manifest_and_cache_identity(
         "kitaru.adapters.claude_agent_sdk._serialization"
     )
     types_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._types")
+
+    sdk_tool = sandbox_tool.create_kitaru_sandbox_command_tool(default_max_chars=321)
+    assert sdk_tool.annotations is not None
+    assert sdk_tool.annotations.maxResultSizeChars == (
+        sandbox_tool._tool_result_max_size_chars(321)
+    )
 
     server = sandbox_tool.create_kitaru_sandbox_mcp_server(
         default_max_chars=321,
@@ -599,6 +628,9 @@ def test_sandbox_example_uses_cost_guarded_tool_capable_defaults(
     assert options.effort == "low"
     assert options.setting_sources == []
     assert options.extra_args == {"bare": None}
+    assert options.strict_mcp_config is True
+    assert options.permission_mode == "dontAsk"
+    assert options.tools == []
     assert options.disallowed_tools == ["Bash"]
     assert options.allowed_tools == [example.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME]
 
