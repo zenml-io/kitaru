@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic_ai import Agent
 
-from kitaru import flow
+from kitaru import checkpoint, flow
 from kitaru.adapters.pydantic_ai import (
     DEFAULT_SANDBOX_TOOL_MAX_CHARS,
     SANDBOX_COMMAND_TOOL_NAME,
@@ -83,13 +83,20 @@ def main() -> None:
     _require_provider_configuration(model)
     sandboxed_agent = build_agent(model=model)
 
-    @flow
-    def sandbox_toolset_flow() -> str:
+    # This explicit checkpoint gives `.wait()` one checkpoint to load as the
+    # flow result. Without it, a tool-using agent run can leave several
+    # model/tool checkpoints as terminal graph steps.
+    @checkpoint
+    def run_sandbox_agent_turn() -> str:
         result = sandboxed_agent.run_sync(
             f"Use {SANDBOX_COMMAND_TOOL_NAME} to run `python --version` in "
             "the sandbox. Then answer with the exact exit code and output."
         )
         return result.output
+
+    @flow
+    def sandbox_toolset_flow() -> str:
+        return run_sandbox_agent_turn()
 
     try:
         answer = sandbox_toolset_flow.run(cache=False).wait()

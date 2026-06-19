@@ -54,10 +54,12 @@ Uses `TestModel` so no API keys are needed to run it.
 
 Attaches `sandbox_command_toolset(...)` to a PydanticAI agent and wraps that
 agent with `KitaruAgent`. The model is asked to call `run_sandbox_command` for
-`python --version`. The example uses the adapter's 20,000-character output
-limit. Your active stack must have exactly one sandbox component; if provider
-credentials or sandbox support are missing, the example prints a short setup
-message instead of a long provider/backend traceback.
+`python --version`. The example wraps the whole agent turn in one explicit
+`@checkpoint` so `.wait()` has one checkpoint to load as the final flow result.
+The example uses the adapter's 20,000-character output limit. Your active stack
+must have exactly one sandbox component; if provider credentials or sandbox
+support are missing, the example prints a short setup message instead of a long
+provider/backend traceback.
 
 ## `pydantic_ai_streaming.py` — Watch live PydanticAI events
 
