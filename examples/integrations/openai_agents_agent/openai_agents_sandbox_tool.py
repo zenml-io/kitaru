@@ -8,6 +8,7 @@ Story:
 Run:
     uv sync --extra local --extra openai-agents
     uv run kitaru init
+    uv run kitaru stack create dev
     export OPENAI_API_KEY=sk-...
     uv run python \
         examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
