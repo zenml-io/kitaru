@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-19
+
 ### Added
 - Added sandbox stack component support and the public `kitaru.run_sandbox_command(...)` SDK helper. Local stacks now get a default local sandbox, stack creation accepts explicit sandbox flavors through CLI/YAML/MCP paths, and `examples/features/sandbox/active_stack_sandbox_command.py` shows a tracked flow checkpoint running a command through the sandbox on the current stack. (#423)
 - Added a PydanticAI sandbox command toolset via `sandbox_command_toolset(...)`, plus docs, example coverage, and `examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py`, so PydanticAI agents can call `run_sandbox_command` through Kitaru's shared sandbox helper. (#429)
