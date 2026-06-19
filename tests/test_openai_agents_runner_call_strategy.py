@@ -1549,6 +1549,9 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     import kitaru.adapters.openai_agents._model as openai_model_module
     import kitaru.adapters.openai_agents._tools as openai_tools_module
 
+    monkeypatch.setattr(openai_agent_module, "is_inside_flow", lambda: False)
+    monkeypatch.setattr(openai_agent_module, "is_inside_checkpoint", lambda: False)
+
     sandbox_calls: list[dict[str, Any]] = []
 
     def fake_run_sandbox_command(command: str, **kwargs: Any) -> SandboxCommandResult:
