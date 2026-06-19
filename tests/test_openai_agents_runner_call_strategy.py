@@ -1547,12 +1547,14 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
 ) -> None:
     import kitaru.adapters.openai_agents._agent as openai_agent_module
     import kitaru.adapters.openai_agents._model as openai_model_module
+    import kitaru.adapters.openai_agents._sandbox_tool as openai_sandbox_tool_module
     import kitaru.adapters.openai_agents._tools as openai_tools_module
 
     monkeypatch.setattr(openai_agent_module, "is_inside_flow", lambda: False)
     monkeypatch.setattr(openai_agent_module, "is_inside_checkpoint", lambda: False)
 
     sandbox_calls: list[dict[str, Any]] = []
+    sdk_tool_results: list[dict[str, Any]] = []
 
     def fake_run_sandbox_command(command: str, **kwargs: Any) -> SandboxCommandResult:
         sandbox_calls.append({"command": command, **kwargs})
@@ -1564,6 +1566,9 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     def fail_tool_wrapper(*_args: object, **_kwargs: object) -> object:
         pytest.fail("runner_call must not wrap function tools")
 
+    def fake_run_sync_in_checkpoint(**kwargs: Any) -> Any:
+        return kwargs["body"]()
+
     def fake_run_openai_agent_sync(**kwargs: Any) -> SimpleNamespace:
         tool = kwargs["agent"].tools[0]
         tool_result = asyncio.run(
@@ -1573,11 +1578,20 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
             )
         )
         payload = json.loads(tool_result)
+        sdk_tool_results.append(payload)
         assert payload["exit_code"] == 0
         assert payload["stdout"] == "Python 3.12.0\n"
         return SimpleNamespace(final_output="ok")
 
+    runner_globals = KitaruRunner._run_sdk_sync.__globals__
+    checkpoint_globals = KitaruRunner._run_runner_call_checkpoint_sync.__globals__
+
     monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
+    monkeypatch.setattr(
+        openai_sandbox_tool_module.kitaru,
+        "run_sandbox_command",
+        fake_run_sandbox_command,
+    )
     monkeypatch.setattr(
         openai_model_module,
         "kitaruify_openai_model",
@@ -1593,6 +1607,23 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
         "run_openai_agent_sync",
         fake_run_openai_agent_sync,
     )
+    monkeypatch.setattr(
+        openai_agent_module,
+        "run_sync_in_checkpoint",
+        fake_run_sync_in_checkpoint,
+    )
+    monkeypatch.setitem(
+        runner_globals,
+        "run_openai_agent_sync",
+        fake_run_openai_agent_sync,
+    )
+    monkeypatch.setitem(
+        checkpoint_globals,
+        "run_sync_in_checkpoint",
+        fake_run_sync_in_checkpoint,
+    )
+    monkeypatch.setitem(checkpoint_globals, "is_inside_flow", lambda: False)
+    monkeypatch.setitem(checkpoint_globals, "is_inside_checkpoint", lambda: False)
 
     runner = KitaruRunner(
         Agent(
@@ -1611,11 +1642,23 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     assert result.final_output == "ok"
     assert sandbox_calls == [
         {
+            "cleanup": "destroy",
             "command": "python --version",
             "cwd": None,
             "max_chars": 123,
             "timeout_seconds": 30.0,
-            "cleanup": "destroy",
+        }
+    ]
+    assert sdk_tool_results == [
+        {
+            "cleanup_error": None,
+            "cleanup_succeeded": True,
+            "exit_code": 0,
+            "stderr": "",
+            "stderr_truncated": False,
+            "stdout": "Python 3.12.0\n",
+            "stdout_truncated": False,
+            "timed_out": False,
         }
     ]
 
