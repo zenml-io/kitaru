@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import to_jsonable_python
 
 from kitaru.checkpoint import _raise_if_checkpoint_output_handle
 
@@ -155,8 +156,8 @@ class GeminiInteractionRequest(BaseModel):
         *,
         previous_interaction_id: str,
         function_call_id: str,
+        function_name: str,
         function_result: Any,
-        function_name: str | None = None,
         model: str | None = None,
         agent: str | None = None,
         environment: str | dict[str, Any] | None = None,
@@ -458,13 +459,49 @@ class GeminiInteractionRequest(BaseModel):
                 )
             if self.function_call_id is None:
                 raise ValueError("kind='function_result' requires function_call_id.")
+            if self.function_name is None:
+                raise ValueError("kind='function_result' requires function_name.")
             if not self.has_function_result_payload:
                 raise ValueError("kind='function_result' requires function_result.")
+            self._validate_function_result_input()
         if self.input is None:
             raise ValueError(f"kind={self.kind!r} requires input.")
         if self.background and not self.store:
             raise ValueError("background=True requires store=True.")
         return self
+
+    def _validate_function_result_input(self) -> None:
+        if not isinstance(self.input, list) or len(self.input) != 1:
+            raise ValueError(
+                "kind='function_result' requires one function_result input item."
+            )
+        item = self.input[0]
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                "kind='function_result' requires input[0] to be a mapping."
+            )
+        if item.get("type") != "function_result":
+            raise ValueError(
+                "kind='function_result' requires input[0].type='function_result'."
+            )
+        if item.get("call_id") != self.function_call_id:
+            raise ValueError(
+                "kind='function_result' requires input[0].call_id to match "
+                "function_call_id."
+            )
+        if item.get("name") != self.function_name:
+            raise ValueError(
+                "kind='function_result' requires input[0].name to match function_name."
+            )
+        if "result" not in item:
+            raise ValueError("kind='function_result' requires input[0].result.")
+        if _json_safe_for_comparison(item["result"]) != _json_safe_for_comparison(
+            self.function_result_payload
+        ):
+            raise ValueError(
+                "kind='function_result' requires input[0].result to match "
+                "function_result."
+            )
 
 
 class GeminiInteractionStepSummary(BaseModel):
@@ -567,6 +604,13 @@ class GeminiInteractionResult(BaseModel):
 
 def _is_function_call_step(step: GeminiInteractionStepSummary) -> bool:
     return normalized_token_contains_any(step.type, CALL_ID_TYPE_FRAGMENTS)
+
+
+def _json_safe_for_comparison(value: Any) -> Any:
+    try:
+        return to_jsonable_python(value, serialize_unknown=True)
+    except Exception:
+        return value
 
 
 def _default_list(value: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

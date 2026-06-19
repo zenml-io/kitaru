@@ -454,18 +454,45 @@ def test_execute_gemini_sandbox_function_call_normalizes_tuple_command(
         {"sandbox_python_version": ("python", "--version")},
     )
 
-    assert calls[0]["command"] == ("python", "--version")
+    assert calls[0]["command"] == ["python", "--version"]
     assert calls[0]["max_chars"] == DEFAULT_SANDBOX_COMMAND_MAX_CHARS
 
 
-def test_execute_gemini_sandbox_function_call_rejects_invalid_tuple_command(
+@pytest.mark.parametrize(
+    ("spec_kwargs", "error_match"),
+    [
+        ({"command": ()}, "command list cannot be empty"),
+        ({"command": ["echo", 1]}, "non-empty strings"),
+        ({"command": "echo", "env": {"A": 1}}, "keys and values"),
+        ({"command": "echo", "max_chars": -1}, ">= 0"),
+        ({"command": "echo", "cleanup": "keep"}, "destroy.*close"),
+    ],
+)
+def test_execute_gemini_sandbox_function_call_preflights_sandbox_spec_before_command(
+    monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
+    spec_kwargs: dict[str, Any],
+    error_match: str,
 ) -> None:
-    with pytest.raises(KitaruUsageError, match="command list cannot be empty"):
+    sandbox_calls: list[Any] = []
+
+    def fake_run_sandbox_command(command: Any, **kwargs: Any) -> SandboxCommandResult:
+        sandbox_calls.append({"command": command, **kwargs})
+        return _sandbox_result()
+
+    monkeypatch.setattr("kitaru.run_sandbox_command", fake_run_sandbox_command)
+    spec = gemini_adapter.GeminiSandboxFunctionSpec(
+        function_name="sandbox_python_version",
+        **spec_kwargs,
+    )
+
+    with pytest.raises(KitaruUsageError, match=error_match):
         gemini_adapter.execute_gemini_sandbox_function_call(
             _requires_action_result(gemini_adapter),
-            {"sandbox_python_version": ()},
+            [spec],
         )
+
+    assert sandbox_calls == []
 
 
 def test_execute_gemini_sandbox_function_call_accepts_call_aware_command_builder(
@@ -595,6 +622,56 @@ def test_default_function_result_payload_caps_stdout_and_stderr(
     assert payload["payload_output_max_chars"] == 4_000
     assert execution.sandbox_result.stdout == long_stdout
     assert execution.sandbox_result.stderr == long_stderr
+
+
+def test_default_function_result_payload_redacts_model_facing_output(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    stdout = (
+        "env value explicit-env-secret "
+        "OPENAI_API_KEY=openai-secret "
+        "Authorization: Bearer bearer-secret "
+        "Bearer standalone-secret"
+    )
+    stderr = "password=hunter2 api_key='quoted-secret'"
+    monkeypatch.setattr(
+        "kitaru.run_sandbox_command",
+        lambda command, **kwargs: _sandbox_result(stdout=stdout, stderr=stderr),
+    )
+
+    execution = gemini_adapter.execute_gemini_sandbox_function_call(
+        _requires_action_result(gemini_adapter),
+        [
+            gemini_adapter.GeminiSandboxFunctionSpec(
+                function_name="sandbox_python_version",
+                command="python --version",
+                env={"TOKEN": "explicit-env-secret"},
+            )
+        ],
+    )
+
+    payload = _default_payload_data(execution)
+    assert payload["stdout_redacted"] is True
+    assert payload["stderr_redacted"] is True
+    assert payload["warnings"] == [
+        "Potential secret-like values were redacted from sandbox stdout/stderr "
+        "before sending this payload to Gemini."
+    ]
+    assert "<redacted>" in payload["stdout"]
+    assert "<redacted>" in payload["stderr"]
+    for leaked in (
+        "explicit-env-secret",
+        "openai-secret",
+        "bearer-secret",
+        "standalone-secret",
+        "hunter2",
+        "quoted-secret",
+    ):
+        assert leaked not in payload["stdout"]
+        assert leaked not in payload["stderr"]
+    assert execution.sandbox_result.stdout == stdout
+    assert execution.sandbox_result.stderr == stderr
 
 
 @pytest.mark.parametrize(

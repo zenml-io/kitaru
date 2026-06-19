@@ -23,7 +23,6 @@ from ._stream_shapes import (
     delta_text,
     delta_type_value,
     event_type,
-    extract,
     function_name_from_step,
     interaction_from_event,
     is_safe_stream_text_delta_source,
@@ -34,6 +33,7 @@ from ._stream_shapes import (
     step_index,
     step_type_from_step,
     string_from,
+    usage_from,
 )
 
 GEMINI_STREAM_STARTED = "gemini_interactions.stream.started"
@@ -189,10 +189,7 @@ class GeminiStreamPublisher(BaseStreamPublisher):
             payload["status"] = status
         if interaction_id is not None:
             payload["interaction_id"] = interaction_id
-        if (
-            extract(interaction, "usage") is not None
-            or extract(event, "usage") is not None
-        ):
+        if usage_from(interaction) is not None or usage_from(event) is not None:
             payload["has_usage"] = True
         return payload
 

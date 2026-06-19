@@ -17,7 +17,6 @@ from ._stream_accumulator import _StreamAccumulator
 from ._stream_shapes import (
     CALL_ID_TYPE_FRAGMENTS,
     coerce_string,
-    dict_or_none,
     environment_id,
     extract,
     function_name_from_step,
@@ -25,6 +24,7 @@ from ._stream_shapes import (
     normalize_token,
     normalized_token_contains_any,
     sequence_or_empty,
+    usage_from,
 )
 from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
 from ._utils import elapsed_ms
@@ -654,7 +654,7 @@ def normalize_interaction(
             raw_steps,
             safe_index=safe_text_preview_index,
         )
-    usage = dict_or_none(extract(interaction, "usage"))
+    usage = usage_from(interaction)
     return GeminiInteractionPayload(
         status=str(extract(interaction, "status") or "unknown"),
         interaction_id=coerce_string(extract(interaction, "id")),

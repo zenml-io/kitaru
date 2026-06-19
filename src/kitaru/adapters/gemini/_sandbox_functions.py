@@ -10,6 +10,10 @@ from typing import Any, Literal, TypeAlias, cast
 from pydantic import BaseModel, ConfigDict
 
 import kitaru
+from kitaru._config._sandbox import (
+    _normalize_sandbox_command_inputs,
+    _redact_sensitive_text,
+)
 from kitaru.config import DEFAULT_SANDBOX_COMMAND_MAX_CHARS, SandboxCommandResult
 from kitaru.errors import KitaruUsageError
 
@@ -76,7 +80,7 @@ class GeminiSandboxFunctionSpec:
         """Return the payload that will be sent back to Gemini."""
         if self.result_payload_builder is not None:
             return self.result_payload_builder(call, sandbox_result)
-        return _default_function_result_payload(sandbox_result)
+        return _default_function_result_payload(sandbox_result, env=self.env)
 
 
 class GeminiSandboxFunctionExecution(BaseModel):
@@ -170,12 +174,25 @@ def execute_gemini_sandbox_function_call(
         timeout_s=timeout_s,
         metadata=metadata,
     )
-    sandbox_result = kitaru.run_sandbox_command(
+    (
+        command,
+        cwd,
+        env,
+        max_chars,
+        cleanup,
+    ) = _normalize_sandbox_command_inputs(
         spec.build_command(call),
         cwd=spec.cwd,
         env=spec.env,
         max_chars=spec.max_chars,
         cleanup=spec.cleanup,
+    )
+    sandbox_result = kitaru.run_sandbox_command(
+        command,
+        cwd=cwd,
+        env=env,
+        max_chars=max_chars,
+        cleanup=cleanup,
     )
     payload = spec.build_payload(call, sandbox_result)
     request = _build_function_result_request(
@@ -317,10 +334,20 @@ def _resolve_model_continuation_target(
 
 def _default_function_result_payload(
     sandbox_result: SandboxCommandResult,
+    *,
+    env: Mapping[str, str] | None,
 ) -> list[dict[str, str]]:
-    stdout, stdout_payload_truncated = _clip_payload_output(sandbox_result.stdout)
-    stderr, stderr_payload_truncated = _clip_payload_output(sandbox_result.stderr)
-    payload = {
+    redacted_stdout, stdout_redacted = _redact_sensitive_text(
+        sandbox_result.stdout,
+        env=env,
+    )
+    redacted_stderr, stderr_redacted = _redact_sensitive_text(
+        sandbox_result.stderr,
+        env=env,
+    )
+    stdout, stdout_payload_truncated = _clip_payload_output(redacted_stdout)
+    stderr, stderr_payload_truncated = _clip_payload_output(redacted_stderr)
+    payload: dict[str, Any] = {
         "ok": sandbox_result.exit_code == 0,
         "exit_code": sandbox_result.exit_code,
         "stdout": stdout,
@@ -339,6 +366,17 @@ def _default_function_result_payload(
             "succeeded": sandbox_result.cleanup_succeeded,
         },
     }
+    if stdout_redacted or stderr_redacted:
+        payload.update(
+            {
+                "stdout_redacted": stdout_redacted,
+                "stderr_redacted": stderr_redacted,
+                "warnings": [
+                    "Potential secret-like values were redacted from sandbox "
+                    "stdout/stderr before sending this payload to Gemini."
+                ],
+            }
+        )
     return [{"type": "text", "text": json.dumps(payload, sort_keys=True)}]
 
 

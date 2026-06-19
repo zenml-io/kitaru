@@ -21,7 +21,6 @@ from ._stream_shapes import (
     coerce_string,
     delta_from_event,
     delta_text,
-    dict_or_none,
     environment_id,
     event_type,
     extract,
@@ -34,6 +33,7 @@ from ._stream_shapes import (
     step_from_event,
     step_index,
     step_type_from_step,
+    usage_from,
 )
 from ._types import GeminiInteractionRequest
 
@@ -223,7 +223,7 @@ class _StreamAccumulator:
             "model": coerce_string(extract(final, "model")) or self.model,
             "agent": coerce_string(extract(final, "agent")) or self.agent,
             "environment_id": environment_id(final) or self.environment_id,
-            "usage": dict_or_none(extract(final, "usage")) or self.usage,
+            "usage": usage_from(final) or self.usage,
             "steps": final_steps or accumulated_steps,
             "outputs": final_outputs,
             "output_text": coerce_string(extract(final, "output_text"))
@@ -249,7 +249,7 @@ class _StreamAccumulator:
             interaction,
             interaction_id=coerce_string(extract(event, "interaction_id")),
             status=coerce_string(extract(event, "status")),
-            usage=dict_or_none(extract(event, "usage")),
+            usage=usage_from(event),
         )
 
     def _merge_interaction_metadata(
@@ -275,7 +275,7 @@ class _StreamAccumulator:
         self.model = coerce_string(extract(interaction, "model")) or self.model
         self.agent = coerce_string(extract(interaction, "agent")) or self.agent
         self.environment_id = environment_id(interaction) or self.environment_id
-        usage = usage or dict_or_none(extract(interaction, "usage"))
+        usage = usage or usage_from(interaction)
         if usage is not None:
             self.usage = usage
 

@@ -67,6 +67,7 @@ UNSAFE_TYPE_FRAGMENTS = (
     "web",
     "mcp",
 )
+USAGE_FIELD_NAMES = ("usage", "usage_metadata", "usageMetadata")
 
 
 def extract(value: Any, key: str) -> Any:
@@ -118,6 +119,15 @@ def dict_or_none(value: Any) -> dict[str, Any] | None:
         }
     safe = to_json_safe(value)
     return safe if isinstance(safe, dict) else {"value": safe}
+
+
+def usage_from(value: Any) -> dict[str, Any] | None:
+    """Return usage metadata from known Gemini SDK field aliases."""
+    for field_name in USAGE_FIELD_NAMES:
+        usage = dict_or_none(extract(value, field_name))
+        if usage is not None:
+            return usage
+    return None
 
 
 def event_type(event: Any) -> str:

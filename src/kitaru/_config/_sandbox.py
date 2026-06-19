@@ -81,11 +81,19 @@ def run_sandbox_command(
     client_factory: Callable[[], Any],
 ) -> SandboxCommandResult:
     """Execute one command through the active stack's sandbox component."""
-    normalized_command = _normalize_command(command)
-    normalized_cwd = _normalize_cwd(cwd)
-    normalized_env = _normalize_env(env)
-    normalized_max_chars = _normalize_max_chars(max_chars)
-    normalized_cleanup = _normalize_cleanup(cleanup)
+    (
+        normalized_command,
+        normalized_cwd,
+        normalized_env,
+        normalized_max_chars,
+        normalized_cleanup,
+    ) = _normalize_sandbox_command_inputs(
+        command,
+        cwd=cwd,
+        env=env,
+        max_chars=max_chars,
+        cleanup=cleanup,
+    )
 
     active_stack, active_stack_model = _resolve_active_stack(client_factory)
     sandbox_name, sandbox = _resolve_single_active_sandbox(active_stack)
@@ -157,6 +165,26 @@ def run_sandbox_command(
         cleanup=normalized_cleanup,
         cleanup_succeeded=cleanup_succeeded,
         cleanup_error=cleanup_error,
+    )
+
+
+def _normalize_sandbox_command_inputs(
+    command: str | Sequence[str],
+    *,
+    cwd: str | None,
+    env: Mapping[str, str] | None,
+    max_chars: int,
+    cleanup: str,
+) -> tuple[
+    str | list[str], str | None, dict[str, str] | None, int, SandboxCleanupPolicy
+]:
+    """Normalize sandbox command inputs without touching the active stack."""
+    return (
+        _normalize_command(command),
+        _normalize_cwd(cwd),
+        _normalize_env(env),
+        _normalize_max_chars(max_chars),
+        _normalize_cleanup(cleanup),
     )
 
 
@@ -347,15 +375,25 @@ def _required_output_bool(output: Any, attr: str) -> bool:
     return value
 
 
+def _redact_sensitive_text(
+    text: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[str, bool]:
+    """Redact known env values and common secret-like text patterns."""
+    redacted = _redact_env_values(text, env=env)
+    redacted = _redact_bearer_tokens(redacted)
+    redacted = _redact_secret_key_values(redacted)
+    return redacted, redacted != text
+
+
 def _redact_provider_message(
     message: object,
     *,
     env: Mapping[str, str] | None,
 ) -> str:
-    text = str(message)
-    text = _redact_env_values(text, env=env)
-    text = _redact_bearer_tokens(text)
-    return _redact_secret_key_values(text)
+    redacted, _ = _redact_sensitive_text(str(message), env=env)
+    return redacted
 
 
 def _redact_env_values(text: str, *, env: Mapping[str, str] | None) -> str:
