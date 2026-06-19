@@ -1260,7 +1260,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -1359,8 +1359,8 @@ requires-dist = [
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.89.0,<1.104.0" },
     { name = "rich", specifier = ">=12.0.0" },
     { name = "typing-extensions", marker = "extra == 'pydantic-ai'", specifier = ">=4.12" },
-    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=ee58baaa3174f98a2b69f2d4855ee0aa62aa8441" },
-    { name = "zenml", extras = ["server"], marker = "extra == 'local'", git = "https://github.com/zenml-io/zenml.git?rev=ee58baaa3174f98a2b69f2d4855ee0aa62aa8441" },
+    { name = "zenml", extras = ["local"], specifier = ">=0.95.1" },
+    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.95.1" },
 ]
 provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "openai-agents", "langgraph", "langgraph-openai", "langgraph-anthropic", "claude-agent-sdk", "gemini", "mcp"]
 
@@ -1385,7 +1385,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["server"], git = "https://github.com/zenml-io/zenml.git?rev=ee58baaa3174f98a2b69f2d4855ee0aa62aa8441" },
+    { name = "zenml", extras = ["server"], specifier = ">=0.95.1" },
 ]
 
 [[package]]
@@ -4130,8 +4130,8 @@ wheels = [
 
 [[package]]
 name = "zenml"
-version = "0.94.6"
-source = { git = "https://github.com/zenml-io/zenml.git?rev=ee58baaa3174f98a2b69f2d4855ee0aa62aa8441#ee58baaa3174f98a2b69f2d4855ee0aa62aa8441" }
+version = "0.95.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "click" },
@@ -4150,6 +4150,10 @@ dependencies = [
     { name = "rich" },
     { name = "setuptools" },
     { name = "structlog" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/56/9d8e8e6b17af7b5a7f0342edc05b950de2224dfa74c633d3aca631c1adab/zenml-0.95.1.tar.gz", hash = "sha256:b8034f2b46e9c6feb4bb880d4df8c86b112f4b12952b08e9f9a2009cbd229afd", size = 7228227, upload-time = "2026-06-18T12:21:31.672Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/07/261fb8413f26494aa8fa45ff186a0532d3679314d46b81bb9b8207779dfd/zenml-0.95.1-py3-none-any.whl", hash = "sha256:63e8299aa62de2a818a18c3d6359a891550cbcebefe5faaeb59c133bed1b28a4", size = 8459753, upload-time = "2026-06-18T12:21:29.392Z" },
 ]
 
 [package.optional-dependencies]
