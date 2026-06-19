@@ -71,3 +71,24 @@ def test_one_of_from_or_skip_required() -> None:
 
     with pytest.raises(KitaruUsageError):
         build_replay_plan(run=_run(fetch, write, publish))
+
+
+def test_skip_with_overrides_raises() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    fetch = _step(name="fetch", invocation_id="fetch", started_at=t0)
+    write = _step(
+        name="write",
+        invocation_id="write",
+        started_at=t0 + timedelta(seconds=10),
+        upstream_steps=["fetch"],
+    )
+    publish = _step(
+        name="publish",
+        invocation_id="publish",
+        started_at=t0 + timedelta(seconds=20),
+        upstream_steps=["write"],
+    )
+
+    run = _run(fetch, write, publish)
+    with pytest.raises(KitaruUsageError):
+        build_replay_plan(run=run, skip=["fetch"], overrides={"checkpoint.write": "x"})

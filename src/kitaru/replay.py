@@ -298,6 +298,10 @@ def build_replay_plan(
     checkpoint_overrides = _split_overrides(overrides)
 
     if skip is not None:
+        if checkpoint_overrides:
+            raise KitaruUsageError(
+                "`overrides` is only supported with `from_`, not `skip`."
+            )
         frozen = {
             _resolve_checkpoint_selector(sel, checkpoints).invocation_id
             for sel in skip
