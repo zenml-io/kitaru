@@ -47,6 +47,7 @@ from kitaru.adapters.pydantic_ai import (
 from kitaru.client import ExecutionStatus
 from kitaru.errors import (
     KitaruBackendError,
+    KitaruExecutionError,
     KitaruFeatureNotAvailableError,
     KitaruStateError,
 )
@@ -182,6 +183,22 @@ def wait_for_completion(
         last_status = handle.status
 
 
+def _raise_failed_execution_details(handle: Any, status: ExecutionStatus) -> None:
+    """Raise the execution failure while avoiding successful result extraction."""
+    try:
+        handle.get()
+    except KitaruExecutionError:
+        raise
+
+    execution_id = getattr(handle, "exec_id", "<unknown>")
+    raise KitaruExecutionError(
+        f"Sandbox toolset flow finished with status {status.value}. "
+        f"Inspect execution {execution_id} for details.",
+        exec_id=str(execution_id),
+        status=status,
+    )
+
+
 def main() -> None:
     model = _default_model()
     _require_provider_configuration(model)
@@ -190,6 +207,8 @@ def main() -> None:
         handle = submit_sandbox_toolset_flow(model=model)
         print(f"Submitted sandbox toolset flow execution: {handle.exec_id}")
         status = wait_for_completion(handle)
+        if status is not ExecutionStatus.COMPLETED:
+            _raise_failed_execution_details(handle, status)
     except (KitaruFeatureNotAvailableError, KitaruStateError) as error:
         raise SystemExit(
             "This example needs an active Kitaru stack with exactly one sandbox "
@@ -200,23 +219,18 @@ def main() -> None:
             "The sandbox command reached the active stack, but the backend could "
             f"not execute it successfully: {error}"
         ) from error
+    except KitaruExecutionError as error:
+        raise SystemExit(str(error)) from error
     except TimeoutError as error:
         raise SystemExit(str(error)) from error
-
-    if status is not ExecutionStatus.COMPLETED:
-        raise SystemExit(
-            f"Sandbox toolset flow finished with status {status.value}. "
-            f"Inspect execution {handle.exec_id} for details."
-        )
 
     print("=== sandbox command checkpoints ===")
     print(f"Execution: {handle.exec_id}")
     print("Open the Kitaru UI or run:")
     print(f"  uv run kitaru executions get {handle.exec_id}")
-    print("You should see these checkpoints:")
-    print("  - sandboxed_pydantic_ai_agent_model_request")
+    print("Look for checkpoints like these:")
+    print("  - one or more sandboxed_pydantic_ai_agent_model_request checkpoints")
     print("  - run_sandbox_command_tool")
-    print("  - sandboxed_pydantic_ai_agent_model_request_2")
     print("  - publish_sandbox_answer")
     print(
         "The final text is stored on the publish_sandbox_answer checkpoint. "

@@ -845,7 +845,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
             "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
             timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
     else
-        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example" "openai" "OPENAI_API_KEY"
+        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example; --release --required-provider-area openai makes this prerequisite skip fail release smoke" "openai" "OPENAI_API_KEY"
     fi
 else
     skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"

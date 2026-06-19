@@ -597,6 +597,34 @@ def test_pydantic_ai_sandbox_example_waits_without_result_extraction(
     assert slept == [0.01]
 
 
+def test_pydantic_ai_sandbox_example_failed_status_raises_execution_details() -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+
+    from kitaru.client import ExecutionStatus
+    from kitaru.errors import KitaruExecutionError
+
+    class FakeHandle:
+        exec_id = "exec-failed"
+        get_called = False
+
+        def get(self) -> object:
+            self.get_called = True
+            raise KitaruExecutionError(
+                "specific sandbox failure",
+                exec_id=self.exec_id,
+                status=ExecutionStatus.FAILED,
+            )
+
+    handle = FakeHandle()
+
+    with pytest.raises(KitaruExecutionError, match="specific sandbox failure"):
+        pydantic_ai_sandbox_toolset._raise_failed_execution_details(
+            handle, ExecutionStatus.FAILED
+        )
+
+    assert handle.get_called is True
+
+
 @pytest.mark.anyio
 async def test_sandbox_command_tool_tracking_records_failed_event(
     monkeypatch: pytest.MonkeyPatch,

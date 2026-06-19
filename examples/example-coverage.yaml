@@ -309,7 +309,7 @@ examples:
         requires_server: true
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
-        notes: smoke-test.sh runs this only when the active stack has exactly one sandbox component; otherwise it records an explicit prerequisite skip
+        notes: smoke-test.sh runs this only when the active stack has exactly one sandbox component; otherwise it records an explicit prerequisite skip; in release mode, use --required-provider-area openai to make that skip fail the run
       live_provider:
         status: smoke_only
         provider: openai
