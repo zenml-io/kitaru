@@ -675,8 +675,8 @@ That way the durable file write is visible to Kitaru as its own checkpoint.
 ## Kitaru-owned sandbox command tool
 
 Sometimes you do want Claude to run a command, but you want that command to go
-through the sandbox attached to the active Kitaru stack instead of through
-Claude's built-in `Bash` tool. Use Kitaru's Claude Agent SDK MCP helper for that
+through the sandbox on your current Kitaru stack instead of through Claude's
+built-in `Bash` tool. Use Kitaru's Claude Agent SDK MCP helper for that
 case.
 
 The concrete path is:
@@ -685,7 +685,7 @@ The concrete path is:
 Claude prompt
   -> Claude Agent SDK invocation
   -> Claude calls mcp__kitaru__run_command
-  -> Kitaru runs kitaru.run_sandbox_command(...) in the active stack sandbox
+  -> Kitaru runs kitaru.run_sandbox_command(...) in your current stack's sandbox
   -> Claude receives stdout, stderr, exit_code, and cleanup metadata
   -> Kitaru stores one completed ClaudeRunResult for the whole invocation
 ```
@@ -768,8 +768,8 @@ If Kitaru cannot run the command, the tool returns `status="failed"` with an
 error object containing the exception type, a category such as `usage`, `state`,
 `feature_not_available`, `backend`, or `runtime`, and a message.
 
-The active stack must have exactly one sandbox component. If it has none, Kitaru
-refuses to run the command. If it has more than one, Kitaru refuses to guess.
+Your current Kitaru stack must have exactly one sandbox component. If it has none,
+Kitaru refuses to run the command. If it has more than one, Kitaru refuses to guess.
 That avoids the bad outcome where Claude asks for a simple inspection command
 and Kitaru silently runs it in the wrong sandbox.
 
@@ -793,7 +793,7 @@ A runnable showcase lives in the repository at
 By default, that showcase passes a small temporary directory as Claude's own
 working directory, uses Claude Code's `--bare` mode, selects the tool-capable
 `sonnet` model alias, and sets a small Claude SDK budget cap. The sandbox command
-still runs through the active Kitaru stack sandbox. This default avoids the bad
+still runs through your current stack's sandbox. This default avoids the bad
 surprise where a tiny `python --version` demo causes Claude Code to load a large
 repository context. Pass `--claude-cwd /path/to/project` only when you actually
 want Claude to see that project, and pass `--model <model>` when you want a

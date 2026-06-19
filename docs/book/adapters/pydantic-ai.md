@@ -11,7 +11,7 @@ Kitaru's PydanticAI adapter makes any [PydanticAI](https://ai.pydantic.dev) agen
 from pydantic_ai import Agent
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-4o", name="researcher")
+agent = Agent("openai:gpt-5-nano", name="researcher")
 durable_agent = KitaruAgent(agent)
 
 result = durable_agent.run_sync("Summarize quantum error correction.")
@@ -54,7 +54,7 @@ Wrap the agent and call it directly. The adapter auto-opens a flow and per-call 
 from pydantic_ai import Agent
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-4o", name="researcher")
+agent = Agent("openai:gpt-5-nano", name="researcher")
 durable_agent = KitaruAgent(agent)
 
 result = durable_agent.run_sync("What are the open questions in QEC?")
@@ -81,7 +81,7 @@ import kitaru
 from pydantic_ai import Agent
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-4o", name="researcher")
+agent = Agent("openai:gpt-5-nano", name="researcher")
 durable_agent = KitaruAgent(agent)
 
 @kitaru.checkpoint
@@ -215,9 +215,9 @@ With `checkpoint_strategy="calls"`, `@hitl_tool` stays flow-scope safe because t
 
 See [Wait, Input, and Resume](../guides/wait-and-resume.md) for how paused flows are resolved.
 
-### Active-stack sandbox command toolset
+### Sandbox command toolset
 
-Use `sandbox_command_toolset(...)` when a PydanticAI agent should run shell commands through the active Kitaru stack sandbox instead of on your laptop or server process.
+Use `sandbox_command_toolset(...)` when a PydanticAI agent should run shell commands through the sandbox on your current Kitaru stack instead of on your laptop or server process.
 
 ```python
 from pydantic_ai import Agent
@@ -228,7 +228,7 @@ from kitaru.adapters.pydantic_ai import (
 )
 
 agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5-nano",
     name="sandboxed_agent",
     toolsets=[sandbox_command_toolset(max_chars=20_000)],
 )
@@ -240,7 +240,7 @@ durable_agent = KitaruAgent(
 )
 ```
 
-The toolset exposes one model-facing tool named `run_sandbox_command(command, cwd=None)`. The active stack must have exactly one sandbox component. Each tool call creates one temporary sandbox session, runs one command, collects `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys that temporary session. By default, the adapter collects up to 20,000 characters from each output stream; pass `max_chars=` to change that limit. The factory also accepts `cleanup="destroy"` or `cleanup="close"`: the default `"destroy"` removes the temporary sandbox session after the command when the backend supports that, while `"close"` only closes the session handle.
+The toolset exposes one model-facing tool named `run_sandbox_command(command, cwd=None)`. Your current Kitaru stack must have exactly one sandbox component. Each tool call creates one temporary sandbox session, runs one command, collects `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys that temporary session. By default, the adapter collects up to 20,000 characters from each output stream; pass `max_chars=` to change that limit. The factory also accepts `cleanup="destroy"` or `cleanup="close"`: the default `"destroy"` removes the temporary sandbox session after the command when the backend supports that, while `"close"` only closes the session handle.
 
 A command that exits with a non-zero code is still a successful tool call from Kitaru's point of view: the model receives `exit_code`, `stdout`, and `stderr` and can decide what to do next. Missing sandbox components, multiple sandbox components, unsupported sandbox runtime APIs, and backend failures become failed tool calls and raise the same public Kitaru errors as `kitaru.run_sandbox_command(...)`.
 
@@ -266,7 +266,7 @@ server = MCPServerStdio(
     args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     cache_tools=True,
 )
-agent = Agent("openai:gpt-4o", name="researcher", toolsets=[server])
+agent = Agent("openai:gpt-5-nano", name="researcher", toolsets=[server])
 durable_agent = KitaruAgent(agent)
 ```
 
@@ -566,7 +566,7 @@ example submits a flow, watches `pydantic_ai.stream.*` events, and then prints
 the durable final answer from `.wait()`.
 
 The sandbox toolset example asks a real PydanticAI model to call
-`run_sandbox_command` for `python --version` through the active Kitaru stack
+`run_sandbox_command` for `python --version` through your current stack's
 sandbox:
 
 ```bash
@@ -576,8 +576,8 @@ export OPENAI_API_KEY=sk-...
 uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
 ```
 
-The active stack must have exactly one sandbox component. Check the active
-stack with `uv run kitaru stack current`, then inspect it with
+Your current Kitaru stack must have exactly one sandbox component. Check it
+with `uv run kitaru stack current`, then inspect it with
 `uv run kitaru stack show <name>`. If it has no sandbox component, create a
 sandbox-enabled local stack with:
 

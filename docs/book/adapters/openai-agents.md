@@ -181,10 +181,10 @@ call in your own `@checkpoint` is **not** a workaround here — the adapter
 guards against it and will raise, because per-call checkpoints cannot be
 nested inside another Kitaru checkpoint.
 
-## Active-stack sandbox command tool
+## Sandbox command tool
 
 Use `sandbox_command_tool(...)` when you want an OpenAI agent to run a command
-through the sandbox attached to Kitaru's active stack:
+through the sandbox on your current Kitaru stack:
 
 ```python
 from agents import Agent
@@ -217,7 +217,7 @@ OpenAI model emits a local function-tool call
 → OpenAI Agents SDK invokes the Kitaru tool callback
 → the callback parses {"command": "...", "cwd": "..."}
 → Kitaru calls run_sandbox_command(...)
-→ the active stack's one sandbox runs the command
+→ your current stack's sandbox runs the command
 → the callback returns compact JSON to the model
 ```
 
@@ -234,7 +234,7 @@ shorter or longer command budget.
 
 {% hint style="warning" %}
 This is not a secret-protection boundary. The model cannot pass a custom `env`
-object to the tool, but it still chooses the command. If the active sandbox can
+object to the tool, but it still chooses the command. If the sandbox can
 read `/workspace/.env`, cloud credentials, SSH keys, internal network endpoints,
 or inherited environment variables, then a model-chosen command can try to read
 or exfiltrate them. In concrete terms: `sandbox_command_tool(...)` blocks "run
@@ -269,7 +269,7 @@ order to answer the user. Tell the model to inspect `exit_code` first: a command
 can write to `stdout` and still fail. If `timed_out` is `true`, Kitaru stopped
 waiting for the command after the app-owned timeout and returns `exit_code: -1`.
 
-The active stack must have exactly one sandbox component. If there is no sandbox,
+Your current Kitaru stack must have exactly one sandbox component. If there is no sandbox,
 Kitaru raises an error and does not run the command. If there is more than one
 sandbox, Kitaru raises instead of guessing. The bad version would be: you
 expected a cheap local sandbox, Kitaru silently picked a different one, and the
@@ -287,7 +287,7 @@ This helper does **not** redirect OpenAI-hosted tools into Kitaru's sandbox.
 `CodeInterpreterTool`, hosted shell containers, hosted MCP, and other
 provider-hosted tools run on OpenAI's side. Kitaru can still wrap the outer
 runner call around them, but their execution environment is not the sandbox on
-your active Kitaru stack.
+your current Kitaru stack.
 
 ## Streaming with Kitaru durability
 
@@ -566,7 +566,7 @@ export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
 uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
 
-# active-stack sandbox command tool example
+# sandbox command tool example
 uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
 
 # streaming runner-call example
@@ -574,9 +574,9 @@ uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.
 ```
 
 `uv run kitaru stack create dev` creates and activates the local stack whose
-sandbox is used by the sandbox command tool example. If you use a different
-active stack, make sure it has exactly one sandbox component before running that
-example.
+sandbox is used by the sandbox command tool example. If you switch stacks,
+make sure your current stack has exactly one sandbox component before running
+that example.
 
 ## End-to-end research bot example
 

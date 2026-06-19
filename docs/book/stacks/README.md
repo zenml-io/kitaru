@@ -237,11 +237,11 @@ the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
 sandbox and ran it somewhere expensive.
 
 If you use the OpenAI Agents SDK, `sandbox_command_tool(...)` turns this same
-active-stack sandbox command path into a local OpenAI `FunctionTool`. See the
-[OpenAI Agents adapter guide](../adapters/openai-agents.md#active-stack-sandbox-command-tool)
+stack-backed sandbox command path into a local OpenAI `FunctionTool`. See the
+[OpenAI Agents adapter guide](../adapters/openai-agents.md#sandbox-command-tool)
 for the agent-facing version and its hosted-tool limitations.
 
-The Gemini Interactions adapter can use this same active-stack sandbox for
+The Gemini Interactions adapter can use the same current-stack sandbox for
 caller-owned custom functions. Gemini returns `requires_action`, your code
 matches the requested function name against an explicit registry, and Kitaru runs
 the registered command through `kitaru.run_sandbox_command(...)`. This does not
