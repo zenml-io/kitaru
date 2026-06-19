@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Reworked the prospect scout example (`examples/end_to_end/prospect_scout/`) into a genuinely agentic sweep: the qualifier is now a real PydanticAI agent that calls a `search_web` tool and decides its own searches (instead of being handed pre-fetched snippets), classifies prospects against a `LineOfBusiness` enum, and is built lazily inside its checkpoint so remote runs can inject keys via a secret. The README is reorganized around the durability, agent-observability, type-safety, and human-in-the-loop "aha moments", and a regression test asserts the agent actually invokes its search tool.
 
+### Fixed
+- Kept the Claude Agent SDK sandbox MCP helper's default output limits within Claude Code's MCP result-size ceiling, so Kitaru's stdout/stderr truncation flags match what Claude actually receives.
+
 ## [0.16.0] - 2026-06-15
 
 ### Added

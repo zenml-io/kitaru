@@ -154,6 +154,16 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
         }
     ]
     schema = fake_claude_sdk.__dict__["tool_calls"][0]["input_schema"]
+    env_object_schema = schema["properties"]["env"]["anyOf"][0]
+    assert env_object_schema["maxProperties"] == sandbox_tool_module._MAX_ENV_VARS
+    assert (
+        env_object_schema["propertyNames"]["maxLength"]
+        == sandbox_tool_module._MAX_ENV_KEY_CHARS
+    )
+    assert (
+        env_object_schema["additionalProperties"]["maxLength"]
+        == sandbox_tool_module._MAX_ENV_VALUE_CHARS
+    )
     max_chars_integer_schema = schema["properties"]["max_chars"]["anyOf"][0]
     assert max_chars_integer_schema["maximum"] == 123
     assert (
@@ -192,6 +202,40 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
     }
 
 
+def test_helper_defaults_stay_within_claude_mcp_result_limit(
+    sandbox_tool_module: types.ModuleType,
+    fake_claude_sdk: types.ModuleType,
+) -> None:
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+    default_max_chars = sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS
+
+    assert (
+        default_max_chars
+        == (
+            sandbox_tool_module._CLAUDE_MCP_MAX_RESULT_SIZE_CHARS
+            - sandbox_tool_module._TOOL_RESULT_JSON_OVERHEAD_CHARS
+        )
+        // 2
+    )
+    assert (
+        sandbox_tool_module._tool_result_max_size_chars(default_max_chars)
+        == sandbox_tool_module._CLAUDE_MCP_MAX_RESULT_SIZE_CHARS
+    )
+
+    schema = fake_claude_sdk.__dict__["tool_calls"][0]["input_schema"]
+    max_chars_integer_schema = schema["properties"]["max_chars"]["anyOf"][0]
+    assert max_chars_integer_schema["maximum"] == default_max_chars
+
+    annotation = fake_claude_sdk.__dict__["tool_calls"][0]["annotations"]
+    assert (
+        annotation.maxResultSizeChars
+        == sandbox_tool_module._CLAUDE_MCP_MAX_RESULT_SIZE_CHARS
+    )
+    metadata = sandbox_tool_module.kitaru_sandbox_mcp_metadata(server)
+    assert metadata is not None
+    assert metadata["default_max_chars"] == default_max_chars
+
+
 def test_public_default_allowed_tool_name(
     sandbox_tool_module: types.ModuleType,
 ) -> None:
@@ -200,6 +244,11 @@ def test_public_default_allowed_tool_name(
     assert (
         sandbox_tool_module.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME
         == "mcp__kitaru__run_command"
+    )
+    adapter = importlib.import_module("kitaru.adapters.claude_agent_sdk")
+    assert (
+        adapter.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS
+        == sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS
     )
 
 
@@ -463,6 +512,7 @@ def test_handler_does_not_redact_short_ordinary_env_values(
         {"command": ["python", ""]},
         {"command": "echo hi", "cwd": 123},
         {"command": "echo hi", "env": {"DEBUG": 1}},
+        {"command": "echo hi", "env": {"DEBUG": "x" * 8_193}},
         {"command": "echo hi", "max_chars": True},
         {"command": "echo hi", "cleanup": "keep"},
     ],
@@ -693,6 +743,12 @@ def test_invalid_helper_defaults_raise_usage_errors(
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=0)
     with pytest.raises(KitaruUsageError, match="default_max_chars"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_max_chars=True)
+    with pytest.raises(KitaruUsageError, match="result-size ceiling"):
+        sandbox_tool_module.create_kitaru_sandbox_mcp_server(
+            default_max_chars=(
+                sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS + 1
+            )
+        )
     with pytest.raises(KitaruUsageError, match="default_cleanup"):
         sandbox_tool_module.create_kitaru_sandbox_mcp_server(default_cleanup="keep")
 
@@ -747,26 +803,6 @@ def test_sandbox_example_uses_cost_guarded_tool_capable_defaults(
     assert options.allowed_tools == [example.KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME]
 
 
-def test_sandbox_example_help_marks_sandbox_cwd_as_requested_not_enforced(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    pytest.importorskip("claude_agent_sdk")
-    _purge_claude_adapter_modules(monkeypatch)
-    module_name = (
-        "examples.integrations.claude_agent_sdk_agent.claude_agent_sdk_sandbox_tool"
-    )
-    monkeypatch.delitem(sys.modules, module_name, raising=False)
-    example = importlib.import_module(module_name)
-    monkeypatch.setattr(sys, "argv", ["claude_agent_sdk_sandbox_tool.py", "--help"])
-
-    with pytest.raises(SystemExit) as exc_info:
-        example._parse_args()
-
-    assert exc_info.value.code == 0
-    assert "does not enforce" in capsys.readouterr().out
-
-
 def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -785,7 +821,6 @@ def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
 
     def fake_run(
         command: str,
-        sandbox_cwd: str | None,
         claude_cwd: str,
         max_turns: int,
         model: str | None,
@@ -794,7 +829,6 @@ def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
         captured.update(
             {
                 "command": command,
-                "sandbox_cwd": sandbox_cwd,
                 "claude_cwd": claude_cwd,
                 "max_turns": max_turns,
                 "model": model,
@@ -810,7 +844,6 @@ def test_sandbox_example_main_defaults_claude_cwd_to_temp_dir(
 
     assert captured == {
         "command": example.DEFAULT_SANDBOX_COMMAND,
-        "sandbox_cwd": None,
         "claude_cwd": example._default_claude_cwd(),
         "max_turns": 3,
         "model": "sonnet",

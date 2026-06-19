@@ -743,20 +743,24 @@ The MCP tool accepts these inputs from Claude:
 
 - `command`: a shell command string or argv-style list
 - `cwd`: optional working directory inside the sandbox
-- `env`: optional command environment
-- `max_chars`: optional output collection limit; Claude may lower the per-call limit but cannot raise it above the helper's configured `default_max_chars`
+- `env`: optional command environment; Kitaru bounds the number and size of variables so one MCP call cannot send an enormous env payload
+- `max_chars`: optional per-stream output collection limit; Claude may lower the per-call limit but cannot raise it above the helper's configured `default_max_chars`
 - `cleanup`: optional session cleanup policy, either `"destroy"` or `"close"`
 
 The tool output is JSON text. A successful sandbox call returns
 `status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
 flags, stack identity, sandbox identity, session ID, and cleanup status. The MCP
-tool advertises a Claude result-size limit based on Kitaru's `default_max_chars`.
-Claude may request a smaller `max_chars` for one call, but it cannot raise that
-per-call limit above the helper's configured default. That means Claude receives
-the large stdout/stderr text that Kitaru collected instead of quietly cutting it
-off at Claude's default MCP result threshold. A non-zero
-`exit_code` is still `status="completed"`; the sandbox ran the command and
-returned process data, so Claude can decide what to do next.
+tool advertises Claude's `maxResultSizeChars` annotation so Claude can receive
+large sandbox outputs without applying its smaller default MCP truncation path.
+Claude Code still caps that annotation at 500,000 characters, so Kitaru's Claude
+MCP helper uses a lower `default_max_chars` than raw
+`kitaru.run_sandbox_command(...)`: stdout, stderr, and the surrounding JSON fields
+must all fit inside Claude's result-size ceiling. If you configure a larger
+`default_max_chars` than the helper can safely advertise, Kitaru raises at setup
+time instead of returning output that says `stdout_truncated=false` while Claude
+only received part of the JSON. A non-zero `exit_code` is still
+`status="completed"`; the sandbox ran the command and returned process data, so
+Claude can decide what to do next.
 
 If Kitaru cannot run the command, the tool returns `status="failed"` with an
 error object containing the exception type, a category such as `usage`, `state`,

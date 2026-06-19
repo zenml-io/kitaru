@@ -6,11 +6,11 @@ import asyncio
 import copy
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal, cast
 
-from kitaru._config._sandbox import DEFAULT_SANDBOX_COMMAND_MAX_CHARS
+from kitaru._config import _sandbox as sandbox_config
 from kitaru.errors import (
     KitaruBackendError,
     KitaruError,
@@ -47,10 +47,20 @@ _DEFAULT_DESCRIPTION = (
     "when command execution should be owned by Kitaru."
 )
 # The tool returns one JSON object with stdout and stderr. Claude reads
-# maxResultSizeChars from the MCP tool metadata before the model sees the result,
-# so include room for both collected streams plus ordinary JSON fields.
+# maxResultSizeChars from the MCP tool metadata before the model sees the result.
+# Claude Code currently caps anthropic/maxResultSizeChars at 500,000 characters,
+# so keep the default per-stream collection budget low enough for both streams
+# plus ordinary JSON fields to fit under that ceiling.
+_CLAUDE_MCP_MAX_RESULT_SIZE_CHARS = 500_000
 _TOOL_RESULT_JSON_OVERHEAD_CHARS = 65_536
+DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS = (
+    _CLAUDE_MCP_MAX_RESULT_SIZE_CHARS - _TOOL_RESULT_JSON_OVERHEAD_CHARS
+) // 2
 _TOOL_ARGUMENT_KEYS = frozenset({"command", "cwd", "env", "max_chars", "cleanup"})
+_MAX_ENV_VARS = 64
+_MAX_ENV_KEY_CHARS = 256
+_MAX_ENV_VALUE_CHARS = 8_192
+_MAX_ENV_TOTAL_CHARS = 65_536
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -74,7 +84,15 @@ _INPUT_SCHEMA: dict[str, Any] = {
             "anyOf": [
                 {
                     "type": "object",
-                    "additionalProperties": {"type": "string"},
+                    "maxProperties": _MAX_ENV_VARS,
+                    "propertyNames": {
+                        "type": "string",
+                        "maxLength": _MAX_ENV_KEY_CHARS,
+                    },
+                    "additionalProperties": {
+                        "type": "string",
+                        "maxLength": _MAX_ENV_VALUE_CHARS,
+                    },
                 },
                 {"type": "null"},
             ],
@@ -103,7 +121,7 @@ def create_kitaru_sandbox_mcp_server(
     server_name: str = KITARU_SANDBOX_MCP_SERVER_NAME,
     tool_name: str = KITARU_SANDBOX_COMMAND_TOOL_NAME,
     description: str | None = None,
-    default_max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    default_max_chars: int = DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS,
     default_cleanup: SandboxCommandCleanup = "destroy",
 ) -> Any:
     """Create a Claude Agent SDK MCP server for Kitaru sandbox commands.
@@ -143,7 +161,7 @@ def create_kitaru_sandbox_command_tool(
     *,
     tool_name: str = KITARU_SANDBOX_COMMAND_TOOL_NAME,
     description: str | None = None,
-    default_max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    default_max_chars: int = DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS,
     default_cleanup: SandboxCommandCleanup = "destroy",
     tool_api: Any | None = None,
 ) -> Any:
@@ -240,7 +258,7 @@ def _tool_arguments(
         )
     _validate_known_tool_arguments(arguments)
     command = _tool_command(arguments.get("command", _MISSING))
-    cwd = _tool_optional_string(arguments.get("cwd"), "cwd")
+    cwd = _tool_cwd(arguments.get("cwd"))
     env = _tool_env(arguments.get("env"))
     max_chars = _tool_max_chars(arguments.get("max_chars"), default_max_chars)
     cleanup = _tool_cleanup(arguments.get("cleanup"), default_cleanup)
@@ -274,62 +292,62 @@ def _validate_known_tool_arguments(arguments: Mapping[str, Any]) -> None:
 
 
 def _tool_command(value: Any) -> SandboxCommand:
-    if isinstance(value, str):
-        if not value.strip():
-            raise KitaruUsageError("Sandbox command must be a non-empty string.")
-        return value
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        if not value:
-            raise KitaruUsageError("Sandbox command list cannot be empty.")
-        command: list[str] = []
-        for item in value:
-            if not isinstance(item, str) or not item:
-                raise KitaruUsageError(
-                    "Sandbox command list items must be non-empty strings."
-                )
-            command.append(item)
-        return command
     if value is _MISSING:
         raise KitaruUsageError("Sandbox command tool input requires `command`.")
-    raise KitaruUsageError("Sandbox command must be a string or list of strings.")
+    return sandbox_config._normalize_command(value)
 
 
-def _tool_optional_string(value: Any, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    raise KitaruUsageError(f"Sandbox command `{field_name}` must be a string or null.")
+def _tool_cwd(value: Any) -> str | None:
+    return sandbox_config._normalize_cwd(value)
 
 
 def _tool_env(value: Any) -> Mapping[str, str] | None:
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise KitaruUsageError("Sandbox command `env` must be an object or null.")
-    normalized: dict[str, str] = {}
-    for key, nested in value.items():
-        if not isinstance(key, str) or not isinstance(nested, str):
-            raise KitaruUsageError(
-                "Sandbox command `env` keys and values must be strings."
-            )
-        normalized[key] = nested
+    normalized = sandbox_config._normalize_env(value)
+    _validate_tool_env_size(normalized)
     return normalized
+
+
+def _validate_tool_env_size(env: Mapping[str, str] | None) -> None:
+    if not env:
+        return
+    if len(env) > _MAX_ENV_VARS:
+        raise KitaruUsageError(
+            f"Sandbox command `env` may contain at most {_MAX_ENV_VARS} variables."
+        )
+    total_chars = 0
+    for key, value in env.items():
+        if len(key) > _MAX_ENV_KEY_CHARS:
+            raise KitaruUsageError(
+                "Sandbox command `env` keys may contain at most "
+                f"{_MAX_ENV_KEY_CHARS} characters."
+            )
+        if len(value) > _MAX_ENV_VALUE_CHARS:
+            raise KitaruUsageError(
+                "Sandbox command `env` values may contain at most "
+                f"{_MAX_ENV_VALUE_CHARS} characters."
+            )
+        total_chars += len(key) + len(value)
+    if total_chars > _MAX_ENV_TOTAL_CHARS:
+        raise KitaruUsageError(
+            "Sandbox command `env` may contain at most "
+            f"{_MAX_ENV_TOTAL_CHARS} total characters across keys and values."
+        )
 
 
 def _tool_max_chars(value: Any, default_max_chars: int) -> int:
     if value is None:
         return default_max_chars
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+    max_chars = sandbox_config._normalize_max_chars(value)
+    if max_chars <= 0:
         raise KitaruUsageError(
             "Sandbox command `max_chars` must be a positive integer or null."
         )
-    if value > default_max_chars:
+    if max_chars > default_max_chars:
         raise KitaruUsageError(
             "Sandbox command `max_chars` must be a positive integer <= "
             f"configured default_max_chars ({default_max_chars}), or null."
         )
-    return value
+    return max_chars
 
 
 def _tool_cleanup(
@@ -338,11 +356,7 @@ def _tool_cleanup(
 ) -> SandboxCommandCleanup:
     if value is None:
         return default_cleanup
-    if value not in {"destroy", "close"}:
-        raise KitaruUsageError(
-            "Sandbox command `cleanup` must be 'destroy', 'close', or null."
-        )
-    return cast(SandboxCommandCleanup, value)
+    return sandbox_config._normalize_cleanup(value)
 
 
 def _run_sandbox_command(
@@ -410,7 +424,10 @@ def _claude_tool_annotations(default_max_chars: int) -> Any:
 
 
 def _tool_result_max_size_chars(default_max_chars: int) -> int:
-    return (default_max_chars * 2) + _TOOL_RESULT_JSON_OVERHEAD_CHARS
+    return min(
+        (default_max_chars * 2) + _TOOL_RESULT_JSON_OVERHEAD_CHARS,
+        _CLAUDE_MCP_MAX_RESULT_SIZE_CHARS,
+    )
 
 
 class _KitaruSandboxMcpServerConfig(dict[str, Any]):
@@ -561,18 +578,25 @@ def _normalize_default_max_chars(value: int) -> int:
         raise KitaruUsageError(
             "Claude sandbox MCP `default_max_chars` must be a positive integer."
         )
+    if value > DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS:
+        raise KitaruUsageError(
+            "Claude sandbox MCP `default_max_chars` must be <= "
+            f"{DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS}, so the JSON tool "
+            "result stays within Claude's MCP result-size ceiling."
+        )
     return value
 
 
 def _normalize_default_cleanup(value: str) -> SandboxCommandCleanup:
-    if value not in {"destroy", "close"}:
+    if value not in {sandbox_config.CLEANUP_DESTROY, sandbox_config.CLEANUP_CLOSE}:
         raise KitaruUsageError(
             "Claude sandbox MCP `default_cleanup` must be 'destroy' or 'close'."
         )
-    return cast(SandboxCommandCleanup, value)
+    return sandbox_config._normalize_cleanup(value)
 
 
 __all__ = [
+    "DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS",
     "KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME",
     "KITARU_SANDBOX_COMMAND_TOOL_NAME",
     "KITARU_SANDBOX_MCP_METADATA_KEY",

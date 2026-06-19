@@ -107,7 +107,6 @@ def _build_runner(
 @flow
 def inspect_sandbox_with_claude(
     command: str,
-    sandbox_cwd: str | None,
     claude_cwd: str,
     max_turns: int,
     model: str | None,
@@ -118,11 +117,7 @@ def inspect_sandbox_with_claude(
         "Use only the MCP tool named "
         f"{KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME} to run this command through "
         "Kitaru's active stack sandbox. Do not use Bash.\n\n"
-        f"Command: {command!r}\n"
-        f"Requested sandbox cwd for the MCP call: {sandbox_cwd!r}\n"
-        "If this value is not None, pass it as the tool call's `cwd` argument. "
-        "This demo asks you to do that; Kitaru does not enforce it in this "
-        "example.\n\n"
+        f"Command: {command!r}\n\n"
         "After the tool returns, summarize stdout, stderr, exit_code, stack, "
         "sandbox, session_id, and cleanup status."
     )
@@ -220,15 +215,6 @@ def _parse_args() -> argparse.Namespace:
         help="Command Claude should run through the Kitaru sandbox tool.",
     )
     parser.add_argument(
-        "--sandbox-cwd",
-        default=None,
-        help=(
-            "Requested working directory for Claude to pass as the MCP tool "
-            "`cwd`. This demo includes it in the prompt; it does not enforce "
-            "the value."
-        ),
-    )
-    parser.add_argument(
         "--claude-cwd",
         default=None,
         help=(
@@ -275,7 +261,6 @@ def main() -> None:
 
     handle = inspect_sandbox_with_claude.run(
         args.command,
-        args.sandbox_cwd,
         claude_cwd,
         args.max_turns,
         args.model,

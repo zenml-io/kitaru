@@ -17,6 +17,7 @@ from ._agent import KitaruClaudeRunner
 from ._events import ClaudeAdapterEvent, ClaudeEventError, ClaudeRunEvent
 from ._policy import ClaudeCapturePolicy
 from ._sandbox_tool import (
+    DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS,
     KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME,
     KITARU_SANDBOX_COMMAND_TOOL_NAME,
     KITARU_SANDBOX_MCP_SERVER_NAME,
@@ -45,6 +46,7 @@ __all__ = [
     "CLAUDE_STREAM_FAILED",
     "CLAUDE_STREAM_STARTED",
     "CLAUDE_STREAM_TERMINAL_EVENT_KINDS",
+    "DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS",
     "KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME",
     "KITARU_SANDBOX_COMMAND_TOOL_NAME",
     "KITARU_SANDBOX_MCP_SERVER_NAME",

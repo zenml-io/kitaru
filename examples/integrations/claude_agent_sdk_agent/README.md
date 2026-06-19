@@ -137,15 +137,10 @@ Optional overrides:
 ```bash
 uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py \
   --command "pwd" \
-  --sandbox-cwd /workspace \
   --max-turns 3 \
   --model sonnet \
   --max-budget-usd 0.10
 ```
-
-`--sandbox-cwd` is a request included in Claude's prompt. This example does not
-force the MCP tool call to use it, so check the returned `cwd` field if that
-matters for your test.
 
 This is different from Claude built-in `Bash`: Kitaru does not secretly reroute
 `Bash`. The example removes that tool and gives Claude the explicit Kitaru MCP
