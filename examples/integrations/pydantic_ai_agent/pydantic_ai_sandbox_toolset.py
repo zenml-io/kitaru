@@ -5,6 +5,12 @@ This example gives the model one Kitaru-provided tool named
 fresh sandbox session from the active stack, runs one command, collects stdout,
 stderr, and exit code, then cleans up the session.
 
+The model controls the command string and optional working directory. Treat that
+like letting the model type in a terminal attached to the sandbox process: files,
+network access, environment variables, and credentials visible there can be
+printed to stdout/stderr and returned to the model. The local sandbox is a local
+development convenience, not a security boundary.
+
 Prerequisites:
     uv sync --extra local --extra pydantic-ai --extra openai
     uv run kitaru init
@@ -19,6 +25,7 @@ Run:
 """
 
 import os
+import time
 from typing import Any
 
 from pydantic_ai import Agent
@@ -30,10 +37,16 @@ from kitaru.adapters.pydantic_ai import (
     KitaruAgent,
     sandbox_command_toolset,
 )
+from kitaru.client import ExecutionStatus
 from kitaru.errors import (
     KitaruBackendError,
     KitaruFeatureNotAvailableError,
     KitaruStateError,
+)
+
+_SANDBOX_PROMPT = (
+    f"Use {SANDBOX_COMMAND_TOOL_NAME} to run `python --version` in the sandbox. "
+    "Then answer with the exact exit code and output."
 )
 
 
@@ -72,34 +85,73 @@ def build_agent(
     )
     return KitaruAgent(
         agent,
+        checkpoint_strategy="calls",
         tool_checkpoint_config_by_name={
             SANDBOX_COMMAND_TOOL_NAME: {"cache": False},
         },
     )
 
 
+def run_sandbox_agent_turn(sandboxed_agent: KitaruAgent[None, str]) -> str:
+    """Run the agent at flow scope so model/tool calls get their own checkpoints."""
+    result = sandboxed_agent.run_sync(_SANDBOX_PROMPT)
+    return result.output
+
+
+@checkpoint
+def publish_sandbox_answer(answer: str) -> str:
+    """Store the final answer on a named checkpoint for UI/CLI inspection."""
+    return answer
+
+
+@flow
+def sandbox_toolset_flow(
+    model: str | None = None,
+    max_chars: int = DEFAULT_SANDBOX_TOOL_MAX_CHARS,
+) -> str:
+    """Run the sandbox-enabled agent while keeping per-tool checkpoints visible."""
+    sandboxed_agent = build_agent(model=model, max_chars=max_chars)
+    answer = run_sandbox_agent_turn(sandboxed_agent)
+    return publish_sandbox_answer(answer)
+
+
+def submit_sandbox_toolset_flow(
+    *,
+    model: str | None = None,
+    max_chars: int = DEFAULT_SANDBOX_TOOL_MAX_CHARS,
+) -> Any:
+    """Submit the example flow with caching disabled for an honest live demo.
+
+    ``flow.run(cache=False)`` reruns the model and tool work on each example run.
+    The agent also disables cache for the sandbox tool checkpoint itself, which
+    matters when ``checkpoint_strategy="calls"`` creates ``run_sandbox_command_tool``.
+    """
+    return sandbox_toolset_flow.run(model=model, max_chars=max_chars, cache=False)
+
+
+def wait_for_completion(handle: Any, *, poll_seconds: float = 1.0) -> ExecutionStatus:
+    """Wait for terminal execution status without extracting a flow result.
+
+    This demo intentionally keeps per-call adapter checkpoints visible. In that
+    shape, ``FlowHandle.wait()`` is not the right API because result extraction
+    sees several terminal model/tool checkpoints and refuses to guess. Polling
+    ``handle.status`` waits for completion without asking Kitaru to choose one
+    output value.
+    """
+    while True:
+        status = handle.status
+        if status.is_finished:
+            return status
+        time.sleep(poll_seconds)
+
+
 def main() -> None:
     model = _default_model()
     _require_provider_configuration(model)
-    sandboxed_agent = build_agent(model=model)
-
-    # This explicit checkpoint gives `.wait()` one checkpoint to load as the
-    # flow result. Without it, a tool-using agent run can leave several
-    # model/tool checkpoints as terminal graph steps.
-    @checkpoint
-    def run_sandbox_agent_turn() -> str:
-        result = sandboxed_agent.run_sync(
-            f"Use {SANDBOX_COMMAND_TOOL_NAME} to run `python --version` in "
-            "the sandbox. Then answer with the exact exit code and output."
-        )
-        return result.output
-
-    @flow
-    def sandbox_toolset_flow() -> str:
-        return run_sandbox_agent_turn()
 
     try:
-        answer = sandbox_toolset_flow.run(cache=False).wait()
+        handle = submit_sandbox_toolset_flow(model=model)
+        status = wait_for_completion(handle)
     except (KitaruFeatureNotAvailableError, KitaruStateError) as error:
         raise SystemExit(
             "This example needs an active Kitaru stack with exactly one sandbox "
@@ -111,8 +163,26 @@ def main() -> None:
             f"not execute it successfully: {error}"
         ) from error
 
-    print("=== sandbox command result ===")
-    print(answer)
+    if status is not ExecutionStatus.COMPLETED:
+        raise SystemExit(
+            f"Sandbox toolset flow finished with status {status.value}. "
+            f"Inspect execution {handle.exec_id} for details."
+        )
+
+    print("=== sandbox command checkpoints ===")
+    print(f"Execution: {handle.exec_id}")
+    print("Open the Kitaru UI or run:")
+    print(f"  uv run kitaru executions get {handle.exec_id}")
+    print("You should see these checkpoints:")
+    print("  - sandboxed_pydantic_ai_agent_model_request")
+    print("  - run_sandbox_command_tool")
+    print("  - sandboxed_pydantic_ai_agent_model_request_2")
+    print("  - publish_sandbox_answer")
+    print(
+        "The final text is stored on the publish_sandbox_answer checkpoint. "
+        "This per-tool checkpoint demo does not use `.wait()` for the final answer "
+        "because adapter-created model/tool checkpoints are also terminal graph steps."
+    )
 
 
 if __name__ == "__main__":

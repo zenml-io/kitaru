@@ -53,13 +53,28 @@ Uses `TestModel` so no API keys are needed to run it.
 ## `pydantic_ai_sandbox_toolset.py` — Run a command in the active stack sandbox
 
 Attaches `sandbox_command_toolset(...)` to a PydanticAI agent and wraps that
-agent with `KitaruAgent`. The model is asked to call `run_sandbox_command` for
-`python --version`. The example wraps the whole agent turn in one explicit
-`@checkpoint` so `.wait()` has one checkpoint to load as the final flow result.
-The example uses the adapter's 20,000-character output limit. Your active stack
-must have exactly one sandbox component; if provider credentials or sandbox
-support are missing, the example prints a short setup message instead of a long
-provider/backend traceback.
+agent with `KitaruAgent(checkpoint_strategy="calls")`. The model is asked to call
+`run_sandbox_command` for `python --version`. The agent runs directly in the flow
+body, so the dashboard can show the model request checkpoint and the
+`run_sandbox_command_tool` checkpoint separately. The example then passes the
+answer into a tiny `publish_sandbox_answer` checkpoint for UI/CLI inspection.
+It does not call `.wait()` for the final answer, because the visible
+model/tool checkpoints are also terminal graph steps in this demo shape.
+Instead, the script polls execution status and prints the execution ID to open
+in the UI or inspect with `kitaru executions get`.
+
+The example uses the adapter's 20,000-character output limit and disables cache
+for the sandbox command checkpoint. Your active stack must have exactly one
+sandbox component; if provider credentials or sandbox support are missing, the
+example prints a short setup message instead of a long provider/backend
+traceback.
+
+Safety note: the model controls the shell command and optional working directory.
+Anything visible to the sandbox process, including files, environment variables,
+network access, and credentials, can be printed to stdout/stderr and returned to
+the model. The local sandbox is a development convenience, not a security
+boundary; use an isolated sandbox provider and minimal credentials for untrusted
+models or prompts.
 
 ## `pydantic_ai_streaming.py` — Watch live PydanticAI events
 

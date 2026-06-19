@@ -9,6 +9,7 @@ pytest.importorskip("pydantic_ai")
 
 from kitaru.adapters.pydantic_ai import _sandbox
 from kitaru.config import SandboxCommandResult
+from kitaru.errors import KitaruUsageError
 
 
 def _fake_core_result(
@@ -133,6 +134,22 @@ async def test_sandbox_command_toolset_exposes_safe_function_tool_schema() -> No
     assert set(properties) == {"command", "cwd"}
     assert schema["required"] == ["command"]
     assert "env" not in properties
+
+
+@pytest.mark.parametrize("invalid_max_chars", [-1, True, 1.5, "100"])
+def test_sandbox_command_toolset_rejects_invalid_max_chars(
+    invalid_max_chars: Any,
+) -> None:
+    with pytest.raises(KitaruUsageError):
+        _sandbox.sandbox_command_toolset(max_chars=invalid_max_chars)
+
+
+@pytest.mark.parametrize("invalid_cleanup", ["keep", "", None, 1])
+def test_sandbox_command_toolset_rejects_invalid_cleanup(
+    invalid_cleanup: Any,
+) -> None:
+    with pytest.raises(KitaruUsageError):
+        _sandbox.sandbox_command_toolset(cleanup=invalid_cleanup)
 
 
 @pytest.mark.anyio
@@ -378,13 +395,12 @@ async def test_sandbox_command_tool_tracking_records_completed_events(
     _assert_recorded_tool_event(recorded_events[0], status="completed")
 
 
-def test_kitaru_agent_run_calls_sandbox_command_toolset(
+def test_pydantic_ai_sandbox_example_keeps_per_tool_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pydantic_ai import Agent
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
     from pydantic_ai.models.test import TestModel
 
-    from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
     from kitaru.runtime import _checkpoint_scope, _flow_scope
 
     calls: list[dict[str, Any]] = []
@@ -423,41 +439,79 @@ def test_kitaru_agent_run_calls_sandbox_command_toolset(
         fake_checkpoint,
     )
 
-    agent = Agent(
-        TestModel(call_tools=[_sandbox.SANDBOX_COMMAND_TOOL_NAME]),
-        name="sandbox_agent",
-        output_type=str,
-        toolsets=[_sandbox.sandbox_command_toolset(max_chars=321)],
-    )
-    durable_agent = KitaruAgent(
-        agent,
-        capture=CapturePolicy(
-            save_prompts=False,
-            save_responses=False,
-            tool_capture="metadata",
-            correlate_otel_spans=False,
-        ),
-        tool_checkpoint_config_by_name={
-            _sandbox.SANDBOX_COMMAND_TOOL_NAME: {"cache": False},
-        },
+    durable_agent = pydantic_ai_sandbox_toolset.build_agent(
+        model=TestModel(call_tools=[_sandbox.SANDBOX_COMMAND_TOOL_NAME]),
+        max_chars=321,
     )
 
     with _flow_scope(name="sandbox_agent_flow"):
-        result = durable_agent.run_sync("Use the sandbox command tool.")
+        answer = pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(durable_agent)
+        final_answer = pydantic_ai_sandbox_toolset.publish_sandbox_answer._func(answer)
 
-    assert "sandbox output" in result.output
+    assert "sandbox output" in final_answer
     assert calls == [
         {
             "args": ("a",),
             "kwargs": {"cwd": None, "max_chars": 321, "cleanup": "destroy"},
         }
     ]
-    assert "sandbox_agent_model_request" in checkpoint_steps
+    assert "sandboxed_pydantic_ai_agent_model_request" in checkpoint_steps
     assert f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool" in checkpoint_steps
     assert checkpoint_configs[f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool"] == {
         "cache": False,
         "type": "tool_call",
     }
+
+
+def test_pydantic_ai_sandbox_example_submit_disables_flow_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+
+    run_calls: list[dict[str, Any]] = []
+
+    class FakeFlow:
+        def run(self, **kwargs: Any) -> object:
+            run_calls.append(kwargs)
+            return object()
+
+    monkeypatch.setattr(pydantic_ai_sandbox_toolset, "sandbox_toolset_flow", FakeFlow())
+
+    handle = pydantic_ai_sandbox_toolset.submit_sandbox_toolset_flow(
+        model="test",
+        max_chars=123,
+    )
+
+    assert handle is not None
+    assert run_calls == [{"model": "test", "max_chars": 123, "cache": False}]
+
+
+def test_pydantic_ai_sandbox_example_waits_without_result_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+
+    from kitaru.client import ExecutionStatus
+
+    statuses = [ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED]
+    slept: list[float] = []
+
+    class FakeHandle:
+        @property
+        def status(self) -> ExecutionStatus:
+            return statuses.pop(0)
+
+        def wait(self) -> object:
+            raise AssertionError("wait() should not be used for this demo shape")
+
+    monkeypatch.setattr(pydantic_ai_sandbox_toolset.time, "sleep", slept.append)
+
+    status = pydantic_ai_sandbox_toolset.wait_for_completion(
+        FakeHandle(), poll_seconds=0.01
+    )
+
+    assert status is ExecutionStatus.COMPLETED
+    assert slept == [0.01]
 
 
 @pytest.mark.anyio
@@ -504,3 +558,4 @@ def test_pydantic_ai_sandbox_toolset_example_imports_and_wires_agent() -> None:
 
     assert isinstance(agent, KitaruAgent)
     assert agent.name == "sandboxed_pydantic_ai_agent"
+    assert agent.checkpoint_strategy == "calls"

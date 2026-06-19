@@ -42,8 +42,11 @@ execution that you can inspect in the UI or with `kitaru executions list`.
 The local sandbox runs a local subprocess. It is useful for development and for
 simple deterministic examples, but it is not a security boundary. Treat a command
 run through the local sandbox like a command you typed into your own terminal:
-it can access local files and the network available to your user. Do not use the
-local sandbox for untrusted code.
+it can access local files, environment variables, credentials, and the network
+available to your user. If a model or untrusted prompt controls the command, it
+can ask the subprocess to print visible values to stdout or stderr, and that
+output may be returned to the model. Use an isolated sandbox provider and minimal
+credentials for untrusted model-controlled commands.
 
 For the full catalog, see [../../README.md](../../README.md).
 

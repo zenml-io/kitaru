@@ -246,6 +246,10 @@ A command that exits with a non-zero code is still a successful tool call from K
 
 The tool is a normal PydanticAI function tool under the hood, so Kitaru tracks and checkpoints it like any other function tool. Commands can create files, mutate databases, install packages, or otherwise change the sandbox, so the recommended default is to disable cache for this tool with `tool_checkpoint_config_by_name={SANDBOX_COMMAND_TOOL_NAME: {"cache": False}}`. That makes replay run the command again instead of accidentally reusing an old command result.
 
+{% hint style="warning" %}
+**The sandbox is not automatically safe just because it is called a sandbox.** The model chooses the shell command and optional working directory. Anything the sandbox process can read can be printed to `stdout` or `stderr`, and that output is returned to the model. If the process can see files, environment variables, network access, or credentials, the model may cause a command to reveal them. The `local` sandbox is a development convenience, not a security boundary; it runs local subprocesses with access available to your user. For untrusted models or prompts, use an isolated sandbox provider and pass only minimal credentials.
+{% endhint %}
+
 The model can choose only the command and optional working directory. `env` is intentionally not exposed through this LLM-facing tool because tool arguments can be captured as Kitaru artifacts. If a command needs environment variables, write your own hand-authored PydanticAI tool around `kitaru.run_sandbox_command(...)` and pass only values you are comfortable handling in that code path.
 
 ### MCP servers
@@ -278,6 +282,25 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 **Replay semantics in one sentence.** If a flow crashes on the 8th model call of a turn, `"turn"` re-runs the whole turn; `"calls"` gives the earlier calls their own completed checkpoint boundaries when Kitaru is allowed to create those boundaries. If you set `cache=True` on adapter-created checkpoint configs, repeated runs can reuse completed checkpoints when the logical inputs are the same; changed prompts, message history, model settings, tool arguments, tool call IDs, or behavior-changing run options produce different cache keys and should miss cache.
 
 `checkpoint_strategy="calls"` cannot create nested checkpoints inside your own `@kitaru.checkpoint` body. If you wrap `durable_agent.run_sync(...)` in a checkpoint, the outer checkpoint wins and model/tool calls are recorded as adapter events/artifacts under that checkpoint.
+
+Two concrete shapes matter:
+
+```python
+@kitaru.flow
+def visible_tool_calls() -> str:
+    result = durable_agent.run_sync("inspect the sandbox")
+    return publish_final_answer(result.output)
+```
+
+Here the agent runs directly in the flow body, so `checkpoint_strategy="calls"` can create rows such as `researcher_model_request` and `run_sandbox_command_tool`. In current file-based flows, those adapter-created model/tool checkpoints can still be terminal graph steps. If your flow keeps this per-tool shape, do not rely on `FlowHandle.wait()` to return the final answer; it may refuse to choose between several terminal checkpoint outputs. Poll `handle.status` until completion, then inspect the execution in the UI/CLI and read the final-answer checkpoint artifact.
+
+```python
+@kitaru.checkpoint
+def whole_turn(prompt: str) -> str:
+    return durable_agent.run_sync(prompt).output
+```
+
+Here the whole agent call belongs to `whole_turn`. Tool activity is still tracked as adapter events/artifacts, but there is no separate `run_sandbox_command_tool` checkpoint. A setting like `tool_checkpoint_config_by_name={"run_sandbox_command": {"cache": False}}` only affects the per-tool checkpoint in the first shape. In the second shape, configure cache on `whole_turn` or call `flow.run(cache=False)`.
 
 `checkpoint_strategy="calls"` is the default. It is shown here for clarity when setting per-call checkpoint configs:
 
@@ -555,7 +578,12 @@ uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolse
 
 The active stack must have exactly one sandbox component. Set
 `PYDANTIC_AI_MODEL` if you want to use a model other than the default
-`openai:gpt-5-nano`.
+`openai:gpt-5-nano`. The example runs the agent directly in the flow body so
+`run_sandbox_command_tool` is visible as its own checkpoint, then passes the
+answer into a small `publish_sandbox_answer` checkpoint for inspection. The
+script polls execution status instead of calling `.wait()`, because `.wait()`
+would try to pick one result from several terminal model/tool checkpoints in
+this per-tool demo shape.
 
 For the broader catalog, see [Examples](../getting-started/examples.md).
 

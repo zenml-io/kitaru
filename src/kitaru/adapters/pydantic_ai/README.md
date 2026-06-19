@@ -201,7 +201,9 @@ durable_agent = KitaruAgent(
 
 The factory returns a normal PydanticAI `FunctionToolset` with one tool named `run_sandbox_command`. Kitaru wraps it as a function toolset, so existing tracking and calls-strategy checkpoints still apply. The active stack must have exactly one sandbox component. Every tool call creates one temporary sandbox session, runs one command, returns `stdout`, `stderr`, `exit_code`, truncation flags, and cleanup status, then closes or destroys the temporary session. The adapter default is 20,000 characters per output stream; pass `max_chars=` when you need a different limit. Pass `cleanup="destroy"` or `cleanup="close"` to choose how the temporary session is cleaned up after the command: `"destroy"` is the default and removes the session when supported, while `"close"` only closes the session handle.
 
-Non-zero process exits come back as normal `SandboxCommandToolResult` values. Missing sandbox setup or backend failures raise public Kitaru errors and are recorded as failed tool calls. The model-facing tool accepts only `command` and optional `cwd`; `env` is deliberately not exposed because captured tool arguments may be stored as artifacts.
+Non-zero process exits come back as normal `SandboxCommandToolResult` values. Missing sandbox setup or backend failures raise public Kitaru errors and are recorded as failed tool calls.
+
+**Safety model.** The model-facing tool accepts only `command` and optional `cwd`; `env` is deliberately not exposed because captured tool arguments may be stored as artifacts. The model still controls the shell command and working directory. Anything the sandbox process can read can be printed to `stdout` or `stderr`, and that output is returned to the model. If the sandbox can see files, environment variables, network access, or credentials, the model may cause a command to reveal them. The `local` sandbox is a development convenience, not a security boundary: it runs local subprocesses with access available to your user. For untrusted models or prompts, use an isolated sandbox provider and pass only the credentials that command truly needs.
 
 ## Checkpoint strategy
 
@@ -213,6 +215,25 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 | `"turn"` | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | Agents where one aggregated checkpoint and checkpoint artifacts like `event_log` / `run_summary` are more useful than per-call boundaries |
 
 **Replay semantics in one sentence.** If a flow crashes on the 8th LLM call of a turn, `"turn"` re-runs the whole turn; `"calls"` gives the earlier calls their own completed checkpoint boundaries. If you set `cache=True` on the per-call model/tool/MCP configs, repeated runs can also reuse completed per-call checkpoints when the logical inputs are the same.
+
+Two concrete shapes matter:
+
+```python
+@kitaru.flow
+def visible_tool_calls() -> str:
+    result = durable_agent.run_sync("inspect the sandbox")
+    return publish_final_answer(result.output)
+```
+
+Here the agent runs directly in the flow body, so `checkpoint_strategy="calls"` can create rows such as `researcher_model_request` and `run_sandbox_command_tool`. In current file-based flows, those adapter-created model/tool checkpoints can still be terminal graph steps. If you keep this per-tool shape, do not rely on `FlowHandle.wait()` to return the final answer; it may refuse to choose between several terminal checkpoint outputs. Poll `handle.status` until completion, then inspect the execution in the UI/CLI and read a named final-answer checkpoint artifact if you add one.
+
+```python
+@kitaru.checkpoint
+def whole_turn(prompt: str) -> str:
+    return durable_agent.run_sync(prompt).output
+```
+
+Here the whole agent call belongs to `whole_turn`. Tool activity is still tracked as adapter events/artifacts, but there is no separate `run_sandbox_command_tool` checkpoint. That means `tool_checkpoint_config_by_name={"run_sandbox_command": {"cache": False}}` has no sandbox-tool checkpoint to configure in this shape; configure cache on the outer checkpoint or call `flow.run(cache=False)` instead.
 
 For model checkpoints, the adapter builds the cache key from the prompt/messages, model settings, and model request parameters. Pydantic AI adds fresh per-run envelope fields such as `timestamp` and `run_id` to its internal message objects; Kitaru ignores those envelope labels for the cache key so the same prompt can hit cache on run 2. It does **not** strip user content: if your prompt text, tool args, or tool result contains words or fields named `timestamp` or `run_id`, those still count as part of the logical input. Changed prompts, message history, tool arguments, tool call IDs, model settings, or request parameters still produce a new cache key and should miss cache.
 

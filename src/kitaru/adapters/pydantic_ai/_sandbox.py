@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Final, Literal
 
 import kitaru
+from kitaru._config._sandbox import _normalize_cleanup, _normalize_max_chars
 from kitaru.config import SandboxCommandResult
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import FunctionToolset
@@ -54,6 +55,8 @@ def sandbox_command_toolset(
     factory, and environment variables are intentionally not exposed as tool
     arguments.
     """
+    normalized_max_chars = _normalize_max_chars(max_chars)
+    normalized_cleanup = _normalize_cleanup(cleanup)
     toolset: FunctionToolset[Any] = FunctionToolset()
 
     @toolset.tool_plain(name=SANDBOX_COMMAND_TOOL_NAME)
@@ -65,8 +68,8 @@ def sandbox_command_toolset(
         result = kitaru.run_sandbox_command(
             command,
             cwd=cwd,
-            max_chars=max_chars,
-            cleanup=cleanup,
+            max_chars=normalized_max_chars,
+            cleanup=normalized_cleanup,
         )
         return _tool_result_from_core_result(result)
 
