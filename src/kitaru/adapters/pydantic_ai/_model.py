@@ -2,15 +2,17 @@
 
 We do not route through ``kitaru.llm`` — it is a text-in/text-out facade over
 OpenAI and Anthropic only and would discard streaming, tool calls, structured
-output, and every other provider PydanticAI supports. Granular mode reuses the
-``type='llm_call'`` checkpoint convention so dashboards group native and adapter
+output, and every other provider PydanticAI supports. The calls strategy reuses
+the ``type='llm_call'`` checkpoint convention so dashboards group native and adapter
 LLM calls uniformly.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
@@ -41,6 +43,11 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
+from ._streaming import (
+    PydanticAIStreamPublisher,
+    current_stream_surface,
+    model_stream_live_events_suppressed,
+)
 from ._tracking import EventTracker, ModelEventContext, get_current_tracker
 from ._utils import (
     CheckpointConfig,
@@ -55,6 +62,12 @@ from ._utils import (
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
 _VOLATILE_MESSAGE_ENVELOPE_KEYS = frozenset({"timestamp", "run_id"})
+_MAX_STREAM_TRANSCRIPT_EVENTS = 1_024
+_MAX_STREAM_TRANSCRIPT_EVENT_ITEMS = 20
+_MAX_STREAM_TRANSCRIPT_EVENT_DEPTH = 4
+_MAX_STREAM_TRANSCRIPT_TOTAL_ITEMS = 256
+_MAX_STREAM_TRANSCRIPT_APPROX_CHARS = 20_000
+_MAX_STREAM_TRANSCRIPT_STRING_CHARS = 4_000
 _EXPLICIT_RUN_CONVERSATION_ID: ContextVar[str | None] = ContextVar(
     "kitaru_pydantic_ai_explicit_run_conversation_id", default=None
 )
@@ -62,6 +75,32 @@ _INHERITED_MESSAGE_CONVERSATION_IDS: ContextVar[frozenset[str]] = ContextVar(
     "kitaru_pydantic_ai_inherited_message_conversation_ids",
     default=frozenset(),
 )
+
+
+@dataclass
+class _LiveStreamSuppressionScope:
+    model_id: int
+    owner_task_id: int | None
+    claim_first_stream_task: bool = False
+
+
+# The global stream suppression context remains for explicit low-level nested
+# stream suppression. These shared model scopes suppress same-model live
+# lifecycle publishes only for the task that owns the mirrored handler stream.
+_SUPPRESSED_LIVE_STREAM_SCOPES: ContextVar[
+    tuple[_LiveStreamSuppressionScope, ...]
+] = ContextVar(
+    "kitaru_pydantic_ai_suppressed_live_stream_scopes",
+    default=(),
+)
+
+
+def _current_task_id() -> int | None:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        return None
+    return id(task) if task is not None else None
 
 
 def _message_conversation_ids(
@@ -181,19 +220,154 @@ def _trackable_tool_call_ids(
     return tool_call_ids
 
 
+def _clip_transcript_string(value: str) -> str:
+    if len(value) <= _MAX_STREAM_TRANSCRIPT_STRING_CHARS:
+        return value
+    return value[: _MAX_STREAM_TRANSCRIPT_STRING_CHARS - 3].rstrip() + "..."
+
+
+@dataclass
+class _StreamTranscriptBudget:
+    remaining_items: int
+    remaining_chars: int
+
+    def take_item(self) -> bool:
+        if self.remaining_items <= 0 or self.remaining_chars <= 0:
+            return False
+        self.remaining_items -= 1
+        return True
+
+    def take_chars(self, count: int) -> int:
+        allowed = min(count, self.remaining_chars)
+        self.remaining_chars -= allowed
+        return allowed
+
+    def exhausted(self) -> bool:
+        return self.remaining_items <= 0 or self.remaining_chars <= 0
+
+
+def _stream_transcript_truncated_marker(value: Any) -> dict[str, str]:
+    return {
+        "_kitaru_truncated": "stream_transcript_budget_exhausted",
+        "python_type": type(value).__qualname__,
+    }
+
+
+def _bounded_stream_transcript_string(value: str, budget: _StreamTranscriptBudget) -> Any:
+    clipped = _clip_transcript_string(value)
+    allowed_chars = budget.take_chars(len(clipped))
+    if allowed_chars <= 0:
+        return _stream_transcript_truncated_marker(value)
+    if allowed_chars >= len(clipped):
+        return clipped
+    if allowed_chars <= 3:
+        return clipped[:allowed_chars]
+    return clipped[: allowed_chars - 3].rstrip() + "..."
+
+
+def _safe_stream_transcript_key(key: Any, budget: _StreamTranscriptBudget) -> str | None:
+    try:
+        text = str(key)
+    except Exception:
+        text = f"<unprintable key {type(key).__qualname__}>"
+    clipped = _clip_transcript_string(text)
+    allowed_chars = budget.take_chars(len(clipped))
+    if allowed_chars <= 0:
+        return None
+    if allowed_chars >= len(clipped):
+        return clipped
+    if allowed_chars <= 3:
+        return clipped[:allowed_chars]
+    return clipped[: allowed_chars - 3].rstrip() + "..."
+
+
+def _bounded_stream_transcript_value(
+    value: Any,
+    *,
+    _depth: int = 0,
+    _budget: _StreamTranscriptBudget | None = None,
+) -> Any:
+    budget = _budget or _StreamTranscriptBudget(
+        remaining_items=_MAX_STREAM_TRANSCRIPT_TOTAL_ITEMS,
+        remaining_chars=_MAX_STREAM_TRANSCRIPT_APPROX_CHARS,
+    )
+    if not budget.take_item():
+        return _stream_transcript_truncated_marker(value)
+    if _depth > _MAX_STREAM_TRANSCRIPT_EVENT_DEPTH:
+        return {
+            "summary": "max_depth_exceeded",
+            "python_type": type(value).__qualname__,
+        }
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        return _bounded_stream_transcript_string(value, budget)
+    if isinstance(value, dict):
+        item_count = len(value)
+        bounded: dict[str, Any] = {}
+        retained_count = 0
+        for index, (key, nested) in enumerate(value.items()):
+            if index >= _MAX_STREAM_TRANSCRIPT_EVENT_ITEMS:
+                break
+            if budget.exhausted():
+                bounded["_kitaru_truncated"] = "stream_transcript_budget_exhausted"
+                break
+            bounded_key = _safe_stream_transcript_key(key, budget)
+            if bounded_key is None:
+                bounded["_kitaru_truncated"] = "stream_transcript_budget_exhausted"
+                break
+            bounded[bounded_key] = _bounded_stream_transcript_value(
+                nested,
+                _depth=_depth + 1,
+                _budget=budget,
+            )
+            retained_count += 1
+        omitted = item_count - retained_count
+        if omitted > 0:
+            bounded["_kitaru_omitted_keys"] = omitted
+        return bounded
+    if isinstance(value, list | tuple):
+        bounded_items: list[Any] = []
+        retained_count = 0
+        for item in value[:_MAX_STREAM_TRANSCRIPT_EVENT_ITEMS]:
+            if budget.exhausted():
+                bounded_items.append(
+                    {"_kitaru_truncated": "stream_transcript_budget_exhausted"}
+                )
+                break
+            bounded_items.append(
+                _bounded_stream_transcript_value(
+                    item,
+                    _depth=_depth + 1,
+                    _budget=budget,
+                )
+            )
+            retained_count += 1
+        omitted = len(value) - retained_count
+        if omitted > 0:
+            bounded_items.append({"_kitaru_omitted_items": omitted})
+        return bounded_items
+    return {
+        "python_type": type(value).__qualname__,
+        "serialization_error": "unsupported_stream_transcript_value",
+    }
+
+
 def _serialize_stream_event(event: Any) -> dict[str, Any]:
     try:
-        return cast(
+        serialized = cast(
             dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode="json")
         )
-    except (TypeError, ValueError, PydanticSerializationError):
+        return cast(dict[str, Any], _bounded_stream_transcript_value(serialized))
+    except (TypeError, ValueError, PydanticSerializationError) as error:
         logger.warning(
-            "Failed to serialize PydanticAI stream event; falling back to repr.",
-            exc_info=True,
+            "Failed to serialize PydanticAI stream event; storing safe metadata only. "
+            "event_type=%s error_type=%s",
+            type(event).__name__,
+            type(error).__name__,
         )
         return {
             "event_type": type(event).__name__,
-            "repr": repr(event),
             "serialization_error": "stream_event_serialization_failed",
         }
 
@@ -207,6 +381,9 @@ class KitaruStreamedResponse(StreamedResponse):
         super().__init__(wrapped.model_request_parameters)
         self._wrapped = wrapped
         self._on_event = on_event
+
+    def __aiter__(self) -> AsyncIterator[ModelResponseStreamEvent]:
+        return self._get_event_iterator()
 
     async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:
         try:
@@ -258,6 +435,46 @@ class KitaruModel(WrapperModel):
     def _should_track(self) -> bool:
         return self._capture.emit_child_events and is_inside_checkpoint()
 
+    @contextmanager
+    def suppress_live_stream_events(
+        self, *, claim_first_stream_task: bool = False
+    ) -> Iterator[None]:
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        task_id = None if claim_first_stream_task else _current_task_id()
+        token = _SUPPRESSED_LIVE_STREAM_SCOPES.set(
+            (
+                *scopes,
+                _LiveStreamSuppressionScope(
+                    id(self), task_id, claim_first_stream_task
+                ),
+            )
+        )
+        try:
+            yield
+        finally:
+            _SUPPRESSED_LIVE_STREAM_SCOPES.reset(token)
+
+    def _live_stream_events_suppressed(self) -> bool:
+        if model_stream_live_events_suppressed():
+            return True
+
+        model_id = id(self)
+        current_task_id = _current_task_id()
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        for scope in scopes:
+            if scope.model_id != model_id:
+                continue
+            if scope.owner_task_id == current_task_id:
+                return True
+            if (
+                scope.claim_first_stream_task
+                and scope.owner_task_id is None
+                and current_task_id is not None
+            ):
+                scope.owner_task_id = current_task_id
+                return True
+        return False
+
     def _reserve_tool_call_order(
         self,
         *,
@@ -306,6 +523,8 @@ class KitaruModel(WrapperModel):
             model_name=response.model_name,
             usage=response.usage,
             checkpoint_name=checkpoint_name,
+            billing_effect="reused_not_incurred",
+            cache_status="checkpoint_cache_hit",
         )
         self._reserve_tool_call_order(
             tracker=tracker,
@@ -508,14 +727,31 @@ class KitaruModel(WrapperModel):
         save_responses = self._capture.save_responses
         stream_events: list[dict[str, Any]] = []
         stream_event_count = 0
+        omitted_stream_event_count = 0
+        live_publisher = PydanticAIStreamPublisher(
+            agent_name=self._agent_name,
+            surface=current_stream_surface(default="model_request_stream"),
+            source="model_request_stream",
+            include_content=save_transcripts,
+            enabled=(
+                self._capture.emit_child_events
+                and not self._live_stream_events_suppressed()
+            ),
+        )
 
         def _on_stream_event(event: Any) -> None:
-            nonlocal stream_event_count
+            nonlocal omitted_stream_event_count, stream_event_count
             stream_event_count += 1
-            if save_transcripts:
+            live_publisher.event(event)
+            if not save_transcripts:
+                return
+            if len(stream_events) < _MAX_STREAM_TRANSCRIPT_EVENTS:
                 stream_events.append(_serialize_stream_event(event))
+            else:
+                omitted_stream_event_count += 1
 
         started_at = time.perf_counter()
+        live_publisher.started()
         try:
             async with super().request_stream(
                 messages, model_settings, model_request_parameters, run_context
@@ -525,7 +761,66 @@ class KitaruModel(WrapperModel):
                 )
                 yield tracked_stream
             response = tracked_stream.get()
-        except Exception as error:
+
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+            serialized_response: dict[str, Any] | None = None
+            if save_responses or save_transcripts:
+                serialized_response = _serialize_model_response(response)
+            if save_responses:
+                response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
+                kitaru.save(
+                    response_key,
+                    serialized_response,
+                    type=ARTIFACT_ROLE_RESPONSE,
+                )
+                artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
+            if save_transcripts:
+                transcript_key = tracker.artifact_name(
+                    event_id, ARTIFACT_ROLE_STREAM_TRANSCRIPT
+                )
+                bounded_final_response = _bounded_stream_transcript_value(
+                    serialized_response
+                )
+                kitaru.save(
+                    transcript_key,
+                    {
+                        "event_count": stream_event_count,
+                        "duration_ms": duration_ms,
+                        "events": stream_events,
+                        "events_truncated": omitted_stream_event_count > 0,
+                        "omitted_event_count": omitted_stream_event_count,
+                        "final_response": bounded_final_response,
+                        "final_response_truncated": (
+                            bounded_final_response != serialized_response
+                        ),
+                    },
+                    type="context",
+                )
+                artifacts[ARTIFACT_ROLE_STREAM_TRANSCRIPT] = transcript_key
+
+            # Pydantic AI only builds the CallToolsNode after this stream context
+            # closes and the final ModelResponse is returned, so this reservation
+            # is still made before any corresponding KitaruToolset calls can start.
+            self._reserve_tool_call_order(
+                tracker=tracker,
+                event_id=event_id,
+                event_context=event_context,
+                response=response,
+                model_request_parameters=model_request_parameters,
+            )
+            tracker.record_model_event(
+                event_id,
+                event_context,
+                status="completed",
+                duration_ms=duration_ms,
+                artifacts=artifacts,
+                model_name=response.model_name,
+                usage=response.usage,
+                stream_event_count=stream_event_count,
+            )
+            live_publisher.completed(event_count=stream_event_count)
+        except BaseException as error:
+            live_publisher.failed(error)
             tracker.record_model_event(
                 event_id,
                 event_context,
@@ -536,52 +831,3 @@ class KitaruModel(WrapperModel):
                 stream_event_count=stream_event_count,
             )
             raise
-
-        duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-        serialized_response: dict[str, Any] | None = None
-        if save_responses or save_transcripts:
-            serialized_response = _serialize_model_response(response)
-        if save_responses:
-            response_key = tracker.artifact_name(event_id, ARTIFACT_ROLE_RESPONSE)
-            kitaru.save(
-                response_key,
-                serialized_response,
-                type=ARTIFACT_ROLE_RESPONSE,
-            )
-            artifacts[ARTIFACT_ROLE_RESPONSE] = response_key
-        if save_transcripts:
-            transcript_key = tracker.artifact_name(
-                event_id, ARTIFACT_ROLE_STREAM_TRANSCRIPT
-            )
-            kitaru.save(
-                transcript_key,
-                {
-                    "event_count": stream_event_count,
-                    "duration_ms": duration_ms,
-                    "events": stream_events,
-                    "final_response": serialized_response,
-                },
-                type="context",
-            )
-            artifacts[ARTIFACT_ROLE_STREAM_TRANSCRIPT] = transcript_key
-
-        tracker.record_model_event(
-            event_id,
-            event_context,
-            status="completed",
-            duration_ms=duration_ms,
-            artifacts=artifacts,
-            model_name=response.model_name,
-            usage=response.usage,
-            stream_event_count=stream_event_count,
-        )
-        # Pydantic AI only builds the CallToolsNode after this stream context
-        # closes and the final ModelResponse is returned, so this reservation is
-        # still made before any corresponding KitaruToolset calls can start.
-        self._reserve_tool_call_order(
-            tracker=tracker,
-            event_id=event_id,
-            event_context=event_context,
-            response=response,
-            model_request_parameters=model_request_parameters,
-        )

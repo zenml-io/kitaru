@@ -23,21 +23,23 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
+  ``kitaru.progress()``, ``kitaru.events.publish()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
   ``create_secret()``, ``delete_secret()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
-  (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and
-  a typed Kitaru exception hierarchy with failure journaling
-  (`Execution.failure`, `CheckpointCall.attempts`).
+  (`get/list/latest/logs/statistics/input/retry/resume/cancel/replay` +
+  artifacts), a typed Kitaru exception hierarchy with failure journaling
+  (``Execution.failure``, ``CheckpointCall.attempts``), and live-event watching
+  (``KitaruClient.executions.events(...)``).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack lifecycle via
 ``kitaru stack list/current/use/create/delete``, and execution lifecycle commands via
-``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
+``kitaru executions get/list/logs/statistics/input/replay/retry/resume/cancel``.
 """
 
 # ZenML must be imported explicitly here so that its init_logging() runs
@@ -58,7 +60,20 @@ _default_analytics_source = os.environ.get(
 )
 set_source(_default_analytics_source)
 
-from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._models import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionEvent,
+    ExecutionStatistics,
+    ExecutionStatisticsDimension,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
+    ExecutionStatisticsTimeGranularity,
+)
 from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
@@ -92,6 +107,7 @@ from kitaru.errors import (
     KitaruUserCodeError,
     KitaruWaitValidationError,
 )
+from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
@@ -105,11 +121,22 @@ from kitaru.secrets import (
 )
 from kitaru.wait import wait
 
+from . import events as events
+
 __all__ = [
     "AuthAPIKey",
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
     "Deployment",
+    "ExecutionEvent",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
+    "ExecutionStatisticsTimeGranularity",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
@@ -141,12 +168,14 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "events",
     "flow",
     "get_secret",
     "list_stacks",
     "llm",
     "load",
     "log",
+    "progress",
     "save",
     "use_stack",
     "wait",

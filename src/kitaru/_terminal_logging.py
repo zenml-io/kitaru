@@ -360,7 +360,12 @@ def install_terminal_log_intercept() -> None:
     ``importlib.reload(kitaru._terminal_logging)``, converges the root logger
     to one Kitaru terminal handler plus any preserved non-console handlers.
     """
-    from zenml.logger import ConsoleFormatter, ZenMLLoggingHandler
+    import zenml.logger as zenml_logger
+
+    ZenMLLoggingHandler = zenml_logger.ZenMLLoggingHandler
+    ZenMLConsoleFormatter = getattr(zenml_logger, "ConsoleFormatter", None)
+    if ZenMLConsoleFormatter is None:
+        ZenMLConsoleFormatter = zenml_logger.ZenMLConsoleFormatter
 
     root = logging.getLogger()
 
@@ -377,7 +382,7 @@ def install_terminal_log_intercept() -> None:
             continue
         if isinstance(handler, ZenMLLoggingHandler):
             continue
-        if isinstance(getattr(handler, "formatter", None), ConsoleFormatter):
+        if isinstance(getattr(handler, "formatter", None), ZenMLConsoleFormatter):
             zenml_console_indices.append(i)
 
     kitaru_handler = existing_kitaru or _KitaruTerminalHandler()

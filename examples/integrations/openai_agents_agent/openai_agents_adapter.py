@@ -9,7 +9,7 @@ Run:
     uv sync --extra local --extra openai-agents
     uv run kitaru init
     export OPENAI_API_KEY=sk-...
-    uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+    uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
 """
 
 import ast

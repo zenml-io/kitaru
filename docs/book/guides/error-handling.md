@@ -1,0 +1,80 @@
+---
+description: Understand Kitaru exception types and failure journaling
+icon: triangle-exclamation
+---
+
+# Error Handling
+
+Kitaru exposes a typed exception hierarchy so you can distinguish usage,
+context, state, runtime, backend, and execution failures.
+
+## Core exception types
+
+```python
+import kitaru
+
+try:
+    result = my_flow.run(...).get()
+except kitaru.KitaruUserCodeError as exc:
+    # user checkpoint/flow code raised
+    print(exc.exec_id, exc.status, exc.failure_origin)
+except kitaru.KitaruDivergenceError:
+    # replay divergence surfaced from backend contract
+    ...
+except kitaru.KitaruExecutionError:
+    # other execution-level failure
+    ...
+```
+
+## Wait-input validation failures
+
+`client.executions.input(...)` raises `kitaru.KitaruWaitValidationError`
+when supplied input does not satisfy the wait schema.
+
+```python
+try:
+    client.executions.input(exec_id, wait="approve_deploy", value="yes")
+except kitaru.KitaruWaitValidationError as exc:
+    print(exc)
+```
+
+When validation fails, the execution remains in `waiting`.
+
+## Failure journaling in the client
+
+`KitaruClient` surfaces structured failure details:
+
+- `execution.failure`: failure summary for failed executions
+- `checkpoint.failure`: final checkpoint failure (if terminal attempt failed)
+- `checkpoint.attempts`: full retry attempt history, including failed attempts
+
+```python
+client = kitaru.KitaruClient()
+execution = client.executions.get(exec_id)
+
+if execution.failure:
+    print(execution.failure.origin, execution.failure.message)
+
+for checkpoint in execution.checkpoints:
+    for attempt in checkpoint.attempts:
+        print(attempt.attempt_id, attempt.status)
+        if attempt.failure:
+            print("  ", attempt.failure.exception_type, attempt.failure.message)
+```
+
+## Replay divergence behavior
+
+`client.executions.replay(...)` may fail immediately with
+`kitaru.KitaruDivergenceError` when the backend detects an incompatible durable
+call sequence.
+
+Even when replay submission succeeds, divergence can still surface later on the
+replayed execution as normal execution failure metadata:
+
+```python
+replayed = client.executions.replay(exec_id, from_="write_draft")
+latest = replayed.refresh()
+
+if latest.failure and latest.failure.origin == kitaru.FailureOrigin.DIVERGENCE:
+    print("Replay divergence:", latest.failure.message)
+```

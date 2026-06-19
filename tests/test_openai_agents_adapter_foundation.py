@@ -40,6 +40,17 @@ def test_public_import_surface_uses_calls_vocabulary(
     assert openai_agents_adapter.OpenAIRunStateEnvelope
     assert openai_agents_adapter.OpenAIApprovalDecision
     assert openai_agents_adapter.OpenAIInterruptionSummary
+    assert openai_agents_adapter.OpenAIUsageSummary
+    assert openai_agents_adapter.OPENAI_STREAM_EVENT_KINDS == (
+        "openai_agents.stream.started",
+        "openai_agents.stream.event",
+        "openai_agents.stream.completed",
+        "openai_agents.stream.failed",
+    )
+    assert openai_agents_adapter.OPENAI_STREAM_TERMINAL_EVENT_KINDS == (
+        "openai_agents.stream.completed",
+        "openai_agents.stream.failed",
+    )
     assert openai_agents_adapter.wait_for_approval
     assert openai_agents_adapter.build_resume_request
 
@@ -137,6 +148,12 @@ def test_kitaru_runner_exposes_keyword_only_context(
 ) -> None:
     run_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run)
     run_sync_signature = inspect.signature(openai_agents_adapter.KitaruRunner.run_sync)
+    run_stream_signature = inspect.signature(
+        openai_agents_adapter.KitaruRunner.run_stream
+    )
+    run_stream_sync_signature = inspect.signature(
+        openai_agents_adapter.KitaruRunner.run_stream_sync
+    )
 
     assert run_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
     assert run_signature.parameters["context"].default is None
@@ -144,6 +161,16 @@ def test_kitaru_runner_exposes_keyword_only_context(
         run_sync_signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
     )
     assert run_sync_signature.parameters["context"].default is None
+    assert (
+        run_stream_signature.parameters["context"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert run_stream_signature.parameters["context"].default is None
+    assert (
+        run_stream_sync_signature.parameters["context"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert run_stream_sync_signature.parameters["context"].default is None
 
 
 def test_run_sync_rejects_running_event_loop(

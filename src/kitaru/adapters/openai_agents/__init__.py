@@ -17,6 +17,14 @@ from ._agent import KitaruRunner
 from ._events import OpenAIAdapterEvent, OpenAIEventError, OpenAIRunEvent
 from ._hitl import build_resume_request, wait_for_approval
 from ._policy import OpenAICapturePolicy
+from ._streaming import (
+    OPENAI_STREAM_COMPLETED,
+    OPENAI_STREAM_EVENT,
+    OPENAI_STREAM_EVENT_KINDS,
+    OPENAI_STREAM_FAILED,
+    OPENAI_STREAM_STARTED,
+    OPENAI_STREAM_TERMINAL_EVENT_KINDS,
+)
 from ._types import (
     OpenAIApprovalDecision,
     OpenAIInterruptionSummary,
@@ -33,6 +41,12 @@ from ._utils import (
 )
 
 __all__ = [
+    "OPENAI_STREAM_COMPLETED",
+    "OPENAI_STREAM_EVENT",
+    "OPENAI_STREAM_EVENT_KINDS",
+    "OPENAI_STREAM_FAILED",
+    "OPENAI_STREAM_STARTED",
+    "OPENAI_STREAM_TERMINAL_EVENT_KINDS",
     "CheckpointConfig",
     "CheckpointRuntime",
     "KitaruRunner",

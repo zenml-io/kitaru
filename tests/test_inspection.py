@@ -20,6 +20,8 @@ from kitaru.client import (
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -52,6 +54,8 @@ from kitaru.inspection import (
     serialize_checkpoint_attempt,
     serialize_checkpoint_call,
     serialize_execution,
+    serialize_execution_statistics,
+    serialize_execution_statistics_group,
     serialize_execution_summary,
     serialize_failure,
     serialize_log_entry,
@@ -481,6 +485,7 @@ def test_serialize_checkpoint_attempt_contract() -> None:
             "traceback": "Traceback...\nValueError: boom",
             "origin": "user_code",
         },
+        "llm_usage_records": [],
     }
 
 
@@ -516,6 +521,7 @@ def test_serialize_checkpoint_call_contract() -> None:
                     "traceback": "Traceback...\nValueError: boom",
                     "origin": "user_code",
                 },
+                "llm_usage_records": [],
             }
         ],
         "artifacts": [
@@ -528,6 +534,43 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "metadata": {"source": "notes"},
             }
         ],
+        "llm_usage_records": [],
+    }
+
+
+def test_serialize_execution_statistics_contract() -> None:
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed", "day": "2026-03-14"},
+                execution_count=12,
+                metrics={"duration_avg": 15.5},
+            ),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+        ],
+        truncated=True,
+    )
+
+    assert serialize_execution_statistics_group(statistics.groups[0]) == {
+        "keys": {"status": "completed", "day": "2026-03-14"},
+        "execution_count": 12,
+        "metrics": {"duration_avg": 15.5},
+    }
+    assert serialize_execution_statistics(statistics) == {
+        "groups": [
+            {
+                "keys": {"status": "completed", "day": "2026-03-14"},
+                "execution_count": 12,
+                "metrics": {"duration_avg": 15.5},
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {},
+            },
+        ],
+        "truncated": True,
+        "group_count": 2,
     }
 
 
@@ -555,6 +598,7 @@ def test_serialize_execution_summary_contract() -> None:
         "metadata": {"owner": "alice"},
         "checkpoint_count": 1,
         "artifact_count": 1,
+        "llm_usage_summary": None,
     }
 
 
@@ -575,7 +619,9 @@ def test_serialize_execution_contract() -> None:
         "metadata",
         "checkpoint_count",
         "artifact_count",
+        "llm_usage_summary",
         "frozen_execution_spec",
+        "llm_usage_records",
         "original_exec_id",
         "checkpoints",
         "artifacts",

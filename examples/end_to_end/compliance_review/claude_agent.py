@@ -199,7 +199,7 @@ def _ensure_anthropic_api_key() -> None:
             f"Remote compliance-review runs require a centralized Anthropic "
             f"secret, but the lookup failed: {exc}. Create the secret with: "
             f"kitaru secrets set {ANTHROPIC_SECRET_NAME} "
-            f"--{ANTHROPIC_API_KEY_ENV}=sk-ant-..."
+            f"--{ANTHROPIC_API_KEY_ENV}=<your-anthropic-api-key>"
         ) from exc
 
     anthropic_api_key = secret.get(ANTHROPIC_API_KEY_ENV)
@@ -207,7 +207,8 @@ def _ensure_anthropic_api_key() -> None:
         raise RuntimeError(
             f"Secret '{ANTHROPIC_SECRET_NAME}' exists, but it does not contain "
             f"{ANTHROPIC_API_KEY_ENV}. Update it with: kitaru secrets set "
-            f"{ANTHROPIC_SECRET_NAME} --{ANTHROPIC_API_KEY_ENV}=sk-ant-..."
+            f"{ANTHROPIC_SECRET_NAME} --{ANTHROPIC_API_KEY_ENV}="
+            "<your-anthropic-api-key>"
         )
 
     os.environ[ANTHROPIC_API_KEY_ENV] = anthropic_api_key

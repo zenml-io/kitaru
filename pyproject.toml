@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.13.1"
+version = "0.16.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.4",
+    "zenml[local]>=0.94.6",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +57,10 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.4",
+    "zenml[server]>=0.94.6",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.89.0,<1.97.0",
+    "pydantic-ai-slim>=1.89.0,<1.104.0",
     "typing_extensions>=4.12",
 ]
 openai-agents = [
@@ -81,6 +81,9 @@ langgraph-anthropic = [
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
 ]
+gemini = [
+    "google-genai>=1.55.0,<2",
+]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
 ]
@@ -94,6 +97,7 @@ kitaru = "kitaru_init_hook:init"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
+Documentation = "https://docs.zenml.io/kitaru"
 Repository = "https://github.com/zenml-io/kitaru"
 
 [build-system]
@@ -111,21 +115,21 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [tool.uv]
 exclude-newer = "3 days"
-exclude-newer-package = { zenml = false }
+exclude-newer-package = { zenml = false, aiohttp = false }
 
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.4",
+    "zenml[server]>=0.94.6",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.89.0,<1.97.0",
+    "pydantic-ai-slim>=1.89.0,<1.104.0",
     "openai-agents>=0.15.0,<0.18.0",
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
@@ -133,6 +137,7 @@ dev = [
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
+    "google-genai>=1.55.0,<2",
     "pip-audit>=2.9.0",
 ]
 
@@ -187,12 +192,6 @@ include = ["scripts/generate_sdk_docs.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-include = ["scripts/r2-upload.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
 include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 
 [tool.ty.overrides.rules]
@@ -226,5 +225,12 @@ no-matching-overload = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-vv -n auto"
+addopts = "-vv -n auto -m 'not live_llm and not live_openai and not live_anthropic and not live_gemini'"
 pythonpath = ["scripts"]
+markers = [
+    "live_llm: paid or external LLM/provider test; excluded from default pytest runs",
+    "live_openai: live OpenAI provider test; requires OPENAI_API_KEY",
+    "live_anthropic: live Anthropic/Claude provider test; requires ANTHROPIC_API_KEY",
+    "live_gemini: live Gemini/Google provider test; requires GEMINI_API_KEY or GOOGLE_API_KEY",
+    "provider_extended: slower or higher-cost provider test outside the provider-core suite",
+]

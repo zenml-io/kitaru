@@ -1,7 +1,7 @@
 # Pinned ZenML server image version — bump here when upgrading.
 # Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
 # workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
-ZENML_SERVER_TAG := "0.94.4"
+ZENML_SERVER_TAG := "0.94.6"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
@@ -63,13 +63,15 @@ zizmor:
 audit:
     awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
-# Check links in markdown files — offline only (requires lychee: brew install lychee)
+# Check raw Markdown links — offline only (requires lychee: brew install lychee).
+# Source MDX uses docs-app-root routes such as /guides/...; site-build validates
+# those after materializing public /docs/... links, where lychee can resolve them.
 links:
-    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
-# Check links including external URLs (slow, used in CI)
+# Check raw Markdown links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
@@ -135,6 +137,15 @@ ui-smoke:
     test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
     KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
 
+# Run release-grade smoke with structured results.
+# Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
+release-smoke *ARGS:
+    ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
+
+# Audit the public example coverage manifest without running examples or providers.
+example-coverage-audit:
+    uv run --with pyyaml python scripts/audit-example-coverage.py
+
 # Build dev base image for remote stack testing (K8s, etc.)
 # The image bakes in kitaru from local source + ZenML from PyPI.
 # Pass REPO to override the target registry/image.
@@ -194,27 +205,6 @@ docs:
 docs-build:
     cd docs && pnpm run build
 
-# Preview landing page locally
-site:
-    cd site && pnpm run dev
-
-# Build landing page only (no docs merge)
-site-build-only:
-    cd site && pnpm run build
-
-# Build full unified site: generate docs → build docs → build site → merge
-site-build:
-    @printf '─── Generate Docs ──────────────────────────────\n'
-    @just generate-docs
-    @printf '\n─── Build Docs ─────────────────────────────────\n'
-    @just docs-build
-    @printf '\n─── Build Site ─────────────────────────────────\n'
-    @just site-build-only
-    @printf '\n─── Merge Docs into Site ────────────────────────\n'
-    bash scripts/merge_site.sh
-    @printf '\n─── Validate SEO Output ────────────────────────\n'
-    node scripts/validate_seo_build.mjs
-    @printf '\n─── Check Internal Links ───────────────────────\n'
-    lychee --offline --root-dir site/dist --index-files index.html 'site/dist/**/*.html'
-    @printf '\n─────────────────────────────────────────────────\n'
-    @printf 'Unified site built at site/dist/\n'
+# Validate the docs static export as it will be served under /docs
+docs-validate:
+    cd docs && pnpm run validate:export

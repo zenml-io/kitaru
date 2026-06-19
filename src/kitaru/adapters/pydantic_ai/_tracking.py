@@ -7,9 +7,15 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import kitaru
+from kitaru._llm_usage import (
+    LLMBillingEffect,
+    LLMCacheStatus,
+    build_usage_record,
+    usage_records_metadata,
+)
 
 from pydantic_ai.usage import RequestUsage
 
@@ -71,6 +77,18 @@ _CONTEXT_ARTIFACT_NAMESPACE_STATE: ContextVar[_ArtifactNamespaceState | None] = 
         default=None,
     )
 )
+
+
+def _request_usage_payload(usage: RequestUsage) -> dict[str, Any]:
+    """Return a JSON-like mapping for Pydantic AI usage objects."""
+    model_dump = getattr(usage, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, dict):
+            return cast(dict[str, Any], dumped)
+    if hasattr(usage, "__dict__"):
+        return dict(vars(usage))
+    return {"value": repr(usage)}
 
 
 def normalize_agent_name(agent_name: str | None) -> str:
@@ -355,6 +373,8 @@ class EventTracker:
         error: BaseException | None = None,
         checkpoint_name: str | None = None,
         checkpoint_id: str | None = None,
+        billing_effect: LLMBillingEffect = "incurred",
+        cache_status: LLMCacheStatus = "executed",
     ) -> None:
         with self._lock:
             if status == "completed":
@@ -379,6 +399,8 @@ class EventTracker:
                     artifacts=artifacts,
                     model_name=model_name,
                     usage=usage,
+                    billing_effect=billing_effect,
+                    cache_status=cache_status,
                     stream_event_count=stream_event_count,
                     error=error_from_exception(error) if error is not None else None,
                 )
@@ -569,9 +591,34 @@ class EventTracker:
                 "Persisting PydanticAI tracker outside a checkpoint; emitting flow-level metadata only.",
                 extra={"agent_name": agent_name, "run_label": run_label},
             )
+        usage_records = []
+        for event in ordered_events:
+            if not isinstance(event, ModelEvent):
+                continue
+            usage_payload = (
+                _request_usage_payload(event.usage) if event.usage is not None else None
+            )
+            usage_records.append(
+                build_usage_record(
+                    adapter="pydantic_ai",
+                    surface="model_call",
+                    call_name=agent_name,
+                    event_id=event.event_id,
+                    record_id=event.event_id,
+                    checkpoint_id=event.checkpoint_id,
+                    checkpoint_name=event.checkpoint_name,
+                    model=event.model_name,
+                    usage=usage_payload,
+                    latency_ms=event.duration_ms,
+                    status=event.status,
+                    billing_effect=event.billing_effect,
+                    cache_status=event.cache_status,
+                )
+            )
         kitaru.log(
             pydantic_ai_events={run_label: events_dump},
             pydantic_ai_run_summaries={run_label: summary_dump},
+            **usage_records_metadata(usage_records),
         )
 
 

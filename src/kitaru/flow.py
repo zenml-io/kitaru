@@ -37,7 +37,7 @@ from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
-from kitaru._client._mappers import _to_public_status
+from kitaru._client._mappers import _list_checkpoint_attempts_for_run, _to_public_status
 from kitaru._client._models import ExecutionStatus
 from kitaru._config._active_context import (
     ActiveConfigSelectionProvenance,
@@ -51,10 +51,19 @@ from kitaru._interface_deployments import (
     resolve_deployment_selector,
     validate_deployment_selector,
 )
+from kitaru._llm_usage import (
+    cache_status_for_checkpoint_status,
+    execution_metadata_from_records,
+    metadata_has_complete_usage_summary,
+    usage_records_from_metadata,
+)
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
     callable_name,
+)
+from kitaru._source_aliases import (
+    normalize_checkpoint_name as _normalize_checkpoint_name,
 )
 from kitaru._telemetry import (
     deployment_metadata_for_stack as _deployment_metadata_for_stack,
@@ -1076,6 +1085,79 @@ def _checkpoint_count_from_run(run: PipelineRunResponse) -> int | None:
     return None
 
 
+def _metadata_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _run_has_llm_usage_summary(run: PipelineRunResponse) -> bool:
+    metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    return metadata_has_complete_usage_summary(metadata)
+
+
+def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+    """Aggregate LLM usage records and write execution-level metadata."""
+    from kitaru.client import KitaruClient
+    from kitaru.logging import log_to_execution
+
+    if _run_has_llm_usage_summary(run):
+        return True
+
+    client = KitaruClient()
+    try:
+        attempts_by_lineage = _list_checkpoint_attempts_for_run(run=run, client=client)
+    except KitaruBackendError:
+        logger.debug(
+            "Skipping terminal LLM usage aggregation because all checkpoint "
+            "attempts could not be fetched.",
+            exc_info=True,
+        )
+        return False
+
+    records: list[dict[str, Any]] = []
+    execution_id = str(run.id)
+    records.extend(
+        usage_records_from_metadata(
+            _metadata_mapping(getattr(run, "run_metadata", None)),
+            source_attempt_id=f"run:{execution_id}",
+        )
+    )
+    for attempts in attempts_by_lineage.values():
+        for step in attempts:
+            cache_status = cache_status_for_checkpoint_status(
+                getattr(step, "status", None)
+            )
+            records.extend(
+                usage_records_from_metadata(
+                    _metadata_mapping(getattr(step, "run_metadata", None)),
+                    source_attempt_id=str(step.id),
+                    default_checkpoint_name=_normalize_checkpoint_name(
+                        str(getattr(step, "name", ""))
+                    ),
+                    reused=cache_status is not None,
+                    reused_cache_status=cache_status or "checkpoint_cache_hit",
+                )
+            )
+    metadata = execution_metadata_from_records(records)
+    if not metadata:
+        return True
+    log_to_execution(str(run.id), **metadata)
+    return True
+
+
+def _safe_persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+    """Best-effort terminal LLM usage aggregation."""
+    try:
+        return _persist_terminal_llm_usage_metadata(run)
+    except Exception:
+        logger.debug(
+            "Failed to persist terminal LLM usage metadata.",
+            exc_info=True,
+        )
+        return False
+
+
 def _raise_for_unsuccessful_run(
     run: PipelineRunResponse,
     *,
@@ -1131,6 +1213,7 @@ class FlowHandle:
         self._run = run
         self._run_id = run.id
         self._terminal_event_emitted = False
+        self._terminal_llm_usage_metadata_persisted = False
         self._observed_started_at = (
             observed_started_at
             if observed_started_at is not None
@@ -1190,6 +1273,12 @@ class FlowHandle:
 
         track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
+    def _persist_terminal_llm_usage_once(self, run: PipelineRunResponse) -> None:
+        if self._terminal_llm_usage_metadata_persisted:
+            return
+        if _safe_persist_terminal_llm_usage_metadata(run):
+            self._terminal_llm_usage_metadata_persisted = True
+
     def wait(self) -> Any:
         """Block until execution finishes and return its result.
 
@@ -1206,8 +1295,10 @@ class FlowHandle:
                 if not run.status.is_successful:
                     origin = _safe_classify_run_failure(run)
                     self._track_terminal_once(run, failure_origin=origin)
+                    self._persist_terminal_llm_usage_once(run)
                     _raise_for_unsuccessful_run(run, failure_origin=origin)
                 self._track_terminal_once(run)
+                self._persist_terminal_llm_usage_once(run)
                 return _extract_flow_result(run)
             time.sleep(1)
 
@@ -1230,8 +1321,10 @@ class FlowHandle:
         if not run.status.is_successful:
             origin = _safe_classify_run_failure(run)
             self._track_terminal_once(run, failure_origin=origin)
+            self._persist_terminal_llm_usage_once(run)
             _raise_for_unsuccessful_run(run, failure_origin=origin)
         self._track_terminal_once(run)
+        self._persist_terminal_llm_usage_once(run)
         return _extract_flow_result(run)
 
     def _refresh(self) -> PipelineRunResponse:

@@ -83,6 +83,28 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
     raise KitaruContextError(_LOG_OUTSIDE_FLOW_ERROR)
 
 
+def _pipeline_run_resource(run_id: str) -> RunMetadataResource:
+    """Build a pipeline-run metadata resource for an explicit run ID."""
+    run_uuid = _parse_scope_uuid(run_id, scope_name="execution", api_name="log")
+    return RunMetadataResource(
+        id=run_uuid,
+        type=MetadataResourceTypes.PIPELINE_RUN,
+    )
+
+
+def log_to_execution(run_id: str, **kwargs: Any) -> None:
+    """Attach structured metadata to a specific execution.
+
+    This helper is for SDK observation paths such as ``FlowHandle.wait()`` that
+    need to write pipeline-run metadata after user code has finished and there
+    is no active flow context anymore.
+    """
+    Client().create_run_metadata(
+        metadata=kwargs,
+        resources=[_pipeline_run_resource(run_id)],
+    )
+
+
 def log(**kwargs: Any) -> None:
     """Attach structured metadata to the current checkpoint or execution.
 

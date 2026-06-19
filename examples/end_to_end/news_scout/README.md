@@ -69,7 +69,7 @@ For a local run, drop your provider API keys in `.env` — the example loads
 them with `python-dotenv` before PydanticAI touches the environment:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
 XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 ```
 
@@ -107,14 +107,14 @@ A hard cap of 50 model requests keeps runaway agents from emptying your wallet.
 
 ## Why every tool call is its own checkpoint
 
-The agent is wrapped with `KitaruAgent(granular_checkpoints=True)`. That turns
+The agent is wrapped with `KitaruAgent(checkpoint_strategy="calls")`. That turns
 each model request, each tool call, and each MCP invocation into its own Kitaru
 checkpoint — individually cached, individually replayable, visible in the
 dashboard.
 
 ```
 @flow news_scout
-  ├── scout_agent.run_sync(prompt)
+  ├── new_scout_agent().run_sync(prompt)
   │     ├── model_request_1      ← checkpoint
   │     ├── search_news_tool     ← checkpoint
   │     ├── model_request_2      ← checkpoint
@@ -144,7 +144,7 @@ secret whenever the active stack is remote:
 
 ```bash
 kitaru secrets set news-scout-keys \
-  --ANTHROPIC_API_KEY=sk-ant-... \
+  --ANTHROPIC_API_KEY=<your-anthropic-api-key> \
   --XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 
 kitaru stack use my-k8s-stack

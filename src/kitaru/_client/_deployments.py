@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote, unquote
 
+from kitaru._client._coercion import optional_string
 from kitaru._client._models import Deployment
 from kitaru.errors import KitaruUsageError
 
@@ -230,14 +231,6 @@ def _deployment_extra(snapshot: Any) -> dict[str, Any]:
     return {}
 
 
-def _optional_string(value: Any) -> str | None:
-    """Return a stripped string or ``None``."""
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    return normalized or None
-
-
 def _optional_bool(value: Any) -> bool | None:
     """Return a bool only for unambiguous bool-like values."""
     if isinstance(value, bool):
@@ -278,7 +271,7 @@ def _schema(snapshot: Any, extra: Mapping[str, Any]) -> dict[str, Any] | None:
 
 def _stack(snapshot: Any, extra: Mapping[str, Any]) -> str | None:
     """Extract stack name/id from deployment metadata or snapshot resources."""
-    raw_stack = _optional_string(extra.get("stack"))
+    raw_stack = optional_string(extra.get("stack"))
     if raw_stack is not None:
         return raw_stack
 
@@ -286,7 +279,7 @@ def _stack(snapshot: Any, extra: Mapping[str, Any]) -> str | None:
     stack = getattr(resources, "stack", None) if resources is not None else None
     if stack is None:
         stack = getattr(snapshot, "stack", None)
-    return _optional_string(getattr(stack, "name", None) or getattr(stack, "id", None))
+    return optional_string(getattr(stack, "name", None) or getattr(stack, "id", None))
 
 
 def map_deployment_snapshot(snapshot: Any) -> Deployment | None:
@@ -301,9 +294,9 @@ def map_deployment_snapshot(snapshot: Any) -> Deployment | None:
         flow=parsed_name.flow,
         version=parsed_name.version,
         tags=deployment_tags_from_snapshot(snapshot),
-        commit_sha=_optional_string(extra.get("commit_sha")),
+        commit_sha=optional_string(extra.get("commit_sha")),
         commit_dirty=_optional_bool(extra.get("commit_dirty")),
-        image_digest=_optional_string(extra.get("image_digest")),
+        image_digest=optional_string(extra.get("image_digest")),
         created_at=_created_at(snapshot),
         schema=_schema(snapshot, extra),
         stack=_stack(snapshot, extra),

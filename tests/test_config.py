@@ -3958,6 +3958,24 @@ def test_kitaru_not_duplicated_when_pinned_version_in_requirements() -> None:
     assert docker_settings.requirements == ["kitaru>=0.2.0", "httpx"]
 
 
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "kitaru[pydantic-ai]",
+        "kitaru[pydantic-ai,openai]",
+    ],
+)
+def test_kitaru_not_duplicated_when_extras_in_requirements(
+    requirement: str,
+) -> None:
+    """Kitaru should not be added if a requirement already includes extras."""
+    image_settings = ImageSettings(requirements=[requirement])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == [requirement]
+
+
 def test_kitaru_not_duplicated_when_git_url_in_requirements() -> None:
     """Kitaru should not be added if a git direct reference is already present."""
     git_ref = "kitaru @ git+https://github.com/zenml-io/kitaru.git@develop"

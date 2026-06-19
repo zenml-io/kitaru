@@ -1,8 +1,0 @@
-{
-  "title": "Server Deployment",
-  "defaultOpen": false,
-  "pages": [
-    "docker",
-    "helm"
-  ]
-}

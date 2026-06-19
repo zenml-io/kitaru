@@ -2,7 +2,7 @@
 
 A small, forkable platform layer that turns an agent `Profile` into a durable, sandboxed, profile-gated [PydanticAI](https://ai.pydantic.dev) agent running on [Kitaru](https://kitaru.ai/). It is aimed at platform engineers who want to give their team a fast way to spin up agents with the same safety and operations rails every time. Six stages each add one platform capability: durable execution, a command sandbox, operator-editable procedures, credential isolation, typed service calls, and human approval. The demo prompts are throwaway; the platform shape is the point.
 
-This README is the runnable companion: setup, commands, and what you should see. The full stage-by-stage walkthrough lives in the docs tour at **[kitaru.ai/docs/agent-harness-platform](https://kitaru.ai/docs/agent-harness-platform/)**, and the [production notes](https://kitaru.ai/docs/agent-harness-platform/production-notes/) cover which pieces are teaching stand-ins and what to harden first.
+This README is the runnable companion: setup, commands, and what you should see. The full stage-by-stage walkthrough lives in the docs tour at **[docs.zenml.io/kitaru/agent-harness-platform](https://docs.zenml.io/kitaru/agent-harness-platform/)**, and the [production notes](https://docs.zenml.io/kitaru/agent-harness-platform/production-notes/) cover which pieces are teaching stand-ins and what to harden first.
 
 > This is a runnable local reference architecture, not a turnkey enterprise platform and not a hostile-code security boundary. Read the production notes before adopting the pattern for real work.
 
@@ -26,12 +26,12 @@ Every stage calls the LLM, so keep `OPENAI_API_KEY` set throughout. Stage 1 runs
 
 | Stage | Setup | Demonstrates | What to look for |
 |---|---|---|---|
-| **[1. Durable agent](https://kitaru.ai/docs/agent-harness-platform/01-durable-agent/)**<br>`stage_1_basic_agent.py` | Key only | A PydanticAI agent inside a Kitaru flow; completed turns survive a crash | Re-run after a forced failure: checkpoint `default` returns `cached` (instant, $0) while `default_2` runs fresh |
-| **[2. Sandbox](https://kitaru.ai/docs/agent-harness-platform/02-sandbox/)**<br>`stage_2_sandboxed_exec.py` | `bash setup.sh` | Shell commands run in a Docker container, not on your host | `[sandbox]` log lines; `cd /tmp` in turn 1 persists into turn 2; the agent reports Debian/root, not your machine |
-| **[3. Skills](https://kitaru.ai/docs/agent-harness-platform/03-skills/)**<br>`stage_3_skills.py` | `bash setup.sh` | The agent reads its procedure from a `SKILL.md` file, not the system prompt | The agent calls `skill(list)` then `skill(read)` before acting; edit the markdown and re-run to change behavior with no Python edits |
-| **[4. Credential proxy](https://kitaru.ai/docs/agent-harness-platform/04-credential-proxy/)**<br>`stage_4_credential_proxy.py` | `bash setup.sh` | A separate proxy holds the secret and adds the auth header; the worker never sees the token | `[proxy] injected headers for wiki.local: ['Authorization']` and a `200` from the mock; no `WIKI_TOKEN` exists inside the worker |
-| **[5. Typed services](https://kitaru.ai/docs/agent-harness-platform/05-typed-services/)**<br>`stage_5_typed_services.py` | `bash setup.sh` | Structured calls go through a host-side `exec_service` dispatcher instead of shell `curl` | `lookup_wiki` and `publish_summary` produce no `[sandbox]` lines (they run host-side); the proxy stays idle for them |
-| **[6. Human approval](https://kitaru.ai/docs/agent-harness-platform/06-hitl/)**<br>`stage_6_hitl.py` | `bash setup.sh` | `ask_question` pauses the flow with `kitaru.wait()` until a human answers | `Waiting on ask_question...`, then a durable pause; the flow resumes once you supply input (see [Stage 6](#stage-6-answering-the-human-pause)) |
+| **[1. Durable agent](https://docs.zenml.io/kitaru/agent-harness-platform/01-durable-agent/)**<br>`stage_1_basic_agent.py` | Key only | A PydanticAI agent inside a Kitaru flow; completed turns survive a crash | Re-run after a forced failure: checkpoint `default` returns `cached` (instant, $0) while `default_2` runs fresh |
+| **[2. Sandbox](https://docs.zenml.io/kitaru/agent-harness-platform/02-sandbox/)**<br>`stage_2_sandboxed_exec.py` | `bash setup.sh` | Shell commands run in a Docker container, not on your host | `[sandbox]` log lines; `cd /tmp` in turn 1 persists into turn 2; the agent reports Debian/root, not your machine |
+| **[3. Skills](https://docs.zenml.io/kitaru/agent-harness-platform/03-skills/)**<br>`stage_3_skills.py` | `bash setup.sh` | The agent reads its procedure from a `SKILL.md` file, not the system prompt | The agent calls `skill(list)` then `skill(read)` before acting; edit the markdown and re-run to change behavior with no Python edits |
+| **[4. Credential proxy](https://docs.zenml.io/kitaru/agent-harness-platform/04-credential-proxy/)**<br>`stage_4_credential_proxy.py` | `bash setup.sh` | A separate proxy holds the secret and adds the auth header; the worker never sees the token | `[proxy] injected headers for wiki.local: ['Authorization']` and a `200` from the mock; no `WIKI_TOKEN` exists inside the worker |
+| **[5. Typed services](https://docs.zenml.io/kitaru/agent-harness-platform/05-typed-services/)**<br>`stage_5_typed_services.py` | `bash setup.sh` | Structured calls go through a host-side `exec_service` dispatcher instead of shell `curl` | `lookup_wiki` and `publish_summary` produce no `[sandbox]` lines (they run host-side); the proxy stays idle for them |
+| **[6. Human approval](https://docs.zenml.io/kitaru/agent-harness-platform/06-hitl/)**<br>`stage_6_hitl.py` | `bash setup.sh` | `ask_question` pauses the flow with `kitaru.wait()` until a human answers | `Waiting on ask_question...`, then a durable pause; the flow resumes once you supply input (see [Stage 6](#stage-6-answering-the-human-pause)) |
 
 ## Setup for stages 2-6
 
@@ -95,9 +95,9 @@ On the local stack the flow polls for input until a 600s timeout, so you do need
 
 ## A note on the logs
 
-Every stage file passes `granular_checkpoints=False` so each agent turn shows up as one readable log block (`default`, `default_2`) while you learn the primitives. A real fork drops that flag and takes the `KitaruAgent` default, where every model request and tool call gets its own checkpoint and cache key. The one exception is wait-bearing tools: keep `ask_question` at flow scope (for example `tool_checkpoint_config_by_name={"ask_question": False}`) so the pause still resolves. The [production notes](https://kitaru.ai/docs/agent-harness-platform/production-notes/) cover this in full.
+Every stage file passes `checkpoint_strategy="turn"` so each agent turn shows up as one readable log block (`default`, `default_2`) while you learn the primitives. A real fork drops that setting and takes the `KitaruAgent` default, `checkpoint_strategy="calls"`, where every model request and tool call gets its own checkpoint and cache key. The one exception is wait-bearing tools: keep `ask_question` at flow scope (for example `tool_checkpoint_config_by_name={"ask_question": False}`) so the pause still resolves. The [production notes](https://docs.zenml.io/kitaru/agent-harness-platform/production-notes/) cover this in full.
 
-Replay is a general Kitaru primitive rather than a stage of its own here. See [Replay and overrides](https://kitaru.ai/docs/guides/replay-and-overrides/) to re-run a flow from a chosen checkpoint.
+Replay is a general Kitaru primitive rather than a stage of its own here. See [Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides/) to re-run a flow from a chosen checkpoint.
 
 ## Forking this for your team
 
@@ -109,4 +109,4 @@ The reusable library lives in `agent_harness_platform/`; each `stage_N_*.py` is 
 
 The profile hardcodes `openai:gpt-5-nano` so stage 1 has the smallest possible setup. In a real deployment, register a model alias (`kitaru model register <alias> --provider openai --model <id> --api-key ...`) and reference the alias in the profile so credentials stay centrally managed.
 
-The [production notes](https://kitaru.ai/docs/agent-harness-platform/production-notes/) walk through each teaching stand-in (the Docker sandbox, local skill files, the self-signed proxy, the mock services) and where you would swap in something your platform team trusts.
+The [production notes](https://docs.zenml.io/kitaru/agent-harness-platform/production-notes/) walk through each teaching stand-in (the Docker sandbox, local skill files, the self-signed proxy, the mock services) and where you would swap in something your platform team trusts.

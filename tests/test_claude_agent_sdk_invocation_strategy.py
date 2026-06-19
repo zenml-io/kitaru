@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib
 import sys
 import types
@@ -33,6 +34,10 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     class AssistantMessage:
         def __init__(self, text: str) -> None:
             self.text = text
+
+    class StreamEvent:
+        def __init__(self, event: dict[str, object]) -> None:
+            self.event = event
 
     class ClaudeAgentOptions:
         def __init__(
@@ -72,6 +77,7 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             yield message
 
     sdk.__dict__["AssistantMessage"] = AssistantMessage
+    sdk.__dict__["StreamEvent"] = StreamEvent
     sdk.__dict__["ClaudeAgentOptions"] = ClaudeAgentOptions
     sdk.__dict__["ResultMessage"] = ResultMessage
     sdk.__dict__["query"] = query
@@ -224,6 +230,133 @@ def test_nested_checkpoint_explicit_opt_in_runs_directly_with_warning(
     )
 
 
+def test_non_stream_sync_does_not_publish_claude_stream_events(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[str] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append(kind),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert published == []
+
+
+def test_non_stream_async_does_not_publish_claude_stream_events(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    _patch_direct_execution_persistence(monkeypatch)
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[str] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append(kind),
+    )
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    async def call_run() -> object:
+        return await runner.run(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    result = asyncio.run(call_run())
+
+    assert cast(Any, result).final_text == "done"
+    assert published == []
+
+
+def test_stream_sync_runs_one_invocation_and_filters_raw_stream_events(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    saved_payloads: list[object] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_artifact=lambda name, value, *, type: saved_payloads.append(value),
+        save_event=lambda name, value, *, type: None,
+    )
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    published: list[tuple[str, dict[str, object], bool]] = []
+    monkeypatch.setattr(
+        streaming_module.kitaru_events,
+        "publish",
+        lambda kind, payload, *, flush=False: published.append((kind, payload, flush)),
+    )
+
+    @dataclasses.dataclass
+    class StaticOptions:
+        include_partial_messages: bool = False
+
+    original_options = StaticOptions()
+    fake_sdk.__dict__["messages"][:] = [
+        fake_sdk.StreamEvent(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "hello"},
+            }
+        ),
+        fake_sdk.AssistantMessage("thinking"),
+        fake_sdk.ResultMessage(),
+    ]
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        options=original_options,
+    )
+
+    result = runner.run_stream_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.final_text == "done"
+    assert original_options.include_partial_messages is False
+    assert len(fake_sdk.__dict__["calls"]) == 1
+    sdk_options = fake_sdk.__dict__["calls"][0]["options"]
+    assert sdk_options is not original_options
+    assert sdk_options.include_partial_messages is True
+    assert [kind for kind, _, _ in published] == [
+        claude_adapter.CLAUDE_STREAM_STARTED,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_COMPLETED,
+    ]
+    assert "text_delta" not in published[1][1]
+    assert published[1][1]["display"] == "Claude text delta"
+    assert "hello" not in repr(published[1][1])
+    message_payload = cast(
+        dict[str, object],
+        next(payload for payload in saved_payloads if isinstance(payload, dict)),
+    )
+    messages_value = message_payload["messages"]
+    assert isinstance(messages_value, list)
+    messages = cast(list[dict[str, object]], messages_value)
+    assert all("event" not in message for message in messages)
+
+
 def test_cache_identity_is_deterministic_for_live_option_objects(
     claude_adapter: types.ModuleType,
 ) -> None:
@@ -245,9 +378,15 @@ def test_cache_identity_is_deterministic_for_live_option_objects(
     changed_key = runner._invocation_cache_key(
         request, options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read", "Grep"])
     )
+    stream_key = runner._invocation_cache_key(
+        request,
+        options=LiveOptions(cwd="/tmp/repo", allowed_tools=["Read"]),
+        surface="stream",
+    )
 
     assert first_key == second_key
     assert changed_key != first_key
+    assert stream_key != first_key
 
 
 def test_options_manifest_redacts_sequence_pairs(
@@ -662,6 +801,13 @@ def test_emit_events_false_suppresses_event_artifacts_and_log(
     _patch_inline_scope(monkeypatch)
     saved: list[str] = []
     logs: list[dict[str, object]] = []
+    usage_records: list[dict[str, object]] = []
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
     _patch_direct_execution_persistence(
         monkeypatch,
         save_artifact=lambda name, value, *, type: saved.append(name),
@@ -681,6 +827,111 @@ def test_emit_events_false_suppresses_event_artifacts_and_log(
     assert not any(name.startswith("event_log__") for name in saved)
     assert not any(name.startswith("run_summary__") for name in saved)
     assert logs == []
+    assert len(usage_records) == 1
+    usage_record = usage_records[0]
+    assert usage_record["adapter"] == "claude_agent_sdk"
+    assert usage_record["surface"] == "agent_invocation"
+    assert usage_record["call_name"] == "claude"
+    cost = cast(dict[str, object], usage_record["cost"])
+    assert cost["actual_cost_usd"] == 0.04
+
+
+def test_canonical_usage_record_prefers_usage_over_model_usage(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    usage_records: list[dict[str, object]] = []
+    result_message = fake_sdk.__dict__["ResultMessage"]()
+    result_message.usage = {"input_tokens": 3, "output_tokens": 5}
+    result_message.model_usage = {
+        "claude-sonnet": {"input_tokens": 100, "output_tokens": 200}
+    }
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert len(usage_records) == 1
+    usage = cast(dict[str, object], usage_records[0]["usage"])
+    assert usage["input_tokens"] == 3
+    assert usage["output_tokens"] == 5
+    assert usage["total_tokens"] == 8
+
+
+def test_canonical_usage_record_falls_back_to_model_usage(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    usage_records: list[dict[str, object]] = []
+    result_message = fake_sdk.__dict__["ResultMessage"]()
+    result_message.usage = None
+    result_message.model_usage = {
+        "claude-sonnet": {"input_tokens": 3, "output_tokens": 5},
+        "claude-haiku": {"input_tokens": 7, "output_tokens": 11},
+    }
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.usage is None
+    assert result.model_usage == result_message.model_usage
+    assert len(usage_records) == 1
+    usage = cast(dict[str, object], usage_records[0]["usage"])
+    assert usage["input_tokens"] == 10
+    assert usage["output_tokens"] == 16
+    assert usage["total_tokens"] == 26
+
+
+def test_save_usage_false_suppresses_canonical_usage_record(
+    claude_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    usage_records: list[dict[str, object]] = []
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        capture=claude_adapter.ClaudeCapturePolicy(save_usage=False),
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.usage == {"input_tokens": 3, "output_tokens": 5}
+    assert result.cost_usd == 0.04
+    assert result.usage_artifact_name is None
+    assert usage_records == []
 
 
 class ForeignClaudeRunResult:

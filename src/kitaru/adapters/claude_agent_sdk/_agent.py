@@ -1,11 +1,19 @@
 """Public runner wrapper for the Claude Agent SDK adapter."""
 
 import asyncio
+import copy
+import dataclasses
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from kitaru._llm_usage import (
+    add_optional_token_count,
+    build_usage_record,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -16,8 +24,10 @@ from ._runner import (
     ClaudeInvocationPayload,
     claude_agent_sdk_version,
     run_claude_invocation,
+    run_claude_invocation_streamed,
 )
 from ._serialization import redacted_options_manifest, to_cache_identity
+from ._streaming import ClaudeStreamPublisher
 from ._tracking import (
     ArtifactKind,
     EventPersistenceFailure,
@@ -43,7 +53,73 @@ _DIRECT_EXECUTION_WARNING = (
     "edits, or API cost."
 )
 
+
+def _partial_messages_unavailable_warning() -> str:
+    return (
+        "Claude stream partial messages could not be enabled without mutating "
+        "caller-provided options or because the installed Claude Agent SDK does "
+        "not expose partial-message options. The invocation will still run, but "
+        "live events may be coarse until the SDK yields complete messages."
+    )
+
+
+def _canonical_usage_payload(
+    payload: ClaudeInvocationPayload,
+) -> Mapping[str, Any] | None:
+    if payload.usage is not None:
+        return payload.usage
+    model_usage = payload.model_usage
+    if model_usage is None:
+        return None
+    if any(
+        key in model_usage for key in ("input_tokens", "output_tokens", "total_tokens")
+    ):
+        return model_usage
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    saw_usage = False
+    for usage in model_usage.values():
+        if not isinstance(usage, Mapping):
+            continue
+        token_usage = token_usage_from_mapping(usage)
+        if not any(
+            token_usage[key] is not None
+            for key in ("input_tokens", "output_tokens", "total_tokens")
+        ):
+            continue
+        saw_usage = True
+        input_tokens = add_optional_token_count(
+            input_tokens, token_usage["input_tokens"]
+        )
+        output_tokens = add_optional_token_count(
+            output_tokens, token_usage["output_tokens"]
+        )
+        total_tokens = add_optional_token_count(
+            total_tokens, token_usage["total_tokens"]
+        )
+    if not saw_usage:
+        return model_usage
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "raw": model_usage,
+    }
+
+
 ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
+InvocationSurface = Literal["run", "run_stream", "run_sync", "run_stream_sync"]
+InvocationCacheSurface = Literal["run", "stream"]
+
+
+@dataclass(frozen=True)
+class _InvocationPlan:
+    options: Any | None
+    stream_warnings: list[str]
+    stream_publisher: ClaudeStreamPublisher | None
+    cache_surface: InvocationCacheSurface
 
 
 @dataclass(frozen=True)
@@ -166,46 +242,106 @@ class KitaruClaudeRunner:
 
     async def run(self, request: ClaudeRunRequest) -> ClaudeRunResult:
         """Run one Claude Agent SDK invocation asynchronously."""
-        self._require_invocation_scope("KitaruClaudeRunner.run()")
-        try:
-            result = await self._run_invocation_async(request)
-            result = canonicalize_result_model(result, ClaudeRunResult)
-        except Exception:
-            self._track_completed("run", status="failed", result=None)
-            raise
-        self._track_completed("run", status="completed", result=result)
-        return result
+        return await self._run_public_async(
+            request,
+            surface="run",
+            api_name="KitaruClaudeRunner.run()",
+            streaming=False,
+        )
+
+    async def run_stream(self, request: ClaudeRunRequest) -> ClaudeRunResult:
+        """Run one Claude Agent SDK invocation and forward live stream events."""
+        return await self._run_public_async(
+            request,
+            surface="run_stream",
+            api_name="KitaruClaudeRunner.run_stream()",
+            streaming=True,
+        )
 
     def run_sync(self, request: ClaudeRunRequest) -> ClaudeRunResult:
         """Run one Claude Agent SDK invocation synchronously."""
+        self._reject_running_event_loop(sync_method="run_sync", async_method="run")
+        return self._run_public_sync(
+            request,
+            surface="run_sync",
+            api_name="KitaruClaudeRunner.run_sync()",
+            streaming=False,
+        )
+
+    def run_stream_sync(self, request: ClaudeRunRequest) -> ClaudeRunResult:
+        """Run one Claude Agent SDK invocation synchronously with live events."""
+        self._reject_running_event_loop(
+            sync_method="run_stream_sync",
+            async_method="run_stream",
+        )
+        return self._run_public_sync(
+            request,
+            surface="run_stream_sync",
+            api_name="KitaruClaudeRunner.run_stream_sync()",
+            streaming=True,
+        )
+
+    async def _run_public_async(
+        self,
+        request: ClaudeRunRequest,
+        *,
+        surface: InvocationSurface,
+        api_name: str,
+        streaming: bool,
+    ) -> ClaudeRunResult:
+        self._require_invocation_scope(api_name)
+        try:
+            result = await self._run_invocation_async(request, streaming=streaming)
+            result = canonicalize_result_model(result, ClaudeRunResult)
+        except Exception:
+            self._track_completed(surface, status="failed", result=None)
+            raise
+        self._track_completed(surface, status="completed", result=result)
+        return result
+
+    def _run_public_sync(
+        self,
+        request: ClaudeRunRequest,
+        *,
+        surface: InvocationSurface,
+        api_name: str,
+        streaming: bool,
+    ) -> ClaudeRunResult:
+        self._require_invocation_scope(api_name)
+        try:
+            result = self._run_invocation_sync(request, streaming=streaming)
+            result = canonicalize_result_model(result, ClaudeRunResult)
+        except Exception:
+            self._track_completed(surface, status="failed", result=None)
+            raise
+        self._track_completed(surface, status="completed", result=result)
+        return result
+
+    @staticmethod
+    def _reject_running_event_loop(*, sync_method: str, async_method: str) -> None:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            pass
-        else:
-            raise KitaruUsageError(
-                "`KitaruClaudeRunner.run_sync()` cannot be called inside an already "
-                "running event loop. Use `await KitaruClaudeRunner.run(...)` instead."
-            )
-        self._require_invocation_scope("KitaruClaudeRunner.run_sync()")
-        try:
-            result = self._run_invocation_sync(request)
-            result = canonicalize_result_model(result, ClaudeRunResult)
-        except Exception:
-            self._track_completed("run_sync", status="failed", result=None)
-            raise
-        self._track_completed("run_sync", status="completed", result=result)
-        return result
+            return
+        raise KitaruUsageError(
+            f"`KitaruClaudeRunner.{sync_method}()` cannot be called inside an "
+            "already running event loop. Use `await "
+            f"KitaruClaudeRunner.{async_method}(...)` instead."
+        )
 
-    async def _run_invocation_async(self, request: ClaudeRunRequest) -> ClaudeRunResult:
-        options = self._build_options(request)
+    async def _run_invocation_async(
+        self, request: ClaudeRunRequest, *, streaming: bool
+    ) -> ClaudeRunResult:
+        plan = self._invocation_plan(request, streaming=streaming)
         direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         async def _body() -> ClaudeRunResult:
-            return await self._run_sdk_async(
+            return await self._run_sdk_boundary_async(
                 request,
-                options=options,
+                options=plan.options,
                 direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                stream_publisher=plan.stream_publisher,
+                stream_warnings=plan.stream_warnings,
             )
 
         if is_inside_flow() and not direct_execution_inside_checkpoint:
@@ -213,20 +349,28 @@ class KitaruClaudeRunner:
                 config=self._invocation_checkpoint_config(),
                 step_name=f"{self._name}_claude_invocation",
                 body=_body,
-                cache_key=self._invocation_cache_key(request, options=options),
+                cache_key=self._invocation_cache_key(
+                    request,
+                    options=plan.options,
+                    surface=plan.cache_surface,
+                ),
             )
         return await _body()
 
-    def _run_invocation_sync(self, request: ClaudeRunRequest) -> ClaudeRunResult:
-        options = self._build_options(request)
+    def _run_invocation_sync(
+        self, request: ClaudeRunRequest, *, streaming: bool
+    ) -> ClaudeRunResult:
+        plan = self._invocation_plan(request, streaming=streaming)
         direct_execution_inside_checkpoint = is_inside_checkpoint()
 
         def _body() -> ClaudeRunResult:
             return asyncio.run(
-                self._run_sdk_async(
+                self._run_sdk_boundary_async(
                     request,
-                    options=options,
+                    options=plan.options,
                     direct_execution_inside_checkpoint=direct_execution_inside_checkpoint,
+                    stream_publisher=plan.stream_publisher,
+                    stream_warnings=plan.stream_warnings,
                 )
             )
 
@@ -235,19 +379,47 @@ class KitaruClaudeRunner:
                 config=self._invocation_checkpoint_config(),
                 step_name=f"{self._name}_claude_invocation",
                 body=_body,
-                cache_key=self._invocation_cache_key(request, options=options),
+                cache_key=self._invocation_cache_key(
+                    request,
+                    options=plan.options,
+                    surface=plan.cache_surface,
+                ),
             )
         return _body()
 
-    async def _run_sdk_async(
+    def _invocation_plan(
+        self, request: ClaudeRunRequest, *, streaming: bool
+    ) -> _InvocationPlan:
+        if not streaming:
+            return _InvocationPlan(
+                options=self._build_options(request),
+                stream_warnings=[],
+                stream_publisher=None,
+                cache_surface="run",
+            )
+        options, stream_warnings = self._build_stream_options(request)
+        return _InvocationPlan(
+            options=options,
+            stream_warnings=stream_warnings,
+            stream_publisher=ClaudeStreamPublisher(
+                runner_name=self._name,
+                include_text_deltas=self._capture.include_stream_text_deltas,
+            ),
+            cache_surface="stream",
+        )
+
+    async def _run_sdk_boundary_async(
         self,
         request: ClaudeRunRequest,
         *,
         options: Any | None,
         direct_execution_inside_checkpoint: bool,
+        stream_publisher: ClaudeStreamPublisher | None,
+        stream_warnings: list[str],
     ) -> ClaudeRunResult:
         with tracker_scope(self._name, persist_on_exit=False) as tracker:
             manifest: dict[str, Any] | None = None
+            terminal_stream_event_sent = False
 
             def get_manifest() -> dict[str, Any]:
                 nonlocal manifest
@@ -259,39 +431,80 @@ class KitaruClaudeRunner:
                     )
                 return manifest
 
+            def publish_stream_completed(result: ClaudeRunResult) -> None:
+                nonlocal terminal_stream_event_sent
+                if stream_publisher is None or terminal_stream_event_sent:
+                    return
+                terminal_stream_event_sent = True
+                stream_publisher.completed(status=result.status)
+
+            def publish_stream_failed(error: BaseException) -> None:
+                nonlocal terminal_stream_event_sent
+                if stream_publisher is None or terminal_stream_event_sent:
+                    return
+                terminal_stream_event_sent = True
+                stream_publisher.failed(error)
+
             started_at = time.perf_counter()
             try:
-                payload = await run_claude_invocation(
+                try:
+                    if stream_publisher is None:
+                        payload = await run_claude_invocation(
+                            request=request,
+                            options=options,
+                            save_transcript_file=self._capture.save_transcript_file,
+                        )
+                    else:
+                        stream_publisher.started()
+                        payload = await run_claude_invocation_streamed(
+                            request=request,
+                            options=options,
+                            save_transcript_file=self._capture.save_transcript_file,
+                            on_event=stream_publisher.event,
+                        )
+                    if stream_warnings:
+                        payload = dataclasses.replace(
+                            payload,
+                            warnings=[*payload.warnings, *stream_warnings],
+                        )
+                except Exception as error:
+                    self._record_failed_invocation(
+                        tracker,
+                        error=error,
+                        manifest_factory=(
+                            get_manifest
+                            if self._capture.save_options_manifest
+                            else None
+                        ),
+                        request=request,
+                        duration_ms=elapsed_ms(started_at),
+                    )
+                    tracker.persist(fail_on_error=False)
+                    raise
+
+                result = self._finalize_run_result(
+                    payload,
+                    tracker=tracker,
+                    get_manifest=get_manifest,
                     request=request,
-                    options=options,
-                    save_transcript_file=self._capture.save_transcript_file,
-                )
-            except Exception as error:
-                self._record_failed_invocation(
-                    tracker,
-                    error=error,
-                    manifest_factory=(
-                        get_manifest if self._capture.save_options_manifest else None
+                    direct_execution_inside_checkpoint=(
+                        direct_execution_inside_checkpoint
                     ),
-                    request=request,
-                    duration_ms=elapsed_ms(started_at),
                 )
-                tracker.persist(fail_on_error=False)
+                persistence_failures = tracker.persist(fail_on_error=False)
+                result = self._apply_event_persistence_failures(
+                    result, persistence_failures
+                )
+                if (
+                    persistence_failures
+                    and self._capture.fail_on_event_persistence_error
+                ):
+                    raise self._event_persistence_error(persistence_failures)
+                publish_stream_completed(result)
+                return result
+            except BaseException as error:
+                publish_stream_failed(error)
                 raise
-            result = self._finalize_run_result(
-                payload,
-                tracker=tracker,
-                get_manifest=get_manifest,
-                request=request,
-                direct_execution_inside_checkpoint=(direct_execution_inside_checkpoint),
-            )
-            persistence_failures = tracker.persist(fail_on_error=False)
-            result = self._apply_event_persistence_failures(
-                result, persistence_failures
-            )
-            if persistence_failures and self._capture.fail_on_event_persistence_error:
-                raise self._event_persistence_error(persistence_failures)
-            return result
 
     def _finalize_run_result(
         self,
@@ -320,6 +533,27 @@ class KitaruClaudeRunner:
         ]
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
+        canonical_usage = _canonical_usage_payload(payload)
+        if self._capture.save_usage:
+            usage_record = build_usage_record(
+                adapter="claude_agent_sdk",
+                surface="agent_invocation",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=canonical_usage,
+                actual_cost_usd=payload.cost_usd,
+                cost_source=(
+                    "provider_reported" if payload.cost_usd is not None else "none"
+                ),
+                cost_source_label="claude_agent_sdk.total_cost_usd",
+                latency_ms=payload.duration_api_ms or payload.duration_ms,
+                status="completed",
+                billing_effect="incurred",
+                cache_status="executed",
+                warnings=warnings,
+            )
+            log_usage_record(usage_record)
         if self._capture.emit_events:
             tracker.record_invocation(
                 status="completed",
@@ -603,6 +837,89 @@ class KitaruClaudeRunner:
             )
         return self._options_from_request(request)
 
+    def _build_stream_options(
+        self, request: ClaudeRunRequest
+    ) -> tuple[Any | None, list[str]]:
+        options = self._build_options(request)
+        if options is None:
+            return self._stream_options_from_request(request)
+        prepared_options, warning = self._copy_options_with_partial_messages(options)
+        return prepared_options, [warning] if warning is not None else []
+
+    @staticmethod
+    def _stream_options_from_request(
+        request: ClaudeRunRequest,
+    ) -> tuple[Any | None, list[str]]:
+        ClaudeAgentOptions = KitaruClaudeRunner._claude_agent_options_type(
+            "Claude streaming requires Claude Agent SDK options support so "
+            "Kitaru can request partial stream messages. Pass an "
+            "`options_factory` if your installed SDK exposes a different "
+            "options type."
+        )
+        try:
+            return (
+                ClaudeAgentOptions(
+                    **KitaruClaudeRunner._request_options_kwargs(
+                        request, include_partial_messages=True
+                    )
+                ),
+                [],
+            )
+        except TypeError:
+            warning = _partial_messages_unavailable_warning()
+            if not KitaruClaudeRunner._request_needs_sdk_options(request):
+                return None, [warning]
+            return (
+                ClaudeAgentOptions(
+                    **KitaruClaudeRunner._request_options_kwargs(request)
+                ),
+                [warning],
+            )
+
+    @staticmethod
+    def _copy_options_with_partial_messages(options: Any) -> tuple[Any, str | None]:
+        warning = _partial_messages_unavailable_warning()
+        if isinstance(options, Mapping):
+            try:
+                copied_mapping = dict(options)
+                copied_mapping["include_partial_messages"] = True
+            except Exception:
+                pass
+            else:
+                return copied_mapping, None
+
+        model_copy = getattr(options, "model_copy", None)
+        if callable(model_copy):
+            try:
+                copied_model = model_copy(update={"include_partial_messages": True})
+            except Exception:
+                pass
+            else:
+                if getattr(copied_model, "include_partial_messages", None) is True:
+                    return copied_model, None
+
+        if dataclasses.is_dataclass(options) and not isinstance(options, type):
+            try:
+                copied_dataclass = dataclasses.replace(
+                    options, include_partial_messages=True
+                )
+            except Exception:
+                pass
+            else:
+                if getattr(copied_dataclass, "include_partial_messages", None) is True:
+                    return copied_dataclass, None
+
+        try:
+            copied = copy.copy(options)
+            if copied is not options:
+                copied.include_partial_messages = True
+                if getattr(copied, "include_partial_messages", None) is True:
+                    return copied, None
+        except Exception:
+            pass
+
+        return options, warning
+
     @staticmethod
     def _request_needs_sdk_options(request: ClaudeRunRequest) -> bool:
         return any(
@@ -611,21 +928,37 @@ class KitaruClaudeRunner:
         )
 
     @staticmethod
-    def _options_from_request(request: ClaudeRunRequest) -> Any:
+    def _request_options_kwargs(
+        request: ClaudeRunRequest,
+        *,
+        include_partial_messages: bool | None = None,
+    ) -> dict[str, Any]:
+        options_kwargs: dict[str, Any] = {
+            "cwd": request.cwd,
+            "resume": request.resume_session_id,
+            "max_turns": request.max_turns,
+        }
+        if include_partial_messages is not None:
+            options_kwargs["include_partial_messages"] = include_partial_messages
+        return options_kwargs
+
+    @staticmethod
+    def _claude_agent_options_type(error_message: str) -> Any:
         try:
             from claude_agent_sdk import ClaudeAgentOptions
         except (ImportError, AttributeError) as exc:
-            raise KitaruUsageError(
-                "ClaudeRunRequest fields `cwd`, `max_turns`, and "
-                "`resume_session_id` require Claude Agent SDK options support. "
-                "Pass an `options_factory` if your installed SDK exposes a "
-                "different options type."
-            ) from exc
-        return ClaudeAgentOptions(
-            cwd=request.cwd,
-            resume=request.resume_session_id,
-            max_turns=request.max_turns,
+            raise KitaruUsageError(error_message) from exc
+        return ClaudeAgentOptions
+
+    @staticmethod
+    def _options_from_request(request: ClaudeRunRequest) -> Any:
+        ClaudeAgentOptions = KitaruClaudeRunner._claude_agent_options_type(
+            "ClaudeRunRequest fields `cwd`, `max_turns`, and "
+            "`resume_session_id` require Claude Agent SDK options support. "
+            "Pass an `options_factory` if your installed SDK exposes a "
+            "different options type."
         )
+        return ClaudeAgentOptions(**KitaruClaudeRunner._request_options_kwargs(request))
 
     def _invocation_checkpoint_config(self) -> CheckpointConfig:
         return {
@@ -634,18 +967,27 @@ class KitaruClaudeRunner:
         }
 
     def _invocation_cache_key(
-        self, request: ClaudeRunRequest, *, options: Any | None
+        self,
+        request: ClaudeRunRequest,
+        *,
+        options: Any | None,
+        surface: Literal["run", "stream"] = "run",
     ) -> str:
-        return checkpoint_cache_key(
-            {
-                "adapter": "claude_agent_sdk",
-                "checkpoint_strategy": "invocation",
-                "claude_agent_sdk_version": claude_agent_sdk_version(),
-                "runner_name": self._name,
-                "request": request.model_dump(mode="json"),
-                "options": to_cache_identity(options),
+        payload = {
+            "adapter": "claude_agent_sdk",
+            "checkpoint_strategy": "invocation",
+            "claude_agent_sdk_version": claude_agent_sdk_version(),
+            "runner_name": self._name,
+            "request": request.model_dump(mode="json"),
+            "options": to_cache_identity(options),
+        }
+        if surface != "run":
+            payload["surface"] = surface
+        if surface == "stream":
+            payload["stream"] = {
+                "include_stream_text_deltas": self._capture.include_stream_text_deltas,
             }
-        )
+        return checkpoint_cache_key(payload)
 
     def _require_invocation_scope(self, api_name: str) -> None:
         if is_inside_checkpoint():

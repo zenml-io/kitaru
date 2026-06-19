@@ -91,13 +91,8 @@ def agent_harness_platform_flow() -> str:
         DockerSandbox(execution_id=execution_id, proxy=proxy) as sandbox,
     ):
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
-        # Turn mode (single aggregating checkpoint per agent.run_sync) —
-        # stage 4 is dense enough on infrastructure (proxy + mock + sandbox)
-        # that per-call granularity isn't earning its keep, and turn mode
-        # caches cross-run cleanly (see stage 1's note on granular caching).
-        # Turn mode for log-clarity — see stage 1's note. Production
-        # forks should drop the kwarg for per-call durability.
-        agent = KitaruAgent(agent, granular_checkpoints=False)
+        # Use turn strategy for this tour; stage 1 explains why.
+        agent = KitaruAgent(agent, checkpoint_strategy="turn")
         result = agent.run_sync("Carry out your procedure and return the result.")
 
     print(f"\n{result.output}\n")

@@ -78,23 +78,3 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     target-branch: develop
-  - package-ecosystem: npm
-    directory: /site
-    schedule:
-      interval: weekly
-      day: tuesday
-      time: "07:00"
-      timezone: Europe/Amsterdam
-    reviewers: [strickvl]
-    labels: [dependencies]
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-    cooldown:
-      default-days: 7
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 3
-    target-branch: develop

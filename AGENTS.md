@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-Kitaru is a **mixed Python + web repo** that produces three things: a Python SDK package, a documentation site, and a marketing landing page — all deployed together.
+Kitaru is a **mixed Python + docs repo** that produces two things: a Python SDK package and the Kitaru documentation app. The marketing landing page and public `kitaru.ai` runtime now live in the sibling `zenml-io-v2` repository.
 
 ```
 src/kitaru/           # Python SDK package (src layout)
@@ -13,31 +13,30 @@ src/kitaru/           # Python SDK package (src layout)
 tests/                # pytest tests
 tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
 examples/             # Runnable SDK examples
-docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
-  content/docs/       # Documentation content (MDX files)
+docs/                 # Two docs surfaces — see "Documentation surfaces" below
+  book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
+  content/docs/       # FumaDocs SDK+CLI reference content (generated cli/ + reference/)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
-  app/                # Next.js app routes, layout, metadata
-site/                 # Astro landing page + runtime shell at kitaru.ai/
-  src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
-scripts/              # Doc generation, site merge, smoke test, and UI bundle scripts
+  app/                # Next.js app routes for the sdkdocs.kitaru.ai reference site
+  worker/             # Cloudflare worker: redirect.mjs (kitaru.ai/docs) + routing maps
+scripts/              # Doc generation, smoke test, and UI bundle scripts
 FRONTEND-TESTING.md   # Internal runbook for Kitaru UI bundle/frontend testing
                          and stable/prerelease release validation
 docker/               # Dockerfiles (production server, server-dev, and dev flow images)
 design/               # Design docs, meeting notes (gitignored, never commit)
-wrangler.toml         # Unified Cloudflare Worker deployment config
 ```
 
-### Unified deployment model
+### Documentation surfaces
 
-The docs and landing page deploy as **one Cloudflare Worker**:
+Kitaru docs live on three surfaces — know which one a task touches:
 
-1. Python scripts generate docs content (`scripts/generate_cli_docs.py`, `scripts/generate_changelog_docs.py`, `scripts/generate_sdk_docs.py`)
-2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
-3. `site/` builds the Astro app into `site/dist/`
-4. `scripts/merge_site.sh` copies `docs/out/*` into `site/dist/docs/`
-5. Root `wrangler.toml` deploys the merged output as one Worker
+1. **Hand-written docs → GitBook.** Concepts, guides, adapters, getting-started, etc. are plain Markdown in **`docs/book/`**, published to **`docs.zenml.io/kitaru`** via GitBook Git Sync. Edit those `.md` directly; nav is `docs/book/toc.md`, config is `docs/book/.gitbook.yaml`, authoring conventions are in `docs/book/AGENTS.md`.
+2. **Generated SDK + CLI reference → `sdkdocs.kitaru.ai`.** The FumaDocs app in `docs/` is now reference-only (generated `content/docs/cli/` + `content/docs/reference/python/` + a landing). Built/deployed to the `kitaru-sdkdocs` worker (root `wrangler.toml`). See `docs/CLAUDE.md`.
+3. **`kitaru.ai/docs` → redirects.** The `kitaru-site` worker (`docs/worker/redirect.mjs`, `wrangler.redirect.toml`) 301-redirects old `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
 
-Astro is the runtime shell because it owns the `/api/waitlist` endpoint (backed by Cloudflare KV). The docs are pure static files mounted under `/docs`.
+Do not add hand-written pages to the FumaDocs app (`docs/content/docs/`) — they belong in `docs/book/`. The public changelog is owned by the changelog repo (`docs.zenml.io/changelog`); this repo may still generate a gitignored `docs/content/docs/changelog.mdx` for local/reference builds, but agents should not hand-edit or commit it.
+
+The public marketing/runtime site for Kitaru now lives in `zenml-io-v2`. If a task involves Astro pages, public site assets, marketing Cloudflare Pages deployment, or runtime web APIs such as waitlist/get-started/newsletter endpoints, switch to that repository instead of adding that code back here.
 
 ## Build, Test, and Development Commands
 
@@ -48,6 +47,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `uv sync`: install and sync dependencies
 - `uv sync --extra local`: install with local ZenML runtime components
 - `uv run kitaru init`: **required in a fresh `git worktree`.** Creates the `.kitaru/` project marker that ZenML's dynamic pipeline resolver needs to re-import example modules by dotted path. Without it, ~14 `test_phase*_example::*_runs_end_to_end` tests fail with `RuntimeError: Unable to resolve dynamic pipeline source`. Worktrees do not inherit `.kitaru/` from the main checkout.
+- **Lockfile merge caution:** when merging `develop` into a feature branch and resolving `pyproject.toml` / `uv.lock`, do not assume a broad `uv lock` preserves recent dependency-security fixes. Check recent commits touching `uv.lock` / `.github/pip-audit-ignored.txt`, use targeted commands such as `uv lock --upgrade-package <package>` when a package was intentionally bumped, and run `just audit` before pushing.
 
 **Core dev loop — these three commands handle the vast majority of development needs:**
 
@@ -71,18 +71,17 @@ Use `uv` for Python dependency management and `just` as the command stack.
 - `just audit`: audit Python dependencies with `pip-audit` and the documented ignore list
 - `just links`: check markdown links offline (requires `lychee`: `brew install lychee`)
 - `just links-external`: check links including external URLs (slow)
+- `just example-coverage-audit`: validate `examples/example-coverage.yaml` against public example docs, referenced tests/smoke/provider metadata, and explicit waivers for `missing`, `planned`, or `manual_only` coverage. Audit-only: it does not run examples or call providers, so a pass means the metadata is honest and internally consistent, not that every example executed.
 - `just build`: build wheel and sdist locally
 
-### Docs/site workflows
+### Docs workflows
 
 These require Node 22+ and pnpm.
 
 - `just generate-docs`: generate CLI reference + changelog + SDK reference docs
 - `just docs`: preview docs locally (dev server at localhost:3000)
 - `just docs-build`: build docs static export
-- `just site`: preview landing page locally (dev server at localhost:4321)
-- `just site-build-only`: build landing page only (no docs merge)
-- `just site-build`: full unified build (generate docs, build docs, build site, merge)
+- `just docs-validate`: validate the static export as served under `/docs`
 
 ## Coding Style & Naming Conventions
 
@@ -115,6 +114,8 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 ## Testing Guidelines
 
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
+
+Default pytest runs exclude live provider checks via `-m 'not live_llm'`. Tests that call OpenAI, Anthropic/Claude, Gemini, or similar paid/external providers must live under `tests/live/`, carry `live_llm` plus the provider-specific marker, use short bounded prompts, and skip cleanly when credentials are absent. The shared provider-spend guard in `tests/conftest.py` blocks accidental provider calls from deterministic tests while allowing localhost/Kitaru/ZenML local traffic.
 
 ## Analytics Instrumentation
 
@@ -153,46 +154,45 @@ Every PR description should include a "Reviewer Notes" H2 or H3 section. Treat t
 When adding a new CLI command, MCP tool, or SDK feature:
 
 - **Smoke test**: add a non-destructive invocation to `scripts/smoke-test.sh` (e.g. `kitaru <command> --dry-run` or `kitaru <command> --help`). The smoke test runs before every release, so new features should be exercised there to catch regressions.
+- **Example coverage manifest**: when adding, removing, renaming, or publicly documenting an example under `examples/`, update `examples/example-coverage.yaml` and run `just example-coverage-audit`. The manifest records coverage status and required waivers only; it is not an example runner, so manual-only or missing coverage remains a release-review item.
 - **Analytics**: check whether the feature needs a tracking event. Add the event to `AnalyticsEvent` in `src/kitaru/analytics.py` and wire it into the appropriate surface (CLI handler via `track()`, MCP tool via `@tracked_mcp_tool`, or SDK lifecycle point). If the CLI command is multi-word (e.g. `clean project`), add it to `_MULTI_TOKEN_COMMANDS` in `cli.py`.
 
 ## CI/CD
 
 ### Python CI (`ci.yml`)
 
-Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, dependency audit, link check, Docker server smoke test, wheel-packaging check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
+Runs on push/PR to `develop`. PR jobs run lint + format check + yaml check, typos, type check, dependency audit, link check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12). Push jobs also run Docker server smoke and wheel-packaging checks, because those paths may need trusted UI release credentials.
 
 When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard packaging, or release UI selection, read `FRONTEND-TESTING.md` first. It is the runbook for stable vs prerelease `kitaru-ui-v*` bundle testing and the trusted-event/token boundaries.
 
-### Site CI (`site.yml`)
+### Docs CI (`docs.yml`)
 
-Runs on manual dispatch, push to `main` (production deploy), and PRs touching `site/**`, `docs/**`, `scripts/generate_*.py`, `scripts/merge_site.sh`, `CHANGELOG.md`, or `wrangler.toml`. Generates docs content, builds both apps, merges output, and deploys:
-- **Production:** deploys unified Worker to `kitaru.ai` on `main` push
-- **PR previews:** deploys a preview Worker for same-repo PRs; cleans up on PR close
+Runs on manual dispatch, `main` pushes, and PRs touching `docs/**`, docs generation scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or Wrangler config. It regenerates the CLI/SDK reference and builds the FumaDocs static export on all runs. It deploys the **SDK+CLI reference site to `sdkdocs.kitaru.ai`** (worker `kitaru-sdkdocs`) plus the **`kitaru.ai/docs` redirect worker** (`kitaru-site`, `wrangler.redirect.toml`) only on `main` push or manual dispatch; PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately to `docs.zenml.io/kitaru` via GitBook Git Sync (not this workflow). Marketing site deployment is handled from `zenml-io-v2`.
 
 ### Other workflows
 
-- `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release)
+- `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release). Do not add live provider calls here; provider validation happens before release dispatch.
+- `llm-integration.yml`: trusted weekly/manual live OpenAI/Anthropic provider checks. It has only `schedule` and `workflow_dispatch` triggers, runs paid tests outside PR CI, can target an exact ref/SHA, uploads logs/results only, and sends a compact Discord failure alert via `DISCORD_WEBHOOK_SRE`. Its secret-bearing jobs use the GitHub Environment `live-provider-tests`; configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as Environment secrets there, with `kitaru-admins` approval/restrictions.
 - `spellcheck.yml`: separate typo/spell checking on `develop` pushes and non-draft PRs
-- `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP files in same-repo non-draft PRs, with `site/public/dashboard.png` ignored
+- `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP files in same-repo non-draft PRs
 - `zizmor.yml`: GitHub Actions security analysis for workflow/dependabot changes, plus weekly and manual runs
 
 ## Branching and Release Strategy
 
 - Default branch is `develop`. All PRs target `develop`.
 - `main` tracks the latest released version only; do not push directly.
-- Before releasing, run `./scripts/smoke-test.sh` to exercise CLI, SDK flows, MCP tools, and LLM integration end-to-end against a local server. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set `OPENAI_API_KEY` to include LLM tests.
+- Before releasing, run release-grade smoke with structured output: `./scripts/smoke-test.sh --release --json-out smoke-results.json` plus repeatable `--required-provider-area <area>` flags for any changed provider-backed behavior (`openai`, `anthropic`, `gemini-model`, `gemini-antigravity`, `research-bot`). Bare `./scripts/smoke-test.sh` remains useful for local development, but it is not enough to prove a provider-relevant release because skipped provider checks do not fail outside `--release`. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set the relevant provider credentials and opt-in env vars before marking provider areas covered.
+- Also check `.github/workflows/llm-integration.yml` before release dispatch. A weekly green run on `develop` is a canary that provider paths are generally healthy; it is not exact release evidence. If OpenAI or Anthropic adapter/example behavior changed, trigger a manual `llm-integration.yml` run for the exact release ref or SHA and require it to pass, or record an explicit waiver in the release conversation. Gemini remains local release-smoke evidence or waiver for v1.
 - Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
 - Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
 - Version is maintained in `pyproject.toml` and bumped by the release workflow. Never hardcode it — use `importlib.metadata.version("kitaru")`.
 - Update `CHANGELOG.md` under `[Unreleased]` when making user-facing changes.
-- The site deploys on `main` pushes, so the site goes live at release time.
-
 ## Docs Content Rules
 
 - **Only document shipped features.** No "Coming Soon" sections.
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
-- **Generated vs static docs:** generated CLI reference content, changelog output, and SDK reference pages come from generation scripts and should not be hand-edited. Static hand-written MDX pages under `docs/content/docs/` (for example `getting-started/*.mdx` or `cli/login.mdx`) are tracked and may be edited directly when the feature behavior changes. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
-- **Docs URL references:** inside `docs/content/docs/` and generated docs MDX, link to other docs pages using docs-app-root paths such as `/cli/executions/` or `/concepts/checkpoints/`, not `/docs/...`; Next's `basePath: '/docs'` adds the public prefix for HTML. From the Astro site or other public surfaces, link to docs with the full public `/docs/...` path. Public materialized Markdown is rewritten during export by `docs/scripts/materialize-markdown-pages.mjs`, and `just site-build` validates these URL shapes.
+- **Where to edit:** hand-written docs are GitBook Markdown in **`docs/book/`** (see `docs/book/AGENTS.md`) — add new pages there and to `docs/book/toc.md`. The FumaDocs app under `docs/content/docs/` is reference-only and **fully generated** (CLI + SDK); do not hand-edit it. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
+- **Docs URL references:** inside `docs/book/`, link to sibling pages with relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the SDK/CLI reference with `https://sdkdocs.kitaru.ai`, to other ZenML docs with absolute `https://docs.zenml.io/...`, and to diagrams with `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
 - **Planning artifacts stay untracked:** do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. These are coordination scratchpads, not product docs.
 - **Secret docs accuracy:** only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, label it clearly as the current low-level pattern instead of implying there is already a dedicated Kitaru secret getter.
 - **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), never the generated `docs/content/docs/cli/*` output.

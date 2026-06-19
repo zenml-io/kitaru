@@ -125,6 +125,7 @@ def _assert_event_artifacts_use_display_names(
 
 
 _DIRECT_WAIT_AGENT: KitaruAgent[Any, str] | None = None
+_STREAMING_WAIT_AGENT: KitaruAgent[Any, str] | None = None
 _GUARDED_WAIT_AGENT: KitaruAgent[Any, str] | None = None
 _HITL_WAIT_AGENT: KitaruAgent[Any, str] | None = None
 _CHILD_EVENT_ZENML_WAIT_REACHED = "zenml_wait_reached"
@@ -209,10 +210,29 @@ def _run_flow_and_report(
         cleanup()
 
 
+@checkpoint(cache=False)
+def pydantic_ai_streaming_wait_persist_history(history: list[str]) -> list[str]:
+    return history
+
+
+async def _consume_event_stream(_ctx: Any, stream: Any) -> None:
+    async for _event in stream:
+        pass
+
+
 @flow
 def pydantic_ai_direct_wait_flow() -> str:
     assert _DIRECT_WAIT_AGENT is not None
     return _DIRECT_WAIT_AGENT.run_sync("Ask the human for context.").output
+
+
+@flow
+def pydantic_ai_streaming_wait_flow() -> str:
+    assert _STREAMING_WAIT_AGENT is not None
+    return _STREAMING_WAIT_AGENT.run_sync(
+        "Ask the human for context.",
+        event_stream_handler=_consume_event_stream,
+    ).output
 
 
 @flow
@@ -258,6 +278,40 @@ def _run_direct_wait_flow_until_pause(queue: Any) -> None:
         _DIRECT_WAIT_AGENT = None
 
     _run_flow_and_report(queue, pydantic_ai_direct_wait_flow, cleanup)
+
+
+def _run_streaming_wait_flow_until_pause(queue: Any) -> None:
+    global _STREAMING_WAIT_AGENT
+    wait_cleanup = _install_child_wait_reached_event(queue)
+
+    agent = Agent(
+        TestModel(call_tools=["ask_user"]),
+        name=f"streaming_wait_agent_{uuid4().hex[:8]}",
+        output_type=str,
+    )
+
+    @agent.tool_plain
+    def ask_user() -> str:
+        pydantic_ai_streaming_wait_persist_history(["before_wait"])
+        return kp.wait_for_input(
+            schema=str,
+            name="streaming_tool_wait",
+            question="What context should the streamed agent use?",
+            timeout=0,
+        )
+
+    _STREAMING_WAIT_AGENT = KitaruAgent(
+        agent,
+        tool_checkpoint_config_by_name={"ask_user": False},
+        allow_sync_tool_body_waits=True,
+    )
+
+    def cleanup() -> None:
+        global _STREAMING_WAIT_AGENT
+        wait_cleanup()
+        _STREAMING_WAIT_AGENT = None
+
+    _run_flow_and_report(queue, pydantic_ai_streaming_wait_flow, cleanup)
 
 
 def _run_hitl_wait_flow_until_pause(queue: Any) -> None:
@@ -426,10 +480,13 @@ def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
     capabilities = [Hooks()]
     conversation_id = "conversation-phase17"
     output_retries = 2
+
+    from kitaru.adapters.pydantic_ai._agent import _UPSTREAM_RUN_RETRIES_PARAM
+
     expected_forwarded_kwargs = {
         "capabilities": capabilities,
         "conversation_id": conversation_id,
-        "output_retries": output_retries,
+        _UPSTREAM_RUN_RETRIES_PARAM: output_retries,
     }
     captured: dict[str, dict[str, object]] = {}
     run_result = object()
@@ -520,10 +577,10 @@ def test_phase17_run_kwargs_forwarded_to_pydantic_ai_run_surfaces(
 
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
-    """Turn mode should persist tracker metadata and checkpoint artifacts."""
-    durable_agent = _make_wrapped_agent(
-        name_prefix="turn_agent",
-        granular_checkpoints=False,
+    """Turn strategy should persist tracker metadata and checkpoint artifacts."""
+    durable_agent = KitaruAgent(
+        _make_test_agent(name_prefix="turn_agent"),
+        checkpoint_strategy="turn",
     )
 
     @flow
@@ -633,6 +690,18 @@ def test_phase17_direct_wait_tool_with_explicit_thread_opt_in_reaches_wait(
     _require_wait_support()
     _assert_child_flow_pauses(
         _run_direct_wait_flow_until_pause,
+        required_event=_CHILD_EVENT_ZENML_WAIT_REACHED,
+    )
+
+
+def test_phase17_streaming_wait_tool_with_checkpoint_reaches_wait(
+    primed_zenml,
+) -> None:
+    """Issue #425: streamed fallback must let opted-out sync tools run at flow scope."""
+    del primed_zenml
+    _require_wait_support()
+    _assert_child_flow_pauses(
+        _run_streaming_wait_flow_until_pause,
         required_event=_CHILD_EVENT_ZENML_WAIT_REACHED,
     )
 

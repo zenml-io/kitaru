@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import ValidationError
@@ -49,6 +50,42 @@ if TYPE_CHECKING:
 
 _WAIT_CONDITION_STATUS_PENDING = "pending"
 
+_RAW_STATUSES_BY_PUBLIC_STATUS: dict[ExecutionStatus, tuple[str, ...]] = {
+    ExecutionStatus.RUNNING: (
+        "cancelling",
+        "initializing",
+        "provisioning",
+        "queued",
+        "running",
+        "retrying",
+        "resuming",
+        "stopping",
+    ),
+    ExecutionStatus.WAITING: ("paused",),
+    ExecutionStatus.COMPLETED: ("completed", "cached", "skipped"),
+    ExecutionStatus.FAILED: ("failed", "retried"),
+    ExecutionStatus.CANCELLED: ("cancelled", "stopped"),
+}
+_RAW_STATUS_TO_PUBLIC_STATUS: dict[str, ExecutionStatus] = {
+    raw_status: public_status
+    for public_status, raw_statuses in _RAW_STATUSES_BY_PUBLIC_STATUS.items()
+    for raw_status in raw_statuses
+}
+
+
+def _backend_filter_value(values: Sequence[str]) -> str:
+    """Format values for ZenML backend string-filter fields."""
+    if len(values) == 1:
+        return values[0]
+    return f"oneof:{json.dumps(list(values), separators=(',', ':'))}"
+
+
+def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
+    """Map a public status filter to the backend string-filter syntax."""
+    if public_status is None:
+        return None
+    return _backend_filter_value(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
+
 
 def _to_plain_dict(values: Mapping[str, Any]) -> dict[str, Any]:
     """Convert metadata mappings to plain dictionaries."""
@@ -59,35 +96,14 @@ def _to_public_status(status: Any) -> ExecutionStatus:
     """Map ZenML execution states to Kitaru public states."""
     status_value = str(getattr(status, "value", status))
 
-    if status_value in {
-        "initializing",
-        "provisioning",
-        "running",
-        "retrying",
-    }:
-        return ExecutionStatus.RUNNING
-    if status_value == "paused":
-        return ExecutionStatus.WAITING
-    if status_value in {
-        "completed",
-        "cached",
-        "skipped",
-    }:
-        return ExecutionStatus.COMPLETED
-    if status_value in {
-        "failed",
-        "retried",
-    }:
-        return ExecutionStatus.FAILED
-    if status_value in {
-        "stopped",
-        "stopping",
-    }:
-        return ExecutionStatus.CANCELLED
-
-    raise KitaruRuntimeError(
-        f"Unsupported execution status mapping: {status!r} (value={status_value!r})."
-    )
+    try:
+        return _RAW_STATUS_TO_PUBLIC_STATUS[status_value]
+    except KeyError as exc:
+        message = (
+            f"Unsupported execution status mapping: {status!r} "
+            f"(value={status_value!r})."
+        )
+        raise KitaruRuntimeError(message) from exc
 
 
 def _coerce_status_filter(
@@ -233,6 +249,7 @@ def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
         ended_at=step.end_time,
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
+        _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
     )
 
 
@@ -508,6 +525,7 @@ def _map_execution(
     run: PipelineRunResponse,
     client: KitaruClient,
     include_details: bool,
+    resolve_wait_status: bool = False,
 ) -> Execution:
     """Map a ZenML pipeline run into a Kitaru execution model."""
     status = _to_public_status(run.status)
@@ -519,7 +537,9 @@ def _map_execution(
         active_wait = _get_active_wait_condition(run)
         if active_wait is not None:
             pending_wait = _map_pending_wait(active_wait)
-        elif include_details:
+        elif include_details or resolve_wait_status:
+            # Some ZenML responses only expose pending waits through
+            # list_run_wait_conditions(...), not through active_wait_condition.
             pending_wait = _first_pending_wait(run=run, client=client)
 
     if pending_wait is not None:
@@ -627,6 +647,8 @@ def _map_execution(
 __all__ = [
     "_CHECKPOINT_SOURCE_ALIAS_PREFIX",
     "_PIPELINE_SOURCE_ALIAS_PREFIX",
+    "_RAW_STATUSES_BY_PUBLIC_STATUS",
+    "_RAW_STATUS_TO_PUBLIC_STATUS",
     "_WAIT_CONDITION_STATUS_PENDING",
     "_adapter_structural_input_kind",
     "_checkpoint_lineage_key",

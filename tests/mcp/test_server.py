@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ import pytest
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
 from kitaru._flow_loading import _load_flow_target as _load_shared_flow_target
-from kitaru.client import ExecutionStatus
+from kitaru.client import ExecutionStatistics, ExecutionStatisticsGroup, ExecutionStatus
 from kitaru.config import (
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
@@ -48,6 +49,7 @@ from kitaru.mcp.server import (
     kitaru_executions_replay,
     kitaru_executions_retry,
     kitaru_executions_run,
+    kitaru_executions_statistics,
     kitaru_info,
     kitaru_replay_lab_compare,
     kitaru_secrets_create,
@@ -56,9 +58,40 @@ from kitaru.mcp.server import (
     kitaru_status,
     kitaru_stop_local_server,
     manage_stack,
+    mcp,
     tracked_mcp_tool,
 )
 from kitaru.secrets import SecretSummary
+
+_REGISTERED_MCP_TOOL_FUNCTIONS = (
+    kitaru_executions_list,
+    kitaru_executions_statistics,
+    kitaru_executions_get,
+    kitaru_executions_latest,
+    get_execution_logs,
+    kitaru_executions_run,
+    kitaru_deployments_deploy,
+    kitaru_deployments_invoke,
+    kitaru_deployments_list,
+    kitaru_deployments_get,
+    kitaru_deployments_delete,
+    kitaru_deployments_tag,
+    kitaru_deployments_untag,
+    kitaru_executions_cancel,
+    kitaru_executions_input,
+    kitaru_executions_retry,
+    kitaru_executions_replay,
+    kitaru_secrets_create,
+    kitaru_artifacts_list,
+    kitaru_artifacts_get,
+    kitaru_start_local_server,
+    kitaru_stop_local_server,
+    kitaru_status,
+    kitaru_stacks_list,
+    manage_stack,
+    kitaru_info,
+    kitaru_clean_preview,
+)
 
 
 def _write_flow_target_module(path: Path, *, marker: str) -> None:
@@ -79,6 +112,48 @@ def _load_mcp_flow_target(target: str) -> Any:
         target,
         module_name_prefix="_kitaru_mcp_run_target_",
     )
+
+
+def _mcp_tool_schemas_by_name() -> dict[str, dict[str, Any]]:
+    """Return FastMCP input schemas from the in-process registry."""
+    tools = asyncio.run(mcp.list_tools())
+    return {tool.name: tool.inputSchema for tool in tools}
+
+
+def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
+    tool_schemas = _mcp_tool_schemas_by_name()
+    expected_names = {func.__name__ for func in _REGISTERED_MCP_TOOL_FUNCTIONS}
+
+    assert expected_names <= set(tool_schemas)
+    assert "_wrapper" not in tool_schemas
+
+    input_schema = tool_schemas["kitaru_executions_input"]
+    assert set(input_schema["properties"]) == {"exec_id", "wait", "value"}
+    assert input_schema["required"] == ["exec_id", "wait", "value"]
+
+    invoke_schema = tool_schemas["kitaru_deployments_invoke"]
+    assert set(invoke_schema["properties"]) == {
+        "flow",
+        "version",
+        "tag",
+        "inputs",
+    }
+    assert invoke_schema["required"] == ["flow"]
+    assert invoke_schema["properties"]["version"]["default"] is None
+    assert invoke_schema["properties"]["tag"]["default"] is None
+    assert invoke_schema["properties"]["inputs"]["default"] is None
+
+    stack_schema = tool_schemas["manage_stack"]
+    assert {"action", "name"}.issubset(stack_schema["properties"])
+    assert stack_schema["required"] == ["action", "name"]
+    assert stack_schema["properties"]["action"]["enum"] == ["create", "delete"]
+    assert stack_schema["properties"]["stack_type"]["default"] == "local"
+    assert stack_schema["properties"]["activate"]["default"] is True
+    assert stack_schema["properties"]["recursive"]["default"] is False
+    assert stack_schema["properties"]["force"]["default"] is False
+    assert stack_schema["properties"]["async_mode"]["default"] is False
+    assert stack_schema["properties"]["verify"]["default"] is True
+    assert "extra" in stack_schema["properties"]
 
 
 def test_load_flow_target_supports_module_paths(
@@ -218,6 +293,115 @@ def test_executions_list_delegates_filtering_to_shared_interface(
         limit=5,
     )
     assert payload[0]["exec_id"] == sample_execution.exec_id
+
+
+def test_executions_statistics_calls_client_and_serializes(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should delegate to the SDK and return serialized counts."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=12),
+            ExecutionStatisticsGroup(
+                keys={"status": "failed"},
+                execution_count=2,
+                metrics={"duration_avg": 3.5},
+            ),
+        ],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_statistics(
+            group_by=["status"],
+            flow="content_pipeline",
+            status="completed",
+            stack="prod",
+            tags=["nightly", "customer-facing"],
+            metrics=["duration_avg:duration:avg"],
+            max_groups=25,
+        )
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=["status"],
+        metrics=["duration_avg:duration:avg"],
+        flow="content_pipeline",
+        status="completed",
+        stack="prod",
+        tags=["nightly", "customer-facing"],
+        max_groups=25,
+    )
+    assert payload == {
+        "groups": [
+            {
+                "keys": {"status": "completed"},
+                "execution_count": 12,
+                "metrics": {},
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {"duration_avg": 3.5},
+            },
+        ],
+        "truncated": False,
+        "group_count": 2,
+    }
+
+
+def test_executions_statistics_delegates_to_inspection_serializer(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should share the same serializer as CLI/SDK transports."""
+    statistics = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution_statistics",
+            return_value={"source": "inspection"},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_statistics()
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=[],
+        metrics=[],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+    mock_serialize.assert_called_once_with(statistics)
+    assert payload == {"source": "inspection"}
+
+
+@pytest.mark.parametrize("max_groups", [0, 10_001])
+def test_executions_statistics_rejects_invalid_max_groups(max_groups: int) -> None:
+    """MCP statistics should reject max_groups outside the public range."""
+    with pytest.raises(ValueError, match="`max_groups` must be between 1 and 10000"):
+        kitaru_executions_statistics(max_groups=max_groups)
+
+
+def test_executions_statistics_preserves_error_boundary_behavior(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics errors should pass through the shared MCP error boundary."""
+    mock_kitaru_client.executions.statistics.side_effect = KitaruUsageError(
+        "bad grouping"
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(KitaruUsageError, match="bad grouping"),
+    ):
+        kitaru_executions_statistics(group_by=["nope"])
 
 
 def test_executions_list_stack_filter_happens_after_fetch(
