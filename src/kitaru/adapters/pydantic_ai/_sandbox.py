@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 import kitaru
-from kitaru._config._sandbox import _normalize_cleanup, _normalize_max_chars
+from kitaru._config._sandbox import (
+    SandboxCleanupPolicy,
+    _normalize_cleanup,
+    _normalize_max_chars,
+)
 from kitaru.config import SandboxCommandResult
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import FunctionToolset
@@ -45,7 +49,7 @@ def _tool_result_from_core_result(
 def sandbox_command_toolset(
     *,
     max_chars: int = DEFAULT_SANDBOX_TOOL_MAX_CHARS,
-    cleanup: Literal["destroy", "close"] = "destroy",
+    cleanup: SandboxCleanupPolicy = "destroy",
 ) -> FunctionToolset[Any]:
     """Return a PydanticAI toolset for active-stack sandbox commands.
 

@@ -57,6 +57,23 @@ async def _get_tool(toolset: Any, ctx: Any) -> Any:
     return (await toolset.get_tools(ctx))[_sandbox.SANDBOX_COMMAND_TOOL_NAME]
 
 
+def _fake_agent_for_message_parts(parts: list[Any], *, output: str) -> Any:
+    from pydantic_ai.messages import ModelResponse
+
+    class FakeResult:
+        def __init__(self) -> None:
+            self.output = output
+
+        def all_messages(self) -> list[ModelResponse]:
+            return [ModelResponse(parts=parts)]
+
+    class FakeAgent:
+        def run_sync(self, _prompt: str) -> FakeResult:
+            return FakeResult()
+
+    return FakeAgent()
+
+
 def _install_checkpoint_recorder(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     from kitaru.runtime import _checkpoint_scope
 
@@ -397,51 +414,36 @@ async def test_sandbox_command_tool_tracking_records_completed_events(
 
 def test_pydantic_ai_sandbox_example_fails_without_sandbox_tool_call() -> None:
     from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
-    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.messages import TextPart
 
-    class FakeResult:
-        output = "Python 3.12.0"
-
-        def all_messages(self) -> list[ModelResponse]:
-            return [ModelResponse(parts=[TextPart(content="Python 3.12.0")])]
-
-    class FakeAgent:
-        def run_sync(self, _prompt: str) -> FakeResult:
-            return FakeResult()
+    agent = _fake_agent_for_message_parts(
+        [TextPart(content="Python 3.12.0")], output="Python 3.12.0"
+    )
 
     with pytest.raises(
         RuntimeError,
         match=f"without calling {_sandbox.SANDBOX_COMMAND_TOOL_NAME}",
     ):
-        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(cast(Any, FakeAgent()))
+        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(agent)
 
 
 def test_pydantic_ai_sandbox_example_accepts_recorded_sandbox_tool_call() -> None:
     from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.messages import ToolCallPart
 
-    class FakeResult:
-        output = "exit code 0; Python 3.12.0"
-
-        def all_messages(self) -> list[ModelResponse]:
-            return [
-                ModelResponse(
-                    parts=[
-                        ToolCallPart(
-                            tool_name=_sandbox.SANDBOX_COMMAND_TOOL_NAME,
-                            args={"command": "python --version"},
-                            tool_call_id="call_sandbox",
-                        )
-                    ]
-                )
-            ]
-
-    class FakeAgent:
-        def run_sync(self, _prompt: str) -> FakeResult:
-            return FakeResult()
+    agent = _fake_agent_for_message_parts(
+        [
+            ToolCallPart(
+                tool_name=_sandbox.SANDBOX_COMMAND_TOOL_NAME,
+                args={"command": "python --version"},
+                tool_call_id="call_sandbox",
+            )
+        ],
+        output="exit code 0; Python 3.12.0",
+    )
 
     assert (
-        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(cast(Any, FakeAgent()))
+        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(agent)
         == "exit code 0; Python 3.12.0"
     )
 
