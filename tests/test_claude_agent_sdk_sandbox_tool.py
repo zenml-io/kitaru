@@ -154,6 +154,19 @@ def test_helper_registers_sdk_mcp_server_and_metadata(
         }
     ]
     schema = fake_claude_sdk.__dict__["tool_calls"][0]["input_schema"]
+    command_string_schema = schema["properties"]["command"]["anyOf"][0]
+    command_array_schema = schema["properties"]["command"]["anyOf"][1]
+    cwd_string_schema = schema["properties"]["cwd"]["anyOf"][0]
+    assert command_string_schema["maxLength"] == (
+        sandbox_tool_module._MAX_COMMAND_STRING_CHARS
+    )
+    assert (
+        command_array_schema["maxItems"] == sandbox_tool_module._MAX_COMMAND_ARGV_ITEMS
+    )
+    assert command_array_schema["items"]["maxLength"] == (
+        sandbox_tool_module._MAX_COMMAND_ARG_CHARS
+    )
+    assert cwd_string_schema["maxLength"] == sandbox_tool_module._MAX_CWD_CHARS
     env_object_schema = schema["properties"]["env"]["anyOf"][0]
     assert env_object_schema["maxProperties"] == sandbox_tool_module._MAX_ENV_VARS
     assert (
@@ -407,6 +420,95 @@ def test_handler_offloads_shared_sandbox_helper(
     assert result["is_error"] is False
 
 
+def test_handler_trims_json_expanded_output_to_claude_result_limit(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "😀" * sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        _ = command, kwargs
+        return _sandbox_result(stdout=stdout, stderr="")
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+    tool = server["tools"][0]
+
+    result = asyncio.run(tool.handler({"command": "echo lots"}))
+
+    text = result["content"][0]["text"]
+    assert len(text) <= tool.annotations.maxResultSizeChars
+    payload = _payload(result)
+    assert payload["status"] == "completed"
+    assert payload["stdout_truncated"] is True
+    assert payload["stdout"].endswith(
+        "truncated by Kitaru to fit Claude MCP result limit]"
+    )
+    assert len(payload["stdout"]) < len(stdout)
+    assert result["is_error"] is False
+
+
+def test_handler_trims_newline_expanded_streams_to_claude_result_limit(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = "\n" * sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS
+
+    def fake_run_sandbox_command(
+        command: object, **kwargs: Any
+    ) -> SandboxCommandResult:
+        _ = command, kwargs
+        return _sandbox_result(stdout=stream, stderr=stream).model_copy(
+            update={"stdout_truncated": False, "stderr_truncated": False}
+        )
+
+    monkeypatch.setattr(
+        sandbox_tool_module, "_run_sandbox_command", fake_run_sandbox_command
+    )
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+    tool = server["tools"][0]
+
+    result = asyncio.run(tool.handler({"command": "echo lots"}))
+
+    text = result["content"][0]["text"]
+    assert len(text) <= tool.annotations.maxResultSizeChars
+    payload = _payload(result)
+    assert payload["status"] == "completed"
+    assert payload["stdout_truncated"] or payload["stderr_truncated"]
+    assert result["is_error"] is False
+
+
+def test_handler_trims_json_expanded_failure_to_claude_result_limit(
+    sandbox_tool_module: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(command: object, **kwargs: Any) -> SandboxCommandResult:
+        _ = command, kwargs
+        raise KitaruBackendError(
+            "provider emitted oversized detail "
+            + ("😀" * sandbox_tool_module.DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS)
+        )
+
+    monkeypatch.setattr(sandbox_tool_module, "_run_sandbox_command", fail)
+    server = sandbox_tool_module.create_kitaru_sandbox_mcp_server()
+    tool = server["tools"][0]
+
+    result = asyncio.run(tool.handler({"command": "echo hi"}))
+
+    text = result["content"][0]["text"]
+    assert len(text) <= tool.annotations.maxResultSizeChars
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["error"]["message"].endswith(
+        "truncated by Kitaru to fit Claude MCP result limit]"
+    )
+    assert result["is_error"] is True
+
+
 def test_non_zero_process_exit_is_completed_tool_result(
     sandbox_tool_module: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -509,8 +611,12 @@ def test_handler_does_not_redact_short_ordinary_env_values(
     [
         {},
         {"command": ""},
+        {"command": "x" * 8_193},
         {"command": ["python", ""]},
+        {"command": ["python", "x" * 4_097]},
+        {"command": ["python"] * 129},
         {"command": "echo hi", "cwd": 123},
+        {"command": "echo hi", "cwd": "/" + ("x" * 4_096)},
         {"command": "echo hi", "env": {"DEBUG": 1}},
         {"command": "echo hi", "env": {"DEBUG": "x" * 8_193}},
         {"command": "echo hi", "max_chars": True},

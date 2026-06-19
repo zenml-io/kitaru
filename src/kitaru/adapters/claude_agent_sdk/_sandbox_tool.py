@@ -57,27 +57,45 @@ DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS = (
     _CLAUDE_MCP_MAX_RESULT_SIZE_CHARS - _TOOL_RESULT_JSON_OVERHEAD_CHARS
 ) // 2
 _TOOL_ARGUMENT_KEYS = frozenset({"command", "cwd", "env", "max_chars", "cleanup"})
+_MAX_COMMAND_STRING_CHARS = 8_192
+_MAX_COMMAND_ARGV_ITEMS = 128
+_MAX_COMMAND_ARG_CHARS = 4_096
+_MAX_CWD_CHARS = 4_096
 _MAX_ENV_VARS = 64
 _MAX_ENV_KEY_CHARS = 256
 _MAX_ENV_VALUE_CHARS = 8_192
 _MAX_ENV_TOTAL_CHARS = 65_536
+_RESULT_TRUNCATION_MARKER = "\n...[truncated by Kitaru to fit Claude MCP result limit]"
+_MAX_NON_STREAM_RESULT_FIELD_CHARS = 4_096
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "command": {
             "anyOf": [
-                {"type": "string", "minLength": 1},
+                {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": _MAX_COMMAND_STRING_CHARS,
+                },
                 {
                     "type": "array",
-                    "items": {"type": "string", "minLength": 1},
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _MAX_COMMAND_ARG_CHARS,
+                    },
                     "minItems": 1,
+                    "maxItems": _MAX_COMMAND_ARGV_ITEMS,
                 },
             ],
             "description": "Command string or argv-style command list to run.",
         },
         "cwd": {
-            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "anyOf": [
+                {"type": "string", "maxLength": _MAX_CWD_CHARS},
+                {"type": "null"},
+            ],
             "description": "Optional working directory inside the sandbox.",
         },
         "env": {
@@ -177,7 +195,10 @@ def create_kitaru_sandbox_command_tool(
             default_max_chars=normalized_max_chars,
             default_cleanup=normalized_cleanup,
         )
-        return _claude_tool_result(payload)
+        return _claude_tool_result(
+            payload,
+            max_size_chars=_tool_result_max_size_chars(normalized_max_chars),
+        )
 
     return tool_factory(
         normalized_tool_name,
@@ -294,11 +315,38 @@ def _validate_known_tool_arguments(arguments: Mapping[str, Any]) -> None:
 def _tool_command(value: Any) -> SandboxCommand:
     if value is _MISSING:
         raise KitaruUsageError("Sandbox command tool input requires `command`.")
-    return sandbox_config._normalize_command(value)
+    command = sandbox_config._normalize_command(value)
+    _validate_tool_command_size(command)
+    return command
+
+
+def _validate_tool_command_size(command: SandboxCommand) -> None:
+    if isinstance(command, str):
+        if len(command) > _MAX_COMMAND_STRING_CHARS:
+            raise KitaruUsageError(
+                "Sandbox command string may contain at most "
+                f"{_MAX_COMMAND_STRING_CHARS} characters."
+            )
+        return
+    if len(command) > _MAX_COMMAND_ARGV_ITEMS:
+        raise KitaruUsageError(
+            f"Sandbox command list may contain at most {_MAX_COMMAND_ARGV_ITEMS} items."
+        )
+    for item in command:
+        if len(item) > _MAX_COMMAND_ARG_CHARS:
+            raise KitaruUsageError(
+                "Sandbox command list items may contain at most "
+                f"{_MAX_COMMAND_ARG_CHARS} characters."
+            )
 
 
 def _tool_cwd(value: Any) -> str | None:
-    return sandbox_config._normalize_cwd(value)
+    cwd = sandbox_config._normalize_cwd(value)
+    if cwd is not None and len(cwd) > _MAX_CWD_CHARS:
+        raise KitaruUsageError(
+            f"Sandbox command `cwd` may contain at most {_MAX_CWD_CHARS} characters."
+        )
+    return cwd
 
 
 def _tool_env(value: Any) -> Mapping[str, str] | None:
@@ -475,16 +523,177 @@ def _attach_metadata(
     return server
 
 
-def _claude_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
+def _claude_tool_result(
+    payload: dict[str, Any],
+    *,
+    max_size_chars: int,
+) -> dict[str, Any]:
+    fitted_payload = _fit_payload_to_result_size(payload, max_size_chars)
     return {
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(payload, sort_keys=True),
+                "text": _payload_json_text(fitted_payload),
             }
         ],
-        "is_error": payload.get("status") == "failed",
+        "is_error": fitted_payload.get("status") == "failed",
     }
+
+
+def _fit_payload_to_result_size(
+    payload: dict[str, Any],
+    max_size_chars: int,
+) -> dict[str, Any]:
+    if _payload_json_len(payload) <= max_size_chars:
+        return payload
+
+    fitted = copy.deepcopy(payload)
+    if fitted.get("status") == "completed":
+        fitted = _truncate_text_field_to_chars(
+            fitted,
+            ("cleanup", "error"),
+            _MAX_NON_STREAM_RESULT_FIELD_CHARS,
+        )
+        stream_fields = sorted(
+            (("stdout", "stdout_truncated"), ("stderr", "stderr_truncated")),
+            key=lambda item: len(_get_nested_text(fitted, (item[0],)) or ""),
+            reverse=True,
+        )
+        for field_name, flag_name in stream_fields:
+            fitted = _fit_text_field_to_result_size(
+                fitted,
+                (field_name,),
+                max_size_chars,
+                truncation_flag=flag_name,
+            )
+            if _payload_json_len(fitted) <= max_size_chars:
+                return fitted
+        return _minimal_oversized_completed_payload(fitted, max_size_chars)
+
+    fitted = _fit_text_field_to_result_size(
+        fitted,
+        ("error", "message"),
+        max_size_chars,
+        truncation_flag=None,
+    )
+    if _payload_json_len(fitted) <= max_size_chars:
+        return fitted
+    return _minimal_oversized_error_payload()
+
+
+def _fit_text_field_to_result_size(
+    payload: dict[str, Any],
+    path: tuple[str, ...],
+    max_size_chars: int,
+    *,
+    truncation_flag: str | None,
+) -> dict[str, Any]:
+    if _payload_json_len(payload) <= max_size_chars:
+        return payload
+    original = _get_nested_text(payload, path)
+    if original is None or original == "":
+        return payload
+
+    base = copy.deepcopy(payload)
+    if truncation_flag is not None:
+        base[truncation_flag] = True
+    _set_nested_value(base, path, "")
+    if _payload_json_len(base) > max_size_chars:
+        return base
+
+    low = 0
+    high = len(original)
+    best = base
+    while low <= high:
+        keep_chars = (low + high) // 2
+        candidate = copy.deepcopy(base)
+        _set_nested_value(candidate, path, _truncated_text(original, keep_chars))
+        if _payload_json_len(candidate) <= max_size_chars:
+            best = candidate
+            low = keep_chars + 1
+        else:
+            high = keep_chars - 1
+    return best
+
+
+def _truncate_text_field_to_chars(
+    payload: dict[str, Any],
+    path: tuple[str, ...],
+    max_chars: int,
+) -> dict[str, Any]:
+    text = _get_nested_text(payload, path)
+    if text is None or len(text) <= max_chars:
+        return payload
+    fitted = copy.deepcopy(payload)
+    _set_nested_value(fitted, path, _truncated_text(text, max_chars))
+    return fitted
+
+
+def _truncated_text(text: str, keep_chars: int) -> str:
+    if keep_chars >= len(text):
+        return text
+    if keep_chars <= 0:
+        return _RESULT_TRUNCATION_MARKER.lstrip()
+    return f"{text[:keep_chars]}{_RESULT_TRUNCATION_MARKER}"
+
+
+def _minimal_oversized_completed_payload(
+    payload: dict[str, Any],
+    max_size_chars: int,
+) -> dict[str, Any]:
+    fitted = copy.deepcopy(payload)
+    fitted["stdout"] = ""
+    fitted["stderr"] = ""
+    fitted["stdout_truncated"] = True
+    fitted["stderr_truncated"] = True
+    fitted = _truncate_text_field_to_chars(fitted, ("cleanup", "error"), 256)
+    if _payload_json_len(fitted) <= max_size_chars:
+        return fitted
+    return _minimal_oversized_error_payload()
+
+
+def _minimal_oversized_error_payload() -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "error": {
+            "type": "KitaruRuntimeError",
+            "category": "runtime",
+            "message": (
+                "Kitaru could not fit the sandbox MCP tool result inside "
+                "Claude's result-size limit."
+            ),
+        },
+    }
+
+
+def _payload_json_text(payload: Mapping[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True)
+
+
+def _payload_json_len(payload: Mapping[str, Any]) -> int:
+    return len(_payload_json_text(payload))
+
+
+def _get_nested_text(payload: Mapping[str, Any], path: tuple[str, ...]) -> str | None:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, str) else None
+
+
+def _set_nested_value(
+    payload: dict[str, Any], path: tuple[str, ...], value: Any
+) -> None:
+    current: dict[str, Any] = payload
+    for key in path[:-1]:
+        nested = current.get(key)
+        if not isinstance(nested, dict):
+            nested = {}
+            current[key] = nested
+        current = nested
+    current[path[-1]] = value
 
 
 def _failed_payload(exc: Exception) -> dict[str, Any]:
