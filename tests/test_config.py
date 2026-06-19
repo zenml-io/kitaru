@@ -2140,6 +2140,37 @@ def test_create_kubernetes_stack_operation_attaches_explicit_sandbox() -> None:
     }
 
 
+def test_create_kubernetes_stack_rejects_sandbox_overrides_without_sandbox() -> None:
+    """Remote backend calls must not drop sandbox overrides silently."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    client_mock = Mock()
+    client_mock.zen_store = Mock()
+    overrides = StackComponentConfigOverrides(sandbox={"forward_env": False})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    message = str(exc_info.value)
+    assert "sandbox" in message
+    assert "sandbox_flavor" in message
+    client_mock._validate_stack_configuration.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+    client_mock.create_service_connector.assert_not_called()
+
+
 def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
     tmp_path: Path,
 ) -> None:
@@ -4068,6 +4099,24 @@ def test_kitaru_not_duplicated_when_pinned_version_in_requirements() -> None:
     docker_settings = image_settings_to_docker_settings(image_settings)
 
     assert docker_settings.requirements == ["kitaru>=0.2.0", "httpx"]
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "kitaru[pydantic-ai]",
+        "kitaru[pydantic-ai,openai]",
+    ],
+)
+def test_kitaru_not_duplicated_when_extras_in_requirements(
+    requirement: str,
+) -> None:
+    """Kitaru should not be added if a requirement already includes extras."""
+    image_settings = ImageSettings(requirements=[requirement])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == [requirement]
 
 
 def test_kitaru_not_duplicated_when_git_url_in_requirements() -> None:

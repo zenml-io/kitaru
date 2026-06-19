@@ -31,6 +31,8 @@ exclude = [
     "^https://twitter\\.com",
     # Slack invite redirect returns 403 to bots/link-checkers
     "^https://(www\\.)?zenml\\.io/slack",
+    # katacontainers.io refuses automated link-checker connections
+    "^https://katacontainers\\.io",
 ]
 
 # Paths to exclude from scanning

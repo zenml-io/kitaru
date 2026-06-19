@@ -369,6 +369,90 @@ def test_run_sandbox_command_maps_backend_failures(
     assert sandbox.session.destroy_calls == expected_destroy_calls
 
 
+@pytest.mark.parametrize(
+    ("session", "provider_error"),
+    [
+        (
+            FakeSession(
+                exec_error=RuntimeError("exec failed"),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "exec failed",
+        ),
+        (
+            FakeSession(
+                FakeProcess(collect_error=RuntimeError("collect failed")),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "collect failed",
+        ),
+    ],
+)
+def test_run_sandbox_command_reports_cleanup_warning_after_command_failure(
+    session: FakeSession,
+    provider_error: str,
+) -> None:
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command("echo hi", client_factory=_client_factory(client))
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert provider_error in message
+    assert "Cleanup warning" in message
+    assert "destroy failed" in message
+    assert session.destroy_calls == 1
+
+
+def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> None:
+    env = {"API_TOKEN": "env-secret-123"}
+    session = FakeSession(
+        exec_error=RuntimeError(
+            "exec failed with env-secret-123 password=provider-secret-456 "
+            "OPENAI_API_KEY=openai-secret-456 "
+            "AWS_SECRET_ACCESS_KEY=aws-secret-789 "
+            "GITHUB_TOKEN=github-secret-000 "
+            'MY_PASSWORD="password secret with spaces" '
+            "api_key='quoted,provider;secret' "
+            "Authorization: Basic basic-secret-111"
+        ),
+        destroy_error=RuntimeError(
+            "destroy failed with env-secret-123 access_key=cleanup-secret-000 "
+            'private_key="cleanup secret with spaces"'
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            ["printenv", "API_TOKEN"],
+            env=env,
+            client_factory=_client_factory(client),
+        )
+
+    assert exc_info.value.__cause__ is None
+    message = str(exc_info.value)
+    assert "<redacted>" in message
+    assert "env-secret-123" not in message
+    assert "provider-secret-456" not in message
+    assert "openai-secret-456" not in message
+    assert "aws-secret-789" not in message
+    assert "github-secret-000" not in message
+    assert "password secret with spaces" not in message
+    assert "basic-secret-111" not in message
+    assert "bearer-secret-789" not in message
+    assert "quoted,provider;secret" not in message
+    assert "cleanup-secret-000" not in message
+    assert "cleanup secret with spaces" not in message
+    assert session.exec_calls == [
+        {"command": ["printenv", "API_TOKEN"], "cwd": None, "env": env}
+    ]
+    assert session.destroy_calls == 1
+
+
 def test_public_sandbox_imports() -> None:
     import kitaru
     import kitaru.config as config

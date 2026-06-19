@@ -25,7 +25,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast, runtime_checkable
+from typing import Any, Literal, NoReturn, Protocol, cast, runtime_checkable
+from uuid import UUID
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -33,7 +34,7 @@ from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.login.credentials_store import get_credentials_store
-from zenml.models import PipelineRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
@@ -73,7 +74,9 @@ from kitaru._client._logs import (
 from kitaru._client._mappers import (
     _CHECKPOINT_SOURCE_ALIAS_PREFIX,
     _PIPELINE_SOURCE_ALIAS_PREFIX,
+    _RAW_STATUSES_BY_PUBLIC_STATUS,
     _WAIT_CONDITION_STATUS_PENDING,
+    _backend_filter_value,
     _checkpoint_lineage_key,
     _coerce_status_filter,
     _first_pending_wait,
@@ -89,6 +92,7 @@ from kitaru._client._mappers import (
     _map_pending_wait,
     _parse_frozen_execution_spec,
     _select_pending_wait_condition,
+    _status_filter_value,
     _to_plain_dict,
     _to_public_status,
 )
@@ -162,6 +166,10 @@ logger = logging.getLogger(__name__)
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
+_RETRY_RESUMING_REASON = "Manual retry requested by user."
+_RETRY_ROLLBACK_REASON = "Retry submission failed."
+_RESUME_RESUMING_REASON = "Manual resume requested by user."
+_RESUME_ROLLBACK_REASON = "Manual resume failed."
 _REPLAY_IMPORT_LOCK = threading.RLock()
 
 
@@ -472,22 +480,6 @@ class _ReplayFlowLike(Protocol):
     ) -> Any: ...
 
 
-@contextmanager
-def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a stack while running an operation."""
-    if not stack_name_or_id:
-        yield
-        return
-
-    client = Client()
-    old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
-    try:
-        yield
-    finally:
-        client.activate_stack(old_stack_id)
-
-
 def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
     """Return `(module, attribute)` from a run snapshot source."""
     snapshot = run.snapshot
@@ -736,11 +728,112 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
     return pipeline_obj
 
 
+def _run_status_value(run: PipelineRunResponse) -> str:
+    """Return a pipeline run status as a plain string."""
+    return str(getattr(run.status, "value", run.status))
+
+
+def _rollback_reopened_run(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    operation_name: str,
+    original_error: Exception,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
+) -> NoReturn:
+    """Try to restore a run status after reopening it failed."""
+    try:
+        client._client().zen_store.update_run(
+            run_id=run.id,
+            run_update=PipelineRunUpdate(
+                status=rollback_status,
+                status_reason=rollback_reason,
+            ),
+        )
+    except Exception as rollback_error:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}. "
+            "Additionally failed to roll back execution status to "
+            f"'{rollback_status.value}': {rollback_error}. "
+            "The execution may remain RESUMING."
+        ) from original_error
+
+    raise KitaruBackendError(
+        f"Failed to {operation_name} execution '{run.id}': {original_error}"
+    ) from original_error
+
+
+def _repair_reopened_run_after_resume_failure(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    operation_name: str,
+    original_error: Exception,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
+) -> NoReturn:
+    """Repair a reopened run if ZenML did not move it out of RESUMING."""
+    try:
+        latest_run = client._get_pipeline_run(str(run.id), hydrate=False)
+    except Exception as refresh_error:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}. "
+            "Could not verify whether the execution is still RESUMING: "
+            f"{refresh_error}. The execution may remain RESUMING."
+        ) from original_error
+
+    if _run_status_value(latest_run) != ZenMLExecutionStatus.RESUMING.value:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}"
+        ) from original_error
+
+    _rollback_reopened_run(
+        run=run,
+        client=client,
+        operation_name=operation_name,
+        original_error=original_error,
+        rollback_status=rollback_status,
+        rollback_reason=rollback_reason,
+    )
+
+
+def _restore_previous_active_stack(
+    *,
+    client: Client,
+    old_stack_id: str | UUID,
+) -> Exception | None:
+    """Restore the active Kitaru stack and return the error if it fails."""
+    try:
+        client.activate_stack(old_stack_id)
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _raise_with_restore_failure_context(
+    *,
+    error: KitaruBackendError,
+    original_error: Exception,
+    restoration_error: Exception | None,
+) -> NoReturn:
+    """Raise an operation failure, adding Kitaru stack restore context if needed."""
+    if restoration_error is None:
+        raise error
+    raise KitaruBackendError(
+        f"{error}. Additionally failed to restore the previous active Kitaru "
+        f"stack: {restoration_error}."
+    ) from original_error
+
+
 def _restart_run_from_snapshot(
     *,
     run: PipelineRunResponse,
     client: KitaruClient,
     operation_name: str,
+    resuming_reason: str,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
 ) -> None:
     """Restart an execution from its stored snapshot metadata."""
     snapshot = run.snapshot
@@ -754,20 +847,113 @@ def _restart_run_from_snapshot(
             f"Unable to {operation_name} execution because snapshot stack "
             "metadata is missing."
         )
+    snapshot_stack_id = getattr(snapshot.stack, "id", None)
+    if not snapshot_stack_id:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot stack "
+            "id is missing."
+        )
 
     try:
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = client._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.resume_run(
-                snapshot=snapshot,
-                run=run,
-                stack=active_stack,
-            )
+        reopened_run = client._client().zen_store.update_run(
+            run_id=run.id,
+            run_update=PipelineRunUpdate(
+                status=ZenMLExecutionStatus.RESUMING,
+                status_reason=resuming_reason,
+            ),
+        )
     except Exception as exc:
         raise KitaruBackendError(
-            f"Failed to {operation_name} execution '{run.id}': {exc}"
+            f"Failed to reopen execution '{run.id}' for {operation_name}: {exc}"
         ) from exc
+
+    try:
+        stack_client = Client()
+        old_stack_id = cast(str | UUID, stack_client.active_stack_model.id)
+    except Exception as exc:
+        _rollback_reopened_run(
+            run=reopened_run,
+            client=client,
+            operation_name=operation_name,
+            original_error=exc,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+        )
+
+    try:
+        stack_client.activate_stack(str(snapshot_stack_id))
+    except Exception as exc:
+        _rollback_reopened_run(
+            run=reopened_run,
+            client=client,
+            operation_name=operation_name,
+            original_error=exc,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+        )
+
+    try:
+        active_stack = stack_client.active_stack
+        orchestrator = cast(Any, active_stack.orchestrator)
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _rollback_reopened_run(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    try:
+        orchestrator.resume_run(
+            snapshot=snapshot,
+            run=reopened_run,
+            stack=active_stack,
+        )
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _repair_reopened_run_after_resume_failure(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    restoration_error = _restore_previous_active_stack(
+        client=stack_client,
+        old_stack_id=old_stack_id,
+    )
+    if restoration_error is not None:
+        raise KitaruBackendError(
+            f"The {operation_name} request for execution '{run.id}' was submitted, "
+            "but restoring the previous active Kitaru stack failed: "
+            f"{restoration_error}. The execution may continue; inspect its latest "
+            "status before retrying."
+        ) from restoration_error
 
 
 def _validate_event_filter_values(
@@ -824,6 +1010,25 @@ def _validate_optional_event_filter_value(
 def _run_has_complete_step_list(run: Any) -> bool:
     """Return whether run steps are stable enough for server-side filters."""
     return _to_public_status(run.status).is_finished
+
+
+def _pipeline_name_filter_value(flow: str) -> str:
+    """Return the backend filter value for both stored names of a Kitaru flow."""
+    candidates = [flow, f"{_PIPELINE_SOURCE_ALIAS_PREFIX}{flow}"]
+    return _backend_filter_value(candidates)
+
+
+def _list_status_filter_value(public_status: ExecutionStatus) -> str:
+    """Return the safest backend status filter for execution listing."""
+    if public_status in {ExecutionStatus.RUNNING, ExecutionStatus.WAITING}:
+        raw_statuses = (
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING],
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.WAITING],
+        )
+        return _backend_filter_value(raw_statuses)
+    status_value = _status_filter_value(public_status)
+    assert status_value is not None
+    return status_value
 
 
 class _ExecutionsAPI:
@@ -1151,7 +1356,7 @@ class _ExecutionsAPI:
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
-        run_status_value = str(getattr(run.status, "value", run.status))
+        run_status_value = _run_status_value(run)
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
                 "Only failed executions can be retried. "
@@ -1162,6 +1367,9 @@ class _ExecutionsAPI:
             run=run,
             client=self._client_ref,
             operation_name="retry",
+            resuming_reason=_RETRY_RESUMING_REASON,
+            rollback_status=ZenMLExecutionStatus.FAILED,
+            rollback_reason=_RETRY_ROLLBACK_REASON,
         )
         track(AnalyticsEvent.EXECUTION_RETRIED, {})
         return self.get(exec_id)
@@ -1178,8 +1386,8 @@ class _ExecutionsAPI:
                 f"Resolve pending wait input before resuming execution '{exec_id}'."
             )
 
-        run_status_value = str(getattr(run.status, "value", run.status))
-        if run_status_value != "paused":
+        run_status_value = _run_status_value(run)
+        if run_status_value != ZenMLExecutionStatus.PAUSED.value:
             raise KitaruStateError(
                 "Only paused executions can be resumed. "
                 f"Execution '{exec_id}' is currently '{run_status_value}'."
@@ -1189,6 +1397,9 @@ class _ExecutionsAPI:
             run=run,
             client=self._client_ref,
             operation_name="resume",
+            resuming_reason=_RESUME_RESUMING_REASON,
+            rollback_status=ZenMLExecutionStatus.PAUSED,
+            rollback_reason=_RESUME_ROLLBACK_REASON,
         )
         track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
@@ -1204,7 +1415,7 @@ class _ExecutionsAPI:
         """Replay an execution from a checkpoint boundary."""
         source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
 
-        run_status_value = str(getattr(source_run.status, "value", source_run.status))
+        run_status_value = _run_status_value(source_run)
         if run_status_value in {
             "initializing",
             "provisioning",
@@ -1334,6 +1545,9 @@ class _ExecutionsAPI:
         if size is not None and page is None:
             page = 1
 
+        if flow is not None and _normalize_flow_name(flow) is None:
+            return []
+
         start_index = 0
         stop_index: int | None = None
         if limit is not None:
@@ -1353,6 +1567,16 @@ class _ExecutionsAPI:
         else:
             page_size = 50
 
+        server_filters: dict[str, Any] = {}
+        if flow is not None:
+            server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
+        if status_filter is not None:
+            server_filters["status"] = _list_status_filter_value(status_filter)
+        resolve_wait_status = status_filter in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.WAITING,
+        }
+
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
                 sort_by="desc:created",
@@ -1360,6 +1584,7 @@ class _ExecutionsAPI:
                 size=page_size,
                 project=self._client_ref._project,
                 hydrate=True,
+                **server_filters,
             )
             runs = list(run_page.items)
             if not runs:
@@ -1370,8 +1595,11 @@ class _ExecutionsAPI:
                     run=run,
                     client=self._client_ref,
                     include_details=False,
+                    resolve_wait_status=resolve_wait_status,
                 )
 
+                # Server filters only reduce fetched runs; these public checks
+                # still decide the final result because flow/status can be derived.
                 if flow is not None and execution.flow_name != flow:
                     continue
                 if status_filter is not None and execution.status != status_filter:

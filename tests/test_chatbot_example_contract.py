@@ -41,6 +41,32 @@ def _nested_function(module: ast.Module, name: str) -> ast.FunctionDef:
     raise AssertionError(f"No function named {name!r}")
 
 
+def test_chatbot_image_uses_supported_kitaru_extras() -> None:
+    module = _module()
+    assignment = next(
+        (
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "CHATBOT_IMAGE"
+                for target in node.targets
+            )
+        ),
+        None,
+    )
+
+    assert assignment is not None
+    assert isinstance(assignment.value, ast.Call)
+    assert isinstance(assignment.value.func, ast.Name)
+    assert assignment.value.func.id == "ImageSettings"
+
+    keywords = {keyword.arg: keyword.value for keyword in assignment.value.keywords}
+
+    assert ast.literal_eval(keywords["requirements"]) == ["kitaru[pydantic-ai,openai]"]
+    assert ast.literal_eval(keywords["secret_environment_from"]) == ["openai-creds"]
+
+
 def test_say_and_wait_does_not_call_kitaru_save_directly() -> None:
     say_and_wait = _nested_function(_module(), "say_and_wait")
 

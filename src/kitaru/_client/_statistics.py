@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -10,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from kitaru._client._mappers import (
-    _RAW_STATUSES_BY_PUBLIC_STATUS,
     _coerce_status_filter,
+    _status_filter_value,
     _to_public_status,
 )
 from kitaru._client._models import (
@@ -419,17 +418,6 @@ def normalize_execution_statistics_tags(
             raise KitaruUsageError("`tags` cannot contain empty strings.")
         normalized_tags.append(normalized_tag)
     return normalized_tags
-
-
-def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
-    """Map a public status filter to the backend string-filter syntax."""
-    if public_status is None:
-        return None
-
-    raw_statuses = _RAW_STATUSES_BY_PUBLIC_STATUS[public_status]
-    if len(raw_statuses) == 1:
-        return raw_statuses[0]
-    return f"oneof:{json.dumps(list(raw_statuses), separators=(',', ':'))}"
 
 
 def _status_grouping_name(
