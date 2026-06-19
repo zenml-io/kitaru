@@ -116,6 +116,8 @@ class RecordedCall:
     usage: Any = None
     cost: float | None = None
     latency: float | None = None
+    node: str | None = None
+    call_index: int | None = None
 
 
 @dataclass(frozen=True)
