@@ -8,8 +8,9 @@ stderr, and exit code, then cleans up the session.
 The model controls the command string and optional working directory. Treat that
 like letting the model type in a terminal attached to the sandbox process: files,
 network access, environment variables, and credentials visible there can be
-printed to stdout/stderr and returned to the model. The local sandbox is a local
-development convenience, not a security boundary.
+printed to stdout/stderr, returned to the model, and persisted in Kitaru
+execution/checkpoint artifacts. The local sandbox is a local development
+convenience, not a security boundary.
 
 Prerequisites:
     uv sync --extra local --extra pydantic-ai --extra openai

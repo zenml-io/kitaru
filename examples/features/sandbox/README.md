@@ -44,9 +44,10 @@ simple deterministic examples, but it is not a security boundary. Treat a comman
 run through the local sandbox like a command you typed into your own terminal:
 it can access local files, environment variables, credentials, and the network
 available to your user. If a model or untrusted prompt controls the command, it
-can ask the subprocess to print visible values to stdout or stderr, and that
-output may be returned to the model. Use an isolated sandbox provider and minimal
-credentials for untrusted model-controlled commands.
+can ask the subprocess to print visible values to stdout or stderr. That output
+may be returned to the model and stored in Kitaru execution/checkpoint artifacts.
+Use an isolated sandbox provider and minimal credentials for untrusted
+model-controlled commands.
 
 For the full catalog, see [../../README.md](../../README.md).
 

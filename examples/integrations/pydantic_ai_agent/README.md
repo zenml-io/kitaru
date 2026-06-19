@@ -78,10 +78,10 @@ short setup message instead of a long provider/backend traceback.
 
 Safety note: the model controls the shell command and optional working directory.
 Anything visible to the sandbox process, including files, environment variables,
-network access, and credentials, can be printed to stdout/stderr and returned to
-the model. The local sandbox is a development convenience, not a security
-boundary; use an isolated sandbox provider and minimal credentials for untrusted
-models or prompts.
+network access, and credentials, can be printed to stdout/stderr, returned to the
+model, and persisted in Kitaru execution/checkpoint artifacts. The local sandbox
+is a development convenience, not a security boundary; use an isolated sandbox
+provider and minimal credentials for untrusted models or prompts.
 
 ## `pydantic_ai_streaming.py` — Watch live PydanticAI events
 
