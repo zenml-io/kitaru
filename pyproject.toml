@@ -60,7 +60,7 @@ local = [
     "zenml[server]>=0.95.1",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.89.0,<1.104.0",
+    "pydantic-ai-slim>=1.89.0,<1.108.0",
     "typing_extensions>=4.12",
 ]
 openai-agents = [
@@ -85,7 +85,7 @@ gemini = [
     "google-genai>=2.8.0,<3",
 ]
 mcp = [
-    "mcp>=1.19.0,<1.20.0",
+    "mcp>=1.19.0,<1.28.0",
 ]
 
 [project.scripts]
@@ -130,7 +130,7 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.89.0,<1.104.0",
+    "pydantic-ai-slim>=1.89.0,<1.108.0",
     "openai-agents>=0.15.0,<0.18.0",
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
