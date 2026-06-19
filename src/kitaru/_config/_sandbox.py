@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any, Literal, cast
 
@@ -20,24 +20,33 @@ from kitaru.errors import (
 DEFAULT_SANDBOX_COMMAND_MAX_CHARS = 1_048_576
 CLEANUP_DESTROY = "destroy"
 CLEANUP_CLOSE = "close"
+_REDACTION_MARKER: str = "<redacted>"
+_SECRET_KEY_PATTERN = (
+    r"token|secret|password|passwd|pwd|api[_-]?key|apikey|access[_-]?key|"
+    r"private[_-]?key|credential|credentials|auth|authorization|bearer"
+)
+_SECRET_KEY_NAME_PATTERN = rf"[A-Za-z0-9_-]*(?:{_SECRET_KEY_PATTERN})[A-Za-z0-9_-]*"
+_AUTHORIZATION_HEADER_RE = re.compile(
+    r"(?<![\w-])(?P<key_quote>['\"]?)(?P<key>authorization|auth)"
+    r"(?P=key_quote)(?P<sep>\s*:\s*)"
+    r"(?P<value_quote>['\"]?)"
+    r"(?P<value>(?:[A-Za-z]+\s+)?[^'\"\s\r\n,;]+)(?P=value_quote)",
+    re.IGNORECASE,
+)
+_SECRET_KEY_PREFIX = (
+    rf"(?<![\w-])(?P<key_quote>['\"]?)(?P<key>{_SECRET_KEY_NAME_PATTERN})"
+    r"(?P=key_quote)(?P<sep>\s*[:=]\s*)"
+)
+_SECRET_KEY_QUOTED_VALUE_RE = re.compile(
+    _SECRET_KEY_PREFIX + r"(?P<value_quote>['\"])(?P<value>.*?)(?P=value_quote)",
+    re.IGNORECASE,
+)
+_SECRET_KEY_UNQUOTED_VALUE_RE = re.compile(
+    _SECRET_KEY_PREFIX + r"(?P<value>[^'\"\s,;]+)",
+    re.IGNORECASE,
+)
+_BEARER_TOKEN_RE = re.compile(r"\bBearer\s+([^\s,;'\"]+)", re.IGNORECASE)
 SandboxCleanupPolicy = Literal["destroy", "close"]
-_REDACTED: str = "[REDACTED]"
-_SECRET_KEY_NAME_PATTERN = (
-    r"[A-Za-z0-9_.-]*(?:api[_-]?key|authorization|password|passwd|secret|token|"
-    r"private[_-]?key|access[_-]?key|credentials?)[A-Za-z0-9_.-]*"
-)
-_AUTHORIZATION_VALUE_PATTERN = re.compile(
-    r"(?i)(\bAuthorization\s*[:=]\s*)([A-Za-z]+\s+)?([^\s,;\r\n]+)"
-)
-_BARE_BEARER_VALUE_PATTERN = re.compile(r"(?i)(\bBearer\s+)([^\s,;\r\n]+)")
-_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    rf"(?i)(\b{_SECRET_KEY_NAME_PATTERN}\b\s*[:=]\s*)"
-    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s,;&}]+))"
-)
-_SECRET_JSON_PATTERN = re.compile(
-    rf"(?i)((?:['\"]){_SECRET_KEY_NAME_PATTERN}(?:['\"])\s*:\s*)"
-    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s,;&}]+))"
-)
 
 
 class SandboxCommandResult(BaseModel):
@@ -75,7 +84,6 @@ def run_sandbox_command(
     normalized_command = _normalize_command(command)
     normalized_cwd = _normalize_cwd(cwd)
     normalized_env = _normalize_env(env)
-    explicit_secrets = _explicit_env_secrets(normalized_env)
     normalized_max_chars = _normalize_max_chars(max_chars)
     normalized_cleanup = _normalize_cleanup(cleanup)
 
@@ -104,33 +112,23 @@ def run_sandbox_command(
         _ensure_process_collect_api_available(process)
         output = process.collect(max_chars=normalized_max_chars)
     except KitaruFeatureNotAvailableError:
-        _cleanup_after_failed_command(
-            session,
-            normalized_cleanup,
-            explicit_secrets=explicit_secrets,
-        )
+        _cleanup_after_failed_command(session, normalized_cleanup)
         raise
     except Exception as exc:
         cleanup_succeeded, cleanup_error = _cleanup_after_failed_command(
-            session,
-            normalized_cleanup,
-            explicit_secrets=explicit_secrets,
+            session, normalized_cleanup
         )
-        failure = _safe_exception_message(
-            exc,
-            explicit_secrets=explicit_secrets,
-        )
-        message = (
-            f"Sandbox command execution failed on active stack '{stack_name}': "
-            f"{failure}"
+        error_message = (
+            "Sandbox command execution failed on active stack "
+            f"'{stack_name}': {_redact_provider_message(exc, env=normalized_env)}"
         )
         if not cleanup_succeeded:
-            cleanup_detail = cleanup_error or "Sandbox cleanup did not complete."
-            message = (
-                f"{message} Sandbox cleanup also failed; the session may still "
-                f"be active. Cleanup failure: {cleanup_detail}"
+            error_message = _append_cleanup_warning(
+                error_message,
+                cleanup_error,
+                env=normalized_env,
             )
-        raise KitaruBackendError(message) from None
+        raise KitaruBackendError(error_message) from None
 
     session_id = _optional_string_attribute(
         session, "id"
@@ -138,7 +136,7 @@ def run_sandbox_command(
     cleanup_succeeded, cleanup_error = _cleanup_after_success(
         session,
         normalized_cleanup,
-        explicit_secrets=explicit_secrets,
+        env=normalized_env,
     )
     if not cleanup_succeeded and cleanup_error is None:
         cleanup_error = "Sandbox cleanup did not complete."
@@ -231,10 +229,10 @@ def _resolve_active_stack(
         client = client_factory()
         active_stack = client.active_stack
         active_stack_model = client.active_stack_model
-    except Exception:
+    except Exception as exc:
         raise KitaruBackendError(
             "Unable to resolve the active stack for sandbox command execution."
-        ) from None
+        ) from exc
     return active_stack, active_stack_model
 
 
@@ -349,32 +347,99 @@ def _required_output_bool(output: Any, attr: str) -> bool:
     return value
 
 
+def _redact_provider_message(
+    message: object,
+    *,
+    env: Mapping[str, str] | None,
+) -> str:
+    text = str(message)
+    text = _redact_env_values(text, env=env)
+    text = _redact_bearer_tokens(text)
+    return _redact_secret_key_values(text)
+
+
+def _redact_env_values(text: str, *, env: Mapping[str, str] | None) -> str:
+    if not env:
+        return text
+
+    redacted = text
+    values: list[str] = []
+    for value in env.values():
+        if value:
+            values.append(value)
+    values.sort(key=len, reverse=True)
+
+    for value in values:
+        redacted = redacted.replace(value, _REDACTION_MARKER)
+    return redacted
+
+
+def _redact_secret_key_values(text: str) -> str:
+    def replace_authorization(match: re.Match[str]) -> str:
+        key_quote = match.group("key_quote")
+        value_quote = match.group("value_quote")
+        return (
+            f"{key_quote}{match.group('key')}{key_quote}{match.group('sep')}"
+            f"{value_quote}{_REDACTION_MARKER}{value_quote}"
+        )
+
+    def replace_quoted(match: re.Match[str]) -> str:
+        key_quote = match.group("key_quote")
+        value_quote = match.group("value_quote")
+        return (
+            f"{key_quote}{match.group('key')}{key_quote}{match.group('sep')}"
+            f"{value_quote}{_REDACTION_MARKER}{value_quote}"
+        )
+
+    def replace_unquoted(match: re.Match[str]) -> str:
+        key_quote = match.group("key_quote")
+        return (
+            f"{key_quote}{match.group('key')}{key_quote}{match.group('sep')}"
+            f"{_REDACTION_MARKER}"
+        )
+
+    redacted = _AUTHORIZATION_HEADER_RE.sub(replace_authorization, text)
+    redacted = _SECRET_KEY_QUOTED_VALUE_RE.sub(replace_quoted, redacted)
+    return _SECRET_KEY_UNQUOTED_VALUE_RE.sub(replace_unquoted, redacted)
+
+
+def _redact_bearer_tokens(text: str) -> str:
+    return _BEARER_TOKEN_RE.sub(f"Bearer {_REDACTION_MARKER}", text)
+
+
+def _append_cleanup_warning(
+    message: str,
+    cleanup_error: str | None,
+    *,
+    env: Mapping[str, str] | None,
+) -> str:
+    warning = (
+        "Cleanup warning: sandbox session cleanup after the failed command "
+        "did not complete."
+    )
+    if cleanup_error:
+        warning = f"{warning} {_redact_provider_message(cleanup_error, env=env)}"
+    return f"{message}. {warning}"
+
+
 def _cleanup_after_failed_command(
     session: Any | None,
     cleanup: SandboxCleanupPolicy,
-    *,
-    explicit_secrets: Iterable[str] = (),
 ) -> tuple[bool, str | None]:
     if session is None:
         return True, None
 
     try:
         if cleanup == CLEANUP_DESTROY:
-            return _destroy_session_or_close_if_unsupported(
-                session,
-                explicit_secrets=explicit_secrets,
-            )
+            return _destroy_session_or_close_if_unsupported(session)
         session.close()
     except Exception as exc:
-        return False, _safe_exception_message(exc, explicit_secrets=explicit_secrets)
+        return False, str(exc)
+
     return True, None
 
 
-def _destroy_session_or_close_if_unsupported(
-    session: Any,
-    *,
-    explicit_secrets: Iterable[str] = (),
-) -> tuple[bool, str | None]:
+def _destroy_session_or_close_if_unsupported(session: Any) -> tuple[bool, str | None]:
     try:
         session.destroy()
     except NotImplementedError as exc:
@@ -382,17 +447,11 @@ def _destroy_session_or_close_if_unsupported(
         try:
             session.close()
         except Exception as close_exc:
-            safe_close_error = _safe_exception_message(
-                close_exc,
-                explicit_secrets=explicit_secrets,
-            )
-            close_error = f" Best-effort close also failed: {safe_close_error}"
+            close_error = f" Best-effort close also failed: {close_exc}"
         return (
             False,
             "Sandbox session destroy is not supported by this provider; "
-            "the command result is still available. "
-            f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
-            f"{close_error or ''}",
+            f"best-effort close was attempted. {exc}{close_error or ''}",
         )
     return True, None
 
@@ -401,7 +460,7 @@ def _cleanup_after_success(
     session: Any,
     cleanup: SandboxCleanupPolicy,
     *,
-    explicit_secrets: Iterable[str] = (),
+    env: Mapping[str, str] | None,
 ) -> tuple[bool, str | None]:
     if cleanup == CLEANUP_CLOSE:
         try:
@@ -409,71 +468,25 @@ def _cleanup_after_success(
         except Exception as exc:
             raise KitaruBackendError(
                 "Sandbox command completed, but closing the sandbox session failed: "
-                f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
+                f"{_redact_provider_message(exc, env=env)}"
             ) from None
         return True, None
 
     try:
-        return _destroy_session_or_close_if_unsupported(
-            session,
-            explicit_secrets=explicit_secrets,
+        cleanup_succeeded, cleanup_error = _destroy_session_or_close_if_unsupported(
+            session
         )
     except Exception as exc:
         with suppress(Exception):
             session.close()
         raise KitaruBackendError(
             "Sandbox command completed, but destroying the sandbox session failed: "
-            f"{_safe_exception_message(exc, explicit_secrets=explicit_secrets)}"
+            f"{_redact_provider_message(exc, env=env)}"
         ) from None
 
-    return True, None
-
-
-def _explicit_env_secrets(env: Mapping[str, str] | None) -> tuple[str, ...]:
-    if env is None:
-        return ()
-    return tuple(value for value in env.values() if value)
-
-
-def _safe_exception_message(
-    exc: BaseException,
-    *,
-    explicit_secrets: Iterable[str] = (),
-) -> str:
-    return _redact_sensitive_text(str(exc), explicit_secrets=explicit_secrets)
-
-
-def _redact_sensitive_text(
-    value: str,
-    *,
-    explicit_secrets: Iterable[str] = (),
-) -> str:
-    redacted: str = value
-    secrets = {str(secret) for secret in explicit_secrets if secret}
-    for secret in sorted(secrets, key=lambda item: len(item), reverse=True):
-        redacted = redacted.replace(secret, _REDACTED)
-    redacted = _AUTHORIZATION_VALUE_PATTERN.sub(_redact_authorization_value, redacted)
-    redacted = _BARE_BEARER_VALUE_PATTERN.sub(_redact_bare_bearer_value, redacted)
-    redacted = _SECRET_JSON_PATTERN.sub(_redact_keyed_secret_value, redacted)
-    redacted = _SECRET_ASSIGNMENT_PATTERN.sub(_redact_keyed_secret_value, redacted)
-    return redacted
-
-
-def _redact_authorization_value(match: re.Match[str]) -> str:
-    scheme = match.group(2) or ""
-    return f"{match.group(1)}{scheme}{_REDACTED}"
-
-
-def _redact_bare_bearer_value(match: re.Match[str]) -> str:
-    return f"{match.group(1)}{_REDACTED}"
-
-
-def _redact_keyed_secret_value(match: re.Match[str]) -> str:
-    if match.group(2) is not None:
-        return f'{match.group(1)}"{_REDACTED}"'
-    if match.group(3) is not None:
-        return f"{match.group(1)}'{_REDACTED}'"
-    return f"{match.group(1)}{_REDACTED}"
+    if cleanup_error is not None:
+        cleanup_error = _redact_provider_message(cleanup_error, env=env)
+    return cleanup_succeeded, cleanup_error
 
 
 __all__ = [

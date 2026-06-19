@@ -126,6 +126,14 @@ def call_external_service() -> str:
 Keep the lookup inside the function body so it happens in the actual runtime
 context. Do not load secrets at import time.
 
+This applies to *implicit* credential reads too. Provider SDK clients often read
+their key the moment they are constructed: building `Agent("openai:gpt-5-nano")`
+(PydanticAI) or an OpenAI client at module scope reads `OPENAI_API_KEY` right
+then. On a remote stack the runner pod imports your module *before* the run's
+secret is applied to the environment, so a module-scope client crashes at import
+with a missing-key error. Build provider-backed clients and agents inside your
+flow or checkpoint (a small factory function), not at module scope.
+
 {% hint style="warning" %}
 Secret values are raw credentials. Avoid logging `secret.values` or returning
 raw secret values from checkpoints unless that is explicitly intended.

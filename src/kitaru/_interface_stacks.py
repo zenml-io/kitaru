@@ -981,6 +981,13 @@ def build_stack_create_request(
         raise ValueError(f"{labels.field_labels['sandbox']} cannot be empty.")
     if normalized_sandbox is None and normalized_stack_type == StackType.LOCAL:
         normalized_sandbox = LOCAL_SANDBOX_FLAVOR
+    overrides = component_overrides or StackComponentConfigOverrides()
+    if normalized_sandbox is None and overrides.sandbox:
+        raise ValueError(
+            f"{_target_field_label(StackComponentTarget.SANDBOX, labels=labels)} "
+            f"requires {labels.field_labels['sandbox']} because sandbox overrides "
+            "only apply when the created stack has a sandbox."
+        )
 
     return ManageStackCreateRequest(
         name=name,

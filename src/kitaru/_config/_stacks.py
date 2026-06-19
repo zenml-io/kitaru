@@ -892,7 +892,17 @@ def _add_remote_sandbox_component_info(
     component_overrides: StackComponentConfigOverrides | None,
 ) -> None:
     """Attach a remote sandbox component when the stack request asks for one."""
+    sandbox_overrides = _component_override_values(
+        component_overrides,
+        StackComponentTarget.SANDBOX,
+    )
     if sandbox_flavor is None:
+        if sandbox_overrides:
+            raise KitaruUsageError(
+                "`sandbox` component overrides require `sandbox_flavor` because "
+                "remote stacks do not create a sandbox unless a sandbox flavor "
+                "is selected."
+            )
         return
 
     configuration = _build_component_configuration(

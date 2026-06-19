@@ -22,6 +22,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Publish live checkpoint progress events:** `examples/features/checkpoint_streaming/checkpoint_streaming.py`
 - **Persist and reload artifacts:** `examples/features/basic_flow/flow_with_artifacts.py`
 - **Run checkpoints in isolated containers with fan-out:** `examples/features/basic_flow/flow_with_checkpoint_runtime.py`
+- **Run a tracked flow checkpoint that uses the active stack's sandbox:** `examples/features/sandbox/active_stack_sandbox_command.py`
 - **Inspect and manage past executions:** `examples/features/execution_management/client_execution_management.py`
 - **Pause for human input and resume later:** `examples/features/execution_management/wait_and_resume.py`
 - **Replay from a checkpoint with overrides:** `examples/features/replay/replay_with_overrides.py`
@@ -33,6 +34,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Run a multi-agent OpenAI research bot:** `examples/end_to_end/openai_research_bot/research_bot.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/end_to_end/coding_agent/agent.py`
 - **Run a granular-checkpoint PydanticAI agent end to end:** `examples/end_to_end/news_scout/scout.py`
+- **Run a durable prospect-research sweep with typed qualification and HITL approval:** `examples/end_to_end/prospect_scout/prospector.py`
 - **Wrap a Claude Agent SDK audit with checkpoints, partial replay, and wait/resume:** `examples/end_to_end/compliance_review/`
 - **Build a sandboxed, credential-isolated, profile-gated agent harness platform (the stage-by-stage starter kit):** `examples/end_to_end/agent_harness_platform/` — see also the [docs tour](https://docs.zenml.io/kitaru/agent-harness-platform/).
 - **Explore Kitaru through MCP tools:** `examples/features/mcp/mcp_query_tools.py`
@@ -63,6 +65,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [features/execution_management/README.md](features/execution_management/README.md) — inspect executions, resolve waits, and resume work
 - [features/replay/README.md](features/replay/README.md) — replay from a checkpoint boundary with targeted overrides
 - [features/llm/README.md](features/llm/README.md) — tracked `kitaru.llm()` calls inside flows
+- [features/sandbox/README.md](features/sandbox/README.md) — run one command through the active stack's sandbox from inside a tracked flow checkpoint
 - [integrations/pydantic_ai_agent/README.md](integrations/pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
 - [integrations/openai_agents_agent/README.md](integrations/openai_agents_agent/README.md) — real OpenAI API customer-support example with order lookup + shipping policy tools and Kitaru durability
 - [integrations/claude_agent_sdk_agent/README.md](integrations/claude_agent_sdk_agent/README.md) — real Claude Agent SDK example showing one invocation as one Kitaru checkpoint
@@ -70,6 +73,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [end_to_end/openai_research_bot/README.md](end_to_end/openai_research_bot/README.md) — multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, published report artifacts, and remote secret guidance
 - [end_to_end/coding_agent/README.md](end_to_end/coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
 - [end_to_end/news_scout/README.md](end_to_end/news_scout/README.md) — agentic news monitor with granular per-tool checkpoints, CLI/default interests, and `secret_environment_from` for remote API keys
+- [end_to_end/prospect_scout/README.md](end_to_end/prospect_scout/README.md) — durable prospect-research sweep: one checkpoint per company (crash-resumable via `kitaru executions retry`), enum-typed PydanticAI qualification, `kitaru.wait()` shortlist approval, and per-prospect outreach drafts
 - [end_to_end/compliance_review/README.md](end_to_end/compliance_review/README.md) — Claude Agent SDK document audit in three runnable stages: crash-resilient turns, sequential domain checkpoints with partial replay, and durable wait/resume conversation
 - [end_to_end/agent_harness_platform/README.md](end_to_end/agent_harness_platform/README.md) — stage-by-stage starter kit for an internal agent harness platform: durable PydanticAI agent → DockerSandbox → skills as markdown → credential proxy → typed services → HITL via `kitaru.wait()`. See the [docs tour](https://docs.zenml.io/kitaru/agent-harness-platform/) for the polished surface.
 - [features/mcp/README.md](features/mcp/README.md) — inspect flows with the Kitaru MCP server
@@ -84,6 +88,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Artifacts](features/basic_flow/flow_with_artifacts.py) | `uv run python examples/features/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://docs.zenml.io/kitaru/guides/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](features/basic_flow/flow_with_configuration.py) | `uv run python examples/features/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://docs.zenml.io/kitaru/guides/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
 | [Checkpoint runtime](features/basic_flow/flow_with_checkpoint_runtime.py) | `uv run python examples/features/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://docs.zenml.io/kitaru/concepts/checkpoints) | — |
+| [Active stack sandbox command](features/sandbox/active_stack_sandbox_command.py) | `uv run python examples/features/sandbox/active_stack_sandbox_command.py` | `uv sync --extra local` + active stack with a sandbox | A tracked `@flow` + `@checkpoint` that calls `kitaru.run_sandbox_command(...)` using the active stack's sandbox component | [Stacks](https://docs.zenml.io/kitaru/stacks/#use-the-active-stack-sandbox-from-python) | [tests/test_sandbox_feature_example.py](../tests/test_sandbox_feature_example.py) |
 
 ## Execution lifecycle and recovery
 
@@ -110,6 +115,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [OpenAI research bot](end_to_end/openai_research_bot/research_bot.py) | `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` | `uv sync --extra local --extra openai-agents` + local `OPENAI_API_KEY` or remote `openai-research-bot-keys` secret | Planner → submitted search fan-out → writer report using `KitaruRunner(..., checkpoint_strategy="runner_call")`; publishes `research_plan`, `search_summaries`, and `final_report` artifacts | [OpenAI Agents Adapter](https://docs.zenml.io/kitaru/adapters/openai-agents/) | [tests/test_openai_research_bot_example.py](../tests/test_openai_research_bot_example.py) |
 | [Coding agent](end_to_end/coding_agent/agent.py) | `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://docs.zenml.io/kitaru/guides/llm-calls) | — |
 | [News scout](end_to_end/news_scout/scout.py) | `cd examples/end_to_end/news_scout && uv run python scout.py` | `uv sync --extra local --extra pydantic-ai --extra llm` + `ANTHROPIC_API_KEY` locally (or a `news-scout-keys` secret for remote stacks) | PydanticAI agent with `checkpoint_strategy="calls"` — every model/tool call is its own Kitaru checkpoint; `publish_report` promotes the agent output to a named `final_report` artifact; `ImageSettings.secret_environment_from` attaches the provider-keys secret automatically when the active stack is remote | [Examples index](https://docs.zenml.io/kitaru/getting-started/examples) | [tests/test_news_scout_example.py](../tests/test_news_scout_example.py) |
+| [Prospect scout](end_to_end/prospect_scout/prospector.py) | `cd examples/end_to_end/prospect_scout && uv run python prospector.py` | `uv sync --extra local --extra pydantic-ai` + `OPENAI_API_KEY` (`EXA_API_KEY` optional; `PROSPECT_SCOUT_MODEL=test` runs keyless) | Durable research sweep — one checkpoint per company so `kitaru executions retry` resumes a crashed run without repeating finished searches; enum-typed PydanticAI qualification; `kitaru.wait()` shortlist approval before per-prospect outreach drafts | [Wait and Resume](https://docs.zenml.io/kitaru/guides/wait-and-resume) | — |
 | [Compliance review](end_to_end/compliance_review/README.md) | `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret | Three runnable Claude Agent SDK stages: checkpointed turns, sequential domain checkpoints with partial replay, and durable wait/resume conversation | [Replay and Overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides) | [tests/test_phase4_compliance_review_stage4.py](../tests/test_phase4_compliance_review_stage4.py) |
 | [MCP query tools](features/mcp/mcp_query_tools.py) | `uv run python examples/features/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://docs.zenml.io/kitaru/guides/execution-management) | [tests/mcp/test_phase19_mcp_example.py](../tests/mcp/test_phase19_mcp_example.py) |
 
@@ -125,19 +131,20 @@ If you are new to Kitaru, this is the smoothest path:
 6. `uv run python examples/features/execution_management/wait_and_resume.py`
 7. `uv run python examples/features/replay/replay_with_overrides.py`
 8. `uv run python examples/features/llm/flow_with_llm.py`
-9. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
-10. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py` *(PydanticAI live events with durable `.wait()` result; requires `OPENAI_API_KEY`)*
-11. `uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py`
-12. `uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py` *(OpenAI Agents live events with durable `OpenAIRunResult`; requires `OPENAI_API_KEY`)*
-13. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
-14. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` *(Claude live events with durable `ClaudeRunResult`; requires Claude credentials)*
-15. `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
-16. `uv run python examples/integrations/langgraph_agent/langgraph_streaming.py` *(local graph-call live events; no API key)*
-17. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
-18. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-19. `cd examples/end_to_end/news_scout && uv run python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
-20. `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
-21. `uv run python examples/features/mcp/mcp_query_tools.py`
+9. `uv run python examples/features/sandbox/active_stack_sandbox_command.py` *(requires an active stack with a sandbox; `uv run kitaru stack create sandbox-demo` creates a local one)*
+10. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
+11. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py` *(PydanticAI live events with durable `.wait()` result; requires `OPENAI_API_KEY`)*
+12. `uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py`
+13. `uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py` *(OpenAI Agents live events with durable `OpenAIRunResult`; requires `OPENAI_API_KEY`)*
+14. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
+15. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` *(Claude live events with durable `ClaudeRunResult`; requires Claude credentials)*
+16. `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
+17. `uv run python examples/integrations/langgraph_agent/langgraph_streaming.py` *(local graph-call live events; no API key)*
+18. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
+19. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+20. `cd examples/end_to_end/news_scout && uv run python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
+21. `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
+22. `uv run python examples/features/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://docs.zenml.io/kitaru/getting-started/examples).

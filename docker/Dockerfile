@@ -13,7 +13,7 @@
 #
 # Published to: zenmldocker/kitaru
 
-ARG ZENML_SERVER_TAG=0.94.6
+ARG ZENML_SERVER_TAG=0.95.1
 
 FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 

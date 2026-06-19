@@ -315,7 +315,7 @@ def test_run_sandbox_command_redacts_cleanup_error_on_result() -> None:
 
     cleanup_error = cast(str, result.cleanup_error)
     assert result.cleanup_succeeded is False
-    assert "[REDACTED]" in cleanup_error
+    assert "<redacted>" in cleanup_error
     assert "destroy-secret" not in cleanup_error
     assert "close-secret" not in cleanup_error
     assert "explicit-env-secret" not in cleanup_error
@@ -336,7 +336,7 @@ def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure
         run_sandbox_command("echo hi", client_factory=_client_factory(client))
 
     message = str(exc_info.value)
-    assert "[REDACTED]" in message
+    assert "<redacted>" in message
     assert "cleanup-secret" not in message
     assert exc_info.value.__cause__ is None
     assert session.destroy_calls == 1
@@ -397,6 +397,43 @@ def test_run_sandbox_command_maps_backend_failures(
     assert sandbox.session.destroy_calls == expected_destroy_calls
 
 
+@pytest.mark.parametrize(
+    ("session", "provider_error"),
+    [
+        (
+            FakeSession(
+                exec_error=RuntimeError("exec failed"),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "exec failed",
+        ),
+        (
+            FakeSession(
+                FakeProcess(collect_error=RuntimeError("collect failed")),
+                destroy_error=RuntimeError("destroy failed"),
+            ),
+            "collect failed",
+        ),
+    ],
+)
+def test_run_sandbox_command_reports_cleanup_warning_after_command_failure(
+    session: FakeSession,
+    provider_error: str,
+) -> None:
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command("echo hi", client_factory=_client_factory(client))
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert provider_error in message
+    assert "Cleanup warning" in message
+    assert "destroy failed" in message
+    assert session.destroy_calls == 1
+
+
 def test_run_sandbox_command_redacts_provider_command_failure_messages() -> None:
     explicit_env_value = "explicit-env-secret"
     raw_message = (
@@ -429,7 +466,7 @@ def test_run_sandbox_command_redacts_provider_command_failure_messages() -> None
 
     message = str(exc_info.value)
     assert "Sandbox command execution failed" in message
-    assert "[REDACTED]" in message
+    assert "<redacted>" in message
     for leaked in (
         explicit_env_value,
         "openai-secret",
@@ -452,11 +489,21 @@ def test_run_sandbox_command_redacts_provider_command_failure_messages() -> None
     assert exc_info.value.__cause__ is None
 
 
-def test_run_sandbox_command_reports_redacted_cleanup_after_command_failure() -> None:
+def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> None:
+    env = {"API_TOKEN": "env-secret-123"}
     session = FakeSession(
-        exec_error=RuntimeError("exec failed token=command-secret"),
+        exec_error=RuntimeError(
+            "exec failed with env-secret-123 password=provider-secret-456 "
+            "OPENAI_API_KEY=openai-secret-456 "
+            "AWS_SECRET_ACCESS_KEY=aws-secret-789 "
+            "GITHUB_TOKEN=github-secret-000 "
+            'MY_PASSWORD="password secret with spaces" '
+            "api_key='quoted,provider;secret' "
+            "Authorization: Basic basic-secret-111"
+        ),
         destroy_error=RuntimeError(
-            "destroy failed Authorization: Bearer cleanup-secret explicit-env-secret"
+            "destroy failed with env-secret-123 access_key=cleanup-secret-000 "
+            'private_key="cleanup secret with spaces"'
         ),
     )
     sandbox = FakeSandbox(session)
@@ -464,18 +511,28 @@ def test_run_sandbox_command_reports_redacted_cleanup_after_command_failure() ->
 
     with pytest.raises(KitaruBackendError) as exc_info:
         run_sandbox_command(
-            "echo hi",
-            env={"MODE": "explicit-env-secret"},
+            ["printenv", "API_TOKEN"],
+            env=env,
             client_factory=_client_factory(client),
         )
 
-    message = str(exc_info.value)
-    assert "Sandbox command execution failed" in message
-    assert "Sandbox cleanup also failed" in message
-    assert "[REDACTED]" in message
-    for leaked in ("command-secret", "cleanup-secret", "explicit-env-secret"):
-        assert leaked not in message
     assert exc_info.value.__cause__ is None
+    message = str(exc_info.value)
+    assert "<redacted>" in message
+    assert "env-secret-123" not in message
+    assert "provider-secret-456" not in message
+    assert "openai-secret-456" not in message
+    assert "aws-secret-789" not in message
+    assert "github-secret-000" not in message
+    assert "password secret with spaces" not in message
+    assert "basic-secret-111" not in message
+    assert "bearer-secret-789" not in message
+    assert "quoted,provider;secret" not in message
+    assert "cleanup-secret-000" not in message
+    assert "cleanup secret with spaces" not in message
+    assert session.exec_calls == [
+        {"command": ["printenv", "API_TOKEN"], "cwd": None, "env": env}
+    ]
     assert session.destroy_calls == 1
 
 

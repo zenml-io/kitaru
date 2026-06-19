@@ -451,6 +451,21 @@ one instance per conversation. If you need durable conversation state, persist
 - **Stable agent name.** `name=` is required; the adapter uses it for artifact keys and auto-created flow/checkpoint names. Changing it orphans existing executions.
 - **No nested checkpoints.** Kitaru forbids opening a checkpoint inside another, so `checkpoint_strategy="calls"` cannot coexist with an enclosing turn checkpoint — the adapter runs the agent body inline at flow scope when per-call checkpoints are enabled.
 
+{% hint style="warning" %}
+**Build the agent at run time, not module scope, when the key comes from a remote secret.** Because the model is bound at construction, `Agent("openai:...")` builds the provider client — and reads `OPENAI_API_KEY` — the moment it runs. On a remote stack the runner pod imports your module *before* the run's secret is applied to the environment, so a module-scope `KitaruAgent` crashes at import with a missing-key error. Wrap construction in a small factory and call it inside your flow or checkpoint instead:
+
+```python
+def new_agent() -> KitaruAgent:
+    return KitaruAgent(Agent("openai:gpt-5-nano", name="researcher"))
+
+@kitaru.checkpoint
+def ask(prompt: str) -> str:
+    return new_agent().run_sync(prompt).output
+```
+
+Locally this is moot (the key is in your shell at import), so it's easy to miss until you run remotely. See [Manage Secrets](../guides/secrets.md#use-a-secret-inside-a-checkpoint).
+{% endhint %}
+
 ## Advanced composition
 
 Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level wrappers are exported:
@@ -465,6 +480,7 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 - **"KitaruAgent requires the wrapped agent to define a concrete model"** — pass `model=` to the `Agent()` constructor, not to `run()`.
 - **"requires an explicit `@kitaru.checkpoint`"** — `run_stream()` and `iter()` return context managers; wrap them in a checkpoint yourself.
 - **Auto-flow fails on a remote stack** — the in-process registry doesn't cross process boundaries. Use `@kitaru.flow` explicitly.
+- **Missing-key / `OpenAIError` at import on a remote stack** — a module-scope `KitaruAgent` builds the provider client before the run's secret is applied. Construct the agent inside your flow or checkpoint via a factory function (see the warning under [Constraints](#constraints)).
 - **Too many per-call checkpoints** — pass `checkpoint_strategy="turn"` to group a whole agent run into one turn checkpoint. Existing `granular_checkpoints=False` code still works as a compatibility alias.
 - **Replay cost control** — `checkpoint_strategy="calls"` gives per-call checkpoint boundaries, not a billing guarantee. Pair it with provider-side caching or idempotency for expensive calls.
 - **Tool calls show up only under artifacts or metadata** — check whether `durable_agent.run(...)` / `run_sync(...)` is inside your own `@kitaru.checkpoint`. That checkpoints the whole agent turn, so model/tool activity is recorded under that checkpoint instead of as separate `*_tool` rows. Move the agent call directly into a `@kitaru.flow` body to get per-call checkpoints.
