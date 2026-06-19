@@ -35,13 +35,14 @@ Copy and track progress in your todo / task list:
 
 ```
 - [ ] Step 1: Fetch + gather state
-- [ ] Step 2: Classify commits by scope
+- [ ] Step 2: Classify commits by scope and release-confidence area
 - [ ] Step 3: Check monorepo Kitaru UI stable releases since last Kitaru release
 - [ ] Step 4: ★ Pause — show summary, suggest version, await user confirmation
 - [ ] Step 5: Update CHANGELOG [Unreleased] block
 - [ ] Step 6: ★ Pause — show CHANGELOG diff, await confirmation, then commit + push
 - [ ] Step 7: Run smoke test
-- [ ] Step 8: ★ Pause — verify smoke test green, await confirmation to trigger release
+- [ ] Step 7b (optional): Offer directed ad-hoc testing of the release's headline changes (large merge windows / flagship features)
+- [ ] Step 8: ★ Pause — verify smoke test and live-provider evidence, await confirmation to trigger release
 - [ ] Step 9: Trigger release workflow via gh, watch to completion
 - [ ] Step 10: Draft structured release notes
 - [ ] Step 11: ★ Pause — show drafted notes, await confirmation
@@ -82,7 +83,7 @@ For each commit between `$LAST_TAG` and `origin/develop`, determine its scope fr
 | Scope | Paths | CHANGELOG? |
 |---|---|---|
 | **Library** | `src/kitaru/**` | Yes |
-| **Docs content** | `docs/content/**.mdx` | Yes |
+| **Docs content** | `docs/book/**.md` hand-written GitBook docs; generated `docs/content/**` only when source generation changes | Yes when user-visible |
 | **Scripts / build** | `scripts/**`, `pyproject.toml` version-adjacent | Sometimes (judgement call) |
 | **Docs site infra** | `docs/app/**`, `docs/scripts/**`, `docs/package.json`, `wrangler.toml` | No (unless user-visible) |
 | **Marketing site** | Lives in sibling `zenml-io-v2`, not this repo | No — handle in that repo |
@@ -96,6 +97,43 @@ git show --stat <sha> | head -30
 ```
 
 Treat no-op pairs (add X / revert X in same unreleased window) as excluded — they net to nothing.
+
+Then answer this release-confidence question for every user-facing change:
+
+> What executes this changed behavior?
+
+Classify each changed behavior into one or more areas:
+
+| Area | Typical paths | Evidence to record |
+|---|---|---|
+| CLI | `src/kitaru/_cli/**`, `src/kitaru/cli.py` | Deterministic pytest, local smoke command, or manual waiver |
+| MCP | `src/kitaru/mcp/**`, `tests/mcp/**` | MCP pytest and/or smoke `fastmcp` command |
+| SDK primitives | `src/kitaru/**` core runtime/client/checkpoint/wait/replay code | Deterministic pytest plus local smoke flow if available |
+| Provider adapters | `src/kitaru/adapters/**`, provider examples | Provider area below, deterministic fake test if available, live/local provider check if required. OpenAI/Anthropic changes need exact-ref `llm-integration.yml` evidence or an explicit waiver; weekly-green `develop` is only a canary. |
+| Public examples | `examples/**` | Example pytest, local smoke command, help/import contract, or waiver |
+| Docs-listed examples | `docs/book/getting-started/examples.md`, `examples/README.md` | Confirm docs do not promise an untested or unshipped path |
+| UI/release machinery | `scripts/download-ui.sh`, `docker/**`, `.github/workflows/release.yml`, UI bundle paths | Dry-run release or UI smoke evidence |
+
+For each changed behavior, record four facts in your release notes to the user before smoke:
+
+1. **Deterministic pytest:** the exact test file or marker that runs without provider credentials, or `none`.
+2. **Local smoke:** the smoke check that executes it, or `none`.
+3. **Live/provider check:** the provider run required, if any.
+4. **Manual verification / waiver:** what a human must check if neither pytest nor smoke executes it.
+
+Run `just example-coverage-audit` when example coverage is part of the release evidence. It validates paths, metadata, and explicit waivers for `missing`, `planned`, or `manual_only` entries. It does not run examples or providers, so a green audit means the manifest is honest, not that every example executed.
+
+Translate changed provider behavior into smoke flags. Use this vocabulary only:
+
+| Changed behavior | Smoke flag |
+|---|---|
+| OpenAI adapter, OpenAI-backed LangGraph/PydanticAI path, OpenAI LLM flow/model alias behavior | `--required-provider-area openai` |
+| Claude Agent SDK / Anthropic behavior | `--required-provider-area anthropic` |
+| Gemini raw model response behavior | `--required-provider-area gemini-model` |
+| Gemini Antigravity managed-agent behavior | `--required-provider-area gemini-antigravity` |
+| OpenAI research bot web-search behavior | `--required-provider-area research-bot` |
+
+Do **not** let the smoke script infer this from git history. The release skill/operator decides which areas changed and passes the flags explicitly.
 
 ## Step 3: Check monorepo Kitaru UI stable releases
 
@@ -130,6 +168,9 @@ Present a summary table to the user covering:
 2. Whether a new Kitaru UI bundle ships (tag only, no contents)
 3. File-level diff stats
 4. Version bump suggestion with reasoning
+5. If the window is large or ships a flagship feature, note that you can run
+   optional directed ad-hoc verification of the headline changes after smoke
+   (Step 7b), and ask whether the user wants it.
 
 Version semantics:
 
@@ -199,7 +240,12 @@ Never push without that explicit confirmation — the release workflow reads `CH
 ## Step 7: Run smoke test
 
 ```bash
-./scripts/smoke-test.sh
+./scripts/smoke-test.sh --release --json-out smoke-results.json \
+  [--required-provider-area openai] \
+  [--required-provider-area anthropic] \
+  [--required-provider-area gemini-model] \
+  [--required-provider-area gemini-antigravity] \
+  [--required-provider-area research-bot]
 ```
 
 Expected runtime: 3-5 minutes. The script:
@@ -208,8 +254,13 @@ Expected runtime: 3-5 minutes. The script:
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
 - Exercises CLI, SDK flows (including replay), MCP tools, the five adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions), and an end-to-end LLM flow
 - Tears down the server
+- Writes structured results to `smoke-results.json`, including skipped checks and skip reasons
+- In `--release` mode, fails if `timeout`/`gtimeout` is unavailable
+- In `--release` mode, fails when an explicitly required provider area skips
 
-**Set credentials before running, or most of the meaningful work is SKIPPED.** The five adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a release-grade run, export the full set first:
+Only pass `--required-provider-area ...` for provider areas classified in Step 2 as changed/release-relevant. If no provider-backed behavior changed, run `--release --json-out smoke-results.json` without required-provider flags; provider skips are still reported, but they do not block the release.
+
+**Set credentials before running, or most provider work is SKIPPED.** The five adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a full provider run, export the relevant credentials first:
 
 ```bash
 export OPENAI_API_KEY=...        # OpenAI Agents real run, LangGraph `calls`, research bot
@@ -217,7 +268,9 @@ export ANTHROPIC_API_KEY=...     # Claude Agent SDK real run (or CLAUDE_CODE_USE
 export GEMINI_API_KEY=...        # Gemini Interactions raw `--mode model` real run (GOOGLE_API_KEY also works)
 export KITARU_SMOKE_RESEARCH_BOT=1     # opt in to the real web-search research-bot test
 export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1  # opt in to the Gemini `--mode antigravity` managed-agent run
-./scripts/smoke-test.sh
+./scripts/smoke-test.sh --release --json-out smoke-results.json \
+  --required-provider-area openai \
+  --required-provider-area anthropic
 ```
 
 **Gemini has two credential paths and they unlock different tests** — this is easy to get wrong. The smoke test checks for `GEMINI_API_KEY`/`GOOGLE_API_KEY` (the direct API path) *separately* from Vertex ADC config (`GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`):
@@ -227,9 +280,19 @@ export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1  # opt in to the Gemini `--mode antigra
 | `--mode model` (raw response) | ✅ runs a real call automatically | ❌ **skipped** — Vertex ADC is *not* accepted on this path |
 | `--mode antigravity` (managed-agent preset) | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` | ✅ runs, but only with `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` |
 
-So if the release machine authenticates Gemini through **Vertex** (common for `zenml-core`-style setups), `--mode model` will skip no matter what, and the *only* way to get a real Gemini round-trip is to set `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` so the antigravity test runs against Vertex ADC. Don't report "Gemini covered" off a Vertex run unless you opted into antigravity. (Vertex ADC must actually be available — `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS` — or the antigravity test will fail rather than skip.)
+So if the release machine authenticates Gemini through **Vertex** (common for `zenml-core`-style setups), `--mode model` will skip no matter what, and the *only* way to get a real Gemini round-trip is to set `KITARU_SMOKE_GEMINI_ANTIGRAVITY=1` so the antigravity test runs against Vertex ADC. Don't report "Gemini covered" off a Vertex run unless you opted into antigravity. (Vertex ADC must actually be available, via `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`, or the antigravity test will fail rather than skip.)
 
-Parse the final summary and **tell the user exactly which checks were SKIPPED and why** (which key was unset), so they can decide whether a partial run is good enough or they want to re-run with the missing key. A bare run with no keys is a weak release gate — flag that explicitly rather than reporting "all passed" when half the adapter suite was skipped.
+**On Vertex, the antigravity managed-agent path requires `GOOGLE_CLOUD_LOCATION=global`, not a regional value.** A regional endpoint (`europe-north1`, `us-central1`, etc.) rejects the managed-agent resource creation with a misleading `400 BadRequestError: "Resource setup has just started. Please try again shortly."` raised from `google.genai._interactions ... interaction_resource.create()`. It fails *instantly*, not after a wait, so it is NOT a transient retry case; switching the location to `global` is the fix. A working Vertex env for the antigravity smoke (project `zenml-core`):
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=$HOME/.keys/google/zenml/gcp_credentials.json
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=zenml-core
+export GOOGLE_CLOUD_LOCATION=global
+export KITARU_SMOKE_GEMINI_ANTIGRAVITY=1
+```
+
+Parse the final summary and `smoke-results.json`. **Tell the user exactly which checks were SKIPPED and why** (which key or opt-in was unset), which provider areas were required, and whether any release-relevant skips occurred. A bare run with no keys is a weak provider gate — flag that explicitly rather than reporting "all passed" when half the adapter suite was skipped.
 
 **Watch for stale `VIRTUAL_ENV` contamination.** If the shell has a leftover `VIRTUAL_ENV` from a different worktree/venv, `uv` prints a "does not match the project environment path" warning **to stderr**, and the few smoke checks that capture `... 2>&1` and parse JSON (e.g. `analytics disabled in smoke test`, `executions get <latest>`) will choke on the warning glued to the front of the JSON and report a spurious `<parse error>` failure/skip. This is environment noise, not a regression — confirm by re-running the affected command with `unset VIRTUAL_ENV` before treating it as a release blocker.
 
@@ -245,21 +308,151 @@ just UI_TAG=kitaru-ui-v<X.Y.Z> ui-bundle    # use the tag from Step 3; or bare `
 just UI_TAG=kitaru-ui-v<X.Y.Z> ui-smoke     # runs the smoke test with that UI and keeps the server up
 ```
 
-`ui-smoke` runs `KITARU_UI_DIST_PATH=<prepared-dist> ./scripts/smoke-test.sh --keep-server`, so after it passes the server stays up and prints a dashboard URL for manual click-through. `KITARU_UI_RELEASE_TOKEN` is required because `ui-bundle` downloads from the **private** `zenml-io/zenml-frontend-monorepo`; without it you get a `curl: (22) ... 404`. Read **`FRONTEND-TESTING.md`** (repo root) for the full stable/prerelease bundle runbook.
+`ui-smoke` runs `KITARU_UI_DIST_PATH=<prepared-dist> ./scripts/smoke-test.sh --keep-server`, so after it passes the server stays up and prints a dashboard URL for manual click-through. This UI helper is not the same as release-grade smoke; run the `--release --json-out ...` command above separately for the release gate. `KITARU_UI_RELEASE_TOKEN` is required because `ui-bundle` downloads from the **private** `zenml-io/zenml-frontend-monorepo`; without it you get a `curl: (22) ... 404`. Read **`FRONTEND-TESTING.md`** (repo root) for the full stable/prerelease bundle runbook.
 
 **If running from a git worktree:** a fresh worktree may not have `src/kitaru/_ui/dist/` populated yet. The same `just ui-bundle` / `just ui-smoke` path above prepares it, or run `bash scripts/download-ui.sh` before `./scripts/smoke-test.sh`. The direct override path is `KITARU_UI_DIST_PATH=/path/to/dist ./scripts/smoke-test.sh --keep-server`.
 
-## Step 8: ★ Pause — verify smoke test
+## Step 7b (optional): Directed ad-hoc testing of the release's headline changes
 
-Parse the final summary. **Any non-zero `Failed:` count = STOP and investigate — do not auto-proceed.**
+The smoke test proves the surfaces still respond; it does **not** prove a big
+new feature is *correct*. When a release window merged a lot (many PRs since the
+last tag) or shipped a flagship feature, **offer the user directed ad-hoc
+verification** beyond smoke. This is opt-in: ask first, and only run it if the
+user agrees (it costs time and, for provider-backed features, real API calls).
+
+When to offer it (use judgement, surface the offer at the Step 4 pause and again
+here):
+
+- Many PRs since the last tag, or a diff that touches a lot of `src/kitaru/**`.
+- A new or substantially changed user-facing feature (new SDK surface, new CLI
+  command, new MCP tool, new cross-cutting behavior like usage/cost tracking).
+- A feature whose **correctness** matters and is not covered by deterministic
+  pytest in an obvious way (aggregations, math, replay/resume semantics,
+  cross-surface consistency between SDK / CLI / MCP).
+
+How to run it (the pattern that worked well; adapt to the feature):
+
+1. **Generate a controlled dataset inline first** (do this yourself, not in a
+   subagent, so it is reliable and you capture exact IDs). Define a
+   uniquely-named flow so its executions do not mix with smoke runs, run it a few
+   times, and exercise any special path (e.g. replay) you want to verify. Capture
+   the execution IDs.
+2. **Fan out verification with a workflow** (this is a legitimate `ultracode`
+   use; only run a workflow when the user has opted into multi-agent
+   orchestration). Pass the dataset IDs as `args`. Good shape:
+   - One agent per surface (SDK / CLI / MCP) runs the *identical* query and
+     returns structured results. Kitaru's MCP server is **not** a connected MCP
+     tool; agents must drive it via fastmcp like the smoke test does:
+     `uv run --with fastmcp fastmcp call --command "uv run kitaru-mcp" --target <tool> --input-json '{...}' --json`.
+   - A barrier, then adversarial verifiers in parallel: cross-surface
+     consistency (do SDK/CLI/MCP agree exactly?), aggregation math (hand-sum the
+     per-execution metadata and compare to the endpoint's SUM), replay/resume
+     semantics (incurred vs reused, no double-count), and edge cases / error
+     handling (empty filter returns clean zero; malformed input returns a clean
+     error, not a traceback).
+3. **Triage findings.** A correctness failure on the core path blocks the
+   release; a narrow, safe edge-case inconsistency does not. For anything real
+   but non-blocking, **file a follow-up GitHub issue** (`gh issue create`) and
+   proceed. Tell the user the verdict and the issue link.
+4. **Clean up** any temporary generator files and scratch JSON you created, and
+   note if a `--keep-server` smoke left a local server running (offer
+   `uv run kitaru logout`).
+
+This step does not gate the release on its own, but a confirmed core-path
+correctness failure found here should stop the release the same as a smoke
+failure.
+
+## Step 8: ★ Pause — verify smoke test and live-provider evidence
+
+Parse the final summary and `smoke-results.json`. **Any non-zero `Failed:` count = STOP and investigate — do not auto-proceed.** Also stop if `release_relevant_skipped` is nonzero in the JSON counts or if the terminal summary lists `RELEASE-RELEVANT SKIPS`.
 
 - Surface the failing check names to the user
+- Surface skipped check names and reasons to the user
+- Surface the provider attestation: required provider areas, credentials detected, and each required area's passed/failed/skipped counts
 - Do NOT proceed to the release trigger on an unexplained failure
+- If a required provider area skipped, ask the user to either rerun with the needed credentials/opt-in or explicitly record a waiver in the release conversation
 - Offer to investigate individual failures
 
 Before treating a failure as a hard blocker, **rule out spurious environment noise** — most commonly the stale `VIRTUAL_ENV` contamination described in Step 7. If a failing check captures `2>&1` and parses JSON, re-run that exact command with `unset VIRTUAL_ENV` (and from a clean shell, not a worktree with a different venv). If it then passes cleanly, the failure is an environment artifact, not a regression: say so explicitly, show the clean re-run as evidence, and you may proceed once the user confirms. A genuine `Failed:` with no environmental explanation still blocks the release.
 
-Only when every failure is either `Failed: 0` or provably spurious, and the user confirms, proceed.
+Only when every failure is either `Failed: 0` or provably spurious, every required provider area has either run or has an explicit waiver, and the user confirms, proceed to live-provider workflow evidence.
+
+### Live-provider workflow evidence before release dispatch
+
+Do **not** use `.github/workflows/release.yml` as the provider-validation path. The publishing workflow must stay focused on release artifacts. Provider calls belong in local release smoke and the trusted `.github/workflows/llm-integration.yml` workflow.
+
+There are two evidence levels:
+
+1. **Weekly-green `develop` canary** — useful if the release only changed docs, local CLI behavior, packaging, or other code that does not affect provider adapters/examples. It says “the provider paths were healthy recently on `develop`.”
+2. **Manual exact-ref evidence** — required when OpenAI or Anthropic/Claude adapter/example behavior changed. It says “this exact release ref/SHA ran the live provider checks.”
+
+Check recent live runs:
+
+```bash
+gh run list --workflow=llm-integration.yml --limit 10 \
+  --json databaseId,displayTitle,event,status,conclusion,createdAt,url,headSha
+```
+
+For a candidate run, inspect the tested ref/SHA and downloaded summary artifact:
+
+```bash
+gh run view <RUN_ID> --json databaseId,displayTitle,status,conclusion,url,createdAt,headSha
+rm -rf /tmp/kitaru-llm-integration
+mkdir -p /tmp/kitaru-llm-integration
+gh run download <RUN_ID> -n llm-integration-results -D /tmp/kitaru-llm-integration
+cat /tmp/kitaru-llm-integration/llm-integration.summary.md
+```
+
+The summary must show the release ref or SHA you are about to release. The workflow run's own `headSha` is the trusted workflow ref, not necessarily the Kitaru ref under test, so do not rely on `headSha` alone. Use the artifact line `Tested SHA` as the identity anchor.
+
+The live-provider workflow uses the GitHub Environment `live-provider-tests`. Configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as secrets on that Environment, with `kitaru-admins` approval/restrictions. If the Environment has required reviewers, the live test job and Discord notification job can wait for approval before secrets are available.
+
+If exact-ref evidence is needed and missing, trigger it manually from trusted workflow code while testing the release ref/SHA:
+
+```bash
+gh workflow run llm-integration.yml --ref develop \
+  -f kitaru_ref=<RELEASE_REF_OR_SHA> \
+  -f suite=provider-core \
+  -f include_openai=true \
+  -f include_anthropic=true \
+  -f include_research_bot=false
+sleep 5
+gh run list --workflow=llm-integration.yml --limit 3 \
+  --json databaseId,displayTitle,event,status,conclusion,createdAt,url
+```
+
+Capture the new `databaseId`, then watch it:
+
+```bash
+gh run watch <RUN_ID> --exit-status
+```
+
+If it fails, inspect logs and stop:
+
+```bash
+gh run view <RUN_ID> --log-failed
+```
+
+Release evidence table to report to the user before Step 9:
+
+```text
+Normal CI: passed / missing / failed
+Local release smoke: passed / failed / skipped relevant checks
+OpenAI live workflow: passed / missing / failed / waived
+Anthropic live workflow: passed / missing / failed / waived
+Gemini local smoke: passed / skipped / waived
+```
+
+Rules:
+
+- If OpenAI adapter/example behavior changed, require a successful OpenAI live workflow check for the exact release ref/SHA or an explicit waiver.
+- If Anthropic/Claude adapter/example behavior changed, require a successful Anthropic live workflow check for the exact release ref/SHA or an explicit waiver.
+- If Gemini behavior changed, require local Gemini release-smoke evidence or an explicit waiver. Gemini is not part of GitHub live checks in v1.
+- If the OpenAI research bot changed, run `llm-integration.yml` manually with `-f suite=provider-extended -f include_openai=true -f include_anthropic=false -f include_research_bot=true`, or record a waiver.
+- If only docs or local CLI behavior changed, live checks are recommended but not required; weekly-green `develop` is enough canary evidence if recent and relevant.
+- Do not proceed to Step 9 on a missing required exact-ref live workflow result unless the user explicitly approves a waiver.
+
+Only when smoke evidence and required live-provider evidence are green or explicitly waived, and the user confirms, proceed.
 
 ## Step 9: Trigger release workflow
 
@@ -341,7 +534,7 @@ Auto-notes list every merged PR including site-only ones. Rewrite into:
 ```markdown
 ## Highlights
 
-[1-2 sentence summary framed relative to the previous release. For a patch, say "A small maintenance release on top of v<prev>". For a minor with a flagship feature, foreground that feature. Mention the new kitaru-ui only if step 3 found a newer one: "This release also bundles the latest Kitaru UI (<ui-tag>)." — do not describe UI changes.]
+[1-2 sentence summary framed relative to the previous release. For a patch, say "A small maintenance release on top of v<prev>". For a minor with a flagship feature, foreground that feature. Mention the new kitaru-ui only if step 3 found a newer one: "This release also bundles the latest Kitaru UI (<ui-tag>)." Do not describe UI changes. Keep each paragraph on one physical line (no hard wrapping) and use no em-dashes (see Formatting rules below).]
 
 ## Added
 - [if any new user-facing capability — use bullet text from CHANGELOG]
@@ -360,7 +553,18 @@ Rules:
 - **Skip empty sections.** If there's nothing Fixed, omit the Fixed heading entirely.
 - **Keep it proportional.** Patch releases get a short Highlights paragraph; minor/major releases can have richer Highlights with subsections + code samples (see the `v0.4.0` release for the flagship-feature pattern).
 - **Do not include** site-only PRs (launch blog, lightbox, redirects, sitemap), dependabot action bumps, or no-op revert pairs. These were already filtered from CHANGELOG; the release notes should follow the same filter.
-- **UI release line placement**: if mentioning the new UI, put it as the last sentence of the Highlights paragraph — not a separate section, not in a PR list.
+- **UI release line placement**: if mentioning the new UI, put it as the last sentence of the Highlights paragraph, not a separate section and not in a PR list.
+
+### Formatting rules (GitHub renders the notes as Markdown)
+
+These exist because hard-wrapped notes render with awkward mid-sentence breaks
+and em-dashes read as AI-generated text. Follow them exactly when composing the
+`gh release edit` body.
+
+- **One physical line per bullet and per paragraph. Do NOT hard-wrap at ~72/80 columns.** When you write the heredoc body, keep each bullet on a single long line and each Highlights paragraph on a single line. A newline inside a sentence becomes a stray soft break on the rendered page, which is the "weird line breaks" failure mode. Only put a newline between distinct bullets, between paragraphs, and around headings/code fences.
+- **No em-dashes (`—`) anywhere in the notes.** Rewrite with a comma, colon, or a restructured sentence. (Em-dashes are a known AI-text tell and are banned in user-facing Kitaru copy.) After applying, verify with `gh release view v<VERSION> --json body --jq .body | grep -c '—'` and expect `0`.
+- **Avoid en-dashes (`–`) too**; use a hyphen or "to" (e.g. "1 to 10000", not "1–10000").
+- Code identifiers (commands, flags, methods, env vars, file paths) go in backticks, as in the CHANGELOG.
 
 ## Step 11: ★ Pause — show drafted notes
 

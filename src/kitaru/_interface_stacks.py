@@ -12,8 +12,8 @@ import yaml
 from zenml.utils import yaml_utils
 
 from kitaru._config import _stacks as stack_ops
+from kitaru._config._sandbox_stack_components import LOCAL_SANDBOX_FLAVOR
 from kitaru._config._stacks import (
-    LOCAL_SANDBOX_FLAVOR,
     AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,
@@ -981,6 +981,13 @@ def build_stack_create_request(
         raise ValueError(f"{labels.field_labels['sandbox']} cannot be empty.")
     if normalized_sandbox is None and normalized_stack_type == StackType.LOCAL:
         normalized_sandbox = LOCAL_SANDBOX_FLAVOR
+    overrides = component_overrides or StackComponentConfigOverrides()
+    if normalized_sandbox is None and overrides.sandbox:
+        raise ValueError(
+            f"{_target_field_label(StackComponentTarget.SANDBOX, labels=labels)} "
+            f"requires {labels.field_labels['sandbox']} because sandbox overrides "
+            "only apply when the created stack has a sandbox."
+        )
 
     return ManageStackCreateRequest(
         name=name,

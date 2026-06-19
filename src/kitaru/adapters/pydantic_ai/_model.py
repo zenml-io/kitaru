@@ -7,6 +7,7 @@ the ``type='llm_call'`` checkpoint convention so dashboards group native and ada
 LLM calls uniformly.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
@@ -74,6 +75,32 @@ _INHERITED_MESSAGE_CONVERSATION_IDS: ContextVar[frozenset[str]] = ContextVar(
     "kitaru_pydantic_ai_inherited_message_conversation_ids",
     default=frozenset(),
 )
+
+
+@dataclass
+class _LiveStreamSuppressionScope:
+    model_id: int
+    owner_task_id: int | None
+    claim_first_stream_task: bool = False
+
+
+# The global stream suppression context remains for explicit low-level nested
+# stream suppression. These shared model scopes suppress same-model live
+# lifecycle publishes only for the task that owns the mirrored handler stream.
+_SUPPRESSED_LIVE_STREAM_SCOPES: ContextVar[
+    tuple[_LiveStreamSuppressionScope, ...]
+] = ContextVar(
+    "kitaru_pydantic_ai_suppressed_live_stream_scopes",
+    default=(),
+)
+
+
+def _current_task_id() -> int | None:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        return None
+    return id(task) if task is not None else None
 
 
 def _message_conversation_ids(
@@ -408,6 +435,46 @@ class KitaruModel(WrapperModel):
     def _should_track(self) -> bool:
         return self._capture.emit_child_events and is_inside_checkpoint()
 
+    @contextmanager
+    def suppress_live_stream_events(
+        self, *, claim_first_stream_task: bool = False
+    ) -> Iterator[None]:
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        task_id = None if claim_first_stream_task else _current_task_id()
+        token = _SUPPRESSED_LIVE_STREAM_SCOPES.set(
+            (
+                *scopes,
+                _LiveStreamSuppressionScope(
+                    id(self), task_id, claim_first_stream_task
+                ),
+            )
+        )
+        try:
+            yield
+        finally:
+            _SUPPRESSED_LIVE_STREAM_SCOPES.reset(token)
+
+    def _live_stream_events_suppressed(self) -> bool:
+        if model_stream_live_events_suppressed():
+            return True
+
+        model_id = id(self)
+        current_task_id = _current_task_id()
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        for scope in scopes:
+            if scope.model_id != model_id:
+                continue
+            if scope.owner_task_id == current_task_id:
+                return True
+            if (
+                scope.claim_first_stream_task
+                and scope.owner_task_id is None
+                and current_task_id is not None
+            ):
+                scope.owner_task_id = current_task_id
+                return True
+        return False
+
     def _reserve_tool_call_order(
         self,
         *,
@@ -668,7 +735,7 @@ class KitaruModel(WrapperModel):
             include_content=save_transcripts,
             enabled=(
                 self._capture.emit_child_events
-                and not model_stream_live_events_suppressed()
+                and not self._live_stream_events_suppressed()
             ),
         )
 

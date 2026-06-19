@@ -5672,6 +5672,71 @@ def test_stack_create_rejects_blank_sandbox(capsys: pytest.CaptureFixture[str]) 
     assert "--sandbox cannot be empty." in capsys.readouterr().err
 
 
+def test_stack_create_remote_rejects_sandbox_extra_without_sandbox(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Remote stack sandbox overrides require an explicit sandbox flavor."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "sandbox.forward_env=false",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "--extra sandbox.*" in stderr
+    assert "--sandbox" in stderr
+    mock_create_stack.assert_not_called()
+
+
+def test_stack_create_file_rejects_sandbox_extra_without_sandbox(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """YAML sandbox overrides for remote stacks require top-level sandbox."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+extra:
+  sandbox:
+    forward_env: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "--extra sandbox.*" in stderr
+    assert "--sandbox" in stderr
+    mock_create_stack.assert_not_called()
+
+
 def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify() -> (
     None
 ):

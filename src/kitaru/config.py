@@ -35,6 +35,7 @@ from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
 from kitaru._config import _sandbox as _config_sandbox
+from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru._config import _stacks as _config_stacks
 from kitaru._env import ZENML_CONFIG_PATH_ENV as _ZENML_CONFIG_PATH_ENV
 from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
@@ -53,7 +54,7 @@ _LOG_STORE_BACKEND_PATTERN = _config_log_store._LOG_STORE_BACKEND_PATTERN
 _MODEL_ALIAS_PATTERN = _config_models._MODEL_ALIAS_PATTERN
 _STACK_MANAGED_LABEL_KEY = _config_stacks._STACK_MANAGED_LABEL_KEY
 _STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
-_LOCAL_SANDBOX_FLAVOR = _config_stacks.LOCAL_SANDBOX_FLAVOR
+_LOCAL_SANDBOX_FLAVOR = _sandbox_components.LOCAL_SANDBOX_FLAVOR
 
 KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
 KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
@@ -685,7 +686,9 @@ def run_sandbox_command(
     """Execute one command through the active stack's sandbox component.
 
     Args:
-        command: Shell command string or argv-style command list.
+        command: Command to execute, as a provider-interpreted string or an
+            argv-style command list. For exact argument splitting, pass a
+            sequence.
         cwd: Optional working directory inside the sandbox.
         env: Optional environment variables for the command. These values are
             passed to the sandbox provider but are not included in the result.

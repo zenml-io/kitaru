@@ -43,6 +43,15 @@ _OLLAMA_HOST_ENV = "OLLAMA_HOST"
 _OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 _OLLAMA_DUMMY_API_KEY = "ollama"  # Ollama needs no auth; prevents OpenAI SDK env lookup
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_MIN_REDACTABLE_SECRET_LENGTH = 8
+_CREDENTIAL_KEY_PARTS = {
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "KEY",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+}
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
 
@@ -286,6 +295,60 @@ def _normalize_messages(
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_credential_name(name: str) -> bool:
+    """Return whether an environment-style name usually carries credentials."""
+    normalized = name.upper()
+    parts = set(re.split(r"[^A-Z0-9]+", normalized))
+    return bool(parts & _CREDENTIAL_KEY_PARTS) or "APIKEY" in normalized
+
+
+def _redactable_secret(value: str | None) -> str | None:
+    """Return a value only when redacting it is unlikely to erase harmless text."""
+    if value is None or value == _OLLAMA_DUMMY_API_KEY:
+        return None
+    if len(value) < _MIN_REDACTABLE_SECRET_LENGTH:
+        return None
+    return value
+
+
+def _redact_provider_error_text(
+    text: str,
+    *,
+    env_overlay: Mapping[str, str],
+    env_names: Sequence[str] = (),
+    extra_secrets: Sequence[str | None] = (),
+) -> str:
+    """Strip known credential values from provider SDK error text.
+
+    Provider SDK exceptions can echo request credentials. Kitaru only redacts
+    values from credential-like overlay keys, explicit provider credential names,
+    or explicit SDK credential arguments so ordinary secret fields do not hide
+    useful provider diagnostics.
+    """
+    credential_names = {
+        name
+        for name in set(env_overlay) | set(env_names)
+        if _looks_like_credential_name(name)
+    }
+    secrets: list[str] = []
+    for name in credential_names:
+        if secret := _redactable_secret(env_overlay.get(name)):
+            secrets.append(secret)
+        if secret := _redactable_secret(os.environ.get(name)):
+            secrets.append(secret)
+    for candidate in extra_secrets:
+        if secret := _redactable_secret(candidate):
+            secrets.append(secret)
+
+    unique_secrets: list[str] = sorted(
+        set(secrets), key=lambda secret: len(secret), reverse=True
+    )
+    redacted = text
+    for secret in unique_secrets:
+        redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
 def _call_openai(
     *,
     model: str,
@@ -323,13 +386,19 @@ def _call_openai(
         client_kwargs["api_key"] = api_key
 
     with _temporary_env(env_overlay):
-        client = OpenAI(**client_kwargs)
         try:
+            client = OpenAI(**client_kwargs)
             response = client.chat.completions.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS.get(provider_label, ()),
+                extra_secrets=(api_key,),
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling {provider_label} for "
-                f"model `{provider_label}/{model}`: {exc}"
+                f"model `{provider_label}/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(
@@ -385,13 +454,18 @@ def _call_anthropic(
         kwargs["temperature"] = temperature
 
     with _temporary_env(env_overlay):
-        client = Anthropic()
         try:
+            client = Anthropic()
             response = client.messages.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS["anthropic"],
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling Anthropic for model "
-                f"`anthropic/{model}`: {exc}"
+                f"`anthropic/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(

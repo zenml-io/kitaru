@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - direct ``python chatbot.py`` execution
     from history_artifacts import HISTORY_ARTIFACT_NAME
 
 CHATBOT_IMAGE = ImageSettings(
-    requirements=["pydantic-ai", "openai"],
+    requirements=["kitaru[pydantic-ai,openai]"],
     # Injects the secret's keys (here: ``OPENAI_API_KEY``) into the runtime
     # environment of every checkpoint pod.
     secret_environment_from=["openai-creds"],
