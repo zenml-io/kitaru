@@ -1580,8 +1580,9 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
         assert payload["stdout"] == "Python 3.12.0\n"
         return SimpleNamespace(final_output="ok")
 
-    runner_globals = KitaruRunner._run_sdk_sync.__globals__
-    checkpoint_globals = KitaruRunner._run_runner_call_checkpoint_sync.__globals__
+    runner_class = openai_agent_module.KitaruRunner
+    runner_globals = runner_class._run_sdk_sync.__globals__
+    checkpoint_globals = runner_class._run_runner_call_checkpoint_sync.__globals__
 
     monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
     monkeypatch.setattr(
@@ -1599,7 +1600,6 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
         "kitaruify_openai_tools",
         fail_tool_wrapper,
     )
-    assert runner_globals is openai_agent_module.__dict__
     monkeypatch.setitem(
         runner_globals,
         "run_openai_agent_sync",
@@ -1613,11 +1613,11 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
     monkeypatch.setitem(checkpoint_globals, "is_inside_flow", lambda: False)
     monkeypatch.setitem(checkpoint_globals, "is_inside_checkpoint", lambda: False)
 
-    runner = KitaruRunner(
+    runner = runner_class(
         Agent(
             name="coarse",
             model=StaticTextModel("ok"),
-            tools=[sandbox_command_tool(max_chars=123)],
+            tools=[openai_sandbox_tool_module.sandbox_command_tool(max_chars=123)],
         ),
         checkpoint_strategy="runner_call",
         run_config_factory=lambda: RunConfig(tracing_disabled=True),

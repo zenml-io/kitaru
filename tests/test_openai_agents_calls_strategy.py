@@ -1,5 +1,6 @@
 """Focused tests for OpenAI Agents SDK call-level checkpointing."""
 
+import importlib
 import json
 import re
 from collections.abc import Iterator
@@ -1477,7 +1478,13 @@ async def test_calls_strategy_prepare_objects_keeps_cyclic_handoffs_wrapped() ->
 def test_calls_strategy_prepare_objects_wires_context_cache_key_factory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import kitaru.adapters.openai_agents._tools as openai_tools
+    import kitaru.adapters.openai_agents._agent as openai_agent_module
+
+    runner_class = openai_agent_module.KitaruRunner
+    tools_module_name = (
+        f"{runner_class._prepare_execution_objects.__globals__['__package__']}._tools"
+    )
+    openai_tools = importlib.import_module(tools_module_name)
 
     seen_kwargs: dict[str, Any] = {}
     original_tools = [SimpleNamespace(name="lookup_customer")]
@@ -1492,7 +1499,7 @@ def test_calls_strategy_prepare_objects_wires_context_cache_key_factory(
         fake_kitaruify_openai_tools,
     )
 
-    runner = KitaruRunner(
+    runner = runner_class(
         Agent(
             name="factory-wire-agent",
             model="gpt-5-nano",
