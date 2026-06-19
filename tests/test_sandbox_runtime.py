@@ -314,18 +314,46 @@ def test_run_sandbox_command_reports_unsupported_destroy_and_closes() -> None:
     assert session.close_calls == 1
 
 
+def test_run_sandbox_command_redacts_cleanup_error_on_result() -> None:
+    session = FakeSession(
+        destroy_error=NotImplementedError("destroy unsupported api_key=destroy-secret"),
+        close_error=RuntimeError("close failed Authorization: Bearer close-secret"),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "echo hi",
+        env={"VISIBLE_MODE": "explicit-env-secret"},
+        client_factory=_client_factory(client),
+    )
+
+    cleanup_error = cast(str, result.cleanup_error)
+    assert result.cleanup_succeeded is False
+    assert "<redacted>" in cleanup_error
+    assert "destroy-secret" not in cleanup_error
+    assert "close-secret" not in cleanup_error
+    assert "explicit-env-secret" not in cleanup_error
+
+
 def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure() -> (
     None
 ):
-    session = FakeSession(destroy_error=RuntimeError("provider exploded"))
+    session = FakeSession(
+        destroy_error=RuntimeError("provider exploded password=cleanup-secret")
+    )
     sandbox = FakeSandbox(session)
     client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
 
     with pytest.raises(
         KitaruBackendError, match="destroying the sandbox session failed"
-    ):
+    ) as exc_info:
         run_sandbox_command("echo hi", client_factory=_client_factory(client))
 
+    message = str(exc_info.value)
+    assert "<redacted>" in message
+    assert "cleanup-secret" not in message
+    assert exc_info.value.__cause__ is None
     assert session.destroy_calls == 1
     assert session.close_calls == 1
 
@@ -419,6 +447,61 @@ def test_run_sandbox_command_reports_cleanup_warning_after_command_failure(
     assert "Cleanup warning" in message
     assert "destroy failed" in message
     assert session.destroy_calls == 1
+
+
+def test_run_sandbox_command_redacts_provider_command_failure_messages() -> None:
+    explicit_env_value = "explicit-env-secret"
+    raw_message = (
+        "provider echoed "
+        f"{explicit_env_value} "
+        "OPENAI_API_KEY=openai-secret "
+        "GITHUB_TOKEN=github-secret "
+        "AWS_SECRET_ACCESS_KEY=aws-secret "
+        "Authorization: Bearer bearer-secret "
+        "Authorization: Basic basic-secret "
+        "Bearer bare-bearer-secret "
+        "PRIVATE_KEY=private-key-secret "
+        "AWS_ACCESS_KEY_ID=access-key-secret "
+        "credentials=credentials-secret "
+        'MY_PASSWORD="password secret with spaces" '
+        "api_key='quoted,provider;secret' "
+        "password=hunter2 token=token-secret "
+        "url=https://example.test/callback?client_secret=query-secret"
+        "&access_token=access-secret"
+    )
+    sandbox = FakeSandbox(FakeSession(exec_error=RuntimeError(raw_message)))
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"MODE": explicit_env_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert "<redacted>" in message
+    for leaked in (
+        explicit_env_value,
+        "openai-secret",
+        "github-secret",
+        "aws-secret",
+        "bearer-secret",
+        "basic-secret",
+        "bare-bearer-secret",
+        "private-key-secret",
+        "access-key-secret",
+        "credentials-secret",
+        "password secret with spaces",
+        "quoted,provider;secret",
+        "hunter2",
+        "token-secret",
+        "query-secret",
+        "access-secret",
+    ):
+        assert leaked not in message
+    assert exc_info.value.__cause__ is None
 
 
 def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> None:

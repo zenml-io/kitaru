@@ -1166,6 +1166,7 @@ def test_request_manifest_records_json_null_function_result_turn(
     request = gemini_adapter.GeminiInteractionRequest.function_result(
         previous_interaction_id="interaction-1",
         function_call_id="call-null",
+        function_name="lookup",
         function_result=None,
         model="m",
     )

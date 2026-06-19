@@ -4,10 +4,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import to_jsonable_python
 
 from kitaru.checkpoint import _raise_if_checkpoint_output_handle
 
 from ._constants import ANTIGRAVITY_AGENT_ID
+from ._tokens import CALL_ID_TYPE_FRAGMENTS, normalized_token_contains_any
 
 GeminiInteractionKind = Literal["start", "resume", "function_result", "poll"]
 GeminiInteractionInput = str | dict[str, Any] | list[dict[str, Any]] | None
@@ -54,13 +56,19 @@ class GeminiInteractionRequest(BaseModel):
 
     @property
     def has_function_result_only_fields(self) -> bool:
-        """Return whether any function-result-only field was explicit."""
+        """Return whether any function-result-only field carries data.
+
+        ZenML/Pydantic reloads may mark nullable fields as explicit even when they
+        are JSON null. Treat only non-null values as function-result data so a
+        persisted ``start`` or ``resume`` request can round-trip through a
+        checkpoint input.
+        """
         return any(
-            field_name in self.model_fields_set
-            for field_name in (
-                "function_call_id",
-                "function_name",
-                "function_result_payload",
+            value is not None
+            for value in (
+                self.function_call_id,
+                self.function_name,
+                self.function_result_payload,
             )
         )
 
@@ -148,8 +156,8 @@ class GeminiInteractionRequest(BaseModel):
         *,
         previous_interaction_id: str,
         function_call_id: str,
+        function_name: str,
         function_result: Any,
-        function_name: str | None = None,
         model: str | None = None,
         agent: str | None = None,
         environment: str | dict[str, Any] | None = None,
@@ -353,7 +361,14 @@ class GeminiInteractionRequest(BaseModel):
         _reject_checkpoint_output_handles(value)
         return value
 
-    @field_validator("model", "agent", "previous_interaction_id", "interaction_id")
+    @field_validator(
+        "model",
+        "agent",
+        "previous_interaction_id",
+        "interaction_id",
+        "function_call_id",
+        "function_name",
+    )
     @classmethod
     def _validate_non_empty_strings(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
@@ -444,13 +459,49 @@ class GeminiInteractionRequest(BaseModel):
                 )
             if self.function_call_id is None:
                 raise ValueError("kind='function_result' requires function_call_id.")
+            if self.function_name is None:
+                raise ValueError("kind='function_result' requires function_name.")
             if not self.has_function_result_payload:
                 raise ValueError("kind='function_result' requires function_result.")
+            self._validate_function_result_input()
         if self.input is None:
             raise ValueError(f"kind={self.kind!r} requires input.")
         if self.background and not self.store:
             raise ValueError("background=True requires store=True.")
         return self
+
+    def _validate_function_result_input(self) -> None:
+        if not isinstance(self.input, list) or len(self.input) != 1:
+            raise ValueError(
+                "kind='function_result' requires one function_result input item."
+            )
+        item = self.input[0]
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                "kind='function_result' requires input[0] to be a mapping."
+            )
+        if item.get("type") != "function_result":
+            raise ValueError(
+                "kind='function_result' requires input[0].type='function_result'."
+            )
+        if item.get("call_id") != self.function_call_id:
+            raise ValueError(
+                "kind='function_result' requires input[0].call_id to match "
+                "function_call_id."
+            )
+        if item.get("name") != self.function_name:
+            raise ValueError(
+                "kind='function_result' requires input[0].name to match function_name."
+            )
+        if "result" not in item:
+            raise ValueError("kind='function_result' requires input[0].result.")
+        if _json_safe_for_comparison(item["result"]) != _json_safe_for_comparison(
+            self.function_result_payload
+        ):
+            raise ValueError(
+                "kind='function_result' requires input[0].result to match "
+                "function_result."
+            )
 
 
 class GeminiInteractionStepSummary(BaseModel):
@@ -466,6 +517,39 @@ class GeminiInteractionStepSummary(BaseModel):
     tool_name: str | None = None
     text_preview: str | None = None
     raw_keys: list[str] = Field(default_factory=list)
+
+
+class GeminiInteractionFunctionCall(BaseModel):
+    """Safe identity for one Gemini custom function call.
+
+    This model intentionally contains only call metadata already exposed by
+    ``GeminiInteractionStepSummary``. It does not capture model-supplied
+    function arguments.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    step_type: str | None = None
+    call_id: str
+    function_name: str
+
+    @classmethod
+    def from_step_summary(
+        cls,
+        step: GeminiInteractionStepSummary,
+    ) -> "GeminiInteractionFunctionCall":
+        """Build a typed function-call view from a safe step summary."""
+        if step.call_id is None:
+            raise ValueError("Gemini function-call step is missing call_id.")
+        if step.tool_name is None:
+            raise ValueError("Gemini function-call step is missing tool_name.")
+        return cls(
+            index=step.index,
+            step_type=step.type,
+            call_id=step.call_id,
+            function_name=step.tool_name,
+        )
 
 
 class GeminiInteractionResult(BaseModel):
@@ -496,6 +580,37 @@ class GeminiInteractionResult(BaseModel):
     run_summary_artifact_name: str | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def function_call_steps(self) -> list[GeminiInteractionStepSummary]:
+        """Return step summaries that look like Gemini function/tool calls."""
+        return [step for step in self.steps if _is_function_call_step(step)]
+
+    @property
+    def function_calls(self) -> list[GeminiInteractionFunctionCall]:
+        """Return complete Gemini function-call identities from safe summaries.
+
+        Incomplete provider step summaries are skipped here. Use
+        ``function_call_steps`` when you need to diagnose a malformed
+        ``requires_action`` response.
+        """
+        calls: list[GeminiInteractionFunctionCall] = []
+        for step in self.function_call_steps:
+            if step.call_id is None or step.tool_name is None:
+                continue
+            calls.append(GeminiInteractionFunctionCall.from_step_summary(step))
+        return calls
+
+
+def _is_function_call_step(step: GeminiInteractionStepSummary) -> bool:
+    return normalized_token_contains_any(step.type, CALL_ID_TYPE_FRAGMENTS)
+
+
+def _json_safe_for_comparison(value: Any) -> Any:
+    try:
+        return to_jsonable_python(value, serialize_unknown=True)
+    except Exception:
+        return value
 
 
 def _default_list(value: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

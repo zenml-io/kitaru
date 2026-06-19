@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added caller-owned Gemini custom function execution through Kitaru's active sandbox, with explicit registered sandbox commands, a dry-run example showcase, and docs that keep Antigravity / Google-owned tool internals outside Kitaru's replay promise. This requires the Gemini extra's current Google GenAI SDK 2.x range (`google-genai>=2.8.0,<3`) for the Interactions step and function-result schema. (#433)
 - Added sandbox stack component support for local stacks, the public `kitaru.run_sandbox_command(...)` SDK helper, and a provider-free tracked flow example at `examples/features/sandbox/active_stack_sandbox_command.py` that runs a command through the active stack's sandbox from inside a checkpoint.
 - Added a LangGraph/LangChain sandbox command tool via `create_sandbox_command_tool(...)`, plus a sandbox strategy in the LangGraph example, so agents can run shell commands through the active Kitaru stack sandbox. (#434)
 

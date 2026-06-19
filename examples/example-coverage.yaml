@@ -440,7 +440,10 @@ examples:
       waiver_allowed: true
   - id: gemini-interactions-adapter
     path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/gemini-interactions.md
     owner_area: Gemini Interactions adapter and Antigravity polling
     coverage:
       deterministic_pytest:
@@ -450,7 +453,7 @@ examples:
         status: covered
         command: uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
           --dry-run --stream
-        requires_server: true
+        requires_server: false
         timeout_seconds: 60
       live_provider:
         status: opt_in_extended
@@ -461,10 +464,61 @@ examples:
         weekly_workflow: false
         local_release_smoke: true
         manual_command_available: true
-        required_env: [GEMINI_API_KEY, KITARU_SMOKE_GEMINI_ANTIGRAVITY]
+        required_env:
+          - GEMINI_API_KEY
+          - GOOGLE_API_KEY
+          - GOOGLE_GENAI_USE_VERTEXAI
+          - GOOGLE_CLOUD_PROJECT
+          - GOOGLE_CLOUD_LOCATION
+          - KITARU_SMOKE_GEMINI_ANTIGRAVITY
         opt_in_env: [KITARU_SMOKE_GEMINI_ANTIGRAVITY]
         timeout_seconds: 360
         cost_class: medium
+        notes: requires the opt-in env plus either GEMINI_API_KEY/GOOGLE_API_KEY
+          for Gemini Developer API or Vertex ADC config with GOOGLE_GENAI_USE_VERTEXAI,
+          GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION=global
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: gemini-sandbox-function
+    path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+    public_docs:
+      - examples/integrations/gemini_interactions_agent/README.md
+      - docs/book/adapters/gemini-interactions.md
+      - docs/book/stacks/README.md
+    owner_area: Gemini caller-owned custom function execution through Kitaru sandbox
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_gemini_sandbox_functions.py
+        notes: tests/test_gemini_interactions_example.py also covers the example dry-run,
+          request construction, Vertex rejection, and successful two-turn showcase
+          contract
+      local_smoke:
+        status: covered
+        command: uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --dry-run --mode sandbox-function
+        requires_server: false
+        timeout_seconds: 60
+      live_provider:
+        status: opt_in_extended
+        provider: gemini
+        command: KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION=1 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
+          --mode sandbox-function
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env:
+          - GEMINI_API_KEY
+          - GOOGLE_API_KEY
+          - KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION
+        opt_in_env: [KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION]
+        timeout_seconds: 180
+        cost_class: low
+        notes: requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY;
+          Vertex ADC is not supported because this mode uses raw model interactions.
+          The release smoke script creates a temporary local sandbox stack and
+          points KITARU_STACK at it for the smoke command.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
