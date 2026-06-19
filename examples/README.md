@@ -27,7 +27,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Pause for human input and resume later:** `examples/features/execution_management/wait_and_resume.py`
 - **Replay from a checkpoint with overrides:** `examples/features/replay/replay_with_overrides.py`
 - **Track a model call inside a flow:** `examples/features/llm/flow_with_llm.py`
-- **Wrap an existing PydanticAI agent:** `examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`; watch live events with `examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py`
+- **Wrap an existing PydanticAI agent:** `examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`; watch live events with `examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py`; let a model call the active-stack sandbox with `examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py`
 - **Wrap an OpenAI Agents SDK agent:** `examples/integrations/openai_agents_agent/openai_agents_adapter.py`; watch live events with `examples/integrations/openai_agents_agent/openai_agents_streaming.py`
 - **Wrap a Claude Agent SDK invocation:** `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py`; watch live events with `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py`
 - **Wrap LangGraph graphs and agents:** `examples/integrations/langgraph_agent/langgraph_adapter.py` (`graph_call` is local/no-key; `calls` is OpenAI-backed with local ticket tools; `sandbox` is OpenAI-backed and runs one command through the active stack sandbox); watch local graph-call live events with `examples/integrations/langgraph_agent/langgraph_streaming.py`
@@ -50,6 +50,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | Core workflow, execution, replay, and configuration examples | `uv sync --extra local` |
 | LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
+| PydanticAI sandbox toolset example | `uv sync --extra local --extra pydantic-ai --extra openai` + `OPENAI_API_KEY` + active stack with one sandbox |
 | OpenAI Agents adapter and research bot examples | `uv sync --extra local --extra openai-agents` |
 | Claude Agent SDK adapter example | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or Claude SDK provider credentials |
 | LangGraph adapter `graph_call` example (local deterministic graph) | `uv sync --extra local --extra langgraph` |
@@ -89,7 +90,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Artifacts](features/basic_flow/flow_with_artifacts.py) | `uv run python examples/features/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://docs.zenml.io/kitaru/guides/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](features/basic_flow/flow_with_configuration.py) | `uv run python examples/features/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://docs.zenml.io/kitaru/guides/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
 | [Checkpoint runtime](features/basic_flow/flow_with_checkpoint_runtime.py) | `uv run python examples/features/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://docs.zenml.io/kitaru/concepts/checkpoints) | — |
-| [Active stack sandbox command](features/sandbox/active_stack_sandbox_command.py) | `uv run python examples/features/sandbox/active_stack_sandbox_command.py` | `uv sync --extra local` + active stack with a sandbox | A tracked `@flow` + `@checkpoint` that calls `kitaru.run_sandbox_command(...)` using the active stack's sandbox component | [Stacks](https://docs.zenml.io/kitaru/stacks/#use-the-active-stack-sandbox-from-python) | [tests/test_sandbox_feature_example.py](../tests/test_sandbox_feature_example.py) |
+| [Active stack sandbox command](features/sandbox/active_stack_sandbox_command.py) | `uv run python examples/features/sandbox/active_stack_sandbox_command.py` | `uv sync --extra local` + active stack with a sandbox | A tracked `@flow` + `@checkpoint` that calls `kitaru.run_sandbox_command(...)` using the active stack's sandbox component | [Stacks](../docs/book/stacks/README.md#use-the-active-stack-sandbox-from-python) | [tests/test_sandbox_feature_example.py](../tests/test_sandbox_feature_example.py) |
 
 ## Execution lifecycle and recovery
 
@@ -106,6 +107,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Tracked LLM calls](features/llm/flow_with_llm.py) | `uv run python examples/features/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://docs.zenml.io/kitaru/guides/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
 | [PydanticAI adapter](integrations/pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://docs.zenml.io/kitaru/adapters/pydantic-ai/) | — |
 | [PydanticAI streaming](integrations/pydantic_ai_agent/pydantic_ai_streaming.py) | `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | `uv sync --extra local --extra pydantic-ai --extra openai` + `OPENAI_API_KEY` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](https://docs.zenml.io/kitaru/adapters/pydantic-ai/#streaming) | — |
+| [PydanticAI sandbox toolset](integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py) | `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` | `uv sync --extra local --extra pydantic-ai --extra openai` + `OPENAI_API_KEY` + active stack with one sandbox | Let a PydanticAI model call `run_sandbox_command`; the dashboard shows the per-tool `run_sandbox_command_tool` checkpoint before the final answer checkpoint | [PydanticAI Adapter](https://docs.zenml.io/kitaru/adapters/pydantic-ai/) | [tests/test_pydantic_ai_sandbox_toolset.py](../tests/test_pydantic_ai_sandbox_toolset.py) |
 | [OpenAI Agents adapter](integrations/openai_agents_agent/openai_agents_adapter.py) | `uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py` | `uv sync --extra local --extra openai-agents` + `OPENAI_API_KEY` | Real OpenAI API customer-support flow with tool calls, showing call-level vs runner-call durability | [OpenAI Agents Adapter](https://docs.zenml.io/kitaru/adapters/openai-agents/) | — |
 | [OpenAI Agents streaming](integrations/openai_agents_agent/openai_agents_streaming.py) | `uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py` | `uv sync --extra local --extra openai-agents` + `OPENAI_API_KEY` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](https://docs.zenml.io/kitaru/adapters/openai-agents/#streaming-with-kitaru-durability) | — |
 | [Claude Agent SDK adapter](integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py) | `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or Claude SDK provider credentials | Real Claude SDK invocation wrapped by `KitaruClaudeRunner`; one invocation becomes one Kitaru checkpoint with final text, session, usage/cost, and audit artifacts | [Claude Agent SDK Adapter](https://docs.zenml.io/kitaru/adapters/claude-agent-sdk/) | — |
@@ -135,18 +137,19 @@ If you are new to Kitaru, this is the smoothest path:
 9. `uv run python examples/features/sandbox/active_stack_sandbox_command.py` *(requires an active stack with a sandbox; `uv run kitaru stack create sandbox-demo` creates a local one)*
 10. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
 11. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py` *(PydanticAI live events with durable `.wait()` result; requires `OPENAI_API_KEY`)*
-12. `uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py`
-13. `uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py` *(OpenAI Agents live events with durable `OpenAIRunResult`; requires `OPENAI_API_KEY`)*
-14. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
-15. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` *(Claude live events with durable `ClaudeRunResult`; requires Claude credentials)*
-16. `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
-17. Optional advanced LangGraph sandbox step: `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox` *(requires `uv sync --extra local --extra langgraph-openai`, `OPENAI_API_KEY`, and an active stack with exactly one sandbox component)*
-18. `uv run python examples/integrations/langgraph_agent/langgraph_streaming.py` *(local graph-call live events; no API key)*
-19. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
-20. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-21. `cd examples/end_to_end/news_scout && uv run python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
-22. `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
-23. `uv run python examples/features/mcp/mcp_query_tools.py`
+12. `uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` *(PydanticAI model calls the active-stack sandbox; requires `OPENAI_API_KEY` and one sandbox component)*
+13. `uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py`
+14. `uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py` *(OpenAI Agents live events with durable `OpenAIRunResult`; requires `OPENAI_API_KEY`)*
+15. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` *(Claude SDK invocation-level checkpoint)*
+16. `uv run python examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` *(Claude live events with durable `ClaudeRunResult`; requires Claude credentials)*
+17. `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call` *(local interrupt/resume with stable thread_id; no API key)*; then try `--strategy calls` after installing `langgraph-openai` and setting `OPENAI_API_KEY`
+18. Optional advanced LangGraph sandbox step: `uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox` *(requires `uv sync --extra local --extra langgraph-openai`, `OPENAI_API_KEY`, and an active stack with exactly one sandbox component)*
+19. `uv run python examples/integrations/langgraph_agent/langgraph_streaming.py` *(local graph-call live events; no API key)*
+20. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → submitted searches → writer report)*
+21. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+22. `cd examples/end_to_end/news_scout && uv run python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
+23. `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
+24. `uv run python examples/features/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://docs.zenml.io/kitaru/getting-started/examples).

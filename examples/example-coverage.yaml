@@ -294,6 +294,36 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: pydantic-ai-sandbox-toolset
+    path: examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    owner_area: PydanticAI active-stack sandbox toolset and per-tool checkpoints
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_pydantic_ai_sandbox_toolset.py
+        notes: validates toolset schema, constructor validation, example wiring, per-tool checkpoint config, and cache-disabled submit helper without provider calls
+      local_smoke:
+        status: smoke_only
+        command: uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        notes: smoke-test.sh runs this only when the active stack has exactly one sandbox component; otherwise it records an explicit prerequisite skip; in release mode, use --required-provider-area openai to make that skip fail the run
+      live_provider:
+        status: smoke_only
+        provider: openai
+        command: uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+        notes: also requires the active stack to have exactly one sandbox component
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: openai-agents-adapter
     path: examples/integrations/openai_agents_agent/openai_agents_adapter.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

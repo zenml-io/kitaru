@@ -93,8 +93,10 @@ By default, Kitaru creates:
 Then it automatically activates the new stack. The local sandbox uses Kitaru's
 installed local sandbox provider. Important: the `local` sandbox is for local
 development convenience, not for running untrusted code. It is not a security
-boundary; commands run on your machine and can access local files and the
-network available to your user. If another sandbox provider is installed in your
+boundary; commands run on your machine and can access local files, environment
+variables, credentials, and the network available to your user. If a model
+controls the command, it can ask the local sandbox to print those visible values
+back through stdout or stderr. If another sandbox provider is installed in your
 environment, you can choose it explicitly:
 
 ```bash
@@ -213,7 +215,11 @@ session.
 
 If the attached sandbox is `local`, the command runs as a local subprocess.
 Treat it like running a command on your own machine, not like running inside a
-locked-down container.
+locked-down container. Anything visible to that subprocess — files, environment
+variables, credentials, and network access — can be returned through stdout or
+stderr if the command prints it. When a model chooses the command, use an
+isolated sandbox provider and minimal credentials unless you fully trust the
+model and prompt.
 
 ```python
 import kitaru
@@ -222,7 +228,7 @@ result = kitaru.run_sandbox_command("python --version")
 print(result.stdout)
 ```
 
-For a runnable version of this pattern inside a tracked Kitaru flow, see `examples/features/sandbox/` in the repository.
+For a runnable version of this pattern inside a tracked Kitaru flow, see the `features/sandbox/active_stack_sandbox_command.py` row in the [examples guide](../getting-started/examples.md#core-workflow-basics).
 
 If the active stack has no sandbox, Kitaru raises an error and does not run the
 command. If the active stack has more than one sandbox, Kitaru also raises an

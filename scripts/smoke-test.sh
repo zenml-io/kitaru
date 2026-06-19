@@ -559,6 +559,17 @@ is_truthy_env_value() {
     esac
 }
 
+active_stack_has_single_sandbox() {
+    local current_json
+    local stack_name
+    local stack_json
+    current_json=$($UV_RUN kitaru stack current -o json 2>/dev/null) || return 1
+    stack_name=$(echo "$current_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["item"]["name"])' 2>/dev/null) || return 1
+    [[ -n "$stack_name" ]] || return 1
+    stack_json=$($UV_RUN kitaru stack show "$stack_name" -o json 2>/dev/null) || return 1
+    echo "$stack_json" | python3 -c 'import json,sys; components=json.load(sys.stdin)["item"].get("components", []); sandboxes=[component for component in components if component.get("role") == "sandbox"]; sys.exit(0 if len(sandboxes) == 1 else 1)'
+}
+
 cleanup() {
     rm -f "$RESULT_RECORDS_FILE"
 
@@ -829,8 +840,16 @@ if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+    if active_stack_has_single_sandbox; then
+        run_provider_test "openai" "OPENAI_API_KEY" \
+            "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
+            timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    else
+        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example; --release --required-provider-area openai makes this prerequisite skip fail release smoke" "openai" "OPENAI_API_KEY"
+    fi
 else
     skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "OPENAI_API_KEY not set; provider credentials and one active-stack sandbox required for PydanticAI sandbox toolset example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "LangGraph adapter"
