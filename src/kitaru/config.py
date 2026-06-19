@@ -685,7 +685,9 @@ def run_sandbox_command(
     """Execute one command through the active stack's sandbox component.
 
     Args:
-        command: Shell command string or argv-style command list.
+        command: Command to execute, as a provider-interpreted string or an
+            argv-style command list. For exact argument splitting, pass a
+            sequence.
         cwd: Optional working directory inside the sandbox.
         env: Optional environment variables for the command. These values are
             passed to the sandbox provider but are not included in the result.

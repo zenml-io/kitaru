@@ -3,7 +3,7 @@
 This directory contains two documentation surfaces:
 
 1. `book/` — the hand-written GitBook docs source, published at `docs.zenml.io/kitaru`.
-2. the FumaDocs reference app — generated CLI, changelog, and SDK reference pages, published at `sdkdocs.kitaru.ai`.
+2. the FumaDocs reference app — generated CLI and SDK reference pages, published at `sdkdocs.kitaru.ai`. It can also materialize a gitignored local changelog page, but the public changelog lives at `docs.zenml.io/changelog`.
 
 Hand-written user docs belong in `docs/book/` as plain Markdown. Do not add new hand-written product docs to `docs/content/docs/`; that directory is for generated reference content and FumaDocs app wiring.
 
@@ -68,7 +68,7 @@ If generated CLI syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the 
 
 The GitBook docs in `book/` are synced by GitBook Git Sync.
 
-The FumaDocs reference app is built from `docs/` and deployed separately as the SDK/reference docs surface. CI runs doc generation automatically before building. Locally, run `just generate-docs` before `just docs-build` when generated content may have changed.
+The FumaDocs reference app is built from `docs/` and deployed separately as the SDK/reference docs surface. CI regenerates the CLI and SDK reference before building; it does not run the local changelog generator. Locally, run `just generate-docs` before `just docs-build` when generated content may have changed; that local recipe also materializes the gitignored changelog page.
 
 To build and validate the reference app locally:
 

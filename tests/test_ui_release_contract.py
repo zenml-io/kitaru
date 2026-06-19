@@ -36,7 +36,7 @@ def test_release_workflow_uses_stable_monorepo_ui_bundling() -> None:
     docker_step = _workflow_step_block(workflow, "Build and push Docker image")
     assert "KITARU_UI_TAG=" not in docker_step
     assert "KITARU_VERSION=" in docker_step
-    assert "ZENML_SERVER_TAG=0.94.6" in docker_step
+    assert "ZENML_SERVER_TAG=0.95.1" in docker_step
 
 
 def test_ci_bundles_ui_before_source_docker_smoke() -> None:

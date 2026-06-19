@@ -4,8 +4,8 @@ Pydantic AI normally moves synchronous tool functions to a worker thread. That
 is safe for ordinary tools, but Kitaru waits must be created from the workflow
 thread. The upstream hook is run-scoped rather than per-tool-scoped, so callers
 must enable it explicitly for run shapes that need direct tool-body waits. Keep
-the private Pydantic AI import isolated here so the rest of the adapter has one
-small seam to update if the upstream hook changes.
+the private Pydantic AI import isolated here so a future upstream hook rename
+requires changing this module rather than every agent run wrapper.
 """
 
 from __future__ import annotations

@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import pytest
 from zenml.client import Client
@@ -21,6 +24,21 @@ from zenml.constants import (
     ENV_ZENML_STORE_PREFIX,
 )
 from zenml.utils.source_utils import set_custom_source_root
+
+_PROVIDER_HOST_SUFFIX_BY_NAME = {
+    "OpenAI": ("api.openai.com",),
+    "Anthropic": ("api.anthropic.com",),
+    "Gemini/Google GenAI": (
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com",
+    ),
+}
+_AZURE_OPENAI_RESOURCE_SUFFIX = ".openai.azure.com"
+_LIVE_PROVIDER_MARKERS = (
+    "live_openai",
+    "live_anthropic",
+    "live_gemini",
+)
 
 _EARLY_TEST_ENV_VARS = (
     "KITARU_SERVER_URL",
@@ -161,6 +179,313 @@ def isolated_zenml_global_config(
     set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
+
+
+def _is_live_provider_test(item: pytest.Item) -> bool:
+    return item.get_closest_marker("live_llm") is not None or any(
+        item.get_closest_marker(marker_name) is not None
+        for marker_name in _LIVE_PROVIDER_MARKERS
+    )
+
+
+def _required_live_env_groups(item: pytest.Item) -> list[tuple[str, ...]]:
+    required: list[tuple[str, ...]] = []
+    if item.get_closest_marker("live_openai") is not None:
+        required.append(("OPENAI_API_KEY",))
+    if item.get_closest_marker("live_anthropic") is not None:
+        required.append(("ANTHROPIC_API_KEY",))
+    if item.get_closest_marker("live_gemini") is not None:
+        required.append(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
+    return required
+
+
+def _skip_if_live_provider_keys_are_missing(item: pytest.Item) -> None:
+    missing_groups = [
+        env_group
+        for env_group in _required_live_env_groups(item)
+        if not any(os.environ.get(env_name) for env_name in env_group)
+    ]
+    if not missing_groups:
+        return
+
+    formatted = [" or ".join(env_group) for env_group in missing_groups]
+    pytest.skip(
+        "live provider test requires environment variable(s): " + "; ".join(formatted)
+    )
+
+
+def _validate_live_marker_contract(
+    items: Iterable[tuple[str, set[str]]],
+) -> list[str]:
+    """Return marker-contract errors for collected pytest items."""
+    missing_live_llm: list[str] = []
+    missing_provider_marker: list[str] = []
+    for nodeid, marker_names in items:
+        provider_markers = [
+            marker_name
+            for marker_name in _LIVE_PROVIDER_MARKERS
+            if marker_name in marker_names
+        ]
+        has_live_llm = "live_llm" in marker_names
+        if provider_markers and not has_live_llm:
+            missing_live_llm.append(f"{nodeid} ({', '.join(provider_markers)})")
+        if has_live_llm and not provider_markers:
+            missing_provider_marker.append(nodeid)
+
+    errors: list[str] = []
+    if missing_live_llm:
+        formatted = "\n".join(f"- {nodeid}" for nodeid in missing_live_llm)
+        errors.append(
+            "Provider-specific live tests must also be marked with "
+            f"@pytest.mark.live_llm:\n{formatted}"
+        )
+    if missing_provider_marker:
+        formatted = "\n".join(f"- {nodeid}" for nodeid in missing_provider_marker)
+        provider_markers = ", ".join(
+            f"@pytest.mark.{name}" for name in _LIVE_PROVIDER_MARKERS
+        )
+        errors.append(
+            "Tests marked with @pytest.mark.live_llm must also declare at least "
+            f"one provider marker ({provider_markers}). If a future live test is "
+            "not provider-specific, deliberately extend the live marker contract "
+            f"in tests/conftest.py first:\n{formatted}"
+        )
+    return errors
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Require live tests to carry umbrella and provider-specific markers."""
+    del config
+    marker_items = [
+        (
+            item.nodeid,
+            {
+                marker_name
+                for marker_name in ("live_llm", *_LIVE_PROVIDER_MARKERS)
+                if item.get_closest_marker(marker_name) is not None
+            },
+        )
+        for item in items
+    ]
+    errors = _validate_live_marker_contract(marker_items)
+    if errors:
+        raise pytest.UsageError("\n\n".join(errors))
+
+
+def _is_azure_openai_host(normalized: str) -> bool:
+    if normalized == "api.openai.azure.com":
+        return True
+    if not normalized.endswith(_AZURE_OPENAI_RESOURCE_SUFFIX):
+        return False
+    resource_name = normalized[: -len(_AZURE_OPENAI_RESOURCE_SUFFIX)]
+    return bool(resource_name) and "." not in resource_name
+
+
+def _provider_name_for_host(host: str | None) -> str | None:
+    if not host:
+        return None
+    normalized = host.lower().rstrip(".")
+    if _is_azure_openai_host(normalized):
+        return "OpenAI"
+    if normalized.endswith("-aiplatform.googleapis.com"):
+        return "Gemini/Google GenAI"
+    for provider_name, suffixes in _PROVIDER_HOST_SUFFIX_BY_NAME.items():
+        if any(
+            normalized == suffix or normalized.endswith(f".{suffix}")
+            for suffix in suffixes
+        ):
+            return provider_name
+    return None
+
+
+def _provider_name_for_url(url: Any) -> str | None:
+    parsed = urlparse(str(url))
+    return _provider_name_for_host(parsed.hostname)
+
+
+def _fail_provider_call(provider_name: str) -> None:
+    raise AssertionError(
+        f"Blocked {provider_name} provider call from an unmarked deterministic "
+        "pytest test. Mark paid/provider tests with @pytest.mark.live_llm and "
+        "the provider-specific marker, for example @pytest.mark.live_openai."
+    )
+
+
+def _resolve_attr_target(dotted_path: str) -> tuple[Any, str] | None:
+    module_name, _, attr_path = dotted_path.partition(":")
+    try:
+        target: Any = importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        return None
+    parts = attr_path.split(".")
+    for part in parts[:-1]:
+        target = getattr(target, part, None)
+        if target is None:
+            return None
+    return target, parts[-1]
+
+
+def _provider_name_for_sdk_request(
+    client: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    default_provider: str,
+) -> str | None:
+    options = kwargs.get("options")
+    if options is None and len(args) >= 2:
+        options = args[1]
+
+    raw_url = getattr(options, "url", None)
+    base_url = getattr(client, "base_url", None)
+
+    if raw_url is not None:
+        raw_url_string = str(raw_url)
+        if urlparse(raw_url_string).hostname is not None:
+            return _provider_name_for_url(raw_url_string)
+        if base_url is not None:
+            return _provider_name_for_url(urljoin(str(base_url), raw_url_string))
+
+    if base_url is not None:
+        return _provider_name_for_url(base_url)
+
+    return default_provider
+
+
+def _patch_sdk_request_if_available(
+    monkeypatch: pytest.MonkeyPatch,
+    dotted_path: str,
+    *,
+    default_provider: str,
+    is_async: bool,
+) -> None:
+    resolved = _resolve_attr_target(dotted_path)
+    if resolved is None:
+        return
+    target, attr_name = resolved
+    original = getattr(target, attr_name, None)
+    if original is None:
+        return
+
+    if is_async:
+
+        async def guarded_async_request(self: Any, *args: Any, **kwargs: Any) -> Any:
+            provider_name = _provider_name_for_sdk_request(
+                self, args, kwargs, default_provider=default_provider
+            )
+            if provider_name is not None:
+                _fail_provider_call(provider_name)
+            return await original(self, *args, **kwargs)
+
+        monkeypatch.setattr(target, attr_name, guarded_async_request, raising=False)
+        return
+
+    def guarded_request(self: Any, *args: Any, **kwargs: Any) -> Any:
+        provider_name = _provider_name_for_sdk_request(
+            self, args, kwargs, default_provider=default_provider
+        )
+        if provider_name is not None:
+            _fail_provider_call(provider_name)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(target, attr_name, guarded_request, raising=False)
+
+
+def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    for dotted_path, default_provider, is_async in (
+        ("openai._base_client:SyncAPIClient.request", "OpenAI", False),
+        ("openai._base_client:AsyncAPIClient.request", "OpenAI", True),
+        ("anthropic._base_client:SyncAPIClient.request", "Anthropic", False),
+        ("anthropic._base_client:AsyncAPIClient.request", "Anthropic", True),
+    ):
+        _patch_sdk_request_if_available(
+            monkeypatch,
+            dotted_path,
+            default_provider=default_provider,
+            is_async=is_async,
+        )
+
+    try:
+        import httpx
+    except ModuleNotFoundError:
+        pass
+    else:
+        original_client_request = httpx.Client.request
+        original_async_client_request = httpx.AsyncClient.request
+
+        def guarded_httpx_request(
+            self: Any, method: str, url: Any, **kwargs: Any
+        ) -> Any:
+            provider_name = _provider_name_for_url(url)
+            if provider_name is not None:
+                _fail_provider_call(provider_name)
+            return original_client_request(self, method, url, **kwargs)
+
+        async def guarded_httpx_request_async(
+            self: Any, method: str, url: Any, **kwargs: Any
+        ) -> Any:
+            provider_name = _provider_name_for_url(url)
+            if provider_name is not None:
+                _fail_provider_call(provider_name)
+            return await original_async_client_request(self, method, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "request", guarded_httpx_request)
+        monkeypatch.setattr(httpx.AsyncClient, "request", guarded_httpx_request_async)
+
+    try:
+        import requests
+    except ModuleNotFoundError:
+        pass
+    else:
+        original_requests_request = requests.sessions.Session.request
+
+        def guarded_requests_request(
+            self: Any, method: str, url: Any, **kwargs: Any
+        ) -> Any:
+            provider_name = _provider_name_for_url(url)
+            if provider_name is not None:
+                _fail_provider_call(provider_name)
+            return original_requests_request(self, method, url, **kwargs)
+
+        monkeypatch.setattr(
+            requests.sessions.Session,
+            "request",
+            guarded_requests_request,
+        )
+
+    try:
+        import urllib3
+    except ModuleNotFoundError:
+        pass
+    else:
+        original_urlopen = urllib3.connectionpool.HTTPConnectionPool.urlopen
+
+        def guarded_urllib3_urlopen(self: Any, *args: Any, **kwargs: Any) -> Any:
+            provider_name = _provider_name_for_host(getattr(self, "host", None))
+            if provider_name is not None:
+                _fail_provider_call(provider_name)
+            return original_urlopen(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            urllib3.connectionpool.HTTPConnectionPool,
+            "urlopen",
+            guarded_urllib3_urlopen,
+        )
+
+
+@pytest.fixture(autouse=True)
+def provider_spend_guard(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Block accidental provider calls unless a test is explicitly live-marked."""
+    if _is_live_provider_test(request.node):
+        _skip_if_live_provider_keys_are_missing(request.node)
+        return
+    _install_provider_call_guard(monkeypatch)
 
 
 @pytest.fixture()

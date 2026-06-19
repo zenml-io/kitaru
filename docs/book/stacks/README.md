@@ -15,8 +15,10 @@ bundles these concerns:
   and saved data are written (local, S3, GCS, Azure Blob)
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
-- **Sandbox** — the isolated execution environment Kitaru can use when a
-  checkpoint asks for sandboxed work
+- **Sandbox** — an execution environment Kitaru can use when a checkpoint
+  asks for sandboxed work. Some sandbox providers isolate execution. The
+  `local` sandbox does not: it runs local subprocesses with local filesystem
+  and network access.
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -89,8 +91,11 @@ By default, Kitaru creates:
 - a stack named `dev`
 
 Then it automatically activates the new stack. The local sandbox uses Kitaru's
-installed local sandbox provider. If another sandbox provider is installed in
-your environment, you can choose it explicitly:
+installed local sandbox provider. Important: the `local` sandbox is for local
+development convenience, not for running untrusted code. It is not a security
+boundary; commands run on your machine and can access local files and the
+network available to your user. If another sandbox provider is installed in your
+environment, you can choose it explicitly:
 
 ```bash
 kitaru stack create dev --sandbox local
@@ -206,12 +211,18 @@ already using, finds the one attached sandbox component, creates a temporary
 session, runs the command, collects output, and then closes or destroys that
 session.
 
+If the attached sandbox is `local`, the command runs as a local subprocess.
+Treat it like running a command on your own machine, not like running inside a
+locked-down container.
+
 ```python
 import kitaru
 
 result = kitaru.run_sandbox_command("python --version")
 print(result.stdout)
 ```
+
+For a runnable version of this pattern inside a tracked Kitaru flow, see the [active stack sandbox command example](https://github.com/zenml-io/kitaru/tree/develop/examples/features/sandbox).
 
 If the active stack has no sandbox, Kitaru raises an error and does not run the
 command. If the active stack has more than one sandbox, Kitaru also raises an
@@ -250,6 +261,8 @@ You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 - `artifact_store`
 - `container_registry`
 - `sandbox`
+
+Sandbox overrides only apply when the created stack has a sandbox: remote stacks require `--sandbox FLAVOR` or top-level `sandbox: FLAVOR`, while local stacks default to `local`.
 
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
