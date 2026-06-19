@@ -20,7 +20,7 @@ def normalized_token_contains_any(
     """Return whether a normalized provider token contains any fragment.
 
     Google SDK shapes are not consistent about separators: one backend can emit
-    ``function_call`` while another exposes a class-like ``FunctionCallContent``.
+    ``function_call`` while another exposes a class-like ``FunctionCallStep``.
     Compare both the normalized token and a separator-free variant so one helper
     owns that tolerance.
     """

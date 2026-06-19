@@ -3,7 +3,9 @@
 Story:
 - A Kitaru flow sends one Gemini Interactions API request.
 - `KitaruGeminiInteractionsRunner` wraps that stable interaction response in one
-  Kitaru checkpoint.
+  Kitaru checkpoint for normal model and Antigravity modes.
+- `--mode sandbox-function` uses three visible checkpoints: ask Gemini for a
+  function call, run the sandbox command, then send the function result back.
 - `--dry-run` prints the same kind of result summary without credentials or a
   network call, so smoke tests can exercise the example safely.
 - `--stream` uses direct model streaming for model mode and create-once,
@@ -77,6 +79,11 @@ SANDBOX_FUNCTION_TOOL = {
     "type": "function",
     "name": SANDBOX_FUNCTION_NAME,
     "description": "Return the Python version from Kitaru's active sandbox.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
 }
 Mode = Literal["model", "antigravity", "sandbox-function"]
 DEFAULT_PROMPTS_BY_MODE: dict[Mode, str] = {
@@ -143,6 +150,7 @@ def _build_runner(
             include_stream_text_deltas=include_stream_text_deltas
         ),
         checkpoint_config={"cache": False},
+        allow_direct_execution_inside_checkpoint=True,
     )
 
 
@@ -230,14 +238,52 @@ def _sandbox_python_version_spec() -> GeminiSandboxFunctionSpec:
 
 
 @checkpoint
+def request_sandbox_python_version_function_call(
+    request: GeminiInteractionRequest,
+    *,
+    stream: bool = False,
+    show_text_deltas: bool = False,
+) -> GeminiInteractionResult:
+    """Ask Gemini to call the showcased sandbox function."""
+    runner = (
+        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    )
+    return runner.run_stream_sync(request) if stream else runner.run_sync(request)
+
+
+@checkpoint
 def run_sandbox_python_version_function(
     result: GeminiInteractionResult,
 ) -> GeminiSandboxFunctionExecution:
     """Execute the showcased Gemini custom function in Kitaru's sandbox."""
+    if result.status != "requires_action":
+        raise RuntimeError(
+            "The sandbox-function showcase expected Gemini to request "
+            "sandbox_python_version, but Gemini returned "
+            f"status={result.status!r}. Try the default prompt or ask explicitly "
+            "for that function call."
+        )
     return execute_gemini_sandbox_function_call(
         result,
         {SANDBOX_FUNCTION_NAME: _sandbox_python_version_spec()},
+        tools=[SANDBOX_FUNCTION_TOOL],
+        metadata={**result.metadata, "mode": "sandbox-function"},
     )
+
+
+@checkpoint
+def finish_sandbox_python_version_function(
+    execution: GeminiSandboxFunctionExecution,
+    *,
+    stream: bool = False,
+    show_text_deltas: bool = False,
+) -> GeminiInteractionResult:
+    """Send the sandbox function result back to Gemini."""
+    runner = (
+        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    )
+    request = execution.function_result_request
+    return runner.run_stream_sync(request) if stream else runner.run_sync(request)
 
 
 @flow
@@ -248,21 +294,17 @@ def run_gemini_sandbox_function_showcase(
     show_text_deltas: bool = False,
 ) -> GeminiInteractionResult:
     """Run Gemini, answer one sandbox function call, then resume Gemini."""
-    runner = (
-        _build_runner(include_stream_text_deltas=True) if show_text_deltas else RUNNER
+    first_result = request_sandbox_python_version_function_call(
+        request,
+        stream=stream,
+        show_text_deltas=show_text_deltas,
     )
-    first_result = (
-        runner.run_stream_sync(request) if stream else runner.run_sync(request)
-    )
-    if first_result.status != "requires_action":
-        raise RuntimeError(
-            "The sandbox-function showcase expected Gemini to request "
-            "sandbox_python_version, but Gemini returned "
-            f"status={first_result.status!r}. Try the default prompt or ask "
-            "explicitly for that function call."
-        )
     execution = run_sandbox_python_version_function(first_result)
-    return runner.run_sync(execution.function_result_request)
+    return finish_sandbox_python_version_function(
+        execution,
+        stream=stream,
+        show_text_deltas=show_text_deltas,
+    )
 
 
 def _fake_result(
@@ -417,7 +459,7 @@ def _print_sandbox_function_dry_run(model: str) -> None:
     print("In a real flow, run the sandbox command from a @checkpoint.")
 
     print("\n1. Fake Gemini requires_action result")
-    _print_result(result)
+    _print_result(result, mode="sandbox-function")
 
     print("\n2. Fake Kitaru sandbox command result")
     print(
@@ -486,9 +528,22 @@ def _watch_gemini_stream(exec_id: str, stop_event: threading.Event) -> None:
         print(f"The durable result will still be read with .wait(): {error}")
 
 
-def _print_result(result: GeminiInteractionResult) -> None:
+def _print_result(
+    result: GeminiInteractionResult,
+    *,
+    mode: Mode | None = None,
+) -> None:
     print("\n=== What happened ===")
-    print("Kitaru records one stable Gemini interaction response as one checkpoint.")
+    result_mode = mode or result.metadata.get("mode")
+    if result_mode == "sandbox-function":
+        print(
+            "Kitaru used three checkpoints: ask Gemini for a sandbox function "
+            "call, run the sandbox command, then send the result back to Gemini."
+        )
+    else:
+        print(
+            "Kitaru records one stable Gemini interaction response as one checkpoint."
+        )
     if "stream" in result.metadata:
         print(
             "Streaming was enabled: Kitaru published best-effort live events while "
@@ -645,7 +700,8 @@ def main(argv: list[str] | None = None) -> None:
             _print_sandbox_function_dry_run(str(args.model))
         else:
             _print_result(
-                _fake_result(args.mode, str(args.model), stream=bool(args.stream))
+                _fake_result(args.mode, str(args.model), stream=bool(args.stream)),
+                mode=args.mode,
             )
         return
 
@@ -680,7 +736,7 @@ def main(argv: list[str] | None = None) -> None:
         watcher.join(timeout=1.0)
         if watcher.is_alive():
             print("\nLive watcher is still open; showing the durable result now.")
-    _print_result(result)
+    _print_result(result, mode=args.mode)
 
 
 if __name__ == "__main__":

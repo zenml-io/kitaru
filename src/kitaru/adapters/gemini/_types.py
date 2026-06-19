@@ -55,13 +55,19 @@ class GeminiInteractionRequest(BaseModel):
 
     @property
     def has_function_result_only_fields(self) -> bool:
-        """Return whether any function-result-only field was explicit."""
+        """Return whether any function-result-only field carries data.
+
+        ZenML/Pydantic reloads may mark nullable fields as explicit even when they
+        are JSON null. Treat only non-null values as function-result data so a
+        persisted ``start`` or ``resume`` request can round-trip through a
+        checkpoint input.
+        """
         return any(
-            field_name in self.model_fields_set
-            for field_name in (
-                "function_call_id",
-                "function_name",
-                "function_result_payload",
+            value is not None
+            for value in (
+                self.function_call_id,
+                self.function_name,
+                self.function_result_payload,
             )
         )
 

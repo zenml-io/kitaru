@@ -21,6 +21,7 @@ def install_fake_google_genai(
     *,
     include_client: bool = True,
     include_types: bool = True,
+    interaction_type_module: str = "legacy",
     function_call_annotations: dict[str, Any] | None = None,
     function_result_annotations: dict[str, Any] | None = None,
 ) -> types.ModuleType:
@@ -28,6 +29,10 @@ def install_fake_google_genai(
     for cached in (
         "google.genai._interactions",
         "google.genai._interactions.types",
+        "google.genai._gaos",
+        "google.genai._gaos.types",
+        "google.genai._gaos.types.interactions",
+        "google.genai._gaos.types.interactions.step",
     ):
         monkeypatch.delitem(sys.modules, cached, raising=False)
 
@@ -42,13 +47,10 @@ def install_fake_google_genai(
     monkeypatch.setitem(sys.modules, "google", google)
     monkeypatch.setitem(sys.modules, "google.genai", genai)
     if include_types:
-        interactions = types.ModuleType("google.genai._interactions")
-        interactions.__path__ = []  # type: ignore[attr-defined]
         interaction_types = types.ModuleType("google.genai._interactions.types")
-        interactions_module: Any = interactions
         interaction_types_module: Any = interaction_types
-        interaction_types_module.FunctionCallContent = type(
-            "FunctionCallContent",
+        interaction_types_module.FunctionCallStep = type(
+            "FunctionCallStep",
             (),
             {
                 "__annotations__": {
@@ -61,8 +63,8 @@ def install_fake_google_genai(
                 else function_call_annotations
             },
         )
-        interaction_types_module.FunctionResultContent = type(
-            "FunctionResultContent",
+        interaction_types_module.FunctionResultStep = type(
+            "FunctionResultStep",
             (),
             {
                 "__annotations__": {
@@ -75,12 +77,47 @@ def install_fake_google_genai(
                 else function_result_annotations
             },
         )
-        genai_module._interactions = interactions
-        interactions_module.types = interaction_types
-        monkeypatch.setitem(sys.modules, "google.genai._interactions", interactions)
-        monkeypatch.setitem(
-            sys.modules,
-            "google.genai._interactions.types",
-            interaction_types,
-        )
+        if interaction_type_module == "legacy":
+            interactions = types.ModuleType("google.genai._interactions")
+            interactions.__path__ = []  # type: ignore[attr-defined]
+            interactions_module: Any = interactions
+            genai_module._interactions = interactions
+            interactions_module.types = interaction_types
+            monkeypatch.setitem(sys.modules, "google.genai._interactions", interactions)
+            monkeypatch.setitem(
+                sys.modules,
+                "google.genai._interactions.types",
+                interaction_types,
+            )
+        elif interaction_type_module == "gaos":
+            gaos = types.ModuleType("google.genai._gaos")
+            gaos.__path__ = []  # type: ignore[attr-defined]
+            gaos_types = types.ModuleType("google.genai._gaos.types")
+            gaos_types.__path__ = []  # type: ignore[attr-defined]
+            interactions = types.ModuleType("google.genai._gaos.types.interactions")
+            interactions.__path__ = []  # type: ignore[attr-defined]
+            interaction_types.__name__ = "google.genai._gaos.types.interactions.step"
+            gaos_module: Any = gaos
+            gaos_types_module: Any = gaos_types
+            interactions_module: Any = interactions
+            genai_module._gaos = gaos
+            gaos_module.types = gaos_types
+            gaos_types_module.interactions = interactions
+            interactions_module.step = interaction_types
+            monkeypatch.setitem(sys.modules, "google.genai._gaos", gaos)
+            monkeypatch.setitem(sys.modules, "google.genai._gaos.types", gaos_types)
+            monkeypatch.setitem(
+                sys.modules,
+                "google.genai._gaos.types.interactions",
+                interactions,
+            )
+            monkeypatch.setitem(
+                sys.modules,
+                "google.genai._gaos.types.interactions.step",
+                interaction_types,
+            )
+        else:
+            raise ValueError(
+                f"Unknown interaction_type_module: {interaction_type_module}"
+            )
     return genai

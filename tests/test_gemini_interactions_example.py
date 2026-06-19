@@ -230,38 +230,15 @@ def test_gemini_interactions_example_sandbox_function_request_uses_model_tool() 
     assert request.metadata["mode"] == "sandbox-function"
 
 
-def test_gemini_interactions_example_sandbox_showcase_requires_action(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = gemini_interactions_adapter.GeminiInteractionRequest.start(
-        "hello",
+def test_gemini_interactions_example_sandbox_showcase_requires_action() -> None:
+    result = gemini_interactions_adapter.GeminiInteractionResult(
+        status="completed",
+        interaction_id="interaction-1",
         model="gemini-test",
     )
 
-    class FakeRunner:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def run_sync(
-            self,
-            request: gemini_interactions_adapter.GeminiInteractionRequest,
-        ) -> gemini_interactions_adapter.GeminiInteractionResult:
-            self.calls += 1
-            return gemini_interactions_adapter.GeminiInteractionResult(
-                status="completed",
-                interaction_id="interaction-1",
-                model="gemini-test",
-            )
-
-    fake_runner = FakeRunner()
-    monkeypatch.setattr(gemini_interactions_adapter, "RUNNER", fake_runner)
-
     with pytest.raises(RuntimeError, match="expected Gemini to request"):
-        gemini_interactions_adapter.run_gemini_sandbox_function_showcase._func(
-            request,
-        )
-
-    assert fake_runner.calls == 1
+        gemini_interactions_adapter.run_sandbox_python_version_function._func(result)
 
 
 def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
@@ -302,6 +279,16 @@ def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
                 output_text="The sandbox is running Python 3.12.0.",
             )
 
+    def fake_request_sandbox_function_call(
+        request: gemini_interactions_adapter.GeminiInteractionRequest,
+        *,
+        stream: bool = False,
+        show_text_deltas: bool = False,
+    ) -> gemini_interactions_adapter.GeminiInteractionResult:
+        assert stream is False
+        assert show_text_deltas is False
+        return FakeRunner().run_sync(request)
+
     def fake_run_sandbox_function(
         result: gemini_interactions_adapter.GeminiInteractionResult,
     ) -> gemini_interactions_adapter.GeminiSandboxFunctionExecution:
@@ -319,6 +306,7 @@ def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
             function_name=call.function_name,
             function_result=payload,
             model=result.model,
+            tools=[gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL],
         )
         return gemini_interactions_adapter.GeminiSandboxFunctionExecution(
             call=call,
@@ -327,11 +315,30 @@ def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
             function_result_request=request,
         )
 
-    monkeypatch.setattr(gemini_interactions_adapter, "RUNNER", FakeRunner())
+    def fake_finish_sandbox_function(
+        execution: gemini_interactions_adapter.GeminiSandboxFunctionExecution,
+        *,
+        stream: bool = False,
+        show_text_deltas: bool = False,
+    ) -> gemini_interactions_adapter.GeminiInteractionResult:
+        assert stream is False
+        assert show_text_deltas is False
+        return FakeRunner().run_sync(execution.function_result_request)
+
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "request_sandbox_python_version_function_call",
+        fake_request_sandbox_function_call,
+    )
     monkeypatch.setattr(
         gemini_interactions_adapter,
         "run_sandbox_python_version_function",
         fake_run_sandbox_function,
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "finish_sandbox_python_version_function",
+        fake_finish_sandbox_function,
     )
 
     final_result = (
@@ -356,6 +363,7 @@ def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
         }
     ]
     assert continuation.function_result_payload[0]["type"] == "text"
+    assert continuation.tools == [gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL]
 
 
 def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> None:

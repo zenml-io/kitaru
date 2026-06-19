@@ -126,7 +126,18 @@ def test_import_without_interaction_types_raises_clear_contract_error(
 
     message = str(exc_info.value)
     assert "Interactions preview API" in message
-    assert "FunctionCallContent/FunctionResultContent" in message
+    assert "FunctionCallStep/FunctionResultStep" in message
+
+
+def test_import_accepts_google_genai_2_9_interaction_type_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(monkeypatch, interaction_type_module="gaos")
+
+    gemini_adapter = importlib.import_module("kitaru.adapters.gemini")
+
+    assert gemini_adapter.KitaruGeminiInteractionsRunner
 
 
 def test_import_with_incomplete_interaction_type_annotations_raises(
@@ -178,32 +189,50 @@ def test_installed_google_genai_interactions_contract(
         monkeypatch.delitem(sys.modules, "google", raising=False)
 
     genai = pytest.importorskip("google.genai")
-    interaction_types = pytest.importorskip("google.genai._interactions.types")
+    interaction_types = None
+    for module_path in (
+        "google.genai._interactions.types",
+        "google.genai._gaos.types.interactions.step",
+    ):
+        try:
+            interaction_types = importlib.import_module(module_path)
+            break
+        except ModuleNotFoundError as exc:
+            if exc.name is not None and (
+                module_path == exc.name or module_path.startswith(f"{exc.name}.")
+            ):
+                continue
+            raise
+    if interaction_types is None:
+        pytest.fail("google-genai does not expose Interactions step types")
 
     client = genai.Client(api_key="test-key")
     create_signature = inspect.signature(client.interactions.create)
     get_signature = inspect.signature(client.interactions.get)
 
+    create_accepts_body_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in create_signature.parameters.values()
+    )
     for field in {
         "input",
         "model",
         "agent",
         "agent_config",
-        "extra_body",
-        "timeout",
         "previous_interaction_id",
         "store",
         "stream",
     }:
-        assert field in create_signature.parameters
+        assert create_accepts_body_kwargs or field in create_signature.parameters
+    assert "extra_body" in create_signature.parameters
+    assert "timeout" in create_signature.parameters
     assert "id" in get_signature.parameters
-    assert "extra_body" in get_signature.parameters
     assert "timeout" in get_signature.parameters
     assert "stream" in get_signature.parameters
     assert "last_event_id" in get_signature.parameters
 
-    function_call_fields = interaction_types.FunctionCallContent.__annotations__
-    function_result_fields = interaction_types.FunctionResultContent.__annotations__
+    function_call_fields = interaction_types.FunctionCallStep.__annotations__
+    function_result_fields = interaction_types.FunctionResultStep.__annotations__
     assert "id" in function_call_fields
     assert "name" in function_call_fields
     assert "arguments" in function_call_fields
@@ -213,7 +242,7 @@ def test_installed_google_genai_interactions_contract(
     assert "result" in function_result_fields
     assert "type" in function_result_fields
 
-    function_result = interaction_types.FunctionResultContent(
+    function_result = interaction_types.FunctionResultStep(
         call_id="call-1",
         name="lookup",
         result={"ok": True},
@@ -427,7 +456,12 @@ def test_gemini_request_constructors_and_validation(
     "request_data, error",
     [
         (
-            {"kind": "start", "input": "hello", "model": "m", "function_result": None},
+            {
+                "kind": "start",
+                "input": "hello",
+                "model": "m",
+                "function_result": {"ok": True},
+            },
             "kind='start'.*function-result fields",
         ),
         (
@@ -435,12 +469,17 @@ def test_gemini_request_constructors_and_validation(
                 "kind": "start",
                 "input": "hello",
                 "model": "m",
-                "function_result_payload": None,
+                "function_result_payload": {"ok": True},
             },
             "kind='start'.*function-result fields",
         ),
         (
-            {"kind": "start", "input": "hello", "model": "m", "function_call_id": None},
+            {
+                "kind": "start",
+                "input": "hello",
+                "model": "m",
+                "function_call_id": "call-1",
+            },
             "kind='start'.*function-result fields",
         ),
         (
@@ -449,7 +488,7 @@ def test_gemini_request_constructors_and_validation(
                 "input": "hello",
                 "previous_interaction_id": "interaction-1",
                 "model": "m",
-                "function_result": None,
+                "function_result": {"ok": True},
             },
             "kind='resume'.*function-result fields",
         ),
@@ -459,7 +498,7 @@ def test_gemini_request_constructors_and_validation(
                 "input": "hello",
                 "previous_interaction_id": "interaction-1",
                 "model": "m",
-                "function_call_id": None,
+                "function_call_id": "call-1",
             },
             "kind='resume'.*function-result fields",
         ),
@@ -467,7 +506,7 @@ def test_gemini_request_constructors_and_validation(
             {
                 "kind": "poll",
                 "interaction_id": "interaction-1",
-                "function_call_id": None,
+                "function_call_id": "call-1",
             },
             "kind='poll'.*function-result fields",
         ),
@@ -480,6 +519,27 @@ def test_direct_gemini_request_rejects_function_result_fields_for_non_result_kin
 ) -> None:
     with pytest.raises(ValidationError, match=error):
         gemini_adapter.GeminiInteractionRequest(**request_data)
+
+
+def test_direct_gemini_request_allows_null_function_result_fields_after_reload(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+    reloaded = gemini_adapter.GeminiInteractionRequest.model_validate(
+        {
+            **request.model_dump(mode="json", by_alias=True),
+            "function_call_id": None,
+            "function_name": None,
+            "function_result": None,
+        }
+    )
+
+    assert reloaded.kind == "start"
+    assert reloaded.has_function_result_payload is True
+    assert reloaded.has_function_result_only_fields is False
 
 
 def test_direct_function_result_request_accepts_explicit_json_null_result(

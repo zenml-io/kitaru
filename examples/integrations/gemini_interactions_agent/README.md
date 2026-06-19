@@ -3,10 +3,12 @@
 This example shows the public `kitaru.adapters.gemini` API on a Gemini
 Interactions API call.
 
-Story in one line: a Kitaru flow sends one Gemini interaction request, and
-`KitaruGeminiInteractionsRunner` records the stable response as one checkpoint.
+Story in one line: for the normal model and Antigravity modes, a Kitaru flow
+sends one Gemini interaction request, and `KitaruGeminiInteractionsRunner`
+records the stable response as one checkpoint. The sandbox-function mode adds a
+second Gemini turn around a Kitaru-owned sandbox command.
 
-The mental model is deliberately simple:
+The mental model for a normal interaction is deliberately simple:
 
 ```text
 flow body calls KitaruGeminiInteractionsRunner
@@ -31,6 +33,10 @@ cd examples/integrations/gemini_interactions_agent
 uv sync --extra local --extra gemini
 uv run kitaru init
 ```
+
+The `gemini` extra installs Google GenAI SDK 2.x. That matters because Google's
+Interactions API now serves the current `steps` schema; older 1.x SDKs send the
+removed legacy schema and are rejected by the API.
 
 Then pick **one** of the two ways to authenticate with Google.
 
@@ -226,11 +232,12 @@ plan. Change the prompt if you want a different managed-agent task.
 
 ## What to look for in Kitaru UI
 
-The flow contains one adapter-created checkpoint named like
+For `--mode model` and `--mode antigravity`, the flow contains one
+adapter-created checkpoint named like
 `gemini_interactions_example_gemini_interaction`. That checkpoint is the replay
 boundary for the Gemini interaction.
 
-A good way to read the run is:
+A good way to read a normal model or Antigravity run is:
 
 1. The flow body creates a `GeminiInteractionRequest`.
 2. `KitaruGeminiInteractionsRunner.run_sync(...)` turns that request into one
@@ -239,6 +246,15 @@ A good way to read the run is:
 4. The printed artifact names point to the captured redacted request manifest,
    output, usage, event log, and run summary. Raw input, raw interaction, and
    raw step artifacts are disabled by default unless you opt in.
+
+For `--mode sandbox-function`, the flow shows three visible checkpoints instead:
+
+1. `request_sandbox_python_version_function_call` asks Gemini for a custom
+   function call.
+2. `run_sandbox_python_version_function` runs `python --version` in Kitaru's
+   active sandbox.
+3. `finish_sandbox_python_version_function` sends the sandbox result back to
+   Gemini and stores the final `GeminiInteractionResult`.
 
 One local-orchestrator wrinkle: the script submits the flow first, then starts a
 watcher thread. On a very fast local run, some stream events may print only after

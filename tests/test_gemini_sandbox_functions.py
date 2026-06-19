@@ -117,7 +117,7 @@ def test_function_call_view_skips_incomplete_and_non_call_steps(
             gemini_adapter.GeminiInteractionStepSummary(index=0, type="message"),
             gemini_adapter.GeminiInteractionStepSummary(
                 index=1,
-                type="FunctionCallContent",
+                type="FunctionCallStep",
                 call_id=None,
                 tool_name="missing_call_id",
             ),
