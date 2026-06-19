@@ -10,7 +10,7 @@ sandbox command tool.
 import argparse
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, cast
 
 from langchain.agents import create_agent
@@ -88,11 +88,20 @@ class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
             tool_choice={
                 "type": "function",
                 "function": {"name": SANDBOX_COMMAND_TOOL_NAME},
-            }
+            },
+            model_settings=_model_settings_with_single_tool_call(request),
         )
         response = handler(forced_request)
         _force_sandbox_tool_arguments(response)
         return response
+
+
+def _model_settings_with_single_tool_call(request: Any) -> dict[str, Any]:
+    """Return model settings that prevent duplicate forced tool calls."""
+    existing = getattr(request, "model_settings", None)
+    settings = dict(existing) if isinstance(existing, Mapping) else {}
+    settings["parallel_tool_calls"] = False
+    return settings
 
 
 def _force_sandbox_tool_arguments(response: Any) -> None:

@@ -37,8 +37,14 @@ def _load_example_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 class _FakeModelRequest:
     """Tiny request object that records LangChain-style override calls."""
 
-    def __init__(self, messages: list[Any]) -> None:
+    def __init__(
+        self,
+        messages: list[Any],
+        *,
+        model_settings: dict[str, Any] | None = None,
+    ) -> None:
         self.messages = messages
+        self.model_settings = model_settings
         self.overrides: list[dict[str, Any]] = []
 
     def override(self, **kwargs: Any) -> Any:
@@ -81,7 +87,44 @@ def test_force_sandbox_tool_choice_forces_specific_tool_only_initially(
             "tool_choice": {
                 "type": "function",
                 "function": {"name": module.SANDBOX_COMMAND_TOOL_NAME},
-            }
+            },
+            "model_settings": {"parallel_tool_calls": False},
+        }
+    ]
+
+
+def test_force_sandbox_tool_choice_preserves_existing_model_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+    middleware = module.ForceSandboxToolChoiceMiddleware()
+    request = _FakeModelRequest(
+        [{"role": "user", "content": "run the command"}],
+        model_settings={"temperature": 0, "parallel_tool_calls": True},
+    )
+    response = SimpleNamespace(
+        result=[
+            SimpleNamespace(
+                tool_calls=[
+                    {
+                        "name": module.SANDBOX_COMMAND_TOOL_NAME,
+                        "args": {"command": "model-chosen-command"},
+                        "id": "sandbox-call-1",
+                    }
+                ]
+            )
+        ]
+    )
+
+    middleware.wrap_model_call(request, lambda _request: response)
+
+    assert request.overrides == [
+        {
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": module.SANDBOX_COMMAND_TOOL_NAME},
+            },
+            "model_settings": {"temperature": 0, "parallel_tool_calls": False},
         }
     ]
 
