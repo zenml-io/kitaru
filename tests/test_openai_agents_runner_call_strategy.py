@@ -203,7 +203,8 @@ def test_runner_sync_threads_interruption_payload_capture_policy(
         fake_build_run_result,
     )
 
-    result = runner.run_sync(OpenAIRunRequest.start("hello"))
+    prompt = f"hello-{uuid4().hex}"
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
 
     assert result.status == "completed"
     assert result.final_output == "ok"
@@ -1399,7 +1400,8 @@ def test_runner_call_strategy_does_not_invoke_calls_wrappers(
         run_config_factory=lambda: RunConfig(tracing_disabled=True),
     )
 
-    result = runner.run_sync(OpenAIRunRequest.start("hello"))
+    prompt = f"hello-{uuid4().hex}"
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
 
     assert result.status == "completed"
     assert result.final_output == "ok"
