@@ -65,9 +65,16 @@ in the UI or inspect with `kitaru executions get`.
 
 The example uses the adapter's 20,000-character output limit and disables cache
 for the sandbox command checkpoint. Your active stack must have exactly one
-sandbox component; if provider credentials or sandbox support are missing, the
-example prints a short setup message instead of a long provider/backend
-traceback.
+sandbox component. Check the active stack with `uv run kitaru stack current`,
+then inspect it with `uv run kitaru stack show <name>`. If it has no sandbox
+component, create a sandbox-enabled local stack with:
+
+```bash
+uv run kitaru stack create sandbox-demo --sandbox local
+```
+
+If provider credentials or sandbox support are missing, the example prints a
+short setup message instead of a long provider/backend traceback.
 
 Safety note: the model controls the shell command and optional working directory.
 Anything visible to the sandbox process, including files, environment variables,

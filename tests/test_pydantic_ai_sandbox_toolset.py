@@ -395,6 +395,57 @@ async def test_sandbox_command_tool_tracking_records_completed_events(
     _assert_recorded_tool_event(recorded_events[0], status="completed")
 
 
+def test_pydantic_ai_sandbox_example_fails_without_sandbox_tool_call() -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    class FakeResult:
+        output = "Python 3.12.0"
+
+        def all_messages(self) -> list[ModelResponse]:
+            return [ModelResponse(parts=[TextPart(content="Python 3.12.0")])]
+
+    class FakeAgent:
+        def run_sync(self, _prompt: str) -> FakeResult:
+            return FakeResult()
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"without calling {_sandbox.SANDBOX_COMMAND_TOOL_NAME}",
+    ):
+        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(cast(Any, FakeAgent()))
+
+
+def test_pydantic_ai_sandbox_example_accepts_recorded_sandbox_tool_call() -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+
+    class FakeResult:
+        output = "exit code 0; Python 3.12.0"
+
+        def all_messages(self) -> list[ModelResponse]:
+            return [
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name=_sandbox.SANDBOX_COMMAND_TOOL_NAME,
+                            args={"command": "python --version"},
+                            tool_call_id="call_sandbox",
+                        )
+                    ]
+                )
+            ]
+
+    class FakeAgent:
+        def run_sync(self, _prompt: str) -> FakeResult:
+            return FakeResult()
+
+    assert (
+        pydantic_ai_sandbox_toolset.run_sandbox_agent_turn(cast(Any, FakeAgent()))
+        == "exit code 0; Python 3.12.0"
+    )
+
+
 def test_pydantic_ai_sandbox_example_keeps_per_tool_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -484,6 +535,36 @@ def test_pydantic_ai_sandbox_example_submit_disables_flow_cache(
 
     assert handle is not None
     assert run_calls == [{"model": "test", "max_chars": 123, "cache": False}]
+
+
+def test_pydantic_ai_sandbox_example_wait_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
+
+    from kitaru.client import ExecutionStatus
+
+    times = iter([0.0, 0.5, 1.5])
+    slept: list[float] = []
+
+    class FakeHandle:
+        exec_id = "exec-timeout"
+
+        @property
+        def status(self) -> ExecutionStatus:
+            return ExecutionStatus.RUNNING
+
+    monkeypatch.setattr(
+        pydantic_ai_sandbox_toolset.time, "monotonic", lambda: next(times)
+    )
+    monkeypatch.setattr(pydantic_ai_sandbox_toolset.time, "sleep", slept.append)
+
+    with pytest.raises(TimeoutError, match=r"exec-timeout.*running"):
+        pydantic_ai_sandbox_toolset.wait_for_completion(
+            FakeHandle(), poll_seconds=0.01, timeout_seconds=1.0
+        )
+
+    assert slept == [0.01]
 
 
 def test_pydantic_ai_sandbox_example_waits_without_result_extraction(

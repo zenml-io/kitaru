@@ -576,8 +576,16 @@ export OPENAI_API_KEY=sk-...
 uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
 ```
 
-The active stack must have exactly one sandbox component. Set
-`PYDANTIC_AI_MODEL` if you want to use a model other than the default
+The active stack must have exactly one sandbox component. Check the active
+stack with `uv run kitaru stack current`, then inspect it with
+`uv run kitaru stack show <name>`. If it has no sandbox component, create a
+sandbox-enabled local stack with:
+
+```bash
+uv run kitaru stack create sandbox-demo --sandbox local
+```
+
+Set `PYDANTIC_AI_MODEL` if you want to use a model other than the default
 `openai:gpt-5-nano`. The example runs the agent directly in the flow body so
 `run_sandbox_command_tool` is visible as its own checkpoint, then passes the
 answer into a small `publish_sandbox_answer` checkpoint for inspection. The

@@ -16,9 +16,14 @@ Prerequisites:
     uv run kitaru init
     export OPENAI_API_KEY=sk-...
 
-Your active stack must have exactly one sandbox component. The default local
-Kitaru stack includes one when your installed Kitaru local runtime supports
-sandbox components.
+Your active stack must have exactly one sandbox component. Check the active
+stack with:
+    uv run kitaru stack current
+    uv run kitaru stack show <name>
+
+If the active stack has no sandbox component, create a sandbox-enabled local
+stack and make it active:
+    uv run kitaru stack create sandbox-demo --sandbox local
 
 Run:
     uv run python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
@@ -29,6 +34,7 @@ import time
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import ToolCallPart
 
 from kitaru import checkpoint, flow
 from kitaru.adapters.pydantic_ai import (
@@ -92,9 +98,25 @@ def build_agent(
     )
 
 
+def _result_called_sandbox_tool(result: Any) -> bool:
+    """Return whether PydanticAI recorded a sandbox tool call in the run."""
+    return any(
+        isinstance(part, ToolCallPart) and part.tool_name == SANDBOX_COMMAND_TOOL_NAME
+        for message in result.all_messages()
+        for part in getattr(message, "parts", [])
+    )
+
+
 def run_sandbox_agent_turn(sandboxed_agent: KitaruAgent[None, str]) -> str:
     """Run the agent at flow scope so model/tool calls get their own checkpoints."""
     result = sandboxed_agent.run_sync(_SANDBOX_PROMPT)
+    if not _result_called_sandbox_tool(result):
+        raise RuntimeError(
+            f"The model answered without calling {SANDBOX_COMMAND_TOOL_NAME}. "
+            "This live example must exercise the active stack sandbox, so the "
+            "run is treated as failed. Try rerunning, or set PYDANTIC_AI_MODEL "
+            "to a model that follows tool-use instructions."
+        )
     return result.output
 
 
@@ -129,7 +151,12 @@ def submit_sandbox_toolset_flow(
     return sandbox_toolset_flow.run(model=model, max_chars=max_chars, cache=False)
 
 
-def wait_for_completion(handle: Any, *, poll_seconds: float = 1.0) -> ExecutionStatus:
+def wait_for_completion(
+    handle: Any,
+    *,
+    poll_seconds: float = 1.0,
+    timeout_seconds: float = 300.0,
+) -> ExecutionStatus:
     """Wait for terminal execution status without extracting a flow result.
 
     This demo intentionally keeps per-call adapter checkpoints visible. In that
@@ -138,11 +165,20 @@ def wait_for_completion(handle: Any, *, poll_seconds: float = 1.0) -> ExecutionS
     ``handle.status`` waits for completion without asking Kitaru to choose one
     output value.
     """
+    start = time.monotonic()
+    last_status = handle.status
     while True:
-        status = handle.status
-        if status.is_finished:
-            return status
+        if last_status.is_finished:
+            return last_status
+        if time.monotonic() - start >= timeout_seconds:
+            execution_id = getattr(handle, "exec_id", "<unknown>")
+            raise TimeoutError(
+                "Timed out waiting for sandbox toolset flow "
+                f"execution {execution_id} after {timeout_seconds:g}s. "
+                f"Last observed status: {last_status.value}."
+            )
         time.sleep(poll_seconds)
+        last_status = handle.status
 
 
 def main() -> None:
@@ -151,6 +187,7 @@ def main() -> None:
 
     try:
         handle = submit_sandbox_toolset_flow(model=model)
+        print(f"Submitted sandbox toolset flow execution: {handle.exec_id}")
         status = wait_for_completion(handle)
     except (KitaruFeatureNotAvailableError, KitaruStateError) as error:
         raise SystemExit(
@@ -162,6 +199,8 @@ def main() -> None:
             "The sandbox command reached the active stack, but the backend could "
             f"not execute it successfully: {error}"
         ) from error
+    except TimeoutError as error:
+        raise SystemExit(str(error)) from error
 
     if status is not ExecutionStatus.COMPLETED:
         raise SystemExit(
