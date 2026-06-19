@@ -110,6 +110,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming) |
 | `integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` | Let a PydanticAI model call `run_sandbox_command`; the dashboard shows `run_sandbox_command_tool` before the final answer checkpoint (`OPENAI_API_KEY` and one active-stack sandbox required) | [PydanticAI Adapter](../adapters/pydantic-ai.md#active-stack-sandbox-command-toolset) |
 | `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
+| `integrations/openai_agents_agent/openai_agents_sandbox_tool.py` | Let an OpenAI agent call `kitaru_sandbox_command`, which runs a command through the active stack's sandbox and returns compact JSON | [OpenAI Agents sandbox tool](../adapters/openai-agents.md#active-stack-sandbox-command-tool) |
 | `integrations/openai_agents_agent/openai_agents_streaming.py` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](../adapters/openai-agents.md#streaming-with-kitaru-durability) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability) |
@@ -126,10 +127,11 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 {% hint style="info" %}
 The LLM and most adapter examples require additional dependencies and provider
 API keys. The Gemini Interactions example has `--help` and `--dry-run` paths
-that require no credentials or network. The LangGraph `graph_call` strategy
-is deterministic and local; the LangGraph `calls` strategy requires
-`langgraph-openai` and `OPENAI_API_KEY`.
-Check each example's README before running a real model-backed example.
+that require no credentials or network. The OpenAI Agents sandbox-tool example
+also needs an active stack with exactly one sandbox component. The LangGraph
+`graph_call` strategy is deterministic and local; the LangGraph `calls` strategy
+requires `langgraph-openai` and `OPENAI_API_KEY`. Check each example's README
+before running a real model-backed example.
 {% endhint %}
 
 ## If you'd rather build up primitive-by-primitive first
@@ -149,12 +151,13 @@ Agent Harness Platform is the recommended starting point for most readers — it
 11. `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` — [PydanticAI streaming](../adapters/pydantic-ai.md#streaming).
 12. `integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` — [PydanticAI sandbox toolset](../adapters/pydantic-ai.md#active-stack-sandbox-command-toolset).
 13. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](../adapters/openai-agents.md).
-14. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](../adapters/openai-agents.md#streaming-with-kitaru-durability).
-15. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
-16. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
-17. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
-18. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
-19. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
-20. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-21. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
-22. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.
+14. `integrations/openai_agents_agent/openai_agents_sandbox_tool.py` — [OpenAI Agents sandbox tool](../adapters/openai-agents.md#active-stack-sandbox-command-tool).
+15. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](../adapters/openai-agents.md#streaming-with-kitaru-durability).
+16. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
+17. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
+18. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
+19. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
+20. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
+21. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
+22. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
+23. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.

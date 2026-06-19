@@ -364,6 +364,7 @@ def _clip_and_redact_payload_output(
         env=env,
     )
     redacted, content_redacted = _redact_sensitive_text(clipped, env=env)
+    redacted = redacted.replace("[REDACTED]", _BOUNDARY_REDACTION_MARKER)
     redacted, marker_truncated = _clip_payload_output(redacted)
     return (
         redacted,

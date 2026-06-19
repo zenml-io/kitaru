@@ -17,8 +17,8 @@ bundles these concerns:
   execution
 - **Sandbox** — an execution environment Kitaru can use when a checkpoint
   asks for sandboxed work. Some sandbox providers isolate execution. The
-  `local` sandbox does not: it runs local subprocesses with local filesystem
-  and network access.
+  `local` sandbox does not: it runs local subprocesses with the filesystem and
+  network access available to your current user.
 
 The active stack is the default; per-flow and per-run overrides can bind a
 different stack for a single execution. See
@@ -100,7 +100,7 @@ back through stdout or stderr. If another sandbox provider is installed in your
 environment, you can choose it explicitly:
 
 ```bash
-kitaru stack create dev --sandbox local
+kitaru stack create dev --sandbox <sandbox-flavor>
 ```
 
 You will see output like:
@@ -235,6 +235,11 @@ command. If the active stack has more than one sandbox, Kitaru also raises an
 error instead of guessing. That avoids the bad version of the story: you thought
 the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
 sandbox and ran it somewhere expensive.
+
+If you use the OpenAI Agents SDK, `sandbox_command_tool(...)` turns this same
+active-stack sandbox command path into a local OpenAI `FunctionTool`. See the
+[OpenAI Agents adapter guide](../adapters/openai-agents.md#active-stack-sandbox-command-tool)
+for the agent-facing version and its hosted-tool limitations.
 
 The Gemini Interactions adapter can use this same active-stack sandbox for
 caller-owned custom functions. Gemini returns `requires_action`, your code

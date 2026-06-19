@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass, field
+from threading import Event
 from typing import Any, cast
 
 import pytest
 
-from kitaru._config._sandbox import run_sandbox_command
+from kitaru._config._sandbox import active_sandbox_cache_identity, run_sandbox_command
 from kitaru.errors import (
     KitaruBackendError,
     KitaruFeatureNotAvailableError,
@@ -41,6 +42,7 @@ class FakeProcess:
         self.collect_error = collect_error
         self.collect_calls = 0
         self.collect_max_chars: list[int] = []
+        self.kill_calls = 0
 
     def collect(self, *, max_chars: int) -> FakeOutput:
         self.collect_calls += 1
@@ -48,6 +50,25 @@ class FakeProcess:
         if self.collect_error is not None:
             raise self.collect_error
         return self.output
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+
+class BlockingFakeProcess(FakeProcess):
+    def __init__(self) -> None:
+        super().__init__(FakeOutput(stdout="late"))
+        self.kill_event = Event()
+
+    def collect(self, *, max_chars: int) -> FakeOutput:
+        self.collect_calls += 1
+        self.collect_max_chars.append(max_chars)
+        self.kill_event.wait(timeout=1.0)
+        return self.output
+
+    def kill(self) -> None:
+        super().kill()
+        self.kill_event.set()
 
 
 class FakeSession:
@@ -139,6 +160,44 @@ def _client_factory(client: FakeClient) -> Any:
     return lambda: client
 
 
+def test_active_sandbox_cache_identity_returns_stack_and_sandbox_ids() -> None:
+    sandbox = FakeSandbox(id="sandbox-123", name="sandbox-object-name")
+    client = FakeClient(
+        active_stack=FakeActiveStack({"local": sandbox}),
+        active_stack_model=FakeStackModel(id="stack-123", name="dev-stack"),
+    )
+
+    identity = active_sandbox_cache_identity(client_factory=_client_factory(client))
+
+    assert identity == {
+        "kind": "active_sandbox",
+        "stack_id": "stack-123",
+        "stack_name": "dev-stack",
+        "sandbox_id": "sandbox-123",
+        "sandbox_name": "local",
+    }
+    assert sandbox.create_settings == []
+
+
+def test_active_sandbox_cache_identity_requires_one_active_sandbox() -> None:
+    client = FakeClient(active_stack=FakeActiveStack({}))
+
+    with pytest.raises(KitaruStateError, match="no sandbox component"):
+        active_sandbox_cache_identity(client_factory=_client_factory(client))
+
+    client = FakeClient(
+        active_stack=FakeActiveStack(
+            {
+                "local": FakeSandbox(),
+                "remote-gpu": FakeSandbox(name="remote-gpu"),
+            }
+        )
+    )
+
+    with pytest.raises(KitaruStateError, match="multiple sandbox components"):
+        active_sandbox_cache_identity(client_factory=_client_factory(client))
+
+
 def _assert_secret_not_in_public_exception(
     exc: BaseException,
     *secret_values: str,
@@ -187,6 +246,7 @@ def test_run_sandbox_command_returns_stable_result_shape() -> None:
         "exit_code": 0,
         "stdout_truncated": False,
         "stderr_truncated": False,
+        "timed_out": False,
         "stack_id": "stack-1",
         "stack_name": "dev",
         "sandbox_id": "sandbox-1",
@@ -248,6 +308,28 @@ def test_run_sandbox_command_copies_truncation_flags() -> None:
 
     assert result.stdout_truncated is True
     assert result.stderr_truncated is True
+
+
+def test_run_sandbox_command_times_out_and_cleans_up() -> None:
+    process = BlockingFakeProcess()
+    session = FakeSession(process)
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "sleep 999999",
+        timeout_seconds=0.01,
+        client_factory=_client_factory(client),
+    )
+
+    assert process.collect_calls == 1
+    assert process.kill_calls == 1
+    assert session.destroy_calls == 1
+    assert result.timed_out is True
+    assert result.exit_code == -1
+    assert "timed out after 0.01 seconds" in result.stderr
+    assert result.stdout == ""
+    assert result.cleanup_succeeded is True
 
 
 def test_run_sandbox_command_requires_one_active_sandbox() -> None:
@@ -330,7 +412,7 @@ def test_run_sandbox_command_redacts_cleanup_error_on_result() -> None:
 
     cleanup_error = cast(str, result.cleanup_error)
     assert result.cleanup_succeeded is False
-    assert "<redacted>" in cleanup_error
+    assert "[REDACTED]" in cleanup_error
     assert "destroy-secret" not in cleanup_error
     assert "close-secret" not in cleanup_error
     assert "explicit-env-secret" not in cleanup_error
@@ -351,11 +433,188 @@ def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure
         run_sandbox_command("echo hi", client_factory=_client_factory(client))
 
     message = str(exc_info.value)
-    assert "<redacted>" in message
+    assert "[REDACTED]" in message
     assert "cleanup-secret" not in message
     assert exc_info.value.__cause__ is None
     assert session.destroy_calls == 1
     assert session.close_calls == 1
+
+
+def test_run_sandbox_command_redacts_provider_error_secrets() -> None:
+    env_secret = "env-token-value-123"
+    non_secret_env_value = "plain env value with spaces"
+    quoted_secret = "quoted secret value, with comma"
+    basic_auth_token = "basic-token-value-123"
+    openai_key = "sk-testtokenvalue1234567890"
+    github_token = "github-token-value-123"
+    process = FakeProcess(
+        collect_error=RuntimeError(
+            "provider failed with Authorization: Bearer "
+            f"{openai_key}; Authorization: Basic {basic_auth_token}; "
+            f"OPENAI_API_KEY={env_secret}; MODE={non_secret_env_value}; "
+            f'PASSWORD="{quoted_secret}"; token={github_token}'
+        )
+    )
+    session = FakeSession(process)
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"OPENAI_API_KEY": env_secret, "MODE": non_secret_env_value},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "[REDACTED]" in message
+    assert env_secret not in message
+    assert non_secret_env_value not in message
+    assert quoted_secret not in message
+    assert basic_auth_token not in message
+    assert openai_key not in message
+    assert github_token not in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_run_sandbox_command_reports_cleanup_failure_after_command_failure() -> None:
+    command_secret = "command-env-value with spaces"
+    cleanup_secret = "cleanup-secret-looking-value-123"
+    process = FakeProcess(collect_error=RuntimeError("collect failed"))
+    session = FakeSession(
+        process,
+        destroy_error=RuntimeError(
+            f"cleanup failed Authorization: Basic {cleanup_secret}"
+        ),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"MODE": command_secret, "CLEANUP_DETAIL": cleanup_secret},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "Sandbox command execution failed" in message
+    assert "collect failed" in message
+    assert "Cleanup warning" in message
+    assert "Sandbox cleanup after command failure failed" in message
+    assert "[REDACTED]" in message
+    assert command_secret not in message
+    assert cleanup_secret not in message
+    assert session.destroy_calls == 1
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_run_sandbox_command_redacts_cleanup_failure_secrets() -> None:
+    secret = "cleanup-secret-value-123"
+    session = FakeSession(
+        destroy_error=RuntimeError(f"destroy failed PASSWORD={secret}")
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command(
+            "echo hi",
+            env={"PASSWORD": secret},
+            client_factory=_client_factory(client),
+        )
+
+    message = str(exc_info.value)
+    assert "[REDACTED]" in message
+    assert secret not in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_unsupported_destroy_after_failure_does_not_promise_result() -> None:
+    process = FakeProcess(collect_error=RuntimeError("collect failed"))
+    session = FakeSession(
+        process,
+        destroy_error=NotImplementedError("destroy unsupported"),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    with pytest.raises(KitaruBackendError) as exc_info:
+        run_sandbox_command("echo hi", client_factory=_client_factory(client))
+
+    message = str(exc_info.value)
+    assert "best-effort close was attempted" in message
+    assert "command result is still available" not in message
+    assert session.destroy_calls == 1
+    assert session.close_calls == 1
+
+
+def test_run_sandbox_command_redacts_timeout_cleanup_error() -> None:
+    secret = "sk-timeoutsecret1234567890"
+    process = BlockingFakeProcess()
+    session = FakeSession(process, destroy_error=RuntimeError(f"Bearer {secret}"))
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "sleep 999999",
+        timeout_seconds=0.01,
+        client_factory=_client_factory(client),
+    )
+
+    assert result.cleanup_succeeded is False
+    assert result.cleanup_error is not None
+    assert "[REDACTED]" in result.cleanup_error
+    assert secret not in result.cleanup_error
+
+
+def test_unsupported_destroy_after_timeout_does_not_promise_result() -> None:
+    process = BlockingFakeProcess()
+    session = FakeSession(
+        process,
+        destroy_error=NotImplementedError("destroy unsupported"),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "sleep 999999",
+        timeout_seconds=0.01,
+        client_factory=_client_factory(client),
+    )
+
+    assert result.cleanup_succeeded is False
+    assert result.cleanup_error is not None
+    assert "best-effort close was attempted" in result.cleanup_error
+    assert "command result is still available" not in result.cleanup_error
+    assert session.destroy_calls == 1
+    assert session.close_calls == 1
+
+
+def test_run_sandbox_command_redacts_unsupported_destroy_cleanup_errors() -> None:
+    destroy_secret = "destroy-secret-value-123"
+    close_secret = "sk-closesecret1234567890"
+    session = FakeSession(
+        destroy_error=NotImplementedError(f"SECRET={destroy_secret}"),
+        close_error=RuntimeError(f"Authorization: Bearer {close_secret}"),
+    )
+    sandbox = FakeSandbox(session)
+    client = FakeClient(active_stack=FakeActiveStack({"local": sandbox}))
+
+    result = run_sandbox_command(
+        "echo hi",
+        env={"SECRET": destroy_secret},
+        client_factory=_client_factory(client),
+    )
+
+    assert result.cleanup_succeeded is False
+    assert result.cleanup_error is not None
+    assert "[REDACTED]" in result.cleanup_error
+    assert destroy_secret not in result.cleanup_error
+    assert close_secret not in result.cleanup_error
 
 
 @pytest.mark.parametrize(
@@ -367,6 +626,9 @@ def test_run_sandbox_command_raises_backend_error_for_unexpected_cleanup_failure
         ({"command": "echo", "max_chars": -1}, ">= 0"),
         ({"command": "echo", "max_chars": 1.2}, "integer"),
         ({"command": "echo", "max_chars": True}, "integer"),
+        ({"command": "echo", "timeout_seconds": 0}, "greater than 0"),
+        ({"command": "echo", "timeout_seconds": float("nan")}, "finite number"),
+        ({"command": "echo", "timeout_seconds": True}, "finite number"),
         ({"command": "echo", "env": {"A": 1}}, "keys and values"),
         ({"command": "echo", "cleanup": "keep"}, "destroy.*close"),
     ],
@@ -481,7 +743,7 @@ def test_run_sandbox_command_redacts_provider_command_failure_messages() -> None
 
     message = str(exc_info.value)
     assert "Sandbox command execution failed" in message
-    assert "<redacted>" in message
+    assert "[REDACTED]" in message
     for leaked in (
         explicit_env_value,
         "openai-secret",
@@ -533,7 +795,7 @@ def test_run_sandbox_command_redacts_provider_and_cleanup_error_secrets() -> Non
 
     assert exc_info.value.__cause__ is None
     message = str(exc_info.value)
-    assert "<redacted>" in message
+    assert "[REDACTED]" in message
     assert "env-secret-123" not in message
     assert "provider-secret-456" not in message
     assert "openai-secret-456" not in message
@@ -563,7 +825,7 @@ def test_run_sandbox_command_redacts_string_command_from_provider_errors() -> No
         run_sandbox_command(command, client_factory=_client_factory(client))
 
     message = _assert_secret_not_in_public_exception(exc_info.value, command)
-    assert "<redacted>" in message
+    assert "[REDACTED]" in message
     assert session.exec_calls == [{"command": command, "cwd": None, "env": None}]
 
 
@@ -589,7 +851,7 @@ def test_run_sandbox_command_redacts_list_command_from_cleanup_errors() -> None:
         command_text,
         command_item,
     )
-    assert "<redacted>" in message
+    assert "[REDACTED]" in message
     assert "Cleanup warning" in message
     assert "binary=python" in message
     assert "flag=-c" in message
@@ -614,7 +876,7 @@ def test_run_sandbox_command_redacts_env_values_from_cleanup_close_failures() ->
         )
 
     message = _assert_secret_not_in_public_exception(exc_info.value, secret_value)
-    assert message.endswith("close failed with <redacted>")
+    assert message.endswith("close failed with [REDACTED]")
 
 
 def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
@@ -641,7 +903,7 @@ def test_run_sandbox_command_redacts_env_values_from_backend_failures() -> None:
         secret_value,
         public_value,
     )
-    assert message.endswith("provider rejected token <redacted> in mode <redacted>")
+    assert message.endswith("provider rejected token [REDACTED] in mode [REDACTED]")
 
 
 def test_public_sandbox_imports() -> None:

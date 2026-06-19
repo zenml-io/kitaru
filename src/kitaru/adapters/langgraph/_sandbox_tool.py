@@ -88,6 +88,8 @@ def create_sandbox_command_tool(
             cleanup=cleanup,
         )
         payload = result.model_dump(mode="json")
+        if payload.get("timed_out") is False:
+            payload.pop("timed_out")
         payload["command"] = SANDBOX_COMMAND_TOOL_REDACTION_MARKER
         return json.dumps(payload)
 

@@ -9,11 +9,16 @@ checkpoints.
 ## Setup
 
 ```bash
-cd examples/integrations/openai_agents_agent
+# From the repository root:
 uv sync --extra local --extra openai-agents
 uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='sk-...'
+cd examples/integrations/openai_agents_agent
 ```
+
+`uv run kitaru init` creates the Kitaru project marker. `uv run kitaru stack
+create dev` creates and activates a local stack with a local sandbox.
 
 Default model is `gpt-5-nano`.
 
@@ -30,6 +35,43 @@ uv run python openai_agents_adapter.py
 ```
 
 If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
+
+## Active-stack sandbox tool example
+
+To let an OpenAI agent run a command through Kitaru's active stack sandbox, run:
+
+```bash
+uv run python openai_agents_sandbox_tool.py
+```
+
+The example gives the agent one local OpenAI Agents SDK `FunctionTool` created by
+`kitaru.adapters.openai_agents.sandbox_command_tool(...)`. When the model calls
+that tool, Kitaru runs the command through the sandbox attached to the active
+stack and returns compact JSON to the model. The prompt tells the model to check
+`exit_code` before trusting `stdout`.
+
+For this local setup, the active `dev` stack has one local sandbox. If you switch
+to another stack, that active stack must have exactly one sandbox component.
+Remote stacks need an explicit sandbox component. If the active stack has no
+sandbox, or has more than one sandbox, Kitaru raises an error instead of guessing
+where to run the command.
+
+Security note: the tool schema prevents the model from choosing extra environment
+variables for a tool call, but the model still chooses the command. Do not attach
+this tool to a sandbox that contains secrets, broad cloud credentials, or network
+access the agent does not need. If prompts or users are not fully trusted, put a
+small allowlist or validator in front of the tool so only approved commands run.
+
+The sandbox tool example also supports the same strategy comparison mode:
+
+```bash
+OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_sandbox_tool.py
+```
+
+The default `runner_call` run saves one outer OpenAI runner checkpoint. In the
+optional `calls` run, the sandbox command becomes its own `tool_call` checkpoint,
+so you can inspect the command input and compact JSON result separately in the
+Kitaru UI.
 
 ## Streaming example
 

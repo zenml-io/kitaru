@@ -351,6 +351,39 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: openai-agents-sandbox-tool
+    path: examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/openai-agents.md
+    owner_area: OpenAI Agents SDK active-stack sandbox command tool
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_openai_agents_calls_strategy.py
+        notes: covers the sandbox_command_tool factory, model-visible JSON, timeout wiring, input validation, and tool-call checkpoint cache identity with fakes
+      local_smoke:
+        status: smoke_only
+        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        notes: Requires an active Kitaru stack with exactly one sandbox component.
+      live_provider:
+        status: smoke_only
+        provider: openai
+        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+        notes: Requires an active Kitaru stack with exactly one sandbox component.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: openai-agents-streaming
     path: examples/integrations/openai_agents_agent/openai_agents_streaming.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
