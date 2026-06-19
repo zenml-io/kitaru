@@ -374,6 +374,7 @@ def _redact_command_text(
     if command is None:
         return text
 
+    candidates: list[str]
     if isinstance(command, str):
         candidates = [command, repr(command)]
     else:
@@ -384,7 +385,13 @@ def _redact_command_text(
         )
 
     redacted = text
-    for candidate in sorted(set(candidates), key=len, reverse=True):
+    unique_candidates: set[str] = set(candidates)
+    sorted_candidates: list[str] = sorted(
+        unique_candidates,
+        key=lambda candidate: len(candidate),
+        reverse=True,
+    )
+    for candidate in sorted_candidates:
         if candidate:
             redacted = redacted.replace(candidate, _REDACTION_MARKER)
     return redacted

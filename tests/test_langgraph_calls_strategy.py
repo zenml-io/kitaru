@@ -816,6 +816,34 @@ def test_calls_mode_run_summary_handles_cyclic_payloads(monkeypatch) -> None:
     }
 
 
+def test_non_sandbox_tool_cache_identity_ignores_tool_object_identity(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    with tracking.tracker_scope(
+        "plain_tool_cache_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(save_tool_args=False),
+    ):
+        first_result = middleware.wrap_tool_call(
+            _tool_request(name="plain-tool", call_id="same-call", args={"value": 2}),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            _tool_request(name="plain-tool", call_id="same-call", args={"value": 2}),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    assert checkpoints[0]["checkpoint_inputs"] is None
+    assert checkpoints[1]["checkpoint_inputs"] is None
+    assert checkpoints[0]["cache_key"] == checkpoints[1]["cache_key"]
+
+
 def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct(
     monkeypatch,
 ) -> None:
@@ -952,6 +980,85 @@ def test_sandbox_tool_checkpoint_inputs_redact_command_text_but_cache_stays_dist
     ]
     assert "sk-secret-command" not in repr(persisted_inputs)
     assert "Authorization" not in repr(persisted_inputs)
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_sandbox_tool_private_factory_settings_affect_cache_identity_only(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    first_tool = create_sandbox_command_tool(
+        name="custom_sandbox_command",
+        default_cwd="/workspace-a",
+        env={"API_TOKEN": "SECRET-STATIC-A"},
+        max_chars=123,
+        cleanup="close",
+    )
+    second_tool = create_sandbox_command_tool(
+        name="custom_sandbox_command",
+        default_cwd="/workspace-b",
+        env={"API_TOKEN": "SECRET-STATIC-B"},
+        max_chars=456,
+        cleanup="destroy",
+    )
+
+    def sandbox_request(tool: Any) -> SimpleNamespace:
+        request = _tool_request(
+            name="custom_sandbox_command",
+            call_id="same-sandbox-call",
+            args={"command": "python -c 'print(123)'", "cwd": "/workspace"},
+        )
+        request.tool = tool
+        return request
+
+    with tracking.tracker_scope(
+        "sandbox_private_cache_identity_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(),
+    ):
+        first_result = middleware.wrap_tool_call(
+            sandbox_request(first_tool),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            sandbox_request(second_tool),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    persisted_inputs = [checkpoint["checkpoint_inputs"] for checkpoint in checkpoints]
+    assert persisted_inputs == [
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "same-sandbox-call",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "same-sandbox-call",
+                },
+            }
+        },
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "same-sandbox-call",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "same-sandbox-call",
+                },
+            }
+        },
+    ]
+    assert "SECRET-STATIC" not in repr(persisted_inputs)
+    assert "python -c" not in repr(persisted_inputs)
     assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
 
 

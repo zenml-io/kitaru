@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -34,6 +35,36 @@ def _load_example_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
+def _sandbox_tool_message(module: ModuleType, content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="tool",
+        tool_call_id=module.SANDBOX_DEMO_TOOL_CALL_ID,
+        content=content,
+    )
+
+
+def _sandbox_tool_result_content(
+    *,
+    exit_code: int = 0,
+    stdout: str | None = None,
+    stderr: str = "",
+) -> str:
+    return json.dumps(
+        {
+            "exit_code": exit_code,
+            "stdout": stdout
+            if stdout is not None
+            else json.dumps({"cwd": "/workspace", "python": "3.12.0"}) + "\n",
+            "stderr": stderr,
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+            "cleanup_succeeded": True,
+            "sandbox_name": "local",
+            "stack_name": "sandbox-stack",
+        }
+    )
+
+
 class _FakeModelRequest:
     """Tiny request object that records LangChain-style override calls."""
 
@@ -50,6 +81,120 @@ class _FakeModelRequest:
     def override(self, **kwargs: Any) -> Any:
         self.overrides.append(kwargs)
         return SimpleNamespace(messages=self.messages, override_kwargs=kwargs)
+
+
+def test_validated_sandbox_demo_result_accepts_successful_tool_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    result = module._validated_sandbox_demo_result(
+        [_sandbox_tool_message(module, _sandbox_tool_result_content())]
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout"] == {"cwd": "/workspace", "python": "3.12.0"}
+    assert result["sandbox_name"] == "local"
+    assert result["stack_name"] == "sandbox-stack"
+
+
+def test_validated_sandbox_demo_result_accepts_dict_tool_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    result = module._validated_sandbox_demo_result(
+        [
+            {
+                "role": "tool",
+                "tool_call_id": module.SANDBOX_DEMO_TOOL_CALL_ID,
+                "content": _sandbox_tool_result_content(),
+            }
+        ]
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout"] == {"cwd": "/workspace", "python": "3.12.0"}
+
+
+def test_validated_sandbox_demo_result_rejects_non_zero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="exit_code=2"):
+        module._validated_sandbox_demo_result(
+            [
+                _sandbox_tool_message(
+                    module,
+                    _sandbox_tool_result_content(exit_code=2, stderr="boom"),
+                )
+            ]
+        )
+
+
+def test_validated_sandbox_demo_result_rejects_missing_expected_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="expected JSON"):
+        module._validated_sandbox_demo_result(
+            [
+                _sandbox_tool_message(
+                    module, _sandbox_tool_result_content(stdout="hello\n")
+                )
+            ]
+        )
+
+    with pytest.raises(RuntimeError, match="'python'"):
+        module._validated_sandbox_demo_result(
+            [
+                _sandbox_tool_message(
+                    module,
+                    _sandbox_tool_result_content(stdout=json.dumps({"cwd": "/tmp"})),
+                )
+            ]
+        )
+
+
+def test_validated_sandbox_demo_result_rejects_malformed_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        module._validated_sandbox_demo_result(
+            [_sandbox_tool_message(module, "not-json")]
+        )
+
+
+def test_validated_sandbox_demo_result_rejects_duplicate_matching_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="expected exactly one"):
+        module._validated_sandbox_demo_result(
+            [
+                _sandbox_tool_message(module, _sandbox_tool_result_content()),
+                _sandbox_tool_message(module, _sandbox_tool_result_content()),
+            ]
+        )
+
+
+def test_validated_sandbox_demo_result_requires_matching_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_example_module(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="did not find"):
+        module._validated_sandbox_demo_result([])
+
+    with pytest.raises(RuntimeError, match="did not find"):
+        module._validated_sandbox_demo_result(
+            [SimpleNamespace(type="tool", tool_call_id="wrong", content="{}")]
+        )
 
 
 def test_force_sandbox_tool_choice_forces_specific_tool_only_initially(

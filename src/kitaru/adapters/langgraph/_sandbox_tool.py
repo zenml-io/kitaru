@@ -14,6 +14,10 @@ from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 DEFAULT_SANDBOX_COMMAND_TOOL_NAME = "run_sandbox_command"
 DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS = 20_000
 SANDBOX_COMMAND_TOOL_REDACTION_MARKER = "[REDACTED]"
+_SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR = (
+    "_kitaru_langgraph_sandbox_command_tool_cache_identity"
+)
+_SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_VERSION = 1
 DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION = """\
 Run one shell command in the active Kitaru stack sandbox. The tool returns JSON
 with stdout, stderr, exit code, output truncation flags, and sandbox/session
@@ -68,6 +72,12 @@ def create_sandbox_command_tool(
     StructuredTool = _import_structured_tool()
     copied_env = dict(env) if env is not None else None
     tool_description = description or DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION
+    cache_identity = _sandbox_command_tool_cache_identity(
+        default_cwd=default_cwd,
+        env=copied_env,
+        max_chars=max_chars,
+        cleanup=cleanup,
+    )
 
     def _run_command(command: str, cwd: str | None = None) -> str:
         result = kitaru.run_sandbox_command(
@@ -81,12 +91,32 @@ def create_sandbox_command_tool(
         payload["command"] = SANDBOX_COMMAND_TOOL_REDACTION_MARKER
         return json.dumps(payload)
 
-    return StructuredTool.from_function(
+    tool = StructuredTool.from_function(
         func=_run_command,
         name=name.strip(),
         description=tool_description,
         args_schema=SandboxCommandToolArgs,
     )
+    object.__setattr__(tool, _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR, cache_identity)
+    return tool
+
+
+def _sandbox_command_tool_cache_identity(
+    *,
+    default_cwd: str | None,
+    env: Mapping[str, str] | None,
+    max_chars: int,
+    cleanup: Literal["destroy", "close"],
+) -> dict[str, Any]:
+    """Return hidden tool settings that affect sandbox execution results."""
+    return {
+        "kind": "kitaru.langgraph.sandbox_command_tool",
+        "version": _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_VERSION,
+        "default_cwd": default_cwd,
+        "env": dict(env) if env is not None else None,
+        "max_chars": max_chars,
+        "cleanup": cleanup,
+    }
 
 
 def _validate_tool_factory_options(

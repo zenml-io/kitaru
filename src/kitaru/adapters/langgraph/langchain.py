@@ -40,7 +40,11 @@ from ._policy import (
     resolve_model_checkpoint_config,
     resolve_tool_call_checkpoint_config,
 )
-from ._sandbox_tool import SandboxCommandToolArgs, create_sandbox_command_tool
+from ._sandbox_tool import (
+    _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR,
+    SandboxCommandToolArgs,
+    create_sandbox_command_tool,
+)
 from ._serialization import redact_config, to_cache_identity, to_json_safe
 from ._tracking import (
     EventContext,
@@ -903,11 +907,23 @@ def _safe_mapping_key_text(key: Any) -> str:
 
 def _tool_cache_identity_envelope(request: Any) -> dict[str, Any]:
     """Return the raw-enough tool payload used only for immediate cache hashing."""
-    return _tool_payload_envelope(
+    payload = _tool_payload_envelope(
         request,
         args=to_cache_identity(_tool_args(request)),
         tool_call=to_cache_identity(getattr(request, "tool_call", None)),
     )
+    private_identity = _tool_private_cache_identity(request)
+    if private_identity is not None:
+        payload["tool_private_identity"] = private_identity
+    return payload
+
+
+def _tool_private_cache_identity(request: Any) -> Any | None:
+    tool = getattr(request, "tool", None)
+    identity = getattr(tool, _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR, None)
+    if identity is None:
+        return None
+    return to_cache_identity(identity)
 
 
 def _tool_payload_envelope(

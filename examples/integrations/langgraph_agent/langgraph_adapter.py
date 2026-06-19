@@ -8,6 +8,7 @@ sandbox command tool.
 """
 
 import argparse
+import json
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -513,13 +514,17 @@ def _run_sandbox_demo() -> dict[str, Any]:
         raise RuntimeError(f"Expected completed status, got: {result.status}")
 
     output = cast(dict[str, Any], result.output)
-    messages = _message_summaries(output.get("messages", []))
+    raw_messages = output.get("messages", [])
+    sandbox_result = _validated_sandbox_demo_result(raw_messages)
+    messages = _message_summaries(raw_messages)
     return {
         "strategy": "sandbox",
         "thread_id": THREAD_ID,
         "model": model_name,
         "status": result.status,
         "sandbox_command": SANDBOX_DEMO_COMMAND,
+        "sandbox_exit_code": sandbox_result["exit_code"],
+        "sandbox_result": sandbox_result,
         "message_count": len(messages),
         "messages": messages,
         "final_message": messages[-1]["content"] if messages else None,
@@ -537,6 +542,115 @@ def _run_sandbox_demo() -> dict[str, Any]:
         ],
         "deep_agents_boundary": "This is not a Deep Agents backend.",
     }
+
+
+def _validated_sandbox_demo_result(messages: Any) -> dict[str, Any]:
+    """Return the parsed sandbox result or fail the example loudly."""
+    content = _sandbox_tool_result_content(messages)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Sandbox demo tool result was not valid JSON, so the example cannot "
+            "prove the command succeeded."
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Sandbox demo tool result JSON was not an object.")
+
+    exit_code = result.get("exit_code")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise RuntimeError(
+            "Sandbox demo tool result did not contain an integer exit_code."
+        )
+    if exit_code != 0:
+        stderr = result.get("stderr")
+        raise RuntimeError(
+            f"Sandbox demo command failed with exit_code={exit_code}. stderr={stderr!r}"
+        )
+
+    stdout = result.get("stdout")
+    if not isinstance(stdout, str):
+        raise RuntimeError("Sandbox demo tool result did not contain string stdout.")
+    try:
+        stdout_json = json.loads(stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Sandbox demo stdout did not contain the expected JSON with cwd and "
+            "python keys."
+        ) from exc
+    if not isinstance(stdout_json, Mapping):
+        raise RuntimeError("Sandbox demo stdout JSON was not an object.")
+    for key in ("cwd", "python"):
+        value = stdout_json.get(key)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(
+                "Sandbox demo stdout JSON did not contain the expected non-empty "
+                f"{key!r} string."
+            )
+
+    return {
+        "exit_code": exit_code,
+        "stdout": {"cwd": stdout_json["cwd"], "python": stdout_json["python"]},
+        "stderr": result.get("stderr"),
+        "stdout_truncated": result.get("stdout_truncated"),
+        "stderr_truncated": result.get("stderr_truncated"),
+        "cleanup_succeeded": result.get("cleanup_succeeded"),
+        "sandbox_name": result.get("sandbox_name"),
+        "stack_name": result.get("stack_name"),
+    }
+
+
+def _sandbox_tool_result_content(messages: Any) -> str:
+    matching_contents: list[Any] = []
+    for message in list(messages or []):
+        if _message_tool_result_call_id(message) == SANDBOX_DEMO_TOOL_CALL_ID:
+            matching_contents.append(_message_content(message))
+
+    if not matching_contents:
+        raise RuntimeError(
+            f"Sandbox demo did not find the {SANDBOX_COMMAND_TOOL_NAME} tool "
+            f"result for call id {SANDBOX_DEMO_TOOL_CALL_ID!r}."
+        )
+    if len(matching_contents) != 1:
+        raise RuntimeError(
+            f"Sandbox demo expected exactly one {SANDBOX_COMMAND_TOOL_NAME} "
+            f"tool result for call id {SANDBOX_DEMO_TOOL_CALL_ID!r}, got "
+            f"{len(matching_contents)}."
+        )
+
+    content = matching_contents[0]
+    if not isinstance(content, str):
+        raise RuntimeError("Sandbox demo tool result content was not a string.")
+    return content
+
+
+def _message_tool_result_call_id(message: Any) -> str | None:
+    if isinstance(message, dict):
+        role_or_type = message.get("role") or message.get("type")
+        if role_or_type == "tool" or "tool_call_id" in message or "call_id" in message:
+            value = (
+                message.get("tool_call_id")
+                or message.get("call_id")
+                or message.get("id")
+            )
+            return value if isinstance(value, str) else None
+        return None
+
+    role_or_type = getattr(message, "role", None) or getattr(message, "type", None)
+    if role_or_type == "tool" or getattr(message, "tool_call_id", None) is not None:
+        value = (
+            getattr(message, "tool_call_id", None)
+            or getattr(message, "call_id", None)
+            or getattr(message, "id", None)
+        )
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", None)
 
 
 def _message_summaries(messages: Any) -> list[dict[str, Any]]:

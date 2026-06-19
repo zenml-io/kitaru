@@ -108,25 +108,24 @@ export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 
 The base `langgraph` extra does not install a model provider. Use `langgraph-openai` for OpenAI-backed LangChain agents, or `langgraph-anthropic` when you are building Anthropic-backed LangChain agents.
 
-The sandbox command tool also needs an active Kitaru stack with exactly one sandbox component. For a local learning setup, create and activate a local stack with a local sandbox component:
+The sandbox command tool also needs an active Kitaru stack with exactly one sandbox component. For a local learning setup, initialize the project, connect to a local Kitaru server, and create a local stack with a local sandbox component:
 
 ```bash
+kitaru init
+kitaru login        # local server; add a URL to connect to a deployed one
 kitaru stack create langgraph-sandbox-demo --type local --sandbox local
+kitaru status
 ```
 
-The local sandbox is convenient for learning, but it is not isolated from your machine. Commands run with local filesystem and network access. For an existing sandbox-enabled stack, activate that stack instead:
+That stack-create command uses your current Kitaru connection and configuration. It works when that context has the local sandbox stack support available. If you are connected to a server or config that does not expose the sandbox flavor, activate an existing sandbox-enabled stack instead, or use a separate local config for the demo:
 
 ```bash
 kitaru stack use <stack-name>
 ```
 
-Initialize the project once:
+The release smoke test does that second option: it points Kitaru's local runtime at a throwaway local config and an explicit repository path for the checkout before creating the sandbox stack. That keeps the smoke test from changing your active stack and avoids depending on a logged-in server that may not have the local sandbox flavor available.
 
-```bash
-kitaru init
-kitaru login        # local server; add a URL to connect to a deployed one
-kitaru status
-```
+The local sandbox is convenient for learning, but it is not isolated from your machine. Commands run as local subprocesses with local filesystem and network access.
 
 {% hint style="info" %}
 Migrating an existing LangGraph, LangChain agent, or Deep Agents-style project?
@@ -654,7 +653,7 @@ export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls
 ```
 
-The sandbox path uses a real OpenAI-backed LangChain agent with Kitaru's sandbox command tool. It defaults to `gpt-5-nano` and also needs an active stack with exactly one sandbox component:
+The sandbox path uses a real OpenAI-backed LangChain agent with Kitaru's sandbox command tool. It defaults to `gpt-5-nano` and also needs an active stack with exactly one sandbox component. The setup below uses your current Kitaru connection and works when that context supports local sandbox stacks:
 
 ```bash
 uv sync --extra local --extra langgraph-openai
@@ -667,7 +666,7 @@ export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
 
-The local sandbox used here is not isolated from your machine; it is for local learning, not hostile code execution.
+The local sandbox used here is not isolated from your machine; it runs local subprocesses and is for local learning, not hostile code execution. The release smoke test uses a throwaway local config plus an explicit repository path pointing at the checkout, so it does not mutate your normal active stack.
 
 The sandbox example disables model-call checkpoints to keep the demo focused on the sandbox tool checkpoint. The proof checkpoint is the synchronous `run_sandbox_command` tool handler.
 

@@ -74,7 +74,9 @@ uv run kitaru stack create langgraph-sandbox-demo --type local --sandbox local
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
 
-The local sandbox is convenient for learning, but it is not isolated from your machine. It runs commands with local filesystem and network access.
+Those commands use your current Kitaru connection and configuration. They work when that context supports local sandbox stacks. If your current server or config does not expose the local sandbox flavor, activate an existing sandbox-enabled stack instead, or use a separate local config for this demo. The release smoke test uses that separate-config pattern so it does not change your normal active stack.
+
+The local sandbox is convenient for learning, but it is not isolated from your machine. It runs commands as local subprocesses with local filesystem and network access.
 
 From this directory, the script path is shorter.
 
@@ -286,6 +288,7 @@ For sandbox mode, the script prints:
 - model name;
 - status (`completed`);
 - the exact sandbox command requested;
+- `sandbox_exit_code: 0` and the parsed sandbox stdout JSON with `cwd` and `python` keys;
 - a JSON-safe summary of the LangChain messages;
 - the final model message;
 - event/run-summary artifact names;

@@ -163,6 +163,29 @@ def test_tool_forwards_command_options_and_returns_full_result_json(
     }
 
 
+def test_factory_private_cache_identity_copies_hidden_execution_settings() -> None:
+    env = {"API_TOKEN": "before"}
+
+    tool = create_sandbox_command_tool(
+        default_cwd="/workspace",
+        env=env,
+        max_chars=123,
+        cleanup="close",
+    )
+    env["API_TOKEN"] = "after"
+
+    identity = getattr(tool, _sandbox_tool._SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR)
+    assert identity == {
+        "kind": "kitaru.langgraph.sandbox_command_tool",
+        "version": 1,
+        "default_cwd": "/workspace",
+        "env": {"API_TOKEN": "before"},
+        "max_chars": 123,
+        "cleanup": "close",
+    }
+    assert set(SandboxCommandToolArgs.model_fields) == {"command", "cwd"}
+
+
 def test_tool_uses_default_cwd_and_copies_static_env_at_factory_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
