@@ -558,6 +558,8 @@ This example uses the real OpenAI API (not a stub model), so set your key:
 
 ```bash
 uv sync --extra local --extra openai-agents
+uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # default model in the example is gpt-5-nano
 # optional override: any OpenAI model you have access to
@@ -570,6 +572,11 @@ uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_to
 # streaming runner-call example
 uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 ```
+
+`uv run kitaru stack create dev` creates and activates the local stack whose
+sandbox is used by the sandbox command tool example. If you use a different
+active stack, make sure it has exactly one sandbox component before running that
+example.
 
 ## End-to-end research bot example
 
