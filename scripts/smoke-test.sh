@@ -841,6 +841,8 @@ run_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy 
     $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy graph_call
 run_test "examples/integrations/langgraph_agent/langgraph_streaming.py" \
     timed 120 $UV_RUN python examples/integrations/langgraph_agent/langgraph_streaming.py
+run_test "LangGraph sandbox command tool factory" \
+    $UV_RUN python -c 'from kitaru.adapters.langgraph import DEFAULT_SANDBOX_COMMAND_TOOL_NAME, create_sandbox_command_tool; tool = create_sandbox_command_tool(); assert tool.name == DEFAULT_SANDBOX_COMMAND_TOOL_NAME; assert set(tool.args_schema.model_fields) == {"command", "cwd"}'
 if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" \
@@ -1003,6 +1005,37 @@ run_test "Active stack sandbox command" \
         ZENML_REPOSITORY_PATH="$SANDBOX_SMOKE_REPO" \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
+if [[ "$HAS_OPENAI" == true ]]; then
+    LANGGRAPH_SANDBOX_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-langgraph-sandbox-smoke.XXXXXX")
+    LANGGRAPH_SANDBOX_SMOKE_STACK="kitaru-langgraph-sandbox-smoke-$$"
+    run_test "Create LangGraph sandbox example stack" \
+        timed 60 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            -u KITARU_STACK \
+            STACK_NAME="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
+            ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
+    run_provider_test "openai" "OPENAI_API_KEY" \
+        "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" \
+        timed 180 env \
+            -u ZENML_SERVER \
+            -u ZENML_ACTIVE_PROJECT_ID \
+            -u ZENML_ACTIVE_STACK_ID \
+            -u ZENML_LOCAL_STORES_PATH \
+            KITARU_STACK="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
+            LANGGRAPH_SANDBOX_AGENT_MODEL="${LANGGRAPH_SANDBOX_AGENT_MODEL:-gpt-5-nano}" \
+            ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
+            ZENML_REPOSITORY_PATH="$PWD" \
+            ZENML_ANALYTICS_OPT_IN=false \
+            $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
+else
+    skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
+fi
 run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
 run_test "Wait/resume example import contract" \
     $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'
