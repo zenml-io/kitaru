@@ -215,6 +215,32 @@ def run_sandbox_command(
     )
 
 
+def active_sandbox_cache_identity(
+    *,
+    client_factory: Callable[[], Any],
+) -> dict[str, str | None]:
+    """Return cache identity for the active stack's single sandbox component."""
+    active_stack, active_stack_model = _resolve_active_stack(client_factory)
+    sandbox_name, sandbox = _resolve_single_active_sandbox(active_stack)
+    _ensure_sandbox_runtime_api_available(active_stack, sandbox=sandbox)
+
+    return {
+        "kind": "active_sandbox",
+        "stack_id": _required_string_attribute(
+            active_stack_model,
+            "id",
+            "active stack ID",
+        ),
+        "stack_name": _required_string_attribute(
+            active_stack_model,
+            "name",
+            "active stack name",
+        ),
+        "sandbox_id": _optional_string_attribute(sandbox, "id"),
+        "sandbox_name": sandbox_name or _optional_string_attribute(sandbox, "name"),
+    }
+
+
 def _normalize_command(command: str | Sequence[str]) -> str | list[str]:
     if isinstance(command, str):
         if not command.strip():
@@ -645,5 +671,6 @@ __all__ = [
     "DEFAULT_SANDBOX_COMMAND_MAX_CHARS",
     "SandboxCleanupPolicy",
     "SandboxCommandResult",
+    "active_sandbox_cache_identity",
     "run_sandbox_command",
 ]

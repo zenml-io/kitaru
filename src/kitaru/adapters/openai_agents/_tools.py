@@ -42,6 +42,13 @@ _GUARDRAIL_ERROR_REDACTED_MESSAGE = (
 ContextCacheKeyFactory = Callable[[Any], str | None]
 
 
+def _resolve_tool_cache_identity(tool: Any) -> Any | None:
+    identity = getattr(tool, "_kitaru_cache_identity", None)
+    if callable(identity):
+        return identity()
+    return identity
+
+
 def kitaruify_openai_tool(
     tool: Any,
     *,
@@ -176,7 +183,7 @@ def _wrap_function_tool(
                 "tool_namespace": getattr(tool, "_tool_namespace", None),
                 "input_json": input_json,
             }
-            tool_cache_identity = getattr(tool, "_kitaru_cache_identity", None)
+            tool_cache_identity = _resolve_tool_cache_identity(tool)
             if tool_cache_identity is not None:
                 cache_payload["tool_cache_identity"] = tool_cache_identity
             if effective_context_cache_key is not None:

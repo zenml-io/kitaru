@@ -7,11 +7,17 @@ from typing import Any, Final, Literal, cast
 from agents.tool import FunctionTool
 
 import kitaru
+import kitaru.config as kitaru_config
 from kitaru._config._sandbox import (
     normalize_timeout_seconds as _normalize_sandbox_timeout_seconds,
 )
 from kitaru.config import DEFAULT_SANDBOX_COMMAND_MAX_CHARS, SandboxCommandResult
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruFeatureNotAvailableError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 
 SandboxToolCleanupPolicy = Literal["destroy", "close"]
 
@@ -113,19 +119,39 @@ def sandbox_command_tool(
         on_invoke_tool=_invoke_sandbox_command,
         strict_json_schema=False,
     )
-    cache_identity: dict[str, Any] = {
-        "kind": "sandbox_command_tool",
-        "max_chars": normalized_max_chars,
-        "cleanup": normalized_cleanup,
-    }
-    if normalized_timeout_seconds is not None:
-        cache_identity["timeout_seconds"] = normalized_timeout_seconds
-    object.__setattr__(tool, "_kitaru_cache_identity", cache_identity)
+
+    def _cache_identity() -> dict[str, Any]:
+        identity: dict[str, Any] = {
+            "kind": "sandbox_command_tool",
+            "max_chars": normalized_max_chars,
+            "cleanup": normalized_cleanup,
+            "active_sandbox": _active_sandbox_cache_identity(),
+        }
+        if normalized_timeout_seconds is not None:
+            identity["timeout_seconds"] = normalized_timeout_seconds
+        return identity
+
+    object.__setattr__(tool, "_kitaru_cache_identity", _cache_identity)
     return tool
 
 
 def _model_visible_result_payload(result: SandboxCommandResult) -> dict[str, Any]:
     return result.model_dump(mode="json", include=set(_MODEL_VISIBLE_RESULT_FIELDS))
+
+
+def _active_sandbox_cache_identity() -> dict[str, Any]:
+    try:
+        return kitaru_config._active_sandbox_cache_identity()
+    except (
+        KitaruBackendError,
+        KitaruFeatureNotAvailableError,
+        KitaruStateError,
+    ) as exc:
+        return {
+            "kind": "active_sandbox_unavailable",
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
 
 
 def _normalize_tool_name(name: str) -> str:

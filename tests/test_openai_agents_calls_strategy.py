@@ -419,6 +419,46 @@ def _fake_sandbox_result(
     )
 
 
+def _active_sandbox_identity(
+    *,
+    stack_id: str = "stack-id",
+    stack_name: str = "dev-stack",
+    sandbox_id: str | None = "sandbox-id",
+    sandbox_name: str | None = "dev-sandbox",
+) -> dict[str, str | None]:
+    return {
+        "kind": "active_sandbox",
+        "stack_id": stack_id,
+        "stack_name": stack_name,
+        "sandbox_id": sandbox_id,
+        "sandbox_name": sandbox_name,
+    }
+
+
+def _patch_active_sandbox_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stack_id: str = "stack-id",
+    stack_name: str = "dev-stack",
+    sandbox_id: str | None = "sandbox-id",
+    sandbox_name: str | None = "dev-sandbox",
+) -> dict[str, str | None]:
+    import kitaru.config as kitaru_config
+
+    identity = _active_sandbox_identity(
+        stack_id=stack_id,
+        stack_name=stack_name,
+        sandbox_id=sandbox_id,
+        sandbox_name=sandbox_name,
+    )
+    monkeypatch.setattr(
+        kitaru_config,
+        "_active_sandbox_cache_identity",
+        lambda: identity,
+    )
+    return identity
+
+
 def _expected_model_input_envelope(
     *,
     system_instructions: str | None = None,
@@ -1196,6 +1236,7 @@ async def test_sandbox_tool_checkpoint_cache_includes_factory_settings(
         "run_sandbox_command",
         lambda *_args, **_kwargs: _fake_sandbox_result(),
     )
+    active_identity = _patch_active_sandbox_identity(monkeypatch)
 
     async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
         nonlocal inside_checkpoint
@@ -1245,21 +1286,96 @@ async def test_sandbox_tool_checkpoint_cache_includes_factory_settings(
             "max_chars": 100,
             "timeout_seconds": 30.0,
             "cleanup": "destroy",
+            "active_sandbox": active_identity,
         },
         {
             "kind": "sandbox_command_tool",
             "max_chars": 20_000,
             "timeout_seconds": 30.0,
             "cleanup": "destroy",
+            "active_sandbox": active_identity,
         },
         {
             "kind": "sandbox_command_tool",
             "max_chars": 100,
             "timeout_seconds": 30.0,
             "cleanup": "close",
+            "active_sandbox": active_identity,
         },
     ]
     assert len({json.dumps(identity, sort_keys=True) for identity in identities}) == 3
+
+
+@pytest.mark.anyio
+async def test_sandbox_tool_checkpoint_cache_varies_by_active_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._tools as openai_tools
+    import kitaru.config as kitaru_config
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    inside_checkpoint = False
+    seen_cache_payloads: list[dict[str, Any]] = []
+    active_identity = _active_sandbox_identity(stack_id="stack-a")
+
+    monkeypatch.setattr(
+        kitaru,
+        "run_sandbox_command",
+        lambda *_args, **_kwargs: _fake_sandbox_result(),
+    )
+    monkeypatch.setattr(
+        kitaru_config,
+        "_active_sandbox_cache_identity",
+        lambda: active_identity,
+    )
+
+    async def fake_run_async_in_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        inside_checkpoint = True
+        try:
+            return await kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    original_checkpoint_cache_key = openai_tools.checkpoint_cache_key
+
+    def fake_checkpoint_cache_key(payload: Any) -> str:
+        if isinstance(payload, dict) and payload.get("input_json") is not None:
+            seen_cache_payloads.append(payload)
+        return original_checkpoint_cache_key(payload)
+
+    monkeypatch.setattr(openai_tools, "checkpoint_cache_key", fake_checkpoint_cache_key)
+    monkeypatch.setattr(openai_tools, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(openai_tools, "is_inside_checkpoint", lambda: inside_checkpoint)
+    monkeypatch.setattr(
+        openai_tools,
+        "run_async_in_checkpoint",
+        fake_run_async_in_checkpoint,
+    )
+
+    wrapped = openai_tools._wrap_function_tool(
+        sandbox_command_tool(max_chars=100),
+        capture=OpenAICapturePolicy(emit_child_events=False),
+        agent_name="sandbox_cache_agent",
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name=None,
+    )
+
+    await wrapped.on_invoke_tool(
+        cast(Any, SimpleNamespace(tool_call_id="call_sandbox_command")),
+        '{"command":"python --version"}',
+    )
+    active_identity = _active_sandbox_identity(stack_id="stack-b")
+    await wrapped.on_invoke_tool(
+        cast(Any, SimpleNamespace(tool_call_id="call_sandbox_command")),
+        '{"command":"python --version"}',
+    )
+
+    assert [
+        payload["tool_cache_identity"]["active_sandbox"]["stack_id"]
+        for payload in seen_cache_payloads
+    ] == ["stack-a", "stack-b"]
+    assert seen_cache_payloads[0] != seen_cache_payloads[1]
 
 
 @pytest.mark.anyio
@@ -1308,6 +1424,54 @@ async def test_calls_strategy_prepare_objects_reuses_shared_handoff_child() -> N
     )
     assert invoked_first_child is prepared_child
     assert invoked_second_child is prepared_child
+
+
+@pytest.mark.anyio
+async def test_calls_strategy_prepare_objects_keeps_cyclic_handoffs_wrapped() -> None:
+    parent_tool = sandbox_command_tool(name="parent_command", max_chars=100)
+    child_tool = sandbox_command_tool(name="child_command", max_chars=100)
+    parent_agent = Agent(
+        name="cyclic_parent",
+        model="gpt-5-nano",
+        tools=[parent_tool],
+    )
+    child_agent = Agent(
+        name="cyclic_child",
+        model="gpt-5-nano",
+        tools=[child_tool],
+    )
+    object.__setattr__(parent_agent, "handoffs", cast(Any, [handoff(child_agent)]))
+    object.__setattr__(child_agent, "handoffs", cast(Any, [handoff(parent_agent)]))
+    runner = KitaruRunner(
+        parent_agent,
+        run_config_factory=lambda: RunConfig(tracing_disabled=True),
+    )
+
+    prepared_parent, _run_config = runner._prepare_execution_objects(
+        wrap_calls=True,
+        context_cache_identity=None,
+        context_cache_key=None,
+    )
+
+    prepared_child = prepared_parent.handoffs[0]._agent_ref()
+    prepared_parent_from_cycle = prepared_child.handoffs[0]._agent_ref()
+    assert prepared_parent is not parent_agent
+    assert prepared_child is not child_agent
+    assert prepared_parent_from_cycle is prepared_parent
+    assert prepared_parent_from_cycle is not parent_agent
+    assert prepared_parent.tools[0]._kitaru_original_tool is parent_tool
+    assert prepared_child.tools[0]._kitaru_original_tool is child_tool
+
+    invoked_child = await prepared_parent.handoffs[0].on_invoke_handoff(
+        SimpleNamespace(),
+        None,
+    )
+    invoked_parent = await prepared_child.handoffs[0].on_invoke_handoff(
+        SimpleNamespace(),
+        None,
+    )
+    assert invoked_child is prepared_child
+    assert invoked_parent is prepared_parent
 
 
 def test_calls_strategy_prepare_objects_wires_context_cache_key_factory(
@@ -2175,6 +2339,7 @@ def test_calls_strategy_sandbox_tool_runs_inside_checkpoint_and_caches(
         return _fake_sandbox_result(stdout="Python 3.12.0\n")
 
     monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
+    _patch_active_sandbox_identity(monkeypatch)
 
     model = SandboxToolCallingModel()
     agent_name = f"openai_sandbox_tool_agent_{uuid4().hex[:8]}"
@@ -2246,6 +2411,7 @@ def test_calls_strategy_explicit_handoff_wraps_child_sandbox_tools(
         return _fake_sandbox_result(stdout="Python 3.12.0\n")
 
     monkeypatch.setattr(kitaru, "run_sandbox_command", fake_run_sandbox_command)
+    _patch_active_sandbox_identity(monkeypatch)
 
     child_name = f"sandbox_handoff_child_{uuid4().hex[:8]}"
     child_model = HandoffSandboxToolCallingModel()

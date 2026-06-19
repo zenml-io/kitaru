@@ -31,6 +31,7 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunStateEnvelope,
     sandbox_command_tool,
 )
+from kitaru.errors import KitaruStateError
 
 
 class StructuredSupportAnswer(BaseModel):
@@ -46,6 +47,9 @@ class StaticTextModel(Model):
     async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
         self.call_count += 1
         return _text_response(self.text, response_id=f"resp_static_{self.call_count}")
+
+    def _kitaru_cache_identity(self) -> dict[str, str]:
+        return {"text": self.text}
 
     def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
         raise NotImplementedError
@@ -103,6 +107,46 @@ def _fake_sandbox_result() -> SandboxCommandResult:
         cleanup_succeeded=True,
         cleanup_error=None,
     )
+
+
+def _active_sandbox_identity(
+    *,
+    stack_id: str = "stack-id",
+    stack_name: str = "dev-stack",
+    sandbox_id: str | None = "sandbox-id",
+    sandbox_name: str | None = "dev-sandbox",
+) -> dict[str, str | None]:
+    return {
+        "kind": "active_sandbox",
+        "stack_id": stack_id,
+        "stack_name": stack_name,
+        "sandbox_id": sandbox_id,
+        "sandbox_name": sandbox_name,
+    }
+
+
+def _patch_active_sandbox_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stack_id: str = "stack-id",
+    stack_name: str = "dev-stack",
+    sandbox_id: str | None = "sandbox-id",
+    sandbox_name: str | None = "dev-sandbox",
+) -> dict[str, str | None]:
+    import kitaru.config as kitaru_config
+
+    identity = _active_sandbox_identity(
+        stack_id=stack_id,
+        stack_name=stack_name,
+        sandbox_id=sandbox_id,
+        sandbox_name=sandbox_name,
+    )
+    monkeypatch.setattr(
+        kitaru_config,
+        "_active_sandbox_cache_identity",
+        lambda: identity,
+    )
+    return identity
 
 
 @dataclass(frozen=True)
@@ -770,8 +814,17 @@ def test_runner_call_cache_identity_varies_by_custom_model_public_state() -> Non
     )
     model_identity = concise_runner._agent_cache_identity(concise_runner.agent)["model"]
 
+    concise_model.text = "changed answer"
+    after_text_mutation_key = concise_runner._runner_call_cache_key(
+        request,
+        agent=concise_runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    concise_model.text = "short answer"
     concise_model.call_count = 99
-    after_mutation_key = concise_runner._runner_call_cache_key(
+    after_call_count_mutation_key = concise_runner._runner_call_cache_key(
         request,
         agent=concise_runner.agent,
         run_config=run_config,
@@ -780,9 +833,10 @@ def test_runner_call_cache_identity_varies_by_custom_model_public_state() -> Non
     )
 
     assert concise_key != detailed_key
-    assert after_mutation_key == concise_key
+    assert after_text_mutation_key != concise_key
+    assert after_call_count_mutation_key == concise_key
     assert model_identity["python_type"].endswith(".StaticTextModel")
-    assert model_identity["public_state"]["text"] == "short answer"
+    assert model_identity["cache_identity"] == {"text": "short answer"}
 
 
 def test_runner_call_cache_identity_varies_by_agent_model_settings() -> None:
@@ -829,7 +883,10 @@ def test_runner_call_cache_identity_varies_by_agent_model_settings() -> None:
     assert behavior_identity["model_settings"]["fields"]["temperature"] == 0.0
 
 
-def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
+def test_runner_call_cache_identity_varies_by_sandbox_tool_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_active_sandbox_identity(monkeypatch)
     request = OpenAIRunRequest.start("hello")
     run_config = RunConfig(tracing_disabled=True)
     runner_small_output = KitaruRunner(
@@ -901,7 +958,98 @@ def test_runner_call_cache_identity_varies_by_sandbox_tool_settings() -> None:
     assert len({small_key, large_key, close_key, timeout_key}) == 4
 
 
-def test_runner_call_cache_identity_varies_by_sandbox_tool_description() -> None:
+def test_runner_call_cache_key_allows_unused_sandbox_tool_without_active_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.config as kitaru_config
+
+    def fail_active_sandbox_identity() -> dict[str, str | None]:
+        raise KitaruStateError("The active stack has no sandbox component.")
+
+    monkeypatch.setattr(
+        kitaru_config,
+        "_active_sandbox_cache_identity",
+        fail_active_sandbox_identity,
+    )
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    runner = KitaruRunner(
+        Agent(
+            name="unused-sandbox-tool-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=100)],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    cache_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    tool_identity = runner._agent_cache_identity(runner.agent)["tools"][0]
+
+    assert isinstance(cache_key, str)
+    assert tool_identity["tool_cache_identity"]["active_sandbox"] == {
+        "kind": "active_sandbox_unavailable",
+        "error_type": "KitaruStateError",
+        "message": "The active stack has no sandbox component.",
+    }
+
+
+def test_runner_call_cache_identity_varies_by_active_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.config as kitaru_config
+
+    request = OpenAIRunRequest.start("hello")
+    run_config = RunConfig(tracing_disabled=True)
+    active_identity = _active_sandbox_identity(stack_id="stack-a")
+    monkeypatch.setattr(
+        kitaru_config,
+        "_active_sandbox_cache_identity",
+        lambda: active_identity,
+    )
+    runner = KitaruRunner(
+        Agent(
+            name="sandbox-cache-agent",
+            model=StaticTextModel("ok"),
+            tools=[sandbox_command_tool(max_chars=100, cleanup="destroy")],
+        ),
+        checkpoint_strategy="runner_call",
+        run_config_factory=lambda: run_config,
+    )
+
+    stack_a_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    active_identity = _active_sandbox_identity(stack_id="stack-b")
+    stack_b_key = runner._runner_call_cache_key(
+        request,
+        agent=runner.agent,
+        run_config=run_config,
+        context_cache_identity=None,
+        surface="run",
+    )
+    tool_identity = runner._agent_cache_identity(runner.agent)["tools"][0]
+
+    assert stack_a_key != stack_b_key
+    assert tool_identity["tool_cache_identity"]["active_sandbox"]["stack_id"] == (
+        "stack-b"
+    )
+
+
+def test_runner_call_cache_identity_varies_by_sandbox_tool_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_active_sandbox_identity(monkeypatch)
     request = OpenAIRunRequest.start("hello")
     run_config = RunConfig(tracing_disabled=True)
     read_only_runner = KitaruRunner(
@@ -957,7 +1105,10 @@ def test_runner_call_cache_identity_varies_by_sandbox_tool_description() -> None
     )
 
 
-def test_runner_call_cache_identity_varies_by_handoff_sandbox_tool_settings() -> None:
+def test_runner_call_cache_identity_varies_by_handoff_sandbox_tool_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_active_sandbox_identity(monkeypatch)
     request = OpenAIRunRequest.start("hello")
     run_config = RunConfig(tracing_disabled=True)
 

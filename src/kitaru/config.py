@@ -714,6 +714,11 @@ def run_sandbox_command(
     )
 
 
+def _active_sandbox_cache_identity() -> dict[str, str | None]:
+    """Return cache identity for the active stack's single sandbox component."""
+    return _config_sandbox.active_sandbox_cache_identity(client_factory=Client)
+
+
 def list_stacks() -> list[StackInfo]:
     """List stacks visible to the current user and mark the active one."""
     return [entry.stack for entry in _list_stack_entries()]

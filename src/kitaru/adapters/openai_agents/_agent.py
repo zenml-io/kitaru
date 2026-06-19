@@ -35,6 +35,7 @@ from ._runner import (
 )
 from ._serialization import stable_cache_identity
 from ._streaming import OpenAIStreamPublisher
+from ._tools import _resolve_tool_cache_identity
 from ._tracking import tracker_scope
 from ._types import (
     OpenAIApprovalDecision,
@@ -97,6 +98,14 @@ def _referenced_agent_from_handoff(handoff: Any) -> Any | None:
     # identity change when that referenced agent's tools/model change.
     agent_ref = getattr(handoff, "_agent_ref", None)
     return agent_ref() if callable(agent_ref) else None
+
+
+def _explicit_model_cache_identity(model: Any) -> Any | None:
+    for attr_name in ("_kitaru_cache_identity", "kitaru_cache_identity"):
+        hook = getattr(model, attr_name, None)
+        if hook is not None:
+            return hook() if callable(hook) else hook
+    return None
 
 
 def _behavior_value_cache_identity(
@@ -549,7 +558,6 @@ class KitaruRunner:
         self._strict_context = strict_context
         self._strict_sdk_version = strict_sdk_version
         self._cost_calculator = cost_calculator
-        self._model_value_cache_identities: dict[int, dict[str, Any]] = {}
 
         track(
             AnalyticsEvent.OPENAI_AGENTS_WRAPPED,
@@ -1288,15 +1296,7 @@ class KitaruRunner:
         return identity
 
     def _model_value_cache_identity(self, model: Any) -> dict[str, Any]:
-        if model is None or isinstance(model, str | int | float | bool):
-            return self._build_model_value_cache_identity(model)
-        model_id = id(model)
-        cached = self._model_value_cache_identities.get(model_id)
-        if cached is not None:
-            return cached
-        identity = self._build_model_value_cache_identity(model)
-        self._model_value_cache_identities[model_id] = identity
-        return identity
+        return self._build_model_value_cache_identity(model)
 
     def _build_model_value_cache_identity(self, model: Any) -> dict[str, Any]:
         model_type = type(model)
@@ -1305,9 +1305,13 @@ class KitaruRunner:
             "python_type": self._python_type(model_type),
             "value": stable_cache_identity(model),
         }
-        public_state = self._public_model_state_cache_identity(model)
-        if public_state is not None:
-            identity["public_state"] = public_state
+        explicit_identity = _explicit_model_cache_identity(model)
+        if explicit_identity is not None:
+            identity["cache_identity"] = stable_cache_identity(explicit_identity)
+        else:
+            public_state = self._public_model_state_cache_identity(model)
+            if public_state is not None:
+                identity["public_state"] = public_state
         return identity
 
     @staticmethod
@@ -1336,7 +1340,7 @@ class KitaruRunner:
         params_json_schema = getattr(tool, "params_json_schema", None)
         if params_json_schema is not None:
             identity["params_json_schema"] = stable_cache_identity(params_json_schema)
-        tool_cache_identity = getattr(tool, "_kitaru_cache_identity", None)
+        tool_cache_identity = _resolve_tool_cache_identity(tool)
         if tool_cache_identity is not None:
             identity["tool_cache_identity"] = stable_cache_identity(tool_cache_identity)
         return identity
@@ -1368,53 +1372,51 @@ class KitaruRunner:
         )
         from ._tools import kitaruify_openai_tools
 
-        preparing: set[int] = set()
         prepared_by_id: dict[int, Any] = {}
 
         def _prepare_agent(agent: Any) -> Any:
             agent_id = id(agent)
             if agent_id in prepared_by_id:
                 return prepared_by_id[agent_id]
-            if agent_id in preparing:
-                return agent
 
-            preparing.add(agent_id)
-            agent_model = getattr(agent, "model", None)
-            wrapped_model = (
-                kitaruify_openai_model(
-                    agent_model,
+            try:
+                agent_model = getattr(agent, "model", None)
+                wrapped_model = (
+                    kitaruify_openai_model(
+                        agent_model,
+                        capture=self._capture,
+                        agent_name=self._name,
+                        checkpoint_config=self._model_checkpoint_config,
+                    )
+                    if isinstance(agent_model, Model)
+                    else agent_model
+                )
+                wrapped_tools = kitaruify_openai_tools(
+                    list(getattr(agent, "tools", []) or []),
                     capture=self._capture,
                     agent_name=self._name,
-                    checkpoint_config=self._model_checkpoint_config,
+                    tool_checkpoint_config=self._tool_checkpoint_config,
+                    tool_checkpoint_config_by_name=self._tool_checkpoint_config_by_name,
+                    context_cache_identity=context_cache_identity,
+                    context_cache_key=context_cache_key,
+                    context_cache_key_factory=self._context_cache_key_for_context,
                 )
-                if isinstance(agent_model, Model)
-                else agent_model
-            )
-            wrapped_tools = kitaruify_openai_tools(
-                list(getattr(agent, "tools", []) or []),
-                capture=self._capture,
-                agent_name=self._name,
-                tool_checkpoint_config=self._tool_checkpoint_config,
-                tool_checkpoint_config_by_name=self._tool_checkpoint_config_by_name,
-                context_cache_identity=context_cache_identity,
-                context_cache_key=context_cache_key,
-                context_cache_key_factory=self._context_cache_key_for_context,
-            )
-            try:
-                wrapped_handoffs = [
-                    _prepare_handoff(handoff)
-                    for handoff in (getattr(agent, "handoffs", []) or [])
-                ]
                 prepared_agent = replace(
                     agent,
                     model=wrapped_model,
                     tools=wrapped_tools,
-                    handoffs=wrapped_handoffs,
+                    handoffs=[],
                 )
                 prepared_by_id[agent_id] = prepared_agent
+                wrapped_handoffs = [
+                    _prepare_handoff(handoff)
+                    for handoff in (getattr(agent, "handoffs", []) or [])
+                ]
+                object.__setattr__(prepared_agent, "handoffs", wrapped_handoffs)
                 return prepared_agent
-            finally:
-                preparing.remove(agent_id)
+            except Exception:
+                prepared_by_id.pop(agent_id, None)
+                raise
 
         def _prepare_handoff(handoff: Any) -> Any:
             if _is_openai_agent(handoff):

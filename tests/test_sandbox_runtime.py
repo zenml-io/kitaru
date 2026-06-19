@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from kitaru._config._sandbox import run_sandbox_command
+from kitaru._config._sandbox import active_sandbox_cache_identity, run_sandbox_command
 from kitaru.errors import (
     KitaruBackendError,
     KitaruFeatureNotAvailableError,
@@ -157,6 +157,44 @@ class FakeClient:
 
 def _client_factory(client: FakeClient) -> Any:
     return lambda: client
+
+
+def test_active_sandbox_cache_identity_returns_stack_and_sandbox_ids() -> None:
+    sandbox = FakeSandbox(id="sandbox-123", name="sandbox-object-name")
+    client = FakeClient(
+        active_stack=FakeActiveStack({"local": sandbox}),
+        active_stack_model=FakeStackModel(id="stack-123", name="dev-stack"),
+    )
+
+    identity = active_sandbox_cache_identity(client_factory=_client_factory(client))
+
+    assert identity == {
+        "kind": "active_sandbox",
+        "stack_id": "stack-123",
+        "stack_name": "dev-stack",
+        "sandbox_id": "sandbox-123",
+        "sandbox_name": "local",
+    }
+    assert sandbox.create_settings == []
+
+
+def test_active_sandbox_cache_identity_requires_one_active_sandbox() -> None:
+    client = FakeClient(active_stack=FakeActiveStack({}))
+
+    with pytest.raises(KitaruStateError, match="no sandbox component"):
+        active_sandbox_cache_identity(client_factory=_client_factory(client))
+
+    client = FakeClient(
+        active_stack=FakeActiveStack(
+            {
+                "local": FakeSandbox(),
+                "remote-gpu": FakeSandbox(name="remote-gpu"),
+            }
+        )
+    )
+
+    with pytest.raises(KitaruStateError, match="multiple sandbox components"):
+        active_sandbox_cache_identity(client_factory=_client_factory(client))
 
 
 def test_run_sandbox_command_returns_stable_result_shape() -> None:
