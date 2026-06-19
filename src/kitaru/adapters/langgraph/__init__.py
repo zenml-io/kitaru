@@ -23,6 +23,7 @@ from ._policy import (
     LangGraphStreamPolicy,
 )
 from ._sandbox_tool import (
+    DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION,
     DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS,
     DEFAULT_SANDBOX_COMMAND_TOOL_NAME,
     SandboxCommandToolArgs,
@@ -61,6 +62,7 @@ from ._utils import (
 )
 
 __all__ = [
+    "DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION",
     "DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS",
     "DEFAULT_SANDBOX_COMMAND_TOOL_NAME",
     "LANGGRAPH_STREAM_CHECKPOINTS",

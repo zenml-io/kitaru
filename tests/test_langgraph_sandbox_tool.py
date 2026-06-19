@@ -57,6 +57,7 @@ def test_factory_builds_structured_tool_with_conservative_defaults() -> None:
     assert tool.name == "run_sandbox_command"
     assert "active Kitaru stack sandbox" in tool.description
     assert "non-zero exit code" in tool.description
+    assert "redacts the command text" in tool.description
     assert "Deep Agents" in tool.description
     assert "exfiltrate secrets" in tool.description
     assert tool.args_schema is SandboxCommandToolArgs
@@ -144,7 +145,7 @@ def test_tool_forwards_command_options_and_returns_full_result_json(
         }
     ]
     assert payload == {
-        "command": "echo hello",
+        "command": "[REDACTED]",
         "cwd": "/tmp",
         "stdout": "hello\n",
         "stderr": "",
@@ -224,6 +225,7 @@ def test_non_zero_exit_result_returns_json_instead_of_raising(
 
     payload = json.loads(create_sandbox_command_tool().invoke({"command": "false"}))
 
+    assert payload["command"] == "[REDACTED]"
     assert payload["exit_code"] == 2
     assert payload["stderr"] == "boom\n"
 

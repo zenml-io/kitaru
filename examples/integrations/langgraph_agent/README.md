@@ -69,11 +69,12 @@ uv run kitaru login
 export OPENAI_API_KEY='sk-...'
 # Optional: override the sandbox demo default gpt-5-nano model.
 export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
-# Select or create a Kitaru stack with exactly one sandbox component first.
+# Create and activate a local stack with one sandbox component.
+uv run kitaru stack create langgraph-sandbox-demo --type local --sandbox local
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
 
-This branch currently pins ZenML to a sandbox-enabled GitHub SHA in `pyproject.toml`. If that SHA is private, unavailable, or not yet installed locally, dependency sync and the real sandbox smoke can fail before the example reaches Kitaru user code.
+The local sandbox is convenient for learning, but it is not isolated from your machine. It runs commands with local filesystem and network access.
 
 From this directory, the script path is shorter.
 
@@ -98,7 +99,7 @@ cd examples/integrations/langgraph_agent
 uv run python langgraph_adapter.py --strategy calls
 ```
 
-After the OpenAI-backed sandbox setup above, including `OPENAI_API_KEY` and a sandbox-enabled active stack, run:
+After the OpenAI-backed sandbox setup above, including `OPENAI_API_KEY` and an active stack with exactly one sandbox component, run:
 
 ```bash
 cd examples/integrations/langgraph_agent
@@ -207,7 +208,7 @@ The concrete chain of events is:
 4. Kitaru middleware opens a `tool_call__run_sandbox_command_...` checkpoint because the handler is synchronous and the run is inside a Kitaru flow.
 5. The tool handler calls `kitaru.run_sandbox_command(...)`.
 6. Kitaru asks the active stack sandbox to run the command.
-7. The tool returns JSON with stdout, stderr, exit code, truncation flags, and sandbox/session metadata.
+7. The tool returns JSON with stdout, stderr, exit code, truncation flags, sandbox/session metadata, and a redacted `command` field. It does not echo raw command text back to the model.
 
 What to expect in Kitaru:
 
@@ -217,7 +218,7 @@ What to expect in Kitaru:
 - event/run-summary artifacts for the sandbox agent run;
 - one user-facing summary artifact: `summary__langgraph_demo`.
 
-This is not a Deep Agents backend. It does not list, read, write, edit, glob, grep, or snapshot Deep Agents files. It runs one command through Kitaru's active stack sandbox and returns the command result JSON to LangChain.
+This is not a Deep Agents backend. It does not list, read, write, edit, glob, grep, or snapshot Deep Agents files. It runs one command through Kitaru's active stack sandbox and returns redacted command result JSON to LangChain.
 
 ## Why `thread_id` matters
 

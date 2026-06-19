@@ -861,11 +861,44 @@ def _tool_call_ids_from_call_payloads(tool_calls: list[Any]) -> list[str]:
 
 def _persisted_tool_args_envelope(request: Any) -> dict[str, Any]:
     """Return the redacted tool payload safe to persist as checkpoint input."""
+    args = redact_config(_tool_args(request))
+    tool_call = redact_config(getattr(request, "tool_call", None))
+    if _is_sandbox_command_tool_request(request):
+        args = _redact_sandbox_command_text(args)
+        tool_call = _redact_sandbox_command_text(tool_call)
     return _tool_payload_envelope(
         request,
-        args=redact_config(_tool_args(request)),
-        tool_call=redact_config(getattr(request, "tool_call", None)),
+        args=args,
+        tool_call=tool_call,
     )
+
+
+def _is_sandbox_command_tool_request(request: Any) -> bool:
+    tool = getattr(request, "tool", None)
+    return getattr(tool, "args_schema", None) is SandboxCommandToolArgs
+
+
+def _redact_sandbox_command_text(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        redacted: dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = _safe_mapping_key_text(key)
+            redacted[key_text] = (
+                "[REDACTED]"
+                if key_text == "command"
+                else _redact_sandbox_command_text(nested)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sandbox_command_text(item) for item in value]
+    return value
+
+
+def _safe_mapping_key_text(key: Any) -> str:
+    try:
+        return str(key)
+    except Exception:
+        return f"<unprintable key {_type_label(key)}>"
 
 
 def _tool_cache_identity_envelope(request: Any) -> dict[str, Any]:

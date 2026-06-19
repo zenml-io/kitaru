@@ -56,7 +56,7 @@ Kitaru flow
        └─ Kitaru checkpoint: langgraph_summary__...
 ```
 
-That second picture is the key. Kitaru is not magically seeing through LangGraph. The `calls` strategy works because `KitaruLangGraphMiddleware` is physically wrapped around the real LangChain model/tool handler call, so Kitaru can open a true checkpoint at that exact seam.
+That second picture is the key. Kitaru is not magically seeing through LangGraph. The `calls` strategy works because `KitaruLangGraphMiddleware` is physically wrapped around the real LangChain model/tool handler call, so Kitaru can open a true checkpoint while that handler is running.
 
 This boundary discipline avoids a dangerous double-replay problem. Imagine a graph node sends a Slack message, the process crashes, LangGraph resumes from its last checkpoint, and Kitaru also retries the same node. The message might be sent twice. The default `graph_call` strategy avoids that by using one Kitaru boundary around the whole graph call. The `calls` strategy is narrower: it only checkpoints calls where Kitaru middleware is actually wrapped around the model/tool handler. Outside those middleware-wrapped calls, LangGraph's own replay logic remains the source of truth.
 
@@ -108,7 +108,17 @@ export LANGGRAPH_AGENT_MODEL='gpt-5-nano'
 
 The base `langgraph` extra does not install a model provider. Use `langgraph-openai` for OpenAI-backed LangChain agents, or `langgraph-anthropic` when you are building Anthropic-backed LangChain agents.
 
-The sandbox command tool also needs an active Kitaru stack with exactly one sandbox component. In this development branch, `pyproject.toml` still pins ZenML to a sandbox-enabled GitHub SHA; if that SHA is unavailable locally, dependency sync or the real sandbox smoke can fail before your agent code runs.
+The sandbox command tool also needs an active Kitaru stack with exactly one sandbox component. For a local learning setup, create and activate a local stack with a local sandbox component:
+
+```bash
+kitaru stack create langgraph-sandbox-demo --type local --sandbox local
+```
+
+The local sandbox is convenient for learning, but it is not isolated from your machine. Commands run with local filesystem and network access. For an existing sandbox-enabled stack, activate that stack instead:
+
+```bash
+kitaru stack use <stack-name>
+```
 
 Initialize the project once:
 
@@ -200,14 +210,14 @@ handle = review.run("ticket-42", cache=False)
 
 The shape is deliberately simple: Kitaru drains LangGraph's `.stream(..., version="v2")` output inside the graph-call checkpoint, publishes safe live events while chunks arrive, and then returns the same durable `LangGraphRunResult` shape as `invoke(...)`.
 
-Picture it as two lanes:
+There are two different records:
 
 ```text
-live lane:    langgraph.stream.started → updates/custom/messages → completed
-saved lane:   one graph-call checkpoint result: LangGraphRunResult
+live events:      langgraph.stream.started → updates/custom/messages → completed
+saved checkpoint: one graph-call checkpoint result: LangGraphRunResult
 ```
 
-The live lane is for watching. The saved lane is what replay and later workflow steps should trust.
+The live events are for watching progress while the graph is running. The saved checkpoint result is what replay and later workflow steps should trust.
 
 By default, Kitaru asks LangGraph for `messages`, `updates`, and `custom` stream modes, plus an internal `values` mode so it can reconstruct the final result without calling the graph a second time. Kitaru does **not** publish that internal `values` state unless you explicitly request `stream_mode="values"` or include it in a mode list.
 
@@ -292,7 +302,7 @@ Here is what actually happens when the model asks for `run_sandbox_command(comma
 6. `kitaru.run_sandbox_command(...)` resolves the active Kitaru stack and asks its single sandbox component to run the command.
 7. The tool returns a JSON string to LangChain.
 
-The returned JSON contains the command, cwd, stdout, stderr, exit code, output truncation flags, active stack metadata, sandbox/session metadata, and cleanup status. A non-zero exit code is still returned as JSON. It means the command failed inside the sandbox; it does not mean the tool itself failed. The LangChain tool defaults `max_chars` to `20_000` because the JSON is fed back into the model; direct `kitaru.run_sandbox_command(...)` still keeps its lower-level default.
+The returned JSON contains cwd, stdout, stderr, exit code, output truncation flags, active stack metadata, sandbox/session metadata, cleanup status, and a redacted `command` field. The tool does not echo raw command text back to the model, because shell commands can contain credential values. A non-zero exit code is still returned as JSON. It means the command failed inside the sandbox; it does not mean the tool itself failed. The LangChain tool defaults `max_chars` to `20_000` because the JSON is fed back into the model; direct `kitaru.run_sandbox_command(...)` still keeps its lower-level default and returns the raw command in its SDK result.
 
 Kitaru errors propagate unchanged. If the active stack has no sandbox, has multiple sandbox components, or the installed ZenML runtime does not expose the sandbox session APIs, the user sees the same Kitaru error they would get from direct `kitaru.run_sandbox_command(...)` usage.
 
@@ -324,9 +334,11 @@ runner = KitaruGraphRunner(
 )
 ```
 
-Be careful when changing those defaults. A retry can run the same sandbox command again. A cache hit can skip command execution and reuse an earlier JSON result. Side effects inside the sandbox session are not separate LangGraph checkpoints.
+Be careful when changing those defaults. A retry can run the same sandbox command again. A cache hit can skip command execution and reuse an earlier JSON result. Keep caching disabled for sandbox commands unless the tool name, command, static environment, working directory, output limit, and cleanup policy are intentionally stable for that cached result. Side effects inside the sandbox session are not separate LangGraph checkpoints.
 
 This first version is a synchronous LangChain tool. True Kitaru tool-call checkpoints are supported for synchronous LangChain tool calls in `checkpoint_strategy="calls"`. In `graph_call` mode, the command can still run as part of the agent invocation, but Kitaru records only the outer graph-call checkpoint; it does not create a separate `tool_call__run_sandbox_command_...` checkpoint unless calls-mode middleware is active. If LangChain runs the sync tool from an async path, Kitaru does not promise true async tool checkpoints; the current async middleware hooks remain metadata-only.
+
+If command text might contain credentials, keep model-call checkpoints disabled around the sandbox tool as shown in the example with `model_checkpoint_config=False`. Tool-call checkpoint inputs and the tool result redact the raw command, but a model-call checkpoint stores the model response for replay; that response can include tool-call arguments.
 
 This is not a Deep Agents backend. Kitaru is not implementing `SandboxBackendProtocol`, `BaseSandbox`, Deep Agents file listing, file reading, file writing, editing, glob, grep, or sandbox filesystem snapshots here. A future Deep Agents backend would need a broader file/session API than this single-command helper.
 
@@ -600,7 +612,7 @@ If neither events nor the graph output expose token usage, Kitaru still records 
 
 ## LangChain and Deep Agents
 
-The adapter is named `langgraph` because LangGraph is the runtime seam. LangChain agents and Deep Agents are built on top of LangGraph-style execution, but they add their own higher-level concepts.
+The adapter is named `langgraph` because Kitaru calls a LangGraph runnable. LangChain agents and Deep Agents are built on top of LangGraph-style execution, but they add their own higher-level concepts.
 
 For this adapter, the contract is:
 
@@ -648,11 +660,14 @@ The sandbox path uses a real OpenAI-backed LangChain agent with Kitaru's sandbox
 uv sync --extra local --extra langgraph-openai
 uv run kitaru init
 uv run kitaru login
+uv run kitaru stack create langgraph-sandbox-demo --type local --sandbox local
 export OPENAI_API_KEY='sk-...'
 # Optional: override the sandbox demo default gpt-5-nano model.
 export LANGGRAPH_SANDBOX_AGENT_MODEL='gpt-5-nano'
 uv run python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 ```
+
+The local sandbox used here is not isolated from your machine; it is for local learning, not hostile code execution.
 
 The sandbox example disables model-call checkpoints to keep the demo focused on the sandbox tool checkpoint. The proof checkpoint is the synchronous `run_sandbox_command` tool handler.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -12,11 +13,13 @@ from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 
 DEFAULT_SANDBOX_COMMAND_TOOL_NAME = "run_sandbox_command"
 DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS = 20_000
+SANDBOX_COMMAND_TOOL_REDACTION_MARKER = "[REDACTED]"
 DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION = """\
 Run one shell command in the active Kitaru stack sandbox. The tool returns JSON
 with stdout, stderr, exit code, output truncation flags, and sandbox/session
-metadata. A non-zero exit code is returned in that JSON and does not mean the
-tool itself failed. Use this for shell-shaped inspection, tests, scripts, or
+metadata. The returned JSON redacts the command text instead of echoing it
+back to the model. A non-zero exit code is returned in that JSON and does not
+mean the tool itself failed. Use this for shell-shaped inspection, tests, scripts, or
 build commands. Do not use it for Deep Agents filesystem operations; this is
 not a Deep Agents backend. Avoid commands that intentionally exfiltrate secrets
 or depend on host-local files outside the sandbox.
@@ -74,7 +77,9 @@ def create_sandbox_command_tool(
             max_chars=max_chars,
             cleanup=cleanup,
         )
-        return result.model_dump_json()
+        payload = result.model_dump(mode="json")
+        payload["command"] = SANDBOX_COMMAND_TOOL_REDACTION_MARKER
+        return json.dumps(payload)
 
     return StructuredTool.from_function(
         func=_run_command,
@@ -139,6 +144,7 @@ __all__ = [
     "DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION",
     "DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS",
     "DEFAULT_SANDBOX_COMMAND_TOOL_NAME",
+    "SANDBOX_COMMAND_TOOL_REDACTION_MARKER",
     "SandboxCommandToolArgs",
     "create_sandbox_command_tool",
 ]

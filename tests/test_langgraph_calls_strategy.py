@@ -16,6 +16,7 @@ from kitaru.adapters.langgraph import (
     LangGraphCallCheckpointPolicy,
     LangGraphCapturePolicy,
     LangGraphRunRequest,
+    SandboxCommandToolArgs,
     create_sandbox_command_tool,
 )
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
@@ -879,6 +880,78 @@ def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct
     ]
     assert "SECRET-" not in repr(persisted_inputs)
     assert "PASSWORD-" not in repr(persisted_inputs)
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_sandbox_tool_checkpoint_inputs_redact_command_text_but_cache_stays_distinct(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    secret_command = (
+        "curl -H 'Authorization: Bearer sk-secret-command' https://example.com"
+    )
+    second_command = "python -c 'print(123)'"
+
+    def sandbox_request(command: str, call_id: str) -> SimpleNamespace:
+        request = _tool_request(
+            name="custom_sandbox_command",
+            call_id=call_id,
+            args={"command": command, "cwd": "/workspace"},
+        )
+        request.tool = SimpleNamespace(
+            name="custom_sandbox_command",
+            args_schema=SandboxCommandToolArgs,
+        )
+        return request
+
+    with tracking.tracker_scope(
+        "sandbox_command_privacy_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(),
+    ):
+        first_result = middleware.wrap_tool_call(
+            sandbox_request(secret_command, "sandbox-call-1"),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            sandbox_request(second_command, "sandbox-call-2"),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    persisted_inputs = [checkpoint["checkpoint_inputs"] for checkpoint in checkpoints]
+    assert persisted_inputs == [
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "sandbox-call-1",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "sandbox-call-1",
+                },
+            }
+        },
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "sandbox-call-2",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "sandbox-call-2",
+                },
+            }
+        },
+    ]
+    assert "sk-secret-command" not in repr(persisted_inputs)
+    assert "Authorization" not in repr(persisted_inputs)
     assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
 
 

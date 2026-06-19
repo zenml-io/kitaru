@@ -47,6 +47,10 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.LangGraphDurabilityPolicy
     assert langgraph_adapter.LangGraphStreamPolicy
     assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_NAME == "run_sandbox_command"
+    assert (
+        "redacts the command text"
+        in langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION
+    )
     assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS == 20_000
     assert langgraph_adapter.SandboxCommandToolArgs
     assert langgraph_adapter.create_sandbox_command_tool
@@ -56,6 +60,7 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     public_names = set(langgraph_adapter.__all__)
     assert "graph_call" not in public_names
     assert "DEFAULT_SANDBOX_COMMAND_TOOL_NAME" in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION" in public_names
     assert "DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS" in public_names
     assert "SandboxCommandToolArgs" in public_names
     assert "create_sandbox_command_tool" in public_names
