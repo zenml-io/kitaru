@@ -93,8 +93,10 @@ By default, Kitaru creates:
 Then it automatically activates the new stack. The local sandbox uses Kitaru's
 installed local sandbox provider. Important: the `local` sandbox is for local
 development convenience, not for running untrusted code. It is not a security
-boundary; commands run on your machine and can access local files and the
-network available to your user. If another sandbox provider is installed in your
+boundary; commands run on your machine and can access local files, environment
+variables, credentials, and the network available to your user. If a model
+controls the command, it can ask the local sandbox to print those visible values
+back through stdout or stderr. If another sandbox provider is installed in your
 environment, you can choose it explicitly:
 
 ```bash
@@ -213,7 +215,11 @@ session.
 
 If the attached sandbox is `local`, the command runs as a local subprocess.
 Treat it like running a command on your own machine, not like running inside a
-locked-down container.
+locked-down container. Anything visible to that subprocess — files, environment
+variables, credentials, and network access — can be returned through stdout or
+stderr if the command prints it. When a model chooses the command, use an
+isolated sandbox provider and minimal credentials unless you fully trust the
+model and prompt.
 
 ```python
 import kitaru
@@ -222,13 +228,21 @@ result = kitaru.run_sandbox_command("python --version")
 print(result.stdout)
 ```
 
-For a runnable version of this pattern inside a tracked Kitaru flow, see the [sandbox entry on the examples page](../getting-started/examples.md#core-workflow-basics).
+For a runnable version of this pattern inside a tracked Kitaru flow, see the `features/sandbox/active_stack_sandbox_command.py` row in the [examples guide](../getting-started/examples.md#core-workflow-basics).
 
 If the active stack has no sandbox, Kitaru raises an error and does not run the
 command. If the active stack has more than one sandbox, Kitaru also raises an
 error instead of guessing. That avoids the bad version of the story: you thought
 the command was going to a cheap local sandbox, but Kitaru silently picked a GPU
 sandbox and ran it somewhere expensive.
+
+The Gemini Interactions adapter can use this same active-stack sandbox for
+caller-owned custom functions. Gemini returns `requires_action`, your code
+matches the requested function name against an explicit registry, and Kitaru runs
+the registered command through `kitaru.run_sandbox_command(...)`. This does not
+redirect Antigravity internals, built-in Gemini code execution, hosted MCP, web
+execution, or Google-owned tools into Kitaru; it only covers the function body
+your application explicitly executes.
 
 The result is intentionally plain and serializable. Check `exit_code` yourself,
 and use `stdout_truncated` / `stderr_truncated` to detect when output hit the

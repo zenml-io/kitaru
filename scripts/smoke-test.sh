@@ -13,7 +13,8 @@
 #   --required-provider-area AREA
 #                        Mark a provider area as required for this release.
 #                        Repeatable. Areas: openai, anthropic, gemini-model,
-#                        gemini-antigravity, research-bot
+#                        gemini-sandbox-function, gemini-antigravity,
+#                        research-bot
 #   --json-out PATH      Write structured smoke results to PATH
 #   -h, --help           Show this help message
 
@@ -39,7 +40,8 @@ Options:
   --required-provider-area AREA
                        Mark a provider area as required for this release.
                        Repeatable. Areas: openai, anthropic, gemini-model,
-                       gemini-antigravity, research-bot
+                       gemini-sandbox-function, gemini-antigravity,
+                       research-bot
   --json-out PATH      Write structured smoke results to PATH
   -h, --help           Show this help message
 EOF
@@ -139,16 +141,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --required-provider-area)
             if [[ $# -lt 2 ]]; then
-                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
                 write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--required-provider-area requires a value" "$RELEASE_MODE" || true
                 exit 1
             fi
             case "$2" in
-                openai|anthropic|gemini-model|gemini-antigravity|research-bot)
+                openai|anthropic|gemini-model|gemini-sandbox-function|gemini-antigravity|research-bot)
                     REQUIRED_PROVIDER_AREAS+=("$2")
                     ;;
                 *)
-                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-antigravity, research-bot" >&2
+                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
                     write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "unsupported provider area '$2'" "$RELEASE_MODE" || true
                     exit 1
                     ;;
@@ -187,6 +189,7 @@ SECTION_NUM=0
 CURRENT_SECTION="Preflight"
 RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
+GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -559,6 +562,17 @@ is_truthy_env_value() {
     esac
 }
 
+active_stack_has_single_sandbox() {
+    local current_json
+    local stack_name
+    local stack_json
+    current_json=$($UV_RUN kitaru stack current -o json 2>/dev/null) || return 1
+    stack_name=$(echo "$current_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["item"]["name"])' 2>/dev/null) || return 1
+    [[ -n "$stack_name" ]] || return 1
+    stack_json=$($UV_RUN kitaru stack show "$stack_name" -o json 2>/dev/null) || return 1
+    echo "$stack_json" | python3 -c 'import json,sys; components=json.load(sys.stdin)["item"].get("components", []); sandboxes=[component for component in components if component.get("role") == "sandbox"]; sys.exit(0 if len(sandboxes) == 1 else 1)'
+}
+
 cleanup() {
     rm -f "$RESULT_RECORDS_FILE"
 
@@ -567,6 +581,10 @@ cleanup() {
             "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
         timed 10 $UV_RUN kitaru auth service-accounts delete \
             "$SMOKE_AUTH_SA" --yes &>/dev/null || true
+    fi
+    if [[ -n "${GEMINI_SANDBOX_FUNCTION_SMOKE_STACK:-}" ]]; then
+        timed 60 $UV_RUN kitaru stack delete \
+            "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" --recursive &>/dev/null || true
     fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
@@ -831,8 +849,16 @@ if [[ "$HAS_OPENAI" == true ]]; then
     run_provider_test "openai" "OPENAI_API_KEY" \
         "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" \
         timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
+    if active_stack_has_single_sandbox; then
+        run_provider_test "openai" "OPENAI_API_KEY" \
+            "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" \
+            timed 120 $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
+    else
+        skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "active stack does not have exactly one sandbox component; provider credentials alone are not enough for this example; --release --required-provider-area openai makes this prerequisite skip fail release smoke" "openai" "OPENAI_API_KEY"
+    fi
 else
     skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py" "OPENAI_API_KEY not set; provider credentials required for PydanticAI streaming example" "openai" "OPENAI_API_KEY"
+    skip_test "examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py" "OPENAI_API_KEY not set; provider credentials and one active-stack sandbox required for PydanticAI sandbox toolset example" "openai" "OPENAI_API_KEY"
 fi
 
 section_header "LangGraph adapter"
@@ -901,6 +927,8 @@ run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_ad
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode antigravity
 run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream" \
     $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
+run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function" \
+    $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function
 
 if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
     run_provider_test "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY" \
@@ -912,6 +940,26 @@ elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
     skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "raw model smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC config is only used for opt-in Antigravity smoke" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
 else
     skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" "GEMINI_API_KEY or GOOGLE_API_KEY not set" "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY"
+fi
+
+if [[ "$HAS_GEMINI_API_KEY" != true ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" "sandbox-function smoke requires GEMINI_API_KEY or GOOGLE_API_KEY; Vertex ADC does not serve raw model interactions" "gemini-sandbox-function" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION"
+elif [[ "${KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION:-}" != "1" ]]; then
+    skip_test "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" "set KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION=1 to run the real Gemini custom-function plus Kitaru sandbox smoke" "gemini-sandbox-function" "KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION"
+else
+    GEMINI_SANDBOX_FUNCTION_SMOKE_STACK="kitaru-gemini-sandbox-function-smoke-$$"
+    run_test "Create Gemini sandbox function smoke stack" \
+        timed 60 $UV_RUN kitaru stack create "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" \
+            --type local \
+            --sandbox local \
+            --no-activate
+    run_provider_test "gemini-sandbox-function" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GEMINI_SANDBOX_FUNCTION" \
+        "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode sandbox-function" \
+        timed 180 env \
+            KITARU_STACK="$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" \
+            $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+                --mode sandbox-function \
+                --prompt "Call the sandbox_python_version function, then answer in one short sentence."
 fi
 
 if [[ "$HAS_GEMINI" != true ]]; then
