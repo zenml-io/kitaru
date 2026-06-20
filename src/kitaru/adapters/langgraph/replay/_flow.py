@@ -14,13 +14,14 @@ terminal-step fallback path.
 """
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
 from kitaru import checkpoint, flow
+from kitaru._replay_verify_imported_models import RecordedCall
 from kitaru.adapters.langgraph.replay._compiler import CompiledTopology
 from kitaru.adapters.langgraph.replay._edits import Edit, resolve_edits
-from kitaru._replay_verify_imported_models import RecordedCall
 
 
 @dataclass
@@ -33,6 +34,49 @@ class ReplayContext:
     playback: bool
     variant: dict[str, Any] | None = None
     edits: list[Edit] = field(default_factory=list)
+    root_state: dict[str, Any] = field(default_factory=dict)
+
+
+def _apply_effective_variant(
+    running_state: dict[str, Any],
+    *,
+    effective: dict[str, Any],
+) -> None:
+    """Overlay the effective variant params onto ``running_state['variant']``.
+
+    The reference-agent node callables read ``state['variant']`` (an
+    ``AgentVariant`` pydantic model or a plain dict).  A fork edit replaces the
+    variant's model / prompt_profile / etc. so the *same* node callables produce
+    a different decision.  This mutates the variant object in place via a
+    structure-preserving copy and writes it back into ``running_state``.
+
+    Only fields that already exist on the variant are overlaid, so unrelated
+    edit/variant keys (e.g. ``value``) never leak onto the variant object.
+    """
+    variant_obj = running_state.get("variant")
+    if variant_obj is None or not effective:
+        return
+
+    if isinstance(variant_obj, dict):
+        updates = {k: v for k, v in effective.items() if k in variant_obj}
+        if updates:
+            running_state["variant"] = {**variant_obj, **updates}
+        return
+
+    # Pydantic-style model: only overlay fields the model actually declares.
+    model_copy = getattr(variant_obj, "model_copy", None)
+    declared = getattr(type(variant_obj), "model_fields", None)
+    if callable(model_copy) and isinstance(declared, dict):
+        updates = {k: v for k, v in effective.items() if k in declared}
+        if updates:
+            running_state["variant"] = model_copy(update=updates)
+        return
+
+    # Fallback: best-effort attribute assignment for plain objects.
+    for key, value in effective.items():
+        if hasattr(variant_obj, key):
+            with contextlib.suppress(AttributeError, TypeError):
+                setattr(variant_obj, key, value)
 
 
 def build_replay_flow(ctx: ReplayContext) -> Any:
@@ -73,24 +117,30 @@ def build_replay_flow(ctx: ReplayContext) -> Any:
         if playback:
             node_out = ctx.node_output_by_node.get(node, {})
         else:
-            # Live path: build the running AgentState from prior results.
-            running_state: dict[str, Any] = {}
+            # Live path: seed the running AgentState with the graph's root input
+            # (scenario + variant — NOT recoverable from prior node OUTPUT dicts),
+            # then overlay each prior node's output delta on top.
+            running_state: dict[str, Any] = dict(ctx.root_state)
             for prior_out in accumulated_results.values():
                 if isinstance(prior_out, dict):
                     running_state.update(prior_out)
 
-            # Apply any edits/variant overrides (no-op when lists are empty).
+            # Resolve effective edit/variant params (call > variant > recorded)
+            # and apply the effective variant into running_state so the live
+            # node callables run under the forked configuration.
             recorded: dict[str, Any] = {}
             calls = ctx.recorded_by_node.get(node, [])
             if calls and getattr(calls[0], "model", None) is not None:
                 recorded = {"model": calls[0].model}
-            resolve_edits(
+            effective = resolve_edits(
                 node=node,
                 call_index=None,
                 edits=ctx.edits,
                 variant=ctx.variant,
                 recorded=recorded,
             )
+            _apply_effective_variant(running_state, effective=effective)
+
             callable_ = ctx.topology.callables[node]
             node_out = callable_(running_state)
 
