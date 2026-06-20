@@ -24,6 +24,7 @@ Drift semantics:
 """
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from types import SimpleNamespace
@@ -134,6 +135,10 @@ class KitaruReplayAgent:
         # Rebuild the flow closure with edits/variant for the live tail.  The
         # seed run's recorded head is reused; only the tail re-executes, now
         # under the forked configuration.
+        # NOTE: fork replays the seed execution through a STRUCTURALLY-IDENTICAL
+        # REBUILT flow definition — Kitaru native replay matches by node names /
+        # step ids, not object identity — so a fresh build_replay_flow(fork_ctx)
+        # is correct to replay against the original seed's exec_id.
         fork_ctx = ReplayContext(
             topology=self._topology,
             recorded_by_node=self._seed_ctx.recorded_by_node,
@@ -224,7 +229,20 @@ def _decision_of_observed(case: ImportedReplayCase) -> dict[str, Any]:
 
 
 def _decision_of_result(result: _ReplayResult) -> dict[str, Any]:
-    """Read the decision dict out of a replay/fork node-output map."""
+    """Read the decision dict out of a replay/fork node-output map.
+
+    Raises RuntimeError if node_outputs is empty or contains none of the known
+    decision nodes with a non-empty decision — an empty result would make
+    ``has_reproduction_drift`` vacuously False, defeating the whole test.
+    """
+    if not result.node_outputs:
+        raise RuntimeError(
+            f"Replay/fork result for exec_id={result.exec_id!r} has an empty "
+            f"node_outputs map.  This likely means the replay flow returned an "
+            f"unexpected shape (e.g. Kitaru's flow.replay() return contract "
+            f"changed).  Cannot compute drift against an empty result."
+        )
+
     for node in _DECISION_NODES:
         node_out = result.node_outputs.get(node)
         if not isinstance(node_out, Mapping):
@@ -239,7 +257,15 @@ def _decision_of_result(result: _ReplayResult) -> dict[str, Any]:
             nested = _coerce_decision(final_output.get("decision"))
             if nested:
                 return nested
-    return {}
+
+    present_nodes = sorted(result.node_outputs)
+    raise RuntimeError(
+        f"Replay/fork result for exec_id={result.exec_id!r} has node_outputs "
+        f"({present_nodes}) but none of the decision nodes "
+        f"{list(_DECISION_NODES)} contain a non-empty 'decision' key.  "
+        f"Cannot compute drift — pass root_state= to reconstruct() or check "
+        f"that the graph's decision node name matches _DECISION_NODES."
+    )
 
 
 def _coerce_decision(value: Any) -> dict[str, Any]:
@@ -320,12 +346,36 @@ class _VariantProxy(SimpleNamespace):
 
 
 def _variant_proxy(raw_config: Mapping[str, Any]) -> _VariantProxy:
+    missing: list[str] = []
+    model_val = raw_config.get("model")
+    if not model_val:
+        missing.append("model")
+        model_val = "gpt-5-mini"
+
+    prompt_profile_val = raw_config.get("prompt_profile")
+    if not prompt_profile_val:
+        missing.append("prompt_profile")
+        prompt_profile_val = "full_permissions"
+
+    variant_name_val = raw_config.get("variant_name") or raw_config.get("name")
+    if not variant_name_val:
+        missing.append("variant_name")
+        variant_name_val = "baseline"
+
+    if missing:
+        warnings.warn(
+            f"Trace raw_config is missing field(s) {missing!r}; defaulting to "
+            f"model={model_val!r}, prompt_profile={prompt_profile_val!r}, "
+            f"variant_name={variant_name_val!r}.  These defaults may produce "
+            f"incorrect reproduction.  Pass root_state= to reconstruct() to "
+            f"override.",
+            stacklevel=3,
+        )
+
     return _VariantProxy(
-        name=str(
-            raw_config.get("variant_name") or raw_config.get("name") or "baseline"
-        ),
-        model=str(raw_config.get("model") or "gpt-5-mini"),
-        prompt_profile=str(raw_config.get("prompt_profile") or "full_permissions"),
+        name=str(variant_name_val),
+        model=str(model_val),
+        prompt_profile=str(prompt_profile_val),
         tool_policy_name=str(
             raw_config.get("tool_policy_name") or "full-permission-policy"
         ),

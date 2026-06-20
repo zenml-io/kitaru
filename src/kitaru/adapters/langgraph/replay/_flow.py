@@ -15,6 +15,7 @@ terminal-step fallback path.
 from __future__ import annotations
 
 import contextlib
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +53,12 @@ def _apply_effective_variant(
 
     Only fields that already exist on the variant are overlaid, so unrelated
     edit/variant keys (e.g. ``value``) never leak onto the variant object.
+
+    Important: ``running_state`` is a per-node shallow copy of ``ctx.root_state``
+    so the dict itself is isolated; however the variant object inside it is
+    shared.  All three branches below write a NEW object back into
+    ``running_state['variant']`` (never mutating the original), so the shared
+    proxy/model in ``ctx.root_state`` is never corrupted across nodes.
     """
     variant_obj = running_state.get("variant")
     if variant_obj is None or not effective:
@@ -72,11 +79,19 @@ def _apply_effective_variant(
             running_state["variant"] = model_copy(update=updates)
         return
 
-    # Fallback: best-effort attribute assignment for plain objects.
-    for key, value in effective.items():
-        if hasattr(variant_obj, key):
+    # Fallback: plain objects (e.g. _VariantProxy / SimpleNamespace).
+    # Work on a per-node shallow copy so we never mutate the shared proxy
+    # in ctx.root_state, and restrict setattr to keys that existed at
+    # construction time (recorded in __dict__) so stray edit keys like
+    # 'value' cannot attach to the proxy.
+    known_keys = set(vars(variant_obj))
+    updates = {k: v for k, v in effective.items() if k in known_keys}
+    if updates:
+        local_copy = copy.copy(variant_obj)
+        for key, value in updates.items():
             with contextlib.suppress(AttributeError, TypeError):
-                setattr(variant_obj, key, value)
+                setattr(local_copy, key, value)
+        running_state["variant"] = local_copy
 
 
 def build_replay_flow(ctx: ReplayContext) -> Any:
