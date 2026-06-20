@@ -32,7 +32,7 @@ class ReplayContext:
     topology: CompiledTopology
     recorded_by_node: dict[str, list[RecordedCall]]
     node_output_by_node: dict[str, Any]
-    playback: bool
+    playback: bool  # Not the runtime switch; the actual switch is the playback flow input threaded to node_step.
     variant: dict[str, Any] | None = None
     edits: list[Edit] = field(default_factory=list)
     root_state: dict[str, Any] = field(default_factory=dict)
