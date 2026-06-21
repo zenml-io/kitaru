@@ -19,8 +19,11 @@ class ReplayAdapter(Protocol):
     def capabilities(self) -> Caps: ...
 
 
+# fork_granularity is "node": the reconstruction places one checkpoint per graph
+# node and runs the node's whole callable (including any internal model/tool loop)
+# live as one unit. Forking an individual call inside a node is not built.
 LANGGRAPH_CAPS = Caps(
-    fork_granularity="call",
+    fork_granularity="node",
     native_checkpoints="reconstructed",
     resume="reconstruct",
 )

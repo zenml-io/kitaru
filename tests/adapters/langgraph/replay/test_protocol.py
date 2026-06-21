@@ -5,8 +5,10 @@ from kitaru.adapters.langgraph.replay._protocol import (
 )
 
 
-def test_langgraph_caps_advertise_call_granularity():
-    assert LANGGRAPH_CAPS.fork_granularity == "call"
+def test_langgraph_caps_advertise_node_granularity():
+    # The reconstruction checkpoints at NODE level: a node's whole callable runs
+    # live as one unit. Call-level forking is not built, so Caps must not claim it.
+    assert LANGGRAPH_CAPS.fork_granularity == "node"
     assert LANGGRAPH_CAPS.native_checkpoints == "reconstructed"
 
 

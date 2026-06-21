@@ -93,7 +93,7 @@ All LangGraph-specific code sits behind a `seed / checkpoints / fork / capabilit
 
 5. **Drift diff** — reuse/extend PR #412's `FieldComparison` + verdict model. Two report sections: reproduction drift and fork drift. Comparison metric = **semantic fields** (`policy_label`, `risk_status`, `required_action`, `tool_names`, `evidence_ids`, tool-call sequence), ignoring free-text `summary` wording.
 
-6. **Capabilities** — `Caps(fork_granularity="call", native_checkpoints="reconstructed", resume="reconstruct")`, so the SDK (and later the UI) can report what a given binding actually supports rather than silently doing the wrong thing.
+6. **Capabilities** — `Caps(fork_granularity="node", native_checkpoints="reconstructed", resume="reconstruct")`, so the SDK (and later the UI) can report what a given binding actually supports rather than silently doing the wrong thing. (v1 reconstructs at node granularity — a node's whole callable runs live as one unit; per-call forking is a separate, deeper effort.)
 
 ## Data shapes
 
