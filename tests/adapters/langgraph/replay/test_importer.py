@@ -52,6 +52,65 @@ def test_import_trace_keys_calls_by_node_and_index():
     assert by_name[("decide_action", 0)].name == "model_call"
 
 
+def _camel_row(obs_id, trace_id, name, started_at, *, parent, type_, metadata=None):
+    """A Langfuse-API-shaped (camelCase) observation row, like a real export."""
+    return {
+        "id": obs_id,
+        "traceId": trace_id,
+        "type": type_,
+        "name": name,
+        "parentObservationId": parent,
+        "startTime": started_at,
+        "metadata": metadata or {},
+        "input": {"args": {}},
+        "output": {"ok": True},
+    }
+
+
+def test_import_trace_attributes_nodes_via_tree_when_calls_lack_langgraph_node():
+    """Real Langfuse shape: call observations (GENERATION/TOOL) carry NO
+    langgraph_node on themselves — only the enclosing node-level span does.
+
+    Regression guard for the verified upstream behavior: the reference agent
+    invokes each model with an explicit config={'metadata': ...}, which drops
+    the inherited langgraph_node from the LLM/tool run. The importer must
+    attribute each call to its node via parentObservationId, NOT fall back to
+    the call's own observation name (lookup_customer / ChatOpenAI).
+    """
+    tid = "tr-real"
+    rows = [
+        # trace root (the graph invoke); decision lives on its output
+        {
+            "id": "root", "traceId": tid, "type": "SPAN", "name": "agent",
+            "parentObservationId": None, "startTime": "2026-06-17T14:00:00Z",
+            "input": {"user_request": "hi"},
+            "output": {"decision": {"policy_label": "billing_policy", "risk_status": "safe"}},
+            "metadata": {},
+        },
+        # node-level spans carry langgraph_node (dropped from recorded_calls as "other")
+        _camel_row("n_collect", tid, "collect_evidence_with_tools", "2026-06-17T14:00:01Z",
+                   parent="root", type_="SPAN",
+                   metadata={"langgraph_node": "collect_evidence_with_tools"}),
+        _camel_row("n_decide", tid, "decide_action", "2026-06-17T14:00:05Z",
+                   parent="root", type_="SPAN",
+                   metadata={"langgraph_node": "decide_action"}),
+        # the actual calls — NO langgraph_node on the call observation itself
+        _camel_row("t1", tid, "lookup_customer", "2026-06-17T14:00:02Z",
+                   parent="n_collect", type_="TOOL", metadata={}),
+        _camel_row("g1", tid, "ChatOpenAI", "2026-06-17T14:00:06Z",
+                   parent="n_decide", type_="GENERATION", metadata={"model": "gpt-5-mini"}),
+    ]
+
+    case = import_trace(rows)
+    by_obs = {c.observation_id: c for c in case.recorded_calls}
+
+    # attributed to the enclosing node, NOT to the call's own name
+    assert by_obs["t1"].node == "collect_evidence_with_tools"
+    assert by_obs["g1"].node == "decide_action"
+    assert by_obs["t1"].call_index == 0
+    assert by_obs["g1"].call_index == 0
+
+
 def test_import_trace_empty_input_raises_value_error():
     """Empty input raises ValueError."""
     import pytest
