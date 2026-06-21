@@ -52,7 +52,7 @@ def test_import_trace_keys_calls_by_node_and_index():
     assert by_name[("decide_action", 0)].name == "model_call"
 
 
-def _camel_row(obs_id, trace_id, name, started_at, *, parent, type_, metadata=None):
+def _camel_row(obs_id, trace_id, name, started_at, *, parent, type_, metadata=None, output=None):
     """A Langfuse-API-shaped (camelCase) observation row, like a real export."""
     return {
         "id": obs_id,
@@ -63,8 +63,54 @@ def _camel_row(obs_id, trace_id, name, started_at, *, parent, type_, metadata=No
         "startTime": started_at,
         "metadata": metadata or {},
         "input": {"args": {}},
-        "output": {"ok": True},
+        "output": {"ok": True} if output is None else output,
     }
+
+
+def _node_output_rows(trace_id):
+    """Real-shape rows: node-level CHAIN spans carry the node's recorded output."""
+    return [
+        {
+            "id": "root", "traceId": trace_id, "type": "SPAN", "name": "agent",
+            "parentObservationId": None, "startTime": "2026-06-17T14:00:00Z",
+            "input": {"user_request": "hi"},
+            "output": {"decision": {"policy_label": "billing_policy", "risk_status": "safe"}},
+            "metadata": {},
+        },
+        _camel_row("n_collect", trace_id, "collect_evidence_with_tools", "2026-06-17T14:00:01Z",
+                   parent="root", type_="CHAIN",
+                   metadata={"langgraph_node": "collect_evidence_with_tools"},
+                   output={"tool_executions": [{"name": "lookup_customer", "kind": "db_read"}]}),
+        _camel_row("n_sum", trace_id, "summarize_evidence", "2026-06-17T14:00:02Z",
+                   parent="root", type_="CHAIN",
+                   metadata={"langgraph_node": "summarize_evidence"},
+                   output={"evidence_summary": "facts about Globex"}),
+        # an inner call that inherits the node tag but is NOT the node span
+        _camel_row("g1", trace_id, "ChatOpenAI", "2026-06-17T14:00:03Z",
+                   parent="n_sum", type_="GENERATION", metadata={}),
+    ]
+
+
+def test_import_trace_extracts_per_node_outputs_from_node_spans():
+    case = import_trace(_node_output_rows("tr-out"))
+    node_outputs = case.raw_source_payload["langgraph_node_outputs"]
+    assert node_outputs["summarize_evidence"] == {"evidence_summary": "facts about Globex"}
+    assert node_outputs["collect_evidence_with_tools"]["tool_executions"][0]["name"] == "lookup_customer"
+    # the inner ChatOpenAI call is NOT mistaken for a node-level output
+    assert "ChatOpenAI" not in node_outputs
+
+
+def test_node_outputs_from_case_seeds_skipped_nodes_with_recorded_outputs():
+    from kitaru.adapters.langgraph.replay._agent import _node_outputs_from_case
+
+    case = import_trace(_node_output_rows("tr-seed"))
+    nodes = ["collect_evidence_with_tools", "summarize_evidence", "decide_action"]
+    outputs = _node_outputs_from_case(case, nodes)
+    # skipped upstream nodes now carry their real recorded state delta
+    assert outputs["summarize_evidence"] == {"evidence_summary": "facts about Globex"}
+    assert outputs["collect_evidence_with_tools"]["tool_executions"][0]["name"] == "lookup_customer"
+    # the decision node still carries the observed decision
+    assert outputs["decide_action"]["decision"]["risk_status"] == "safe"
 
 
 def test_import_trace_attributes_nodes_via_tree_when_calls_lack_langgraph_node():

@@ -104,6 +104,38 @@ def build_node_map(rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
     return node_map
 
 
+def _parse_output(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    return value if isinstance(value, Mapping) else None
+
+
+def build_node_outputs(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Map each LangGraph node to its recorded output (state delta), from the trace.
+
+    A node-level observation is the span whose own ``langgraph_node`` metadata
+    equals its ``name`` (e.g. the ``summarize_evidence`` CHAIN). Its ``output`` is
+    the node's recorded state delta (``{evidence_summary: ...}`` /
+    ``{tool_executions: [...]}``). Inner calls that merely inherit the node tag
+    (``ChatOpenAI``) are skipped because their name differs from the node.
+
+    These outputs let a later live replay reuse the recorded state of the skipped
+    head instead of an empty placeholder.
+    """
+    outputs: dict[str, Any] = {}
+    for row in rows:
+        node = _own_node(row)
+        if not node or _row_name(row) != node:
+            continue
+        parsed = _parse_output(row.get("output"))
+        if isinstance(parsed, Mapping):
+            outputs[node] = dict(parsed)
+    return outputs
+
+
 def _call_own_node(call: RecordedCall) -> str | None:
     node = call.metadata.get(_NODE_METADATA_KEY) if call.metadata else None
     return node if isinstance(node, str) and node else None
@@ -155,4 +187,14 @@ def import_trace(
             "Multiple traces found; pass trace_id= to select one "
             f"({', '.join(c.source_ref.source_id for c in cases)})."
         )
-    return key_calls_by_node(cases[0], node_map)
+    case = key_calls_by_node(cases[0], node_map)
+    node_outputs = build_node_outputs(rows)
+    if node_outputs:
+        case = replace(
+            case,
+            raw_source_payload={
+                **case.raw_source_payload,
+                "langgraph_node_outputs": node_outputs,
+            },
+        )
+    return case

@@ -82,22 +82,34 @@ class KitaruReplayAgent:
         case: ImportedReplayCase,
         *,
         root_state: Mapping[str, Any] | None = None,
+        node_outputs: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> str:
         """Build the mirror flow and run it in playback mode; return seed exec_id.
 
         ``root_state`` carries the graph's ROOT input (scenario + variant) so the
         later live tail can run the real node callables.  When omitted it is
         reconstructed from the imported case via attribute-accessible proxies.
+
+        ``node_outputs`` supplies each node's recorded output (state delta) so a
+        later live replay reuses the real recorded state of the skipped head.
+        When omitted it is recovered from the trace, but those are raw
+        JSON-decoded values: if a downstream node consumes a richer type (e.g. a
+        Pydantic model), pass ``node_outputs`` with properly rehydrated objects.
         """
         effective_root_state = (
             dict(root_state)
             if root_state is not None
             else _root_state_from_case(case)
         )
+        effective_node_outputs = (
+            {node: dict(delta) for node, delta in node_outputs.items()}
+            if node_outputs is not None
+            else _node_outputs_from_case(case, self._topology.nodes)
+        )
         ctx = ReplayContext(
             topology=self._topology,
             recorded_by_node=_recorded_by_node(case),
-            node_output_by_node=_node_outputs_from_case(case, self._topology.nodes),
+            node_output_by_node=effective_node_outputs,
             playback=True,
             variant=None,
             edits=[],
@@ -194,16 +206,18 @@ def _node_outputs_from_case(
 ) -> dict[str, Any]:
     """Recover each node's recorded output dict (used in playback mode).
 
-    The terminal decision node carries the observed decision; other nodes get an
-    empty delta.  Playback only needs the decision node to be correct because the
-    seed run exists solely to give the later live replay a head to skip past.
+    Each node is seeded with its recorded output (state delta) recovered from the
+    trace's node-level spans, so a later live replay reuses the real recorded
+    state of the skipped head rather than an empty placeholder.  The terminal
+    decision node additionally carries the observed decision.
     """
     observed = case.observed_output if isinstance(case.observed_output, Mapping) else {}
     decision = _decision_of_observed(case)
-    outputs: dict[str, Any] = {n: {} for n in nodes}
+    stashed = _stashed_node_outputs(case)
+    outputs: dict[str, Any] = {n: dict(stashed.get(n, {})) for n in nodes}
     for node in nodes:
         if node in _DECISION_NODES and decision:
-            outputs[node] = {"decision": dict(decision)}
+            outputs[node] = {**outputs.get(node, {}), "decision": dict(decision)}
     # Also surface the full observed output on the final node for completeness.
     if nodes and isinstance(observed, Mapping) and observed:
         final = nodes[-1]
@@ -213,6 +227,21 @@ def _node_outputs_from_case(
             merged["decision"] = dict(decision)
         outputs[final] = merged
     return outputs
+
+
+def _stashed_node_outputs(case: ImportedReplayCase) -> dict[str, Any]:
+    """Per-node recorded outputs the importer extracted from the trace, if any."""
+    payload = getattr(case, "raw_source_payload", None)
+    if not isinstance(payload, Mapping):
+        return {}
+    node_outputs = payload.get("langgraph_node_outputs")
+    if not isinstance(node_outputs, Mapping):
+        return {}
+    return {
+        node: dict(delta)
+        for node, delta in node_outputs.items()
+        if isinstance(delta, Mapping)
+    }
 
 
 def _decision_of_observed(case: ImportedReplayCase) -> dict[str, Any]:
