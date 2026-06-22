@@ -3,28 +3,30 @@
 Task 3 of the PydanticAI replay & fork demo.
 
 Wraps ``build_agent`` with ``KitaruAgent(checkpoint_strategy="calls")`` inside
-a ``@flow`` so each run is a durable Kitaru execution.  The agent call is placed
-inside an explicit ``@checkpoint`` so the flow has a single terminal and
-``handle.wait()`` can extract the result cleanly.
+a bare ``@flow`` (no outer ``@checkpoint``).  Because the agent has no tools,
+``KitaruAgent`` produces exactly ONE terminal checkpoint per run —
+``{agent_name}_model_request`` — which is the CUT (checkpoint-under-test) that
+Tasks 4/5 replay from.
 
-When inside an explicit ``@checkpoint``, ``KitaruAgent`` is a passthrough (per
-the adapter docs); the ``checkpoint_strategy="calls"`` attribute is carried by the
-``KitaruAgent`` but the outer explicit checkpoint is the one actually recorded.
-``cut_of`` returns the name of the last (and only) checkpoint, which is
-``"run_support_copilot"`` — the explicit checkpoint name — rather than the
-``{agent_name}_model_request`` pattern from a bare ``@flow``.
+Design rationale for the tool-free agent
+-----------------------------------------
+With tools registered, ``checkpoint_strategy="calls"`` creates sibling
+checkpoints for each tool call *and* the final model request.  A bare ``@flow``
+with multiple terminal checkpoints raises ``_MultipleTerminalStepsOutputError``
+because the dynamic flow cannot pick a single output.  Wrapping the agent call
+in an outer ``@checkpoint`` "fixes" this but turns KitaruAgent into a
+passthrough, suppressing the per-call checkpoints and destroying the CUT.
 
-Decision readback: ``handle.wait()`` returns the ``@checkpoint`` return value
-(the ``SupportDecision`` dict) which is stored keyed by exec_id at run time.
-
-CUT selector constant: ``CUT_SUFFIX`` is kept as the spike-verified suffix so
-Tasks 4/5 can locate the right checkpoint when replaying a bare-flow run.
+The correct solution (chosen here) is to keep the agent tool-free.  Customer
+context (plan, role) is folded into ``SupportDeps`` and injected into the prompt
+so there is no need for a ``lookup_customer`` tool.  The result is a single
+``{agent_name}_model_request`` checkpoint that is both the terminal and the CUT.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from kitaru import checkpoint, flow, KitaruClient
+from kitaru import flow, KitaruClient
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
 from .agent import build_agent, SupportDeps
@@ -64,16 +66,13 @@ class KitaruAdapterPA:
         # Capture self for the closure.
         wrapped = self._wrapped
 
-        # Wrap the agent call in an explicit @checkpoint so the flow has a
-        # single terminal node and handle.wait() can extract the result.
-        # Inside an explicit @checkpoint, KitaruAgent becomes a passthrough.
-        @checkpoint(type="llm_call")
-        def run_support_copilot(prompt: str, customer: str) -> dict:
-            return wrapped.run_sync(prompt, deps=SupportDeps(customer=customer)).output.model_dump()
-
+        # Bare @flow: no outer @checkpoint, so KitaruAgent's per-call
+        # checkpoints are recorded normally.  The agent is tool-free, so there
+        # is exactly one terminal checkpoint: ``{name}_model_request``.
         @flow(cache=False)
         def _run_agent(prompt: str, customer: str) -> dict:
-            return run_support_copilot(prompt, customer)
+            deps = SupportDeps(customer=customer)
+            return wrapped.run_sync(prompt, deps=deps).output.model_dump()
 
         self._flow = _run_agent
 
@@ -84,58 +83,88 @@ class KitaruAdapterPA:
     def run(self, prompt: str, customer: str) -> str:
         """Run the agent as a durable Kitaru flow and return the exec_id.
 
-        Blocks until the execution finishes.  The flow return value
-        (``SupportDecision.model_dump()``  dict) is cached internally so that
-        ``decision_of`` can return it without a second round-trip.
+        Blocks until the execution finishes.  In a bare ``calls``-strategy
+        flow the ``handle.wait()`` return value is the terminal checkpoint's
+        stored ``ModelResponse`` (not the flow body's dict), so the cache is
+        populated lazily by ``decision_of`` on first access instead.
         """
         handle = self._flow.run(prompt, customer)
-        result = handle.wait()  # blocks; returns the dict from _call_agent
-        exec_id = handle.exec_id
-        if isinstance(result, dict):
-            self._results[exec_id] = result
-        return exec_id
+        handle.wait()  # blocks until the execution finishes
+        return handle.exec_id
 
     def cut_of(self, exec_id: str) -> str:
         """Return the CUT checkpoint name for *exec_id*.
 
-        The CUT is the last checkpoint in the execution.
-
-        For a bare ``calls``-strategy flow (Tasks 4/5 replay), the last
-        checkpoint follows the pattern ``{agent_name}_model_request``.
-        For this task's explicit-checkpoint flow, the last checkpoint is
-        ``"run_support_copilot"``.
+        The CUT is the checkpoint whose name ends with ``_model_request``
+        (i.e. ``{agent_name}_model_request``).  This is robust against
+        positional changes and matches the pattern validated by the Task 1 spike.
 
         Raises:
-            RuntimeError: If the execution has no checkpoints.
+            RuntimeError: If no ``_model_request`` checkpoint exists.
         """
         run = self._client.executions.get(exec_id)
+        for cp in run.checkpoints:
+            if cp.name.endswith(CUT_SUFFIX):
+                return cp.name
         names = [c.name for c in run.checkpoints]
-        if not names:
-            raise RuntimeError(f"execution {exec_id} has no checkpoints")
-        return names[-1]
+        raise RuntimeError(
+            f"No '{CUT_SUFFIX}' checkpoint found in execution {exec_id}. "
+            f"Checkpoints present: {names}"
+        )
 
     def decision_of(self, exec_id: str) -> dict:
         """Return the ``SupportDecision`` dict for *exec_id*.
 
-        Primary path: the dict cached at ``run()`` time (fastest, no I/O).
-        Fallback: scan terminal checkpoint artifacts for the decision dict.
+        Scans the ``{agent_name}_model_request`` checkpoint artifact (the CUT)
+        for the ``ModelResponse`` stored by ``KitaruAgent(checkpoint_strategy="calls")``.
+        PydanticAI stores structured output as a ``final_result`` tool-call in the
+        ``ModelResponse.parts``; this method extracts those args.
 
         Returns an empty dict if the decision cannot be found.
         """
-        # Fast path: decision stored at run() time.
+        # Fast path: decision stored at run() time (e.g. from a prior explicit cache).
         cached = self._results.get(exec_id)
         if cached is not None:
             return cached
 
-        # Fallback: read from execution artifacts (e.g., if this adapter
-        # instance was not the one that ran the execution).
+        # Scan the _model_request checkpoint artifact.
+        # KitaruAgent(checkpoint_strategy="calls") stores the ModelResponse object
+        # as the checkpoint output.  PydanticAI encodes structured output as a
+        # ToolCallPart with tool_name="final_result" in ModelResponse.parts.
         run = self._client.executions.get(exec_id)
-        for cp in reversed(run.checkpoints):
+        for cp in run.checkpoints:
+            if not cp.name.endswith(CUT_SUFFIX):
+                continue
             for art in cp.artifacts:
+                if art.direction != "output":
+                    continue
                 try:
                     val = art.load()
                 except Exception:  # noqa: BLE001
                     continue
+                # Direct dict with decision keys (e.g., saved explicitly).
                 if isinstance(val, dict) and "risk_status" in val:
                     return val
+                # Loaded ModelResponse object: extract final_result tool-call args.
+                # ModelResponse.parts contains ToolCallPart objects with .tool_name
+                # and .args attributes.
+                parts = getattr(val, "parts", None)
+                if parts is not None:
+                    for part in parts:
+                        args = getattr(part, "args", None)
+                        if (
+                            getattr(part, "tool_name", None) == "final_result"
+                            and isinstance(args, dict)
+                        ):
+                            return args
+                # Serialized ModelResponse dict (fallback for raw dict saves).
+                if isinstance(val, dict) and "parts" in val:
+                    for part in val.get("parts", []):
+                        if (
+                            isinstance(part, dict)
+                            and part.get("part_kind") == "tool-call"
+                            and part.get("tool_name") == "final_result"
+                            and isinstance(part.get("args"), dict)
+                        ):
+                            return part["args"]
         return {}

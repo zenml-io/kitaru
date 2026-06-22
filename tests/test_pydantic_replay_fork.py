@@ -124,7 +124,14 @@ def test_build_agent_runs_and_returns_decision():
 
 
 def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
-    """Task 3: KitaruAdapterPA wraps the agent as a durable Kitaru execution."""
+    """Task 3: KitaruAdapterPA wraps the agent as a durable Kitaru execution.
+
+    Asserts that the baseline run exposes a ``{agent_name}_model_request``
+    checkpoint (the CUT) so Tasks 4/5 can replay/fork from it.  This assertion
+    ensures the outer-checkpoint suppression regression cannot silently creep
+    back in: if KitaruAgent is wrapped in an outer ``@checkpoint``, it becomes
+    a passthrough and no ``_model_request`` checkpoint is recorded.
+    """
     from pydantic_ai.models.test import TestModel
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
@@ -138,4 +145,10 @@ def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
     exec_id = adapter.run("Can I enable SSO?", customer="acme")
     run = KitaruClient().executions.get(exec_id)
     assert run.checkpoints                      # per-call checkpoints exist
+    # CUT must be present: bare calls-strategy flow produces {agent_name}_model_request.
+    # If this fails, an outer @checkpoint is suppressing the per-call checkpoints.
+    assert any(c.name.endswith("_model_request") for c in run.checkpoints), (
+        f"No '_model_request' checkpoint found. Checkpoints: {[c.name for c in run.checkpoints]}. "
+        "Check that pipeline.py uses a bare @flow with no outer @checkpoint."
+    )
     assert adapter.decision_of(exec_id)["risk_status"] == "needs_review"

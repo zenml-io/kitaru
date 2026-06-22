@@ -1,9 +1,19 @@
-"""PydanticAI support-copilot for the replay & fork demo."""
+"""PydanticAI support-copilot for the replay & fork demo.
+
+The agent is intentionally tool-free so that ``KitaruAgent(checkpoint_strategy="calls")``
+produces exactly ONE terminal checkpoint per run (``{agent_name}_model_request``).
+That checkpoint is the CUT (checkpoint-under-test) that Tasks 4/5 replay from.
+
+Customer context (plan, role) is folded into ``SupportDeps`` and injected into
+the user prompt by the caller rather than being fetched via a tool call.  A tool
+call would add a second terminal checkpoint under the ``calls`` strategy, which
+causes ``_MultipleTerminalStepsOutputError`` in a bare ``@flow``.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 
 _PROMPTS = {
     "baseline": (
@@ -29,19 +39,22 @@ class SupportDecision(BaseModel):
 @dataclass
 class SupportDeps:
     customer: str
+    plan: str = "Enterprise"
+    role: str = "account_owner"
 
 
 def build_agent(model, *, prompt_profile: str = "baseline", name: str = "support_copilot"):
-    agent = Agent(
+    """Build a tool-free PydanticAI support-copilot agent.
+
+    No tools are registered so that ``KitaruAgent(checkpoint_strategy="calls")``
+    creates exactly one terminal checkpoint per run (``{name}_model_request``).
+    Customer context is provided via ``SupportDeps`` and folded into the prompt
+    by the caller.
+    """
+    return Agent(
         model,
         name=name,
         deps_type=SupportDeps,
         output_type=SupportDecision,
         instructions=_PROMPTS[prompt_profile],
     )
-
-    @agent.tool
-    def lookup_customer(ctx: RunContext[SupportDeps], query: str) -> dict:
-        return {"customer_id": ctx.deps.customer, "plan": "Enterprise", "role": "account_owner"}
-
-    return agent
