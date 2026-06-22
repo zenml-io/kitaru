@@ -90,18 +90,43 @@ def fork(ref: str, model: str, prompt_profile: str, html_path: str) -> None:
 @click.option("--variant", default=utils.VARIANT, show_default=True)
 def run_all(scenario: str, variant: str) -> None:
     """Generate a fresh trace, then import → replay → fork → compare."""
+    # 1) A production run of your agent.
+    click.secho("1) Your LangGraph agent ran in production and was traced to Langfuse.", bold=True)
     trace_id = utils.generate_trace(scenario, variant)
-    click.echo(f"generated trace_id={trace_id}")
+    click.echo(f"   → it produced trace {trace_id}  (scenario={scenario}, variant={variant})")
+
+    # 2) Import that recorded run — no rewrite of your agent.
+    click.secho("2) You import that recorded run as a forkable case.", bold=True)
     case = import_langgraph_trace(f"langfuse:{trace_id}")
+    d = case.observed_output.get("decision", {})
+    click.echo(f"   → {case.case_id}: {len(case.recorded_calls)} recorded calls; "
+               f"it decided risk_status={d.get('risk_status')!r}, "
+               f"required_action={d.get('required_action')!r}")
+
     agent = _agent()
+
+    # 3) Replay it unchanged to verify we faithfully reproduce the run.
+    click.secho("3) You replay it unchanged to verify the reproduction "
+                "(cached head, live tail).", bold=True)
     replay_run = agent.replay(case)
+    repro = replay_run.vs_trace()
+    click.echo("   → reproduction drift: " + (
+        "False — faithfully reproduced the recorded decision"
+        if not repro.has_reproduction_drift else "True — the replay diverged from the trace"))
+
+    # 4) Fork it to test a change before shipping.
+    click.secho(f"4) You fork it to test a change before shipping: "
+                f"{FORK_EDITS['model']} + {FORK_EDITS['prompt_profile']}, run forward from the cut.", bold=True)
     fork_run = agent.fork(case, **FORK_EDITS).run()
+
+    # 5) Compare the fork against the unchanged replay.
+    click.secho("5) You compare the fork against the unchanged replay — "
+                "did the change move the decision?", bold=True)
     report = fork_run.diff(replay_run)
-    click.echo(f"reproduction drift: {replay_run.vs_trace().has_reproduction_drift}")
-    click.echo(str(report))
+    click.echo(f"   → {report}")
     path = utils.write_report("replay_vs_fork.html", case=case, replay_run=replay_run,
                               fork_run=fork_run, report=report, edits=FORK_EDITS)
-    click.echo(f"html: {path}")
+    click.echo(f"   → report written to {path}")
 
 
 if __name__ == "__main__":
