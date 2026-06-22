@@ -133,13 +133,17 @@ def test_build_agent_runs_and_returns_decision():
 
 
 def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
-    """Task 3: KitaruAdapterPA wraps the agent as a durable Kitaru execution.
+    """Task 3 (updated for R1 multi-step): KitaruAdapterPA produces a durable execution.
 
-    Asserts that the baseline run exposes a ``{agent_name}_model_request``
-    checkpoint (the CUT) so Tasks 4/5 can replay/fork from it.  This assertion
-    ensures the outer-checkpoint suppression regression cannot silently creep
-    back in: if KitaruAgent is wrapped in an outer ``@checkpoint``, it becomes
-    a passthrough and no ``_model_request`` checkpoint is recorded.
+    Reworked from the single-step ``KitaruAgent(calls)`` assertion to match the
+    R1 multi-step ``@checkpoint`` structure.  The old assertion checked for a
+    ``{agent_name}_model_request`` checkpoint; R1 replaces that with three named
+    checkpoints (``gather_context``, ``decide``, ``finalize``).
+
+    This test validates that:
+    - at least one checkpoint exists (durable execution recorded);
+    - the ``decide`` checkpoint (CUT) is present;
+    - ``decision_of`` successfully extracts the SupportDecision dict.
     """
     from pydantic_ai.models.test import TestModel
     import sys, pathlib
@@ -153,12 +157,12 @@ def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
     adapter = KitaruAdapterPA(model=model)
     exec_id = adapter.run("Can I enable SSO?", customer="acme")
     run = KitaruClient().executions.get(exec_id)
-    assert run.checkpoints                      # per-call checkpoints exist
-    # CUT must be present: bare calls-strategy flow produces {agent_name}_model_request.
-    # If this fails, an outer @checkpoint is suppressing the per-call checkpoints.
-    assert any(c.name.endswith("_model_request") for c in run.checkpoints), (
-        f"No '_model_request' checkpoint found. Checkpoints: {[c.name for c in run.checkpoints]}. "
-        "Check that pipeline.py uses a bare @flow with no outer @checkpoint."
+    assert run.checkpoints, "Expected at least one checkpoint in the durable execution"
+    # R1 structure: three named @checkpoint steps replace the old _model_request pattern.
+    cp_names = [c.name for c in run.checkpoints]
+    assert "decide" in cp_names, (
+        f"'decide' (CUT) checkpoint not found. Checkpoints: {cp_names}. "
+        "Ensure pipeline.py uses the multi-step @checkpoint structure."
     )
     assert adapter.decision_of(exec_id)["risk_status"] == "needs_review"
 
@@ -291,3 +295,83 @@ def test_reproduce_matches_original(primed_zenml):
     repro = adapter.reproduce(base)
     report = adapter.diff(base, repro)
     assert report.has_fork_drift is False   # repro vs base: no change
+
+
+def test_r1_multistep_gather_decide_finalize_checkpoints(primed_zenml) -> None:
+    """R1: three @checkpoint steps (gather_context -> decide -> finalize) in the flow.
+
+    Validates the multi-step structure described in the REVISED TASK SEQUENCE R1:
+    - execution has chained checkpoints named gather_context, decide, finalize;
+    - decision_of(exec_id) returns the decision dict with risk_status present;
+    - CUT == "decide" (module constant);
+    - cut_of(exec_id) resolves to "decide";
+    - the execution's original_exec_id is None (it is not a replay).
+
+    NON-VACUOUS: if decide were missing from the checkpoint list, the assertion
+    fails.  If decision_of returned an empty dict or without risk_status, the
+    assertion fails.
+    """
+    del primed_zenml  # fixture used for ZenML store init side-effect
+
+    from pydantic_ai.models.test import TestModel
+    import sys
+    import pathlib
+
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA, CUT
+    from kitaru import KitaruClient
+
+    # Build all three per-step agents with the same TestModel output; we only
+    # care that each step returns a serializable dict so artifacts chain cleanly.
+    model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "needs_review",
+            "required_action": "escalate_to_human",
+            "summary": "needs human review",
+        }
+    )
+    adapter = KitaruAdapterPA(model=model)
+    exec_id = adapter.run("Can I enable SSO?", customer="acme")
+
+    client = KitaruClient()
+    run = client.executions.get(exec_id)
+    cp_names = [c.name for c in run.checkpoints]
+
+    # All three checkpoints must exist in order.
+    assert "gather_context" in cp_names, (
+        f"Missing 'gather_context' checkpoint. Got: {cp_names}"
+    )
+    assert "decide" in cp_names, (
+        f"Missing 'decide' checkpoint. Got: {cp_names}"
+    )
+    assert "finalize" in cp_names, (
+        f"Missing 'finalize' checkpoint. Got: {cp_names}"
+    )
+    assert cp_names.index("gather_context") < cp_names.index("decide"), (
+        "gather_context must come before decide"
+    )
+    assert cp_names.index("decide") < cp_names.index("finalize"), (
+        "decide must come before finalize"
+    )
+
+    # CUT must be "decide" (module constant).
+    assert CUT == "decide", f"CUT constant should be 'decide', got {CUT!r}"
+    assert adapter.cut_of(exec_id) == "decide", (
+        f"cut_of should return 'decide', got {adapter.cut_of(exec_id)!r}"
+    )
+
+    # decision_of must find the SupportDecision with risk_status.
+    decision = adapter.decision_of(exec_id)
+    assert isinstance(decision, dict), f"decision_of should return a dict, got {type(decision)}"
+    assert "risk_status" in decision, (
+        f"decision_of result missing 'risk_status': {decision}"
+    )
+    assert decision["risk_status"] == "needs_review", (
+        f"Expected 'needs_review', got {decision['risk_status']!r}"
+    )
+
+    # Not a replay — original_exec_id should be None.
+    assert run.original_exec_id is None, (
+        f"A fresh run should not have original_exec_id set; got {run.original_exec_id!r}"
+    )

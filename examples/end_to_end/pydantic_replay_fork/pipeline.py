@@ -1,50 +1,91 @@
-"""Kitaru durable execution wrapper for the PydanticAI support-copilot agent.
+"""Kitaru durable execution adapter for the PydanticAI support-copilot (multi-step).
 
-Task 3 of the PydanticAI replay & fork demo.
+R1 of the REVISED TASK SEQUENCE — 2026-06-22.
 
-Wraps ``build_agent`` with ``KitaruAgent(checkpoint_strategy="calls")`` inside
-a bare ``@flow`` (no outer ``@checkpoint``).  Because the agent has no tools,
-``KitaruAgent`` produces exactly ONE terminal checkpoint per run —
-``{agent_name}_model_request`` — which is the CUT (checkpoint-under-test) that
-Tasks 4/5 replay from.
+Structure
+---------
+The flow ``support_copilot`` is composed of three explicit ``@checkpoint`` step
+functions, each wrapping a raw ``pydantic_ai.Agent``:
 
-Design rationale for the tool-free agent
------------------------------------------
-With tools registered, ``checkpoint_strategy="calls"`` creates sibling
-checkpoints for each tool call *and* the final model request.  A bare ``@flow``
-with multiple terminal checkpoints raises ``_MultipleTerminalStepsOutputError``
-because the dynamic flow cannot pick a single output.  Wrapping the agent call
-in an outer ``@checkpoint`` "fixes" this but turns KitaruAgent into a
-passthrough, suppressing the per-call checkpoints and destroying the CUT.
+  gather_context(prompt, customer) -> dict
+      Triage / classify the incoming request.  Returns a ``GatherResult`` dict.
 
-The correct solution (chosen here) is to keep the agent tool-free.  Customer
-context (plan, role) is folded into ``SupportDeps`` and injected into the prompt
-so there is no need for a ``lookup_customer`` tool.  The result is a single
-``{agent_name}_model_request`` checkpoint that is both the terminal and the CUT.
+  decide(gather_out: dict) -> dict
+      Produce the ``SupportDecision`` from the triage result.  This is the CUT
+      (intermediate step).  The decide step's system prompt switches when
+      ``prompt_profile="trimmed_permissions"`` is supplied — reconfiguring it
+      flips the decision.
+
+  finalize(decide_out: dict) -> dict
+      Assemble the customer-facing answer from the decision.  This is the
+      single terminal step in the ZenML DAG.
+
+Chaining via artifacts
+----------------------
+``gather_context`` produces a ZenML artifact that is passed directly as the
+argument to ``decide``.  ``decide`` produces an artifact that is passed to
+``finalize``.  The ZenML DAG therefore has exactly one terminal (``finalize``),
+so ``flow.run(...).wait()`` succeeds without ``_MultipleTerminalStepsOutputError``.
+
+Each ``@checkpoint`` body uses raw ``pydantic_ai.Agent``  (not ``KitaruAgent``).
+Inside an explicit ``@checkpoint``, ``KitaruAgent`` is a passthrough, so the raw
+agent is correct and avoids the double-wrapping footgun.
+
+CUT
+---
+``CUT = "decide"`` is the fixed checkpoint name for the intermediate step.  Use
+``cut_of(exec_id)`` to resolve it per-run (validates that the checkpoint exists).
+
+decision_of
+-----------
+Reads the ``SupportDecision`` dict from the ``decide`` (preferred) or
+``finalize`` checkpoint artifact.  Raises loudly if not found (Task 3 loud-
+failure behavior preserved).
+
+reproduce / diff
+----------------
+Carry over Task 4 semantics: ``reproduce`` replays from CUT; ``diff`` uses
+``_drift.compare_decisions``.
 """
 from __future__ import annotations
 
 from typing import Any
 
+import kitaru
 from kitaru import flow, KitaruClient
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru.checkpoint import checkpoint
 
-from .agent import build_agent, SupportDeps
+from .agent import (
+    SupportDecision,
+    build_decide_agent,
+    build_finalize_agent,
+    build_gather_agent,
+)
 
 
-#: Checkpoint name suffix that identifies the model-call boundary (CUT).
-#: Confirmed by the Task 1 spike: last checkpoint of a bare ``calls``-strategy
-#: run follows the pattern ``{agent_name}_model_request``.
-CUT_SUFFIX = "_model_request"
+# ---------------------------------------------------------------------------
+# Module-level CUT constant
+# ---------------------------------------------------------------------------
 
+#: The fixed checkpoint name for the intermediate decide step.
+#: R1 spec: CUT = "decide".
+CUT: str = "decide"
+
+
+# ---------------------------------------------------------------------------
+# KitaruAdapterPA
+# ---------------------------------------------------------------------------
 
 class KitaruAdapterPA:
-    """Durable execution adapter for the PydanticAI support-copilot.
+    """Durable execution adapter for the three-step PydanticAI support-copilot.
 
     Args:
-        model: A PydanticAI-compatible model (or ``TestModel`` for tests).
-        prompt_profile: Which system-prompt profile to use (default ``"baseline"``).
-        name: Stable agent name; stored on ``self.name`` for use by later tasks.
+        model: A PydanticAI-compatible model (real or ``TestModel`` for tests).
+            The *same* model is used for all three steps.  Pass different models
+            per step by extending this adapter.
+        prompt_profile: System-prompt profile (``"baseline"`` or
+            ``"trimmed_permissions"``).  Drives the ``decide`` step's behaviour.
+        name: Stable name prefix for the step agents.  Stored on ``self.name``.
     """
 
     def __init__(
@@ -56,134 +97,193 @@ class KitaruAdapterPA:
     ) -> None:
         self.name = name
         self._client = KitaruClient()
-        self._results: dict[str, dict] = {}  # exec_id -> SupportDecision dict
 
-        self._wrapped = KitaruAgent(
-            build_agent(model, prompt_profile=prompt_profile, name=name),
-            checkpoint_strategy="calls",
+        # Build per-step raw pydantic_ai.Agent objects.
+        # Raw agents are correct here — @checkpoint provides the Kitaru boundary.
+        _gather_agent = build_gather_agent(
+            model,
+            prompt_profile=prompt_profile,
+            name=f"{name}_gather",
+        )
+        _decide_agent = build_decide_agent(
+            model,
+            prompt_profile=prompt_profile,
+            name=f"{name}_decide",
+        )
+        _finalize_agent = build_finalize_agent(
+            model,
+            prompt_profile=prompt_profile,
+            name=f"{name}_finalize",
         )
 
-        # Capture self for the closure.
-        wrapped = self._wrapped
+        # Define the three @checkpoint step functions as closures over the agents.
+        # Each function name == checkpoint name in the ZenML DAG.
 
-        # Bare @flow: no outer @checkpoint, so KitaruAgent's per-call
-        # checkpoints are recorded normally.  The agent is tool-free, so there
-        # is exactly one terminal checkpoint: ``{name}_model_request``.
+        @checkpoint
+        def gather_context(prompt: str, customer: str) -> dict:  # type: ignore[return]
+            """Triage / classify the incoming support request."""
+            result = _gather_agent.run_sync(
+                f"Customer: {customer}\nRequest: {prompt}"
+            )
+            return result.output.model_dump()
+
+        @checkpoint
+        def decide(gather_out: dict) -> dict:  # type: ignore[return]
+            """Produce the SupportDecision from the triage result (the CUT)."""
+            triage_summary = (
+                f"intent={gather_out.get('intent', 'unknown')} "
+                f"category={gather_out.get('category', 'general')} "
+                f"triage={gather_out.get('triage', 'medium')}"
+            )
+            result = _decide_agent.run_sync(triage_summary)
+            return result.output.model_dump()
+
+        @checkpoint
+        def finalize(decide_out: dict) -> dict:  # type: ignore[return]
+            """Assemble the customer-facing answer (single terminal step)."""
+            decision_summary = (
+                f"policy_label={decide_out.get('policy_label', 'unknown')} "
+                f"risk_status={decide_out.get('risk_status', 'unknown')} "
+                f"required_action={decide_out.get('required_action', 'unknown')} "
+                f"summary={decide_out.get('summary', '')!r}"
+            )
+            result = _finalize_agent.run_sync(decision_summary)
+            out = result.output.model_dump()
+            # Ensure all SupportDecision fields are propagated so decision_of
+            # can read them from the finalize artifact as a fallback.
+            for key in ("policy_label", "risk_status", "required_action", "summary"):
+                if key not in out or not out[key] or out[key] == "unknown":
+                    out[key] = decide_out.get(key, "unknown")
+            return out
+
+        # Build the @flow that chains the three checkpoints.
+        # finalize is the single terminal — ZenML sees exactly one output.
         @flow(cache=False)
-        def _run_agent(prompt: str, customer: str) -> dict:
-            deps = SupportDeps(customer=customer)
-            return wrapped.run_sync(prompt, deps=deps).output.model_dump()
+        def support_copilot_flow(prompt: str, customer: str) -> dict:  # type: ignore[return]
+            gathered = gather_context(prompt, customer)
+            decided = decide(gathered)
+            return finalize(decided)
 
-        self._flow = _run_agent
+        self._flow = support_copilot_flow
 
-    # ------------------------------------------------------------------
+        # Cache for decisions read at run() time.
+        self._results: dict[str, dict] = {}
+
+    # -----------------------------------------------------------------------
     # Public interface
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
 
     def run(self, prompt: str, customer: str) -> str:
-        """Run the agent as a durable Kitaru flow and return the exec_id.
+        """Run the three-step flow and return the exec_id.
 
-        Blocks until the execution finishes.  In a bare ``calls``-strategy
-        flow the ``handle.wait()`` return value is the terminal checkpoint's
-        stored ``ModelResponse`` (not the flow body's dict), so the cache is
-        populated at run() time to enable the fast path in ``decision_of``.
+        Blocks until the execution finishes.  The flow result (from the
+        ``finalize`` terminal) is cached by exec_id to enable the fast path
+        in ``decision_of``.
         """
         handle = self._flow.run(prompt, customer)
-        result = handle.wait()  # blocks until the execution finishes
+        result = handle.wait()
+        exec_id = handle.exec_id
+        # The flow result is the finalize step's dict (contains SupportDecision
+        # fields propagated by finalize).  Cache it for fast decision_of lookup.
         if isinstance(result, dict) and "risk_status" in result:
-            self._results[handle.exec_id] = result
-        return handle.exec_id
+            self._results[exec_id] = result
+        return exec_id
 
     def cut_of(self, exec_id: str) -> str:
         """Return the CUT checkpoint name for *exec_id*.
 
-        The CUT is the checkpoint whose name ends with ``_model_request``
-        (i.e. ``{agent_name}_model_request``).  This is robust against
-        positional changes and matches the pattern validated by the Task 1 spike.
+        In the multi-step flow, CUT is always ``"decide"`` (the intermediate
+        checkpoint).  This method validates that the checkpoint exists and raises
+        loudly if the flow structure has changed.
 
         Raises:
-            RuntimeError: If no ``_model_request`` checkpoint exists.
+            RuntimeError: If no ``"decide"`` checkpoint exists.
         """
         run = self._client.executions.get(exec_id)
-        for cp in run.checkpoints:
-            if cp.name.endswith(CUT_SUFFIX):
-                return cp.name
         names = [c.name for c in run.checkpoints]
-        raise RuntimeError(
-            f"No '{CUT_SUFFIX}' checkpoint found in execution {exec_id}. "
-            f"Checkpoints present: {names}"
-        )
+        if CUT not in names:
+            raise RuntimeError(
+                f"CUT checkpoint {CUT!r} not found in execution {exec_id}. "
+                f"Checkpoints present: {names}. "
+                "The flow may not be using the multi-step @checkpoint structure."
+            )
+        return CUT
 
     def decision_of(self, exec_id: str) -> dict:
         """Return the ``SupportDecision`` dict for *exec_id*.
 
-        Scans the ``{agent_name}_model_request`` checkpoint artifact (the CUT)
-        for the ``ModelResponse`` stored by ``KitaruAgent(checkpoint_strategy="calls")``.
-        PydanticAI stores structured output as a ``final_result`` tool-call in the
-        ``ModelResponse.parts``; this method extracts those args.
+        Lookup order:
+        1. In-memory cache (populated at ``run()`` time).
+        2. ``decide`` checkpoint artifact (preferred; produced by the CUT step).
+        3. ``finalize`` checkpoint artifact (fallback; contains propagated fields).
 
         Raises:
-            RuntimeError: If the decision cannot be found in the cache or artifacts.
+            RuntimeError: If the decision cannot be found via any path.
         """
-        # Fast path: decision stored at run() time (e.g. from a prior explicit cache).
+        # Fast path: decision cached at run() time.
         cached = self._results.get(exec_id)
         if cached is not None:
             return cached
 
-        # Scan the _model_request checkpoint artifact.
-        # KitaruAgent(checkpoint_strategy="calls") stores the ModelResponse object
-        # as the checkpoint output.  PydanticAI encodes structured output as a
-        # ToolCallPart with tool_name="final_result" in ModelResponse.parts.
         run = self._client.executions.get(exec_id)
-        for cp in run.checkpoints:
-            if not cp.name.endswith(CUT_SUFFIX):
+
+        # Helper: extract a SupportDecision dict from an artifact value.
+        def _extract(val: Any) -> dict | None:
+            if isinstance(val, dict) and "risk_status" in val:
+                return val
+            # SupportDecision object (from pydantic BaseModel).
+            if isinstance(val, SupportDecision):
+                return val.model_dump()
+            model_dump = getattr(val, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                if isinstance(dumped, dict) and "risk_status" in dumped:
+                    return dumped
+            return None
+
+        # Scan checkpoints in priority order: decide first, then finalize.
+        priority = [CUT, "finalize"]
+        cp_by_name = {c.name: c for c in run.checkpoints}
+        for cp_name in priority:
+            cp = cp_by_name.get(cp_name)
+            if cp is None:
                 continue
             for art in cp.artifacts:
-                if art.direction != "output":
+                if getattr(art, "direction", None) not in (None, "output"):
                     continue
                 try:
                     val = art.load()
                 except Exception:  # noqa: BLE001
                     continue
-                # Direct dict with decision keys (e.g., saved explicitly).
-                if isinstance(val, dict) and "risk_status" in val:
-                    return val
-                # Loaded ModelResponse object: extract final_result tool-call args.
-                # ModelResponse.parts contains ToolCallPart objects with .tool_name
-                # and .args attributes.
-                parts = getattr(val, "parts", None)
-                if parts is not None:
-                    for part in parts:
-                        args = getattr(part, "args", None)
-                        if (
-                            getattr(part, "tool_name", None) == "final_result"
-                            and isinstance(args, dict)
-                        ):
-                            return args
-                # Serialized ModelResponse dict (fallback for raw dict saves).
-                if isinstance(val, dict) and "parts" in val:
-                    for part in val.get("parts", []):
-                        if (
-                            isinstance(part, dict)
-                            and part.get("part_kind") == "tool-call"
-                            and part.get("tool_name") == "final_result"
-                            and isinstance(part.get("args"), dict)
-                        ):
-                            return part["args"]
+                extracted = _extract(val)
+                if extracted is not None:
+                    return extracted
+
         raise RuntimeError(
-            f"Could not extract a SupportDecision from execution {exec_id!r} "
-            f"(no cached result, and no decision found in the CUT checkpoint artifact)."
+            f"Could not extract a SupportDecision from execution {exec_id!r}. "
+            f"Searched checkpoints: {priority}. "
+            f"Checkpoints present: {[c.name for c in run.checkpoints]}. "
+            "Ensure the flow completed successfully and the 'decide' checkpoint "
+            "produced a serializable SupportDecision dict as its artifact."
         )
 
     def reproduce(self, exec_id: str) -> str:
-        """Re-run from the CUT checkpoint without edits; return the replay exec_id."""
+        """Re-run from the CUT checkpoint without edits; return the replay exec_id.
+
+        The ``gather_context`` head is served from cache; ``decide`` and
+        ``finalize`` re-run under the same agent configuration.
+        """
         handle = self._flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
-        handle.wait()
-        return handle.exec_id
+        result = handle.wait()
+        replay_id = handle.exec_id
+        if isinstance(result, dict) and "risk_status" in result:
+            self._results[replay_id] = result
+        return replay_id
 
     def diff(self, baseline_exec: str, other_exec: str):
         """Return a DriftReport comparing the two executions' SupportDecision dicts."""
         from kitaru.adapters.langgraph.replay._drift import DriftReport, compare_decisions
+
         base = self.decision_of(baseline_exec)
         other = self.decision_of(other_exec)
         return DriftReport(reproduction=[], fork=compare_decisions(base, other))
