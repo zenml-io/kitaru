@@ -46,11 +46,24 @@ reproduce / diff
 ----------------
 Carry over Task 4 semantics: ``reproduce`` replays from CUT; ``diff`` uses
 ``_drift.compare_decisions``.
+
+Alias-overwrite race fix (Finding 1)
+--------------------------------------
+The three ``@checkpoint`` step functions and the ``@flow`` are defined ONCE at
+module scope so the module-level source aliases (used by Kitaru/ZenML for replay
+dispatch) are registered exactly once at import time and never clobbered.
+
+Each step reads its three agents from a module-level ``ContextVar``
+(``_active_agents``).  ``KitaruAdapterPA._activate()`` sets the ContextVar to
+the adapter's own agents before any flow dispatch.  This ensures that
+``reproduce()`` after ``experiment()`` always runs under the adapter whose
+``_activate()`` was called last — i.e. the adapter that issued the dispatch.
 """
 from __future__ import annotations
 
 import dataclasses
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from pydantic import BaseModel
@@ -297,6 +310,76 @@ def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# ContextVar for ambient agents (Finding 1 fix)
+# ---------------------------------------------------------------------------
+
+# Holds the three pydantic_ai agents for the currently-dispatching adapter.
+# Each KitaruAdapterPA._activate() sets this before dispatching the flow.
+# The module-level @checkpoint steps read from it at execution time.
+# This is NOT a checkpoint input — it stays ambient/config, never serialized.
+_active_agents: ContextVar[tuple[Agent, Agent, Agent]] = ContextVar("_active_agents")
+
+
+# ---------------------------------------------------------------------------
+# Module-level @checkpoint steps (registered ONCE at import, never clobbered)
+# ---------------------------------------------------------------------------
+
+@checkpoint
+def gather_context(prompt: str, customer: str) -> dict:  # type: ignore[return]
+    """Triage / classify the incoming support request."""
+    _gather_agent, _, _ = _active_agents.get()
+    result = _gather_agent.run_sync(
+        f"Customer: {customer}\nRequest: {prompt}"
+    )
+    return result.output.model_dump()
+
+
+@checkpoint
+def decide(gather_out: dict) -> dict:  # type: ignore[return]
+    """Produce the SupportDecision from the triage result (the CUT)."""
+    _, _decide_agent, _ = _active_agents.get()
+    triage_summary = (
+        f"intent={gather_out.get('intent', 'unknown')} "
+        f"category={gather_out.get('category', 'general')} "
+        f"triage={gather_out.get('triage', 'medium')}"
+    )
+    result = _decide_agent.run_sync(triage_summary)
+    return result.output.model_dump()
+
+
+@checkpoint
+def finalize(decide_out: dict) -> dict:  # type: ignore[return]
+    """Assemble the customer-facing answer (single terminal step)."""
+    _, _, _finalize_agent = _active_agents.get()
+    decision_summary = (
+        f"policy_label={decide_out.get('policy_label', 'unknown')} "
+        f"risk_status={decide_out.get('risk_status', 'unknown')} "
+        f"required_action={decide_out.get('required_action', 'unknown')} "
+        f"summary={decide_out.get('summary', '')!r}"
+    )
+    result = _finalize_agent.run_sync(decision_summary)
+    out = result.output.model_dump()
+    # Ensure all SupportDecision fields are propagated so decision_of
+    # can read them from the finalize artifact as a fallback.
+    for key in ("policy_label", "risk_status", "required_action", "summary"):
+        if key not in out or not out[key]:
+            out[key] = decide_out.get(key, "unknown")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Module-level @flow (registered ONCE at import, never clobbered)
+# ---------------------------------------------------------------------------
+
+@flow(cache=False)
+def support_copilot_flow(prompt: str, customer: str) -> dict:  # type: ignore[return]
+    """Three-step support copilot flow: gather -> decide -> finalize."""
+    gathered = gather_context(prompt, customer)
+    decided = decide(gathered)
+    return finalize(decided)
+
+
+# ---------------------------------------------------------------------------
 # KitaruAdapterPA
 # ---------------------------------------------------------------------------
 
@@ -326,74 +409,42 @@ class KitaruAdapterPA:
 
         # Build per-step raw pydantic_ai.Agent objects.
         # Raw agents are correct here — @checkpoint provides the Kitaru boundary.
-        _gather_agent = build_gather_agent(
+        # These are NOT decorated; the module-level @checkpoint steps are the
+        # single registered step objects (Finding 1 fix).
+        self._gather_agent = build_gather_agent(
             model,
             prompt_profile=prompt_profile,
             name=f"{name}_gather",
         )
-        _decide_agent = build_decide_agent(
+        self._decide_agent = build_decide_agent(
             model,
             prompt_profile=prompt_profile,
             name=f"{name}_decide",
         )
-        _finalize_agent = build_finalize_agent(
+        self._finalize_agent = build_finalize_agent(
             model,
             prompt_profile=prompt_profile,
             name=f"{name}_finalize",
         )
 
-        # Define the three @checkpoint step functions as closures over the agents.
-        # Each function name == checkpoint name in the ZenML DAG.
-
-        @checkpoint
-        def gather_context(prompt: str, customer: str) -> dict:  # type: ignore[return]
-            """Triage / classify the incoming support request."""
-            result = _gather_agent.run_sync(
-                f"Customer: {customer}\nRequest: {prompt}"
-            )
-            return result.output.model_dump()
-
-        @checkpoint
-        def decide(gather_out: dict) -> dict:  # type: ignore[return]
-            """Produce the SupportDecision from the triage result (the CUT)."""
-            triage_summary = (
-                f"intent={gather_out.get('intent', 'unknown')} "
-                f"category={gather_out.get('category', 'general')} "
-                f"triage={gather_out.get('triage', 'medium')}"
-            )
-            result = _decide_agent.run_sync(triage_summary)
-            return result.output.model_dump()
-
-        @checkpoint
-        def finalize(decide_out: dict) -> dict:  # type: ignore[return]
-            """Assemble the customer-facing answer (single terminal step)."""
-            decision_summary = (
-                f"policy_label={decide_out.get('policy_label', 'unknown')} "
-                f"risk_status={decide_out.get('risk_status', 'unknown')} "
-                f"required_action={decide_out.get('required_action', 'unknown')} "
-                f"summary={decide_out.get('summary', '')!r}"
-            )
-            result = _finalize_agent.run_sync(decision_summary)
-            out = result.output.model_dump()
-            # Ensure all SupportDecision fields are propagated so decision_of
-            # can read them from the finalize artifact as a fallback.
-            for key in ("policy_label", "risk_status", "required_action", "summary"):
-                if key not in out or not out[key]:
-                    out[key] = decide_out.get(key, "unknown")
-            return out
-
-        # Build the @flow that chains the three checkpoints.
-        # finalize is the single terminal — ZenML sees exactly one output.
-        @flow(cache=False)
-        def support_copilot_flow(prompt: str, customer: str) -> dict:  # type: ignore[return]
-            gathered = gather_context(prompt, customer)
-            decided = decide(gathered)
-            return finalize(decided)
-
+        # The @flow is the module-level support_copilot_flow.
         self._flow = support_copilot_flow
 
         # Cache for decisions read at run() time.
         self._results: dict[str, dict] = {}
+
+    def _activate(self) -> None:
+        """Set the module-level ContextVar to this adapter's agents.
+
+        Must be called at the top of every method that dispatches the flow
+        (``run``, ``reproduce``, and the reconfigured adapter's dispatch in
+        ``experiment``).  This ensures that the module-level @checkpoint steps
+        read from the correct adapter's agents when the flow executes.
+
+        This is what makes reproduce-after-experiment correct: the adapter
+        that calls ``_activate()`` immediately before dispatch wins.
+        """
+        _active_agents.set((self._gather_agent, self._decide_agent, self._finalize_agent))
 
     # -----------------------------------------------------------------------
     # Public interface
@@ -406,6 +457,7 @@ class KitaruAdapterPA:
         ``finalize`` terminal) is cached by exec_id to enable the fast path
         in ``decision_of``.
         """
+        self._activate()
         handle = self._flow.run(prompt, customer)
         result = handle.wait()
         exec_id = handle.exec_id
@@ -499,6 +551,7 @@ class KitaruAdapterPA:
         The ``gather_context`` head is served from cache; ``decide`` and
         ``finalize`` re-run under the same agent configuration.
         """
+        self._activate()
         handle = self._flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
         result = handle.wait()
         replay_id = handle.exec_id
@@ -532,10 +585,12 @@ class KitaruAdapterPA:
         Returns:
             List of exec_id strings, newest first.
         """
-        # The @flow function is named support_copilot_flow; that is the name
-        # Kitaru registers with ZenML as the pipeline name.
+        # Derive the flow name from the flow object's function name (Finding 3a).
+        # This avoids hardcoding the literal string and will track any rename.
+        from kitaru._source_aliases import build_pipeline_registration_name, callable_name as _callable_name
+        flow_name = build_pipeline_registration_name(_callable_name(self._flow._func))
         executions = self._client.executions.list(
-            flow="support_copilot_flow",
+            flow=flow_name,
             limit=n * 5,  # over-fetch to account for replays we'll filter out
         )
         # Exclude replays (reproduce/experiment runs) from the cohort seed.
@@ -575,22 +630,19 @@ class KitaruAdapterPA:
         """
         # Build the judge BEFORE creating any reconfigured adapter.
         # Use self._model (baseline) to keep the judge deterministic under TestModel.
-        # Note: if model is not None and is a TestModel, we use the baseline model
-        # for the judge to avoid polluting the alias registry before reproduces run.
         judge = build_judge(self._model)
 
         exec_ids = self.last_executions(n)
         report = CohortReport()
 
         # -----------------------------------------------------------------------
-        # Phase 1: validate CUT and reproduce ALL baseline executions FIRST.
-        # This MUST happen before experiment() is called for any execution,
-        # because experiment() instantiates a KitaruAdapterPA with a new model
-        # which overwrites the module-level source alias (used by Kitaru/ZenML
-        # for source lookup during replay). Separating reproduce (uses self's
-        # alias) from experiment (overwrites alias) prevents cross-run
-        # contamination when TestModel produces identical step inputs/outputs.
+        # With the ContextVar fix, the reproduce/experiment ordering hack is no
+        # longer strictly required for correctness.  However, we keep Phase-1 /
+        # Phase-2 separation as a belt-and-suspenders guard and for readability:
+        # Phase 1 validates CUT and runs all baseline reproduces; Phase 2 runs
+        # experiments.  Each dispatch calls _activate() on the correct adapter.
         # -----------------------------------------------------------------------
+
         rows: list[CohortRow] = []
         for base_id in exec_ids:
             row = CohortRow(base_exec_id=base_id)
@@ -620,11 +672,7 @@ class KitaruAdapterPA:
             row.repro_exec_id = repro_id
             rows.append(row)
 
-        # -----------------------------------------------------------------------
-        # Phase 2: run experiments (reconfigured replay) for all non-skipped rows.
-        # The reconfigured adapter's __init__ rewrites the module-level alias,
-        # so all baseline reproduces above must already be done.
-        # -----------------------------------------------------------------------
+        # Phase 2: run experiments for all non-skipped rows.
         for row in rows:
             if row.skipped:
                 report.rows.append(row)
@@ -646,8 +694,8 @@ class KitaruAdapterPA:
             row.exp_exec_id = exp_id
 
             # Decision-changed: compare repro vs experiment decisions.
-            # Read decisions from the artifact store (not in-memory cache) to
-            # avoid stale cached values from before the alias was overwritten.
+            repro_decision = None
+            exp_decision = None
             try:
                 repro_decision = self._decision_from_artifacts(repro_id)
                 exp_decision = self._decision_from_artifacts(exp_id)
@@ -657,8 +705,6 @@ class KitaruAdapterPA:
             except Exception as exc:
                 _log.warning("diff failed for %s vs %s: %s", repro_id, exp_id, exc)
                 row.decision_changed = None
-                repro_decision = None
-                exp_decision = None
 
             # Cost and latency from execution metadata.
             row.cost_baseline_usd = _extract_cost(self._client, repro_id)
@@ -667,17 +713,8 @@ class KitaruAdapterPA:
             row.latency_experiment_s = _extract_latency_s(self._client, exp_id)
 
             # LLM-judge quality scores.
-            if repro_decision is None:
-                try:
-                    repro_decision = self._decision_from_artifacts(repro_id)
-                except Exception:
-                    repro_decision = None
-            if exp_decision is None:
-                try:
-                    exp_decision = self._decision_from_artifacts(exp_id)
-                except Exception:
-                    exp_decision = None
-
+            # (Finding 3b: dead re-fetch block removed — repro_decision/exp_decision
+            # are already set above from the try block or left None on failure.)
             try:
                 if repro_decision is not None:
                     repro_summary = (
@@ -787,9 +824,6 @@ class KitaruAdapterPA:
         Returns:
             The experiment execution's exec_id.
         """
-        # Build a reconfigured adapter with the same checkpoint step names.
-        # Supplying the same name keeps the flow/checkpoint names identical so
-        # flow.replay() can resolve the head checkpoint from the baseline execution.
         resolved_model = model if model is not None else self._model
         resolved_profile = prompt_profile if prompt_profile is not None else self._prompt_profile
         reconfigured = KitaruAdapterPA(
@@ -797,6 +831,9 @@ class KitaruAdapterPA:
             prompt_profile=resolved_profile,
             name=self.name,
         )
+        # Activate the reconfigured adapter's agents before dispatch so the
+        # module-level @checkpoint steps run under the new config.
+        reconfigured._activate()
         handle = reconfigured._flow.replay(
             exec_id,
             from_=self.cut_of(exec_id),

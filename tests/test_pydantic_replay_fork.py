@@ -738,3 +738,183 @@ def test_r4_skipped_count_covered(primed_zenml) -> None:
     # Validate the guard raises on a non-existent exec_id (simulates broken data).
     with pytest.raises((RuntimeError, LookupError, Exception)):
         adapter.cut_of("00000000-0000-0000-0000-000000000000")
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: alias-overwrite race — reproduce-after-experiment correctness
+# ---------------------------------------------------------------------------
+
+def test_reproduce_after_experiment_is_unaffected(primed_zenml) -> None:
+    """Finding 1 (RED→GREEN): reproduce() after experiment() must use adapter A's agents.
+
+    Before the ContextVar fix, constructing a second KitaruAdapterPA inside
+    experiment() overwrote the module-level source aliases for gather_context /
+    decide / finalize.  A subsequent reproduce() on adapter A would silently
+    dispatch the fork closures, returning risk_status="safe" instead of
+    "needs_review".
+
+    After the fix, _activate() sets the ContextVar to THIS adapter's agents
+    before each dispatch, so reproduce()-after-experiment() returns the correct
+    baseline decision.
+
+    RED: returns "safe" (fork model leaks into baseline reproduce).
+    GREEN: returns "needs_review" (adapter A's agents used correctly).
+    """
+    del primed_zenml  # fixture used for ZenML store init side-effect
+
+    import sys
+    import pathlib
+
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA
+
+    # Adapter A: baseline model -> needs_review
+    base_model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "needs_review",
+            "required_action": "escalate_to_human",
+            "summary": "needs human review",
+        }
+    )
+    # Fork model: safe (the experiment uses this)
+    fork_model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "safe",
+            "required_action": "answer_directly",
+            "summary": "safe to answer",
+        }
+    )
+
+    # Step 1: Run adapter A baseline.
+    adapter_A = KitaruAdapterPA(model=base_model)
+    base_exec = adapter_A.run("Can I enable SSO?", customer="acme")
+    base_decision = adapter_A.decision_of(base_exec)
+    assert base_decision["risk_status"] == "needs_review", (
+        f"Baseline should be 'needs_review', got {base_decision['risk_status']!r}"
+    )
+
+    # Step 2: Call experiment() — this constructs a second KitaruAdapterPA
+    # (the fork adapter) and dispatches the flow under the fork model.
+    exp_exec = adapter_A.experiment(base_exec, model=fork_model, prompt_profile="trimmed_permissions")
+    exp_decision = adapter_A.decision_of(exp_exec)
+    assert exp_decision["risk_status"] == "safe", (
+        f"Experiment should be 'safe', got {exp_decision['risk_status']!r}"
+    )
+
+    # Step 3: NOW call reproduce() on adapter A AFTER experiment() has run.
+    # Before fix (RED): returns "safe" because the fork adapter's closures
+    #   overwrote the module-level aliases.
+    # After fix (GREEN): returns "needs_review" because _activate() sets the
+    #   ContextVar to adapter A's agents before dispatching.
+    repro_exec = adapter_A.reproduce(base_exec)
+    repro_decision = adapter_A.decision_of(repro_exec)
+    assert repro_decision["risk_status"] == "needs_review", (
+        f"reproduce() after experiment() must return 'needs_review' (adapter A's agents). "
+        f"Got {repro_decision['risk_status']!r}. "
+        "This indicates the alias-overwrite race: the fork adapter's closures leaked "
+        "into adapter A's reproduce dispatch."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Finding 2: improvement logic — pure unit test with synthetic values
+# ---------------------------------------------------------------------------
+
+def test_improvement_logic_with_synthetic_values() -> None:
+    """Finding 2: CohortReport.improvement logic tested with known synthetic aggregates.
+
+    Tests the derivation independent of timing by constructing CohortReport and
+    CohortRow instances directly with known values.
+
+    Cases:
+    - clearly_improved: cheaper, faster, same quality -> True
+    - experiment_costs_more: experiment cost > baseline cost -> False
+    - experiment_is_slower: experiment latency > baseline latency -> False
+    - experiment_quality_worse: experiment score << baseline score (below tolerance) -> False
+    """
+    import sys
+    import pathlib
+
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import CohortReport, CohortRow
+
+    def _make_report(
+        cost_baseline: float,
+        cost_experiment: float,
+        latency_baseline: float,
+        latency_experiment: float,
+        score_baseline: int,
+        score_experiment: int,
+    ) -> CohortReport:
+        """Build a CohortReport with a single non-skipped row of known values."""
+        row = CohortRow(
+            base_exec_id="fake-base",
+            repro_exec_id="fake-repro",
+            exp_exec_id="fake-exp",
+            decision_changed=True,
+            cost_baseline_usd=cost_baseline,
+            cost_experiment_usd=cost_experiment,
+            latency_baseline_s=latency_baseline,
+            latency_experiment_s=latency_experiment,
+            judge_score_baseline=score_baseline,
+            judge_score_experiment=score_experiment,
+            skipped=False,
+        )
+        report = CohortReport(rows=[row], skipped_count=0)
+        return report
+
+    # Case 1: clearly improved — cheaper, faster, same quality.
+    clearly_improved = _make_report(
+        cost_baseline=0.05, cost_experiment=0.02,
+        latency_baseline=2.0, latency_experiment=1.0,
+        score_baseline=4, score_experiment=4,
+    )
+    assert clearly_improved.improvement is True, (
+        "Expected improvement=True when experiment is cheaper, faster, same quality. "
+        f"cost_baseline={clearly_improved.mean_cost_baseline_usd}, "
+        f"cost_experiment={clearly_improved.mean_cost_experiment_usd}, "
+        f"latency_baseline={clearly_improved.mean_latency_baseline_s}, "
+        f"latency_experiment={clearly_improved.mean_latency_experiment_s}, "
+        f"score_baseline={clearly_improved.mean_judge_score_baseline}, "
+        f"score_experiment={clearly_improved.mean_judge_score_experiment}"
+    )
+
+    # Case 2: experiment costs more -> False.
+    costs_more = _make_report(
+        cost_baseline=0.02, cost_experiment=0.05,  # experiment more expensive
+        latency_baseline=2.0, latency_experiment=1.0,
+        score_baseline=4, score_experiment=4,
+    )
+    assert costs_more.improvement is False, (
+        "Expected improvement=False when experiment costs more than baseline. "
+        f"cost_baseline={costs_more.mean_cost_baseline_usd}, "
+        f"cost_experiment={costs_more.mean_cost_experiment_usd}"
+    )
+
+    # Case 3: experiment is slower -> False.
+    slower = _make_report(
+        cost_baseline=0.05, cost_experiment=0.02,
+        latency_baseline=1.0, latency_experiment=3.0,  # experiment slower
+        score_baseline=4, score_experiment=4,
+    )
+    assert slower.improvement is False, (
+        "Expected improvement=False when experiment is slower than baseline. "
+        f"latency_baseline={slower.mean_latency_baseline_s}, "
+        f"latency_experiment={slower.mean_latency_experiment_s}"
+    )
+
+    # Case 4: experiment quality worse (below tolerance) -> False.
+    # QUALITY_TOLERANCE is 0.1; baseline=4, experiment=3 -> 3 < 4-0.1=3.9 -> False.
+    quality_worse = _make_report(
+        cost_baseline=0.05, cost_experiment=0.02,
+        latency_baseline=2.0, latency_experiment=1.0,
+        score_baseline=4, score_experiment=3,  # significantly worse quality
+    )
+    assert quality_worse.improvement is False, (
+        "Expected improvement=False when experiment quality is significantly worse. "
+        f"score_baseline={quality_worse.mean_judge_score_baseline}, "
+        f"score_experiment={quality_worse.mean_judge_score_experiment}, "
+        f"tolerance={quality_worse.QUALITY_TOLERANCE}"
+    )
