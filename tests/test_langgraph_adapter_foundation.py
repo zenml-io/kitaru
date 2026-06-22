@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -537,6 +537,32 @@ def test_invoke_accepts_aliased_start_run_request_with_explicit_none_input(
     assert canonical_request.input is None
     assert "input" in canonical_request.model_fields_set
     assert "command" not in canonical_request.model_fields_set
+
+
+def test_invoke_treats_same_shaped_foreign_pydantic_model_as_raw_input(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class ForeignRunRequest(BaseModel):
+        schema_version: int = 1
+        kind: str = "start"
+        input: Any | None = None
+        command: Any | None = None
+        thread_id: str = "embedded-thread"
+        checkpoint_id: str | None = None
+        checkpoint_ns: str | None = None
+        context: Any | None = None
+        configurable: dict[str, Any] = Field(default_factory=dict)
+        config: dict[str, Any] = Field(default_factory=dict)
+        durability: str | None = None
+        metadata: dict[str, Any] = Field(default_factory=dict)
+
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    foreign_input = ForeignRunRequest(input={"x": 5})
+
+    result = runner.invoke(foreign_input, thread_id="raw-model-thread")
+
+    assert result.output is foreign_input
+    assert result.thread_id == "raw-model-thread"
 
 
 def test_invoke_accepts_keyword_run_request(

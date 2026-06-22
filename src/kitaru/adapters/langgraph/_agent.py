@@ -84,6 +84,22 @@ _FRESH_START_KWARG_NAMES = (
     "durability",
     "metadata",
 )
+_LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX = "kitaru.adapters.langgraph._types"
+
+
+def _is_aliased_run_request(value: Any) -> bool:
+    value_type = type(value)
+    if value_type.__name__ != "LangGraphRunRequest":
+        return False
+    if value_type.__qualname__ != "LangGraphRunRequest":
+        return False
+    module_path = value_type.__module__.removeprefix("src.")
+    if module_path != _LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX:
+        return False
+    model_fields = getattr(value_type, "model_fields", None)
+    return isinstance(model_fields, Mapping) and set(model_fields) == set(
+        LangGraphRunRequest.model_fields
+    )
 
 
 def _canonicalize_run_request(value: Any) -> LangGraphRunRequest | None:
@@ -96,11 +112,7 @@ def _canonicalize_run_request(value: Any) -> LangGraphRunRequest | None:
     """
     if isinstance(value, LangGraphRunRequest):
         return value
-
-    model_fields = getattr(type(value), "model_fields", None)
-    if not isinstance(model_fields, Mapping):
-        return None
-    if set(model_fields) != set(LangGraphRunRequest.model_fields):
+    if not _is_aliased_run_request(value):
         return None
 
     model_dump = getattr(value, "model_dump", None)
@@ -381,6 +393,7 @@ class KitaruGraphRunner:
         subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph synchronously and forward best-effort live stream events."""
+        self._require_streaming_graph_call()
         request = self._coerce_run_request(
             request,
             thread_id=thread_id,
@@ -392,7 +405,6 @@ class KitaruGraphRunner:
             durability=durability,
             metadata=metadata,
         )
-        self._require_streaming_graph_call()
         self._validate_request(request, required_method="stream")
         options = resolve_stream_options(
             stream_mode,
@@ -467,6 +479,7 @@ class KitaruGraphRunner:
         subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph asynchronously and forward best-effort live stream events."""
+        self._require_streaming_graph_call()
         request = self._coerce_run_request(
             request,
             thread_id=thread_id,
@@ -478,7 +491,6 @@ class KitaruGraphRunner:
             durability=durability,
             metadata=metadata,
         )
-        self._require_streaming_graph_call()
         self._validate_request(request, required_method="astream")
         options = resolve_stream_options(
             stream_mode,
