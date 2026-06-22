@@ -86,6 +86,32 @@ _FRESH_START_KWARG_NAMES = (
 )
 
 
+def _canonicalize_run_request(value: Any) -> LangGraphRunRequest | None:
+    """Return aliased LangGraph run requests with local class identity.
+
+    ZenML can materialize the same source file through both ``kitaru...`` and
+    ``src.kitaru...`` module names. When that happens, the request has the same
+    Pydantic fields but a different class object, so an exact ``isinstance``
+    check misses it.
+    """
+    if isinstance(value, LangGraphRunRequest):
+        return value
+
+    model_fields = getattr(type(value), "model_fields", None)
+    if not isinstance(model_fields, Mapping):
+        return None
+    if set(model_fields) != set(LangGraphRunRequest.model_fields):
+        return None
+
+    model_dump = getattr(value, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    payload = model_dump(mode="python", exclude_unset=True)
+    if not isinstance(payload, Mapping):
+        return None
+    return LangGraphRunRequest.model_validate(payload)
+
+
 class KitaruGraphRunner:
     """Wrap a LangGraph-compatible runnable with one Kitaru graph-call boundary.
 
@@ -510,7 +536,8 @@ class KitaruGraphRunner:
             "durability": durability,
             "metadata": metadata,
         }
-        if isinstance(request, LangGraphRunRequest):
+        prebuilt_request = _canonicalize_run_request(request)
+        if prebuilt_request is not None:
             explicit_names = [
                 name
                 for name in _FRESH_START_KWARG_NAMES
@@ -524,7 +551,7 @@ class KitaruGraphRunner:
                     "values on `LangGraphRunRequest.start(...)` or pass raw "
                     "graph input with `thread_id=...`."
                 )
-            return request
+            return prebuilt_request
 
         if not isinstance(thread_id, str) or not thread_id.strip():
             raise KitaruUsageError(

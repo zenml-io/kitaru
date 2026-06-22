@@ -471,6 +471,74 @@ def test_invoke_accepts_positional_run_request(
     assert result.thread_id == "request-thread"
 
 
+def test_invoke_accepts_aliased_resume_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    assert (
+        aliased_types.LangGraphRunRequest is not langgraph_adapter.LangGraphRunRequest
+    )
+
+    command = SimpleNamespace(resume={"approved": True})
+    request = aliased_types.LangGraphRunRequest.resume(
+        command,
+        thread_id="aliased-request-thread",
+    )
+    seen_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_requests.append(request)
+        return langgraph_adapter.merge_config(request)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        CheckpointableGraph(),
+        config_factory=config_factory,
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output is command
+    assert result.thread_id == "aliased-request-thread"
+    assert isinstance(seen_requests[0], langgraph_adapter.LangGraphRunRequest)
+    assert not isinstance(seen_requests[0], aliased_types.LangGraphRunRequest)
+    canonical_request = cast(Any, seen_requests[0])
+    assert canonical_request.kind == "resume"
+    assert canonical_request.command is command
+    assert "input" not in canonical_request.model_fields_set
+    assert "command" in canonical_request.model_fields_set
+
+
+def test_invoke_accepts_aliased_start_run_request_with_explicit_none_input(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    request = aliased_types.LangGraphRunRequest.start(
+        None,
+        thread_id="aliased-none-input-thread",
+    )
+    seen_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_requests.append(request)
+        return langgraph_adapter.merge_config(request)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        CheckpointableGraph(),
+        config_factory=config_factory,
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output is None
+    assert result.thread_id == "aliased-none-input-thread"
+    assert isinstance(seen_requests[0], langgraph_adapter.LangGraphRunRequest)
+    canonical_request = seen_requests[0]
+    assert canonical_request.kind == "start"
+    assert canonical_request.input is None
+    assert "input" in canonical_request.model_fields_set
+    assert "command" not in canonical_request.model_fields_set
+
+
 def test_invoke_accepts_keyword_run_request(
     langgraph_adapter: types.ModuleType,
 ) -> None:
@@ -521,6 +589,20 @@ def test_prebuilt_request_rejects_fresh_start_kwargs(
 
     with pytest.raises(KitaruUsageError, match="prebuilt LangGraphRunRequest"):
         runner.invoke(request, **{fresh_kwarg: value})
+
+
+def test_aliased_prebuilt_request_rejects_fresh_start_kwargs(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = aliased_types.LangGraphRunRequest.resume(
+        SimpleNamespace(resume={"approved": True}),
+        thread_id="request-thread",
+    )
+
+    with pytest.raises(KitaruUsageError, match="prebuilt LangGraphRunRequest"):
+        runner.invoke(request, thread_id="fresh-thread")
 
 
 def test_raw_fresh_input_uses_same_request_config_path(
