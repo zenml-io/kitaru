@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rerun vs Replay — b02c98ec-6298-44b7-9336-2a93e4fa285f</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1c2024;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }
+.banner { border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-weight: 600; }
+.banner.drift { background: #fdecec; color: #8a1c1c; border: 1px solid #f3c0c0; }
+.banner.clean { background: #e9f7ec; color: #1e6b34; border: 1px solid #bfe6c8; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: #6b7280; margin: 0 0 28px; font-size: 13px; }
+.card { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px;
+  padding: 18px 20px; margin-bottom: 20px; }
+.card h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: #8a9099; margin: 0 0 14px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 8px 10px; text-align: left; vertical-align: top; }
+tr + tr td { border-top: 1px solid #f0f1f3; }
+.field { color: #6b7280; width: 200px; font-variant-numeric: tabular-nums; }
+.val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.arrow { color: #b0b6bd; padding: 0 4px; }
+tr.changed td.val.to { color: #b42318; font-weight: 600; }
+tr.changed { background: #fdf3f3; }
+.tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  margin-left: 8px; vertical-align: middle; }
+.tag.ok { background: #e9f7ec; color: #1e6b34; }
+.tag.chg { background: #fdecec; color: #8a1c1c; }
+.flow { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+.node { font-family: ui-monospace, monospace; font-size: 12px; padding: 7px 11px;
+  border-radius: 8px; border: 1px solid #e6e8eb; background: #fff; white-space: nowrap; }
+.node.cached { background: #f1f2f4; color: #6b7280; border-style: dashed; }
+.node.live { background: #eef4ff; color: #1d4ed8; border-color: #cfe0ff; }
+.branch { border: 1px solid #e6e8eb; border-radius: 10px; padding: 12px; margin-top: 10px; }
+.branch h3 { margin: 0 0 8px; font-size: 13px; }
+.branch.rerun h3 { color: #1e6b34; }
+.branch.replay h3 { color: #b42318; }
+.legend { color: #8a9099; font-size: 12px; margin-top: 10px; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.answers .col h3 { margin: 0 0 6px; font-size: 13px; }
+.answers .col.rerun h3 { color: #1e6b34; }
+.answers .col.replay h3 { color: #b42318; }
+.answers pre { white-space: pre-wrap; font: 12px/1.5 ui-monospace, monospace;
+  background: #f6f7f9; border: 1px solid #eceef0; border-radius: 8px; padding: 10px; margin: 0; }
+</style></head>
+<body><div class="wrap">
+<div class="banner drift">Replay drift detected — the reconfigured agent changed the decision.</div>
+<h1>Rerun vs Replay</h1>
+<p class="sub">b02c98ec-6298-44b7-9336-2a93e4fa285f &middot; scenario <code>I need to grant all members of our engineering team admin access to the producti...</code> &middot; cut <code>decide</code></p>
+
+<div class="card"><h2>Settings — what replay changed</h2>
+<table><tr class="changed"><td class="field">model</td><td class="val from">openai:gpt-5-mini</td><td class="arrow">→</td><td class="val to">openai:gpt-5-nano</td></tr><tr class="changed"><td class="field">prompt_profile</td><td class="val from">baseline</td><td class="arrow">→</td><td class="val to">trimmed_permissions</td></tr></table></div>
+
+<div class="card"><h2>Execution — cached head, live tail</h2>
+<div class="flow"><span class="node cached">gather_context</span></div>
+<div class="branch rerun"><h3>rerun (same config)</h3><div class="flow"><span class="node live">decide</span><span class="node live">finalize</span></div></div>
+<div class="branch replay"><h3>replay (reconfigured)</h3><div class="flow"><span class="node live">decide</span><span class="node live">finalize</span></div></div>
+<p class="legend">Dashed = served from checkpoint cache (no model calls). Blue = re-executed live from the cut point.</p>
+</div>
+
+<div class="card"><h2>Outcomes — rerun vs replay</h2>
+<table><tr class="changed"><td class="field">policy_label<span class="tag chg">changed</span></td><td class="val from">restricted</td><td class="arrow">→</td><td class="val to">require_approval_for_admin_privileges</td></tr><tr class="changed"><td class="field">risk_status<span class="tag chg">changed</span></td><td class="val from">needs_review</td><td class="arrow">→</td><td class="val to">high</td></tr><tr class="changed"><td class="field">required_action<span class="tag chg">changed</span></td><td class="val from">escalate_to_human</td><td class="arrow">→</td><td class="val to">deny_until_approved; route to IAM/security for formal approval; collect business justification; verify compliance; enforce least privilege; require MFA; implement logging/audit; enable only after explicit approval.</td></tr><tr class="changed"><td class="field">summary<span class="tag chg">changed</span></td><td class="val from">High-risk request to grant team-admin privileges via SSO. This is a restricted admin/SSO change and must be escalated to a human reviewer. Collect target team and user identifiers, justification and approval, requestor identity, org/tenant ID, and SSO provider details to include with the escalation.</td><td class="arrow">→</td><td class="val to">High-risk request to grant team admin privileges via SSO. Requires formal IAM/security approval, solid business justification, and strict controls (least privilege, MFA, auditing); pause and escalate.</td></tr></table>
+<div class="answers" style="margin-top:16px">
+  <div class="col rerun"><h3>rerun answer</h3><pre>risk=needs_review  action=escalate_to_human  label=restricted</pre></div>
+  <div class="col replay"><h3>replay answer</h3><pre>risk=high  action=deny_until_approved; route to IAM/security for formal approval; collect business justification; verify compliance; enforce least privilege; require MFA; implement logging/audit; enable only after explicit approval.  label=require_approval_for_admin_privileges</pre></div>
+</div></div>
+
+</div></body></html>

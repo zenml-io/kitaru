@@ -1,4 +1,4 @@
-"""Durable PydanticAI support-copilot with Kitaru checkpoints and replay.
+"""PydanticAI support-copilot wrapped as a durable Kitaru flow.
 
     from support_copilot import KitaruAdapterPA
     from utils import cost, latency, quality_judge
@@ -7,250 +7,142 @@
     agent   = KitaruAdapterPA(model="openai:gpt-5-mini")
     exec_id = agent.run(prompt, customer)
 
-    rerun  = agent.rerun(exec_id)
-    replay = agent.replay(exec_id, at="decide",
-                          model="openai:gpt-5-nano",
+    rerun  = agent.rerun(exec_id)                       # reproduce: cached head, live tail, no edits
+    replay = agent.replay(exec_id, model="openai:gpt-5-nano",
                           prompt_profile="trimmed_permissions")
-    replay.diff(rerun)
+    replay.diff(rerun)                                  # did the change move the decision?
 
     report = cohort(agent.last_executions(10)).experiment(
         agent, variant=replay.recipe,
         metrics=[cost, latency, quality_judge], repeats=1)
-    report.summary()
-    report.regressions()
+    report.summary(); report.regressions()
 
-Module structure:
-- Module-level @checkpoint steps (gather_context / decide / finalize) and
-  the @flow are registered once at import — never clobbered.
-- ContextVar _active_agents holds the three step agents for the in-flight run;
-  steps read them at execution time; kept ambient so they're never serialized
-  as checkpoint inputs.
-- RunHandle is the small return value of rerun/replay: .exec_id, .decision,
-  .model, .recipe, .diff(other) -> DriftReport.
+The flow carries its config (``model`` spec + ``prompt_profile``) as ordinary
+flow inputs.  Each ``@checkpoint`` step builds its own ``pydantic_ai.Agent`` from
+those inputs, so *any* process — the SDK or the ``kitaru executions replay`` CLI —
+can rebuild the agents from the recorded execution.  ``decide`` is the CUT: the
+step you replay from.  Replaying with a new ``model``/``prompt_profile`` re-runs
+``decide`` + ``finalize`` under the new config while the ``gather_context`` head
+is served from cache.
 """
 from __future__ import annotations
 
-import logging
-from contextvars import ContextVar
 from typing import Any
 
-from pydantic_ai import Agent
-
-from kitaru import flow, KitaruClient
+from kitaru import KitaruClient, flow
 from kitaru.checkpoint import checkpoint
 
-from agent import (
-    SupportDecision,
-    build_decide_agent,
-    build_finalize_agent,
-    build_gather_agent,
-)
-from utils import CUT, DriftReport, Recipe, decision_of, diff_decisions, decision_from_artifacts
-
-_log = logging.getLogger(__name__)
+from agent import build_decide_agent, build_finalize_agent, build_gather_agent
+from utils import CUT, Recipe, decision_from_artifacts, decision_of, diff_decisions
 
 
 # ---------------------------------------------------------------------------
-# Ambient agents — set by _activate() before each flow dispatch so that the
-# module-level @checkpoint steps pick up the correct per-adapter agents without
-# requiring them as serialized checkpoint inputs.
-# ---------------------------------------------------------------------------
-
-_active_agents: ContextVar[tuple[Agent, Agent, Agent]] = ContextVar("_active_agents")
-
-
-# ---------------------------------------------------------------------------
-# Module-level @checkpoint steps (registered once at import, never clobbered)
+# The three-step flow: gather_context -> decide -> finalize.
+# Config (model, prompt_profile) travels as flow inputs so the steps can rebuild
+# their agents in any process (SDK run, SDK replay, or the kitaru CLI replay).
 # ---------------------------------------------------------------------------
 
 @checkpoint
-def gather_context(prompt: str, customer: str) -> dict:  # type: ignore[return]
+def gather_context(prompt: str, customer: str, model: str, prompt_profile: str) -> dict:
     """Triage / classify the incoming support request."""
-    _gather_agent, _, _ = _active_agents.get()
-    result = _gather_agent.run_sync(
-        f"Customer: {customer}\nRequest: {prompt}"
-    )
+    agent = build_gather_agent(model, prompt_profile=prompt_profile)
+    result = agent.run_sync(f"Customer: {customer}\nRequest: {prompt}")
     return result.output.model_dump()
 
 
 @checkpoint
-def decide(gather_out: dict) -> dict:  # type: ignore[return]
+def decide(gather_out: dict, model: str, prompt_profile: str) -> dict:
     """Produce the SupportDecision from the triage result (the CUT)."""
-    _, _decide_agent, _ = _active_agents.get()
-    triage_summary = (
+    agent = build_decide_agent(model, prompt_profile=prompt_profile)
+    triage = (
         f"intent={gather_out.get('intent', 'unknown')} "
         f"category={gather_out.get('category', 'general')} "
         f"triage={gather_out.get('triage', 'medium')}"
     )
-    result = _decide_agent.run_sync(triage_summary)
-    return result.output.model_dump()
+    return agent.run_sync(triage).output.model_dump()
 
 
 @checkpoint
-def finalize(decide_out: dict) -> dict:  # type: ignore[return]
+def finalize(decide_out: dict, model: str, prompt_profile: str) -> dict:
     """Assemble the customer-facing answer (single terminal step)."""
-    _, _, _finalize_agent = _active_agents.get()
-    decision_summary = (
+    agent = build_finalize_agent(model, prompt_profile=prompt_profile)
+    summary = (
         f"policy_label={decide_out.get('policy_label', 'unknown')} "
         f"risk_status={decide_out.get('risk_status', 'unknown')} "
         f"required_action={decide_out.get('required_action', 'unknown')} "
         f"summary={decide_out.get('summary', '')!r}"
     )
-    result = _finalize_agent.run_sync(decision_summary)
-    out = result.output.model_dump()
+    out = agent.run_sync(summary).output.model_dump()
+    # Carry the decision fields forward so the answer artifact is self-contained.
     for key in ("policy_label", "risk_status", "required_action", "summary"):
-        if key not in out or not out[key]:
+        if not out.get(key):
             out[key] = decide_out.get(key, "unknown")
     return out
 
 
-# ---------------------------------------------------------------------------
-# Module-level @flow (registered once at import, never clobbered)
-# ---------------------------------------------------------------------------
-
 @flow(cache=False)
-def support_copilot_flow(prompt: str, customer: str) -> dict:  # type: ignore[return]
-    """Three-step support copilot flow: gather -> decide -> finalize."""
-    gathered = gather_context(prompt, customer)
-    decided = decide(gathered)
-    return finalize(decided)
+def support_copilot_flow(prompt: str, customer: str, model: str, prompt_profile: str) -> dict:
+    """gather_context -> decide -> finalize, each running under (model, prompt_profile)."""
+    gathered = gather_context(prompt, customer, model, prompt_profile)
+    decided = decide(gathered, model, prompt_profile)
+    return finalize(decided, model, prompt_profile)
 
 
 # ---------------------------------------------------------------------------
-# RunHandle — returned by rerun() and replay()
+# RunHandle — the small result of rerun()/replay()
 # ---------------------------------------------------------------------------
 
 class RunHandle:
-    """Lightweight result handle returned by ``rerun`` and ``replay``.
+    """Result of a rerun or replay: the new exec_id, its decision, and the recipe."""
 
-    Attributes:
-        exec_id:  The execution ID of the completed run.
-        decision: The SupportDecision dict extracted from the execution.
-        model:    The PydanticAI model used for this run (for judge metrics).
-        recipe:   The Recipe that produced this run (identity for rerun;
-                  model/prompt_profile/at for replay).
-    """
-
-    def __init__(
-        self,
-        exec_id: str,
-        decision: dict,
-        recipe: Recipe,
-        model: Any = None,
-    ) -> None:
+    def __init__(self, exec_id: str, decision: dict, recipe: Recipe, model: Any = None) -> None:
         self.exec_id = exec_id
         self.decision = decision
         self.recipe = recipe
         self.model = model
 
-    def diff(self, other: "RunHandle") -> DriftReport:
-        """Compare this handle's decision against *other*'s decision."""
-        return diff_decisions(self.decision, other.decision)
+    def diff(self, other: "RunHandle"):
+        """Compare this run's decision against ``other`` (the baseline)."""
+        return diff_decisions(other.decision, self.decision)
 
 
 # ---------------------------------------------------------------------------
-# KitaruAdapterPA
+# KitaruAdapterPA — wrap the flow; run, rerun (no edit), replay (with edit)
 # ---------------------------------------------------------------------------
 
 class KitaruAdapterPA:
-    """Durable execution adapter for the three-step PydanticAI support-copilot.
+    """Run the support-copilot flow durably, and rerun/replay recorded executions."""
 
-    Args:
-        model:          PydanticAI-compatible model (real or TestModel for tests).
-        prompt_profile: System-prompt profile ("baseline" or "trimmed_permissions").
-        name:           Stable name prefix for the step agents.
-
-    Public surface:
-        run(prompt, customer) -> str           execute and return exec_id
-        rerun(exec_id) -> RunHandle            no edit: cached head, live tail
-        replay(exec_id, ...) -> RunHandle      WITH edit: reconfigure decide + tail
-        last_executions(n) -> list[str]        n most recent baseline exec_ids
-    """
-
-    def __init__(
-        self,
-        *,
-        model: Any,
-        prompt_profile: str = "baseline",
-        name: str = "support_copilot",
-    ) -> None:
-        self.name = name
+    def __init__(self, *, model: str, prompt_profile: str = "baseline") -> None:
         self._model = model
         self._prompt_profile = prompt_profile
         self._client = KitaruClient()
 
-        self._gather_agent = build_gather_agent(
-            model, prompt_profile=prompt_profile, name=f"{name}_gather",
-        )
-        self._decide_agent = build_decide_agent(
-            model, prompt_profile=prompt_profile, name=f"{name}_decide",
-        )
-        self._finalize_agent = build_finalize_agent(
-            model, prompt_profile=prompt_profile, name=f"{name}_finalize",
-        )
-
-        self._flow = support_copilot_flow
-        self._results: dict[str, dict] = {}
-
-    def _activate(self) -> None:
-        """Set the ContextVar to this adapter's agents before any dispatch."""
-        _active_agents.set((self._gather_agent, self._decide_agent, self._finalize_agent))
-
     def run(self, prompt: str, customer: str) -> str:
-        """Run the three-step flow and return the exec_id.
-
-        Blocks until the execution finishes.  The flow result is cached by
-        exec_id to enable a fast path in decision lookup.
-        """
-        self._activate()
-        handle = self._flow.run(prompt, customer)
-        result = handle.wait()
-        exec_id = handle.exec_id
-        if isinstance(result, dict) and "risk_status" in result:
-            self._results[exec_id] = result
-        return exec_id
+        """Run the three-step flow and return the exec_id."""
+        handle = support_copilot_flow.run(prompt, customer, self._model, self._prompt_profile)
+        handle.wait()
+        return handle.exec_id
 
     def cut_of(self, exec_id: str) -> str:
-        """Return the CUT checkpoint name for *exec_id*.
-
-        Raises:
-            RuntimeError: If no ``"decide"`` checkpoint exists.
-        """
+        """Return the CUT checkpoint name for ``exec_id`` (raises if absent)."""
         run = self._client.executions.get(exec_id)
         names = [c.name for c in run.checkpoints]
         if CUT not in names:
-            raise RuntimeError(
-                f"CUT checkpoint {CUT!r} not found in execution {exec_id}. "
-                f"Checkpoints present: {names}."
-            )
+            raise RuntimeError(f"CUT {CUT!r} not found in {exec_id}; checkpoints: {names}.")
         return CUT
 
     def decision_of(self, exec_id: str) -> dict:
-        """Return the SupportDecision dict for *exec_id*.
-
-        Checks in-memory cache first, then artifact store.
-
-        Raises:
-            RuntimeError: If the decision cannot be found via any path.
-        """
-        return decision_of(self._client, exec_id, cache=self._results)
+        """Return the SupportDecision dict recorded for ``exec_id``."""
+        return decision_of(self._client, exec_id)
 
     def rerun(self, exec_id: str) -> RunHandle:
-        """Re-execute from the CUT with NO config change (cached head, live tail).
-
-        Returns:
-            A RunHandle with the identity Recipe and the re-run decision.
-        """
-        self._activate()
-        handle = self._flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
-        result = handle.wait()
-        replay_id = handle.exec_id
-        if isinstance(result, dict) and "risk_status" in result:
-            self._results[replay_id] = result
-        dec = decision_from_artifacts(self._client, replay_id)
+        """Re-execute from the CUT with NO config change (cached head, live tail)."""
+        handle = support_copilot_flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
+        handle.wait()
         return RunHandle(
-            exec_id=replay_id,
-            decision=dec,
+            exec_id=handle.exec_id,
+            decision=decision_from_artifacts(self._client, handle.exec_id),
             recipe=Recipe(at=CUT),
             model=self._model,
         )
@@ -260,58 +152,31 @@ class KitaruAdapterPA:
         exec_id: str,
         *,
         at: str = CUT,
-        model: Any = None,
+        model: str | None = None,
         prompt_profile: str | None = None,
     ) -> RunHandle:
-        """Re-execute from *at* WITH a config change (new model and/or prompt).
+        """Re-execute from ``at`` WITH a config change (new model and/or prompt).
 
-        Builds a reconfigured adapter and replays from *at*, re-running the
-        decide + finalize steps under the new configuration.  The
-        gather_context head is served from cache.
-
-        Args:
-            exec_id: The baseline execution to replay.
-            at: The checkpoint name to replay from (default: CUT = ``"decide"``).
-            model: New PydanticAI model for the reconfigured adapter.
-                Defaults to ``self``'s model when not supplied.
-            prompt_profile: New system-prompt profile.  Defaults to ``self``'s
-                profile when not supplied.
-
-        Returns:
-            A RunHandle capturing the Recipe and the replay decision.
+        The new config is passed as flow-input overrides, so ``decide`` + ``finalize``
+        re-run under it while the ``gather_context`` head is served from cache.
         """
-        resolved_model = model if model is not None else self._model
-        resolved_profile = prompt_profile if prompt_profile is not None else self._prompt_profile
-        reconfigured = KitaruAdapterPA(
-            model=resolved_model,
-            prompt_profile=resolved_profile,
-            name=self.name,
+        new_model = model if model is not None else self._model
+        new_profile = prompt_profile if prompt_profile is not None else self._prompt_profile
+        handle = support_copilot_flow.replay(
+            exec_id, from_=at, cache=False, model=new_model, prompt_profile=new_profile,
         )
-        reconfigured._activate()
-        handle = reconfigured._flow.replay(exec_id, from_=at, cache=False)
-        result = handle.wait()
-        replay_id = handle.exec_id
-        if isinstance(result, dict) and "risk_status" in result:
-            self._results[replay_id] = result
-        dec = decision_from_artifacts(self._client, replay_id)
-        recipe = Recipe(model=model, prompt_profile=prompt_profile, at=at)
+        handle.wait()
         return RunHandle(
-            exec_id=replay_id,
-            decision=dec,
-            recipe=recipe,
-            model=resolved_model,
+            exec_id=handle.exec_id,
+            decision=decision_from_artifacts(self._client, handle.exec_id),
+            recipe=Recipe(model=model, prompt_profile=prompt_profile, at=at),
+            model=new_model,
         )
 
     def last_executions(self, n: int) -> list[str]:
-        """Return the ``n`` most recent exec_ids for this adapter's flow, newest first.
-
-        Excludes replay executions (those with ``original_exec_id`` set).
-        """
-        from kitaru._source_aliases import build_pipeline_registration_name, callable_name as _callable_name
-        flow_name = build_pipeline_registration_name(_callable_name(self._flow._func))
-        executions = self._client.executions.list(
-            flow=flow_name,
-            limit=n * 5,
-        )
-        originals = [e for e in executions if e.original_exec_id is None]
+        """Return the ``n`` most recent original (non-replay) exec_ids, newest first."""
+        from kitaru._source_aliases import build_pipeline_registration_name, callable_name
+        flow_name = build_pipeline_registration_name(callable_name(support_copilot_flow._func))
+        runs = self._client.executions.list(flow=flow_name, limit=n * 5)
+        originals = [e for e in runs if e.original_exec_id is None]
         return [e.exec_id for e in originals[:n]]

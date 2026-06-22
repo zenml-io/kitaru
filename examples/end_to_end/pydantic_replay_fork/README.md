@@ -6,7 +6,7 @@ the whole loop, in code:
 
 1. **run** — your agent runs in production (durable, checkpointed).
 2. **rerun** — reproduce that run from an intermediate step with *no* changes (cached head, live tail)
-   to confirm you can faithfully reproduce it. This is the Kitaru **CLI**.
+   to confirm you can faithfully reproduce it.
 3. **replay** — re-run from the same step *with* a config change (cheaper model + looser prompt) and
    see whether the decision moved.
 4. **cohort** — apply that *same* change across your last N production runs and measure whether it's an
@@ -56,20 +56,27 @@ Individual commands:
 | command | what it does |
 |---|---|
 | `uv run python demo.py run` | run the agent once; print the exec id + decision |
-| `uv run python demo.py rerun <EXEC-ID>` | reproduce from the `decide` step via the Kitaru CLI; show drift (should be none) |
+| `uv run python demo.py rerun <EXEC-ID>` | reproduce from the `decide` step; show drift (should be none) |
 | `uv run python demo.py replay <EXEC-ID>` | re-run `decide` under `gpt-5-nano` + looser prompt; write `replay_vs_rerun.html` |
 | `uv run python demo.py cohort` | apply the change to the last N runs; print metric deltas + regressions |
 
-## The CLI-native rerun
+## The same operations from the CLI
 
-Reproducing a run is a first-class Kitaru CLI operation — the `rerun` command actually shells out to it:
+`demo.py` is the SDK story. Both rerun and replay are also first-class Kitaru CLI commands — the SDK
+methods are thin wrappers over them:
 
 ```bash
-kitaru executions replay --from decide <EXEC-ID> --output json
+# rerun (no edits): reproduce from the decide checkpoint — cached head, live tail
+kitaru executions replay --from decide <EXEC-ID>
+
+# replay (with edits): re-run decide + finalize under a new config
+kitaru executions replay --from decide <EXEC-ID> \
+    --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
 ```
 
-Kitaru serves every checkpoint before `decide` from cache and re-runs `decide` onward live. The demo
-then diffs the reproduced decision against the original to confirm it reproduced faithfully.
+Kitaru serves every checkpoint before `decide` from cache and re-runs `decide` onward live; `--args`
+overrides the flow inputs so the re-run steps pick up the new config. Add `--output json` to capture
+the new execution id programmatically.
 
 ## The agent
 
@@ -85,6 +92,12 @@ gather_context  →  decide  →  finalize
   between the `baseline` profile (permission/SSO/admin changes are `needs_review`) and the
   `trimmed_permissions` profile (answer directly). Reconfiguring this step is what flips the decision.
 - Output is a typed `SupportDecision` (policy label, risk status, required action, summary).
+- "Did the decision move?" is judged on the decision fields (`risk_status`, `required_action`); the
+  free-text `policy_label`/`summary` are reworded by the model each call, so they don't count as drift.
+
+Config (`model` + `prompt_profile`) travels as flow inputs, so the steps rebuild their agents in any
+process — that's why the SDK *and* the `kitaru executions replay` CLI both reproduce a run from a fresh
+process with no in-memory state.
 
 ## Cohort metrics
 
@@ -112,10 +125,11 @@ worse. `repeats` averages the variant over N runs to smooth out nondeterminism.
 | `demo.py` | the `click` CLI |
 | `comparison_html.py` | the rerun-vs-replay HTML report |
 
-## Tests
+## Validating
 
-The suite uses PydanticAI's `TestModel` (deterministic, no API key) and runs from the repo root:
+This example is validated by **real runs** — a real model and the real Kitaru backend, not mocks.
+Set `OPENAI_API_KEY` (and your Kitaru connection), then:
 
 ```bash
-uv run pytest tests/test_pydantic_replay_fork.py tests/test_pydantic_demo_cli.py -v
+uv run python demo.py run-all     # exercises run → rerun → replay → compare → cohort end to end
 ```

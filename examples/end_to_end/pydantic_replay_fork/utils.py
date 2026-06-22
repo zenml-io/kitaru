@@ -47,15 +47,22 @@ CUT: str = "decide"
 from kitaru.adapters.langgraph.replay._drift import DriftReport  # noqa: E402
 from kitaru.adapters.langgraph.replay._drift import compare_decisions as _compare_decisions
 
+#: The decision fields that define "did the decision move". ``policy_label`` and
+#: ``summary`` are free-text the model rewords every call, so they are excluded —
+#: a faithful no-edit rerun should not register drift on wording alone.
+DECISION_FIELDS = ("risk_status", "required_action")
+
 
 def diff_decisions(baseline: dict, other: dict) -> DriftReport:
-    """Compare two SupportDecision dicts and return a DriftReport.
+    """Compare two SupportDecision dicts on the decision fields; return a DriftReport.
 
-    The comparator is framework-agnostic (lives in kitaru.adapters.langgraph
-    for historical reasons but operates on plain dicts with no LangGraph dep).
-    ``has_fork_drift`` is True when any semantic field differs.
+    The comparator is framework-agnostic (lives in kitaru.adapters.langgraph for
+    historical reasons but operates on plain dicts with no LangGraph dep). We scope
+    it to ``DECISION_FIELDS`` so ``has_fork_drift`` means the decision changed, not
+    that the model reworded a label or summary.
     """
-    return DriftReport(reproduction=[], fork=_compare_decisions(baseline, other))
+    keep = lambda d: {k: d.get(k) for k in DECISION_FIELDS}  # noqa: E731
+    return DriftReport(reproduction=[], fork=_compare_decisions(keep(baseline), keep(other)))
 
 
 # ---------------------------------------------------------------------------
