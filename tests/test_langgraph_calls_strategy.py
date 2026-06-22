@@ -1,16 +1,16 @@
 """Deterministic tests for LangGraph calls-mode LangChain middleware."""
 
-from __future__ import annotations
-
 import asyncio
 import importlib
 import json
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any, cast
 
-from kitaru import SandboxCommandResult
+from kitaru import SandboxCommandResult, checkpoint, flow
+from kitaru._client._models import ExecutionStatus
 from kitaru.adapters.langgraph import (
     KitaruGraphRunner,
     LangGraphCallCheckpointPolicy,
@@ -19,6 +19,7 @@ from kitaru.adapters.langgraph import (
     create_sandbox_command_tool,
 )
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
+from kitaru.client import KitaruClient
 
 
 def _patch_runner_summary_runtime(monkeypatch) -> tuple[Any, dict[str, object]]:
@@ -128,6 +129,128 @@ def _logged_events(logged: dict[str, object]) -> list[dict[str, object]]:
         logged[constants.LANGGRAPH_EVENTS_METADATA_KEY],
     )
     return next(iter(event_payload.values()))
+
+
+def add_one_for_checkpoint_materialization(value: int) -> str:
+    """Add one to the provided value."""
+    return str(value + 1)
+
+
+def _model_checkpoint_output_contains_tool_call(
+    output: Any,
+    tool_call_id: str,
+) -> bool:
+    if not isinstance(output, dict):
+        return False
+    if (
+        output.get("schema")
+        != "kitaru.langgraph.langchain.model_response_checkpoint.v1"
+    ):
+        return False
+    message_payload = output.get("messages")
+    if not isinstance(message_payload, dict):
+        return False
+    messages = message_payload.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        data = message.get("data")
+        if not isinstance(data, dict):
+            continue
+        tool_calls = data.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if isinstance(tool_call, dict) and tool_call.get("id") == tool_call_id:
+                return True
+    return False
+
+
+@checkpoint
+def persist_langgraph_materialization_summary(
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the flow summary through one final result checkpoint."""
+    return summary
+
+
+@flow
+def langgraph_calls_materialization_regression() -> dict[str, Any]:
+    """Run a calls-mode LangGraph agent through real checkpoint materialization."""
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import (
+        FakeMessagesListChatModel,
+    )
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    class BindableFakeMessagesListChatModel(FakeMessagesListChatModel):
+        def bind_tools(
+            self,
+            tools: Any,
+            *,
+            tool_choice: str | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            return self
+
+    model = BindableFakeMessagesListChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "add_one_for_checkpoint_materialization",
+                        "args": {"value": 1},
+                        "id": "call-materialized",
+                    }
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    graph = create_agent(
+        model,
+        tools=[add_one_for_checkpoint_materialization],
+        middleware=[KitaruLangGraphMiddleware()],
+        checkpointer=InMemorySaver(),
+        name="materialized_langchain_agent",
+    )
+    runner = KitaruGraphRunner(
+        graph,
+        name="materialized_langchain_agent",
+        checkpoint_strategy="calls",
+        capture=LangGraphCapturePolicy(save_state_snapshot=False),
+    )
+
+    result = runner.invoke(
+        {"messages": [{"role": "user", "content": "use the tool"}]},
+        thread_id="materialized-langchain-thread",
+    )
+    output = cast(dict[str, Any], result.output)
+    messages = cast(list[Any], output["messages"])
+    summary = {
+        "status": result.status,
+        "message_types": [type(message).__name__ for message in messages],
+        "contents": [str(getattr(message, "content", "")) for message in messages],
+        "tool_call_counts": [
+            len(getattr(message, "tool_calls", None) or []) for message in messages
+        ],
+        "tool_call_ids": [
+            [
+                str(tool_call["id"])
+                for tool_call in cast(
+                    list[dict[str, Any]],
+                    getattr(message, "tool_calls", None) or [],
+                )
+                if "id" in tool_call
+            ]
+            for message in messages
+        ],
+    }
+    return persist_langgraph_materialization_summary(summary)
 
 
 def test_runner_calls_mode_uses_middleware_without_outer_graph_checkpoint(
@@ -384,6 +507,68 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     ] == ["true", "true", "true"]
     assert events[2]["tool_name"] == "add_one"
     assert events[2]["tool_call_id"] == "call-1"
+
+
+def test_real_materialized_model_checkpoint_preserves_tool_calls(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    handle = langgraph_calls_materialization_regression.run()
+    deadline = time.monotonic() + 15
+    while not handle.status.is_finished:
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"Execution {handle.exec_id} did not finish within 15 seconds."
+            )
+        time.sleep(0.25)
+
+    assert handle.status.is_successful
+    execution = KitaruClient().executions.get(handle.exec_id)
+    assert execution.status == ExecutionStatus.COMPLETED
+    summary_checkpoints = [
+        checkpoint
+        for checkpoint in execution.checkpoints
+        if checkpoint.name == "persist_langgraph_materialization_summary"
+    ]
+    assert len(summary_checkpoints) == 1
+    summary_outputs = [
+        artifact
+        for artifact in summary_checkpoints[0].artifacts
+        if artifact.direction == "output"
+    ]
+    assert len(summary_outputs) == 1
+    summary = cast(dict[str, Any], summary_outputs[0].load())
+    assert summary["status"] == "completed"
+    assert summary["message_types"] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "AIMessage",
+    ]
+    assert summary["tool_call_counts"] == [0, 1, 0, 0]
+    assert summary["tool_call_ids"] == [[], ["call-materialized"], [], []]
+    assert summary["contents"][-2:] == ["2", "done"]
+
+    checkpoint_names = [checkpoint.name for checkpoint in execution.checkpoints]
+    assert any(name.startswith("model_call__") for name in checkpoint_names)
+    assert any(
+        name.startswith(
+            "tool_call__add_one_for_checkpoint_materialization_call_materialized_"
+        )
+        for name in checkpoint_names
+    )
+
+    model_outputs = (
+        artifact.load()
+        for checkpoint in execution.checkpoints
+        if checkpoint.name.startswith("model_call__")
+        for artifact in checkpoint.artifacts
+        if artifact.direction == "output"
+    )
+    assert any(
+        _model_checkpoint_output_contains_tool_call(output, "call-materialized")
+        for output in model_outputs
+    )
 
 
 def test_sandbox_command_tool_uses_calls_mode_true_tool_checkpoint(
