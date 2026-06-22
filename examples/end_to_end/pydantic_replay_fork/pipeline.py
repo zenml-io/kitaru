@@ -86,10 +86,12 @@ class KitaruAdapterPA:
         Blocks until the execution finishes.  In a bare ``calls``-strategy
         flow the ``handle.wait()`` return value is the terminal checkpoint's
         stored ``ModelResponse`` (not the flow body's dict), so the cache is
-        populated lazily by ``decision_of`` on first access instead.
+        populated at run() time to enable the fast path in ``decision_of``.
         """
         handle = self._flow.run(prompt, customer)
-        handle.wait()  # blocks until the execution finishes
+        result = handle.wait()  # blocks until the execution finishes
+        if isinstance(result, dict) and "risk_status" in result:
+            self._results[handle.exec_id] = result
         return handle.exec_id
 
     def cut_of(self, exec_id: str) -> str:
@@ -120,7 +122,8 @@ class KitaruAdapterPA:
         PydanticAI stores structured output as a ``final_result`` tool-call in the
         ``ModelResponse.parts``; this method extracts those args.
 
-        Returns an empty dict if the decision cannot be found.
+        Raises:
+            RuntimeError: If the decision cannot be found in the cache or artifacts.
         """
         # Fast path: decision stored at run() time (e.g. from a prior explicit cache).
         cached = self._results.get(exec_id)
@@ -167,4 +170,7 @@ class KitaruAdapterPA:
                             and isinstance(part.get("args"), dict)
                         ):
                             return part["args"]
-        return {}
+        raise RuntimeError(
+            f"Could not extract a SupportDecision from execution {exec_id!r} "
+            f"(no cached result, and no decision found in the CUT checkpoint artifact)."
+        )
