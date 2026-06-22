@@ -420,6 +420,182 @@ class CheckpointableGraph:
         return input
 
 
+def test_invoke_accepts_raw_fresh_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = runner.invoke({"x": 1}, thread_id="thread-1")
+
+    assert result.output == {"x": 1}
+    assert result.thread_id == "thread-1"
+
+
+async def _ainvoke_raw_fresh_input(runner: Any) -> Any:
+    return await runner.ainvoke({"x": 2}, thread_id="thread-async")
+
+
+def test_ainvoke_accepts_raw_fresh_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = asyncio.run(_ainvoke_raw_fresh_input(runner))
+
+    assert result.output == {"x": 2}
+    assert result.thread_id == "thread-async"
+
+
+def test_invoke_accepts_raw_none_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = runner.invoke(None, thread_id="thread-none")
+
+    assert result.output is None
+    assert result.thread_id == "thread-none"
+
+
+def test_invoke_accepts_positional_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 3}, thread_id="request-thread"
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output == {"x": 3}
+    assert result.thread_id == "request-thread"
+
+
+def test_invoke_accepts_keyword_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 4}, thread_id="request-keyword-thread"
+    )
+
+    result = runner.invoke(request=request)
+
+    assert result.output == {"x": 4}
+    assert result.thread_id == "request-keyword-thread"
+
+
+@pytest.mark.parametrize("thread_id", [None, "", "   ", 123])
+def test_raw_fresh_input_requires_non_empty_thread_id(
+    langgraph_adapter: types.ModuleType,
+    thread_id: object,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    with pytest.raises(KitaruUsageError, match="thread_id"):
+        runner.invoke({"x": 1}, thread_id=cast(Any, thread_id))
+
+
+@pytest.mark.parametrize(
+    ("fresh_kwarg", "value"),
+    [
+        ("thread_id", "other-thread"),
+        ("checkpoint_id", None),
+        ("checkpoint_ns", "ns"),
+        ("context", {"tenant": "acme"}),
+        ("configurable", {"tenant": "acme"}),
+        ("config", {"tags": ["demo"]}),
+        ("durability", "sync"),
+        ("metadata", {"source": "test"}),
+    ],
+)
+def test_prebuilt_request_rejects_fresh_start_kwargs(
+    langgraph_adapter: types.ModuleType,
+    fresh_kwarg: str,
+    value: object,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 1}, thread_id="request-thread"
+    )
+
+    with pytest.raises(KitaruUsageError, match="prebuilt LangGraphRunRequest"):
+        runner.invoke(request, **{fresh_kwarg: value})
+
+
+def test_raw_fresh_input_uses_same_request_config_path(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class RecordingGraph:
+        name = "recording"
+        checkpointer = object()
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, dict[str, Any], dict[str, Any]]] = []
+
+        def invoke(
+            self,
+            input: object,
+            *,
+            config: dict[str, Any],
+            context: object | None = None,
+            **kwargs: Any,
+        ) -> object:
+            self.calls.append((input, config, {"context": context, **kwargs}))
+            return input
+
+    seen_config_requests: list[object] = []
+    seen_context_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_config_requests.append(request)
+        return {"configurable": {"factory": "yes", "thread_id": "factory-wrong"}}
+
+    def context_factory(request: object) -> dict[str, str]:
+        seen_context_requests.append(request)
+        return {"resolved": "context"}
+
+    graph = RecordingGraph()
+    runner = langgraph_adapter.KitaruGraphRunner(
+        graph,
+        config_factory=config_factory,
+        context_factory=context_factory,
+    )
+    start_kwargs = {
+        "thread_id": "config-thread",
+        "checkpoint_id": "checkpoint-1",
+        "checkpoint_ns": "ns",
+        "configurable": {"tenant": "acme", "thread_id": "configurable-wrong"},
+        "config": {"configurable": {"region": "eu", "thread_id": "config-wrong"}},
+        "metadata": {"source": "test"},
+    }
+
+    runner.invoke({"x": 1}, **start_kwargs)
+    explicit_request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 1}, **start_kwargs
+    )
+    runner.invoke(explicit_request)
+
+    convenience_config = graph.calls[0][1]
+    explicit_config = graph.calls[1][1]
+
+    assert convenience_config == explicit_config
+    assert convenience_config["configurable"] == {
+        "factory": "yes",
+        "region": "eu",
+        "tenant": "acme",
+        "thread_id": "config-thread",
+        "checkpoint_id": "checkpoint-1",
+        "checkpoint_ns": "ns",
+    }
+    assert graph.calls[0][2]["context"] == {"resolved": "context"}
+    assert graph.calls[1][2]["context"] == {"resolved": "context"}
+    assert all(
+        isinstance(request, langgraph_adapter.LangGraphRunRequest)
+        for request in [*seen_config_requests, *seen_context_requests]
+    )
+
+
 def test_invoke_canonicalizes_foreign_graph_call_checkpoint_result(
     langgraph_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
