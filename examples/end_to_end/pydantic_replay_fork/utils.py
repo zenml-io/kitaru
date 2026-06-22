@@ -2,15 +2,15 @@
 
 Public surface
 --------------
-CUT                   The fixed checkpoint name for the intermediate decide step.
-Recipe                Captured edit-set (model / prompt_profile / at).
-MetricDelta           Named metric comparison: baseline vs variant value.
-QualityScore          Typed output for the LLM quality judge (score 1-5).
-build_judge           Build a raw pydantic_ai.Agent that scores an answer 1-5.
-quality_judge         BYO metric: score baseline and variant with the judge.
-cost                  BYO metric (lower_is_better=True): display_cost_usd delta.
-latency               BYO metric (lower_is_better=True): wall-clock latency delta.
-decision_of           Read the SupportDecision dict from an execution (unified).
+CUT           The fixed checkpoint name for the intermediate decide step.
+Recipe        Captured edit-set (model / prompt_profile / at).
+MetricDelta   Named metric comparison: baseline vs variant value.
+QualityScore  Typed output for the LLM quality judge (score 1-5).
+build_judge   Build a raw pydantic_ai.Agent that scores an answer 1-5.
+quality_judge BYO metric: score baseline and variant with the judge.
+cost          BYO metric (lower_is_better=True): display_cost_usd delta.
+latency       BYO metric (lower_is_better=True): wall-clock latency delta.
+decision_of   Read the SupportDecision dict from an execution (unified).
 """
 from __future__ import annotations
 
@@ -276,10 +276,10 @@ def latency(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type
 def quality_judge(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type: ignore[name-defined]
     """BYO metric: LLM judge quality score (lower_is_better=False).
 
-    Uses the baseline handle's model to build a judge (deterministic under
-    TestModel).  Scores both decisions on a 1-5 scale.
+    Reads ``baseline.model`` — the model stored on the RunHandle at creation
+    time.  Returns an empty (None) delta when no model is available.
     """
-    model = getattr(baseline, "_model", None)
+    model = getattr(baseline, "model", None)
     if model is None:
         return MetricDelta(name="quality", baseline_value=None, variant_value=None, lower_is_better=False)
 
@@ -301,102 +301,3 @@ def quality_judge(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  
     v_score = _score(variant.decision)
     return MetricDelta(name="quality", baseline_value=b_score, variant_value=v_score, lower_is_better=False)
 
-
-# ---------------------------------------------------------------------------
-# Legacy CohortRow / CohortReport
-# ---------------------------------------------------------------------------
-
-@dataclasses.dataclass
-class CohortRow:
-    """Legacy per-run row for the adapter-level cohort() method.
-
-    Preserved here (not in pipeline.py) to avoid circular imports between
-    support_copilot.py and pipeline.py.
-    """
-
-    base_exec_id: str
-    repro_exec_id: str | None = None
-    exp_exec_id: str | None = None
-    decision_changed: bool | None = None
-    cost_baseline_usd: float = 0.0
-    cost_experiment_usd: float = 0.0
-    latency_baseline_s: float | None = None
-    latency_experiment_s: float | None = None
-    judge_score_baseline: int | None = None
-    judge_score_experiment: int | None = None
-    skipped: bool = False
-    skip_reason: str | None = None
-
-
-@dataclasses.dataclass
-class CohortReport:
-    """Legacy aggregate cohort report.
-
-    ``improvement`` is True when the experiment is simultaneously:
-    - cheaper (mean cost <= baseline mean cost), AND
-    - faster (mean latency <= baseline mean latency), AND
-    - quality-not-worse (mean judge score >= baseline mean judge score
-      within QUALITY_TOLERANCE).
-    """
-
-    QUALITY_TOLERANCE: float = 0.1
-
-    rows: list[CohortRow] = dataclasses.field(default_factory=list)
-    skipped_count: int = 0
-
-    @property
-    def decision_change_count(self) -> int:
-        return sum(1 for r in self.rows if r.decision_changed is True)
-
-    @property
-    def mean_cost_baseline_usd(self) -> float:
-        costs = [r.cost_baseline_usd for r in self.rows if not r.skipped]
-        return sum(costs) / len(costs) if costs else 0.0
-
-    @property
-    def mean_cost_experiment_usd(self) -> float:
-        costs = [r.cost_experiment_usd for r in self.rows if not r.skipped]
-        return sum(costs) / len(costs) if costs else 0.0
-
-    @property
-    def mean_latency_baseline_s(self) -> float:
-        lats = [r.latency_baseline_s for r in self.rows if not r.skipped and r.latency_baseline_s is not None]
-        return sum(lats) / len(lats) if lats else 0.0
-
-    @property
-    def mean_latency_experiment_s(self) -> float:
-        lats = [r.latency_experiment_s for r in self.rows if not r.skipped and r.latency_experiment_s is not None]
-        return sum(lats) / len(lats) if lats else 0.0
-
-    @property
-    def mean_judge_score_baseline(self) -> float | None:
-        scores = [r.judge_score_baseline for r in self.rows if not r.skipped and r.judge_score_baseline is not None]
-        return sum(scores) / len(scores) if scores else None
-
-    @property
-    def mean_judge_score_experiment(self) -> float | None:
-        scores = [r.judge_score_experiment for r in self.rows if not r.skipped and r.judge_score_experiment is not None]
-        return sum(scores) / len(scores) if scores else None
-
-    @property
-    def improvement(self) -> bool:
-        cost_ok = self.mean_cost_experiment_usd <= self.mean_cost_baseline_usd
-        latency_ok = self.mean_latency_experiment_s <= self.mean_latency_baseline_s
-        base_score = self.mean_judge_score_baseline
-        exp_score = self.mean_judge_score_experiment
-        if base_score is None or exp_score is None:
-            quality_ok = True
-        else:
-            quality_ok = exp_score >= (base_score - self.QUALITY_TOLERANCE)
-        return cost_ok and latency_ok and quality_ok
-
-    def __str__(self) -> str:
-        lines = [
-            "CohortReport",
-            f"  rows: {len(self.rows)} | skipped: {self.skipped_count} | changed: {self.decision_change_count}",
-            f"  cost     baseline={self.mean_cost_baseline_usd:.4f} usd  experiment={self.mean_cost_experiment_usd:.4f} usd",
-            f"  latency  baseline={self.mean_latency_baseline_s:.3f}s  experiment={self.mean_latency_experiment_s:.3f}s",
-            f"  quality  baseline={self.mean_judge_score_baseline}  experiment={self.mean_judge_score_experiment}",
-            f"  improvement: {self.improvement}",
-        ]
-        return "\n".join(lines)

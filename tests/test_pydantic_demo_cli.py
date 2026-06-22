@@ -13,7 +13,6 @@ import pathlib
 
 import pytest
 
-# Make the pydantic_replay_fork package importable.
 _EXAMPLES_PATH = str(pathlib.Path(__file__).parent.parent / "examples" / "end_to_end")
 if _EXAMPLES_PATH not in sys.path:
     sys.path.insert(0, _EXAMPLES_PATH)
@@ -24,22 +23,18 @@ pytest.importorskip("pydantic_ai")
 
 @pytest.fixture(scope="module")
 def demo_cli():
-    """Import and return the cli group from demo.py.
-
-    Adds ``examples/end_to_end`` to sys.path so ``pydantic_replay_fork`` is a
-    resolvable package (satisfying the relative imports in pipeline.py / demo.py).
-    """
+    """Import and return the cli group from demo.py."""
     examples_path = str(pathlib.Path(__file__).parent.parent / "examples" / "end_to_end")
     if examples_path not in sys.path:
         sys.path.insert(0, examples_path)
-    from pydantic_replay_fork import demo  # noqa: PLC0415
+    from pydantic_replay_fork import demo
     return demo.cli
 
 
 def test_cli_command_names(demo_cli) -> None:
     """The cli group exposes exactly the five required commands."""
     names = set(demo_cli.commands.keys())
-    assert names == {"run", "reproduce", "experiment", "cohort", "run-all"}, (
+    assert names == {"run", "rerun", "replay", "cohort", "run-all"}, (
         f"Unexpected command set: {sorted(names)}"
     )
 
@@ -47,8 +42,8 @@ def test_cli_command_names(demo_cli) -> None:
 @pytest.mark.parametrize("args", [
     ["--help"],
     ["run", "--help"],
-    ["reproduce", "--help"],
-    ["experiment", "--help"],
+    ["rerun", "--help"],
+    ["replay", "--help"],
     ["cohort", "--help"],
     ["run-all", "--help"],
 ])

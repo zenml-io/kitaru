@@ -1,20 +1,17 @@
 """THE STORY SURFACE — PydanticAI support-copilot with Kitaru durable execution.
 
-Usage (reads top-to-bottom like the promise)
----------------------------------------------
     from support_copilot import KitaruAdapterPA
     from utils import cost, latency, quality_judge
     from cohort import cohort
 
-    agent  = KitaruAdapterPA(model="openai:gpt-5-mini")
-    exec_id = agent.run(prompt, customer)          # production run (durable)
+    agent   = KitaruAdapterPA(model="openai:gpt-5-mini")
+    exec_id = agent.run(prompt, customer)
 
-    rerun   = agent.rerun(exec_id)                 # no edit: cached head, live tail
-    replay  = agent.replay(exec_id,                # WITH edit: reconfigure decide step
-                           at="decide",
-                           model="openai:gpt-5-nano",
-                           prompt_profile="trimmed_permissions")
-    replay.diff(rerun)                             # -> DriftReport
+    rerun  = agent.rerun(exec_id)
+    replay = agent.replay(exec_id, at="decide",
+                          model="openai:gpt-5-nano",
+                          prompt_profile="trimmed_permissions")
+    replay.diff(rerun)
 
     report = cohort(agent.last_executions(10)).experiment(
         agent, variant=replay.recipe,
@@ -22,16 +19,14 @@ Usage (reads top-to-bottom like the promise)
     report.summary()
     report.regressions()
 
-Module structure
-----------------
-- Module-level ``@checkpoint`` steps (``gather_context`` / ``decide`` /
-  ``finalize``) and the ``@flow`` are defined ONCE at import so the module-level
-  source aliases registered by Kitaru/ZenML are never clobbered.
-- The ``ContextVar`` ``_active_agents`` + ``_activate()`` fix the alias-overwrite
-  race (Finding 1): each adapter sets the ContextVar before dispatching the flow,
-  so rerun-after-replay always uses the correct adapter's agents.
-- ``RunHandle`` is the small return value of ``rerun``/``replay``: ``.exec_id``,
-  ``.decision``, ``.recipe``, ``.diff(other) -> DriftReport``.
+Module structure:
+- Module-level @checkpoint steps (gather_context / decide / finalize) and
+  the @flow are registered ONCE at import — never clobbered.
+- ContextVar _active_agents + _activate() fix the alias-overwrite race:
+  each adapter sets the ContextVar before dispatching the flow, so
+  rerun-after-replay always uses the correct adapter's agents.
+- RunHandle is the small return value of rerun/replay: .exec_id, .decision,
+  .model, .recipe, .diff(other) -> DriftReport.
 """
 from __future__ import annotations
 
@@ -135,6 +130,7 @@ class RunHandle:
     Attributes:
         exec_id:  The execution ID of the completed run.
         decision: The SupportDecision dict extracted from the execution.
+        model:    The PydanticAI model used for this run (for judge metrics).
         recipe:   The Recipe that produced this run (identity for rerun;
                   model/prompt_profile/at for replay).
     """
@@ -149,15 +145,10 @@ class RunHandle:
         self.exec_id = exec_id
         self.decision = decision
         self.recipe = recipe
-        # Internal: stored so quality_judge metric can build a judge.
-        self._model = model
+        self.model = model
 
     def diff(self, other: "RunHandle") -> "DriftReport":
-        """Compare this handle's decision against *other*'s decision.
-
-        Returns:
-            A DriftReport (``has_fork_drift``, per-field comparison in ``.fork``).
-        """
+        """Compare this handle's decision against *other*'s decision."""
         from kitaru.adapters.langgraph.replay._drift import DriftReport as _DR
         from kitaru.adapters.langgraph.replay._drift import compare_decisions
         return _DR(reproduction=[], fork=compare_decisions(self.decision, other.decision))
@@ -178,17 +169,15 @@ class KitaruAdapterPA:
     """Durable execution adapter for the three-step PydanticAI support-copilot.
 
     Args:
-        model: A PydanticAI-compatible model (real or ``TestModel`` for tests).
-            The same model is used for all three steps.
-        prompt_profile: System-prompt profile (``"baseline"`` or
-            ``"trimmed_permissions"``).  Drives the ``decide`` step's behaviour.
-        name: Stable name prefix for the step agents.
+        model:          PydanticAI-compatible model (real or TestModel for tests).
+        prompt_profile: System-prompt profile ("baseline" or "trimmed_permissions").
+        name:           Stable name prefix for the step agents.
 
-    Public surface (only):
-        run(prompt, customer) -> str                exec_id
-        rerun(exec_id) -> RunHandle                 no edit: cached head, live tail
-        replay(exec_id, *, at, model, prompt_profile) -> RunHandle   WITH edit
-        last_executions(n) -> list[str]
+    Public surface:
+        run(prompt, customer) -> str           execute and return exec_id
+        rerun(exec_id) -> RunHandle            no edit: cached head, live tail
+        replay(exec_id, ...) -> RunHandle      WITH edit: reconfigure decide + tail
+        last_executions(n) -> list[str]        n most recent baseline exec_ids
     """
 
     def __init__(
@@ -356,140 +345,3 @@ class KitaruAdapterPA:
         originals = [e for e in executions if e.original_exec_id is None]
         return [e.exec_id for e in originals[:n]]
 
-    # -----------------------------------------------------------------------
-    # Legacy verb aliases kept for test-migration compatibility
-    # (removed once all callers are updated to rerun/replay)
-    # -----------------------------------------------------------------------
-
-    def reproduce(self, exec_id: str) -> str:
-        """Legacy alias for rerun(); returns exec_id string."""
-        handle = self.rerun(exec_id)
-        return handle.exec_id
-
-    def experiment(
-        self,
-        exec_id: str,
-        *,
-        model: Any = None,
-        prompt_profile: str | None = None,
-    ) -> str:
-        """Legacy alias for replay(); returns exec_id string."""
-        handle = self.replay(exec_id, model=model, prompt_profile=prompt_profile)
-        return handle.exec_id
-
-    def diff(self, baseline_exec: str, other_exec: str) -> "DriftReport":  # type: ignore[name-defined]
-        """Legacy two-id diff; prefer RunHandle.diff(other)."""
-        from kitaru.adapters.langgraph.replay._drift import DriftReport, compare_decisions
-        base = self.decision_of(baseline_exec)
-        other = self.decision_of(other_exec)
-        return DriftReport(reproduction=[], fork=compare_decisions(base, other))
-
-    def cohort(
-        self,
-        *,
-        model: Any = None,
-        prompt_profile: str | None = None,
-        n: int = 10,
-    ) -> Any:
-        """Legacy cohort() method — returns a pipeline.CohortReport.
-
-        Kept for backward compatibility with existing tests that import from
-        ``pipeline`` and call ``adapter.cohort(...)``.  New code should use
-        ``cohort(agent.last_executions(n)).experiment(agent, variant=..., ...)``
-        from ``cohort.py`` and ``support_copilot.py`` directly.
-        """
-        import logging as _logging
-        from .utils import build_judge as _build_judge, _extract_cost, _extract_latency_s, _decision_from_artifacts
-        from .utils import CohortReport, CohortRow
-        from kitaru.adapters.langgraph.replay._drift import DriftReport as _DR, compare_decisions as _cmp
-
-        judge = _build_judge(self._model)
-        exec_ids = self.last_executions(n)
-        report = CohortReport()
-
-        rows: list[CohortRow] = []
-        for base_id in exec_ids:
-            row = CohortRow(base_exec_id=base_id)
-            try:
-                self.cut_of(base_id)
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = str(exc)
-                rows.append(row)
-                report.skipped_count += 1
-                continue
-
-            try:
-                repro_id = self.reproduce(base_id)
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = f"reproduce failed: {exc}"
-                rows.append(row)
-                report.skipped_count += 1
-                continue
-
-            row.repro_exec_id = repro_id
-            rows.append(row)
-
-        for row in rows:
-            if row.skipped:
-                report.rows.append(row)
-                continue
-
-            base_id = row.base_exec_id
-            repro_id = row.repro_exec_id
-
-            try:
-                exp_id = self.experiment(base_id, model=model, prompt_profile=prompt_profile)
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = f"experiment failed: {exc}"
-                report.rows.append(row)
-                report.skipped_count += 1
-                continue
-
-            row.exp_exec_id = exp_id
-
-            repro_decision = None
-            exp_decision = None
-            try:
-                repro_decision = _decision_from_artifacts(self._client, repro_id)
-                exp_decision = _decision_from_artifacts(self._client, exp_id)
-                drift = _DR(reproduction=[], fork=_cmp(repro_decision, exp_decision))
-                row.decision_changed = drift.has_fork_drift
-            except Exception as exc:
-                _logging.getLogger(__name__).warning("diff failed: %s", exc)
-                row.decision_changed = None
-
-            row.cost_baseline_usd = _extract_cost(self._client, repro_id)
-            row.cost_experiment_usd = _extract_cost(self._client, exp_id)
-            row.latency_baseline_s = _extract_latency_s(self._client, repro_id)
-            row.latency_experiment_s = _extract_latency_s(self._client, exp_id)
-
-            try:
-                if repro_decision is not None:
-                    repro_summary = (
-                        f"policy={repro_decision.get('policy_label')} "
-                        f"risk={repro_decision.get('risk_status')} "
-                        f"action={repro_decision.get('required_action')} "
-                        f"summary={repro_decision.get('summary', '')!r}"
-                    )
-                    row.judge_score_baseline = judge.run_sync(repro_summary).output.score
-            except Exception as exc:
-                _logging.getLogger(__name__).warning("Judge baseline failed: %s", exc)
-
-            try:
-                if exp_decision is not None:
-                    exp_summary = (
-                        f"policy={exp_decision.get('policy_label')} "
-                        f"risk={exp_decision.get('risk_status')} "
-                        f"action={exp_decision.get('required_action')} "
-                        f"summary={exp_decision.get('summary', '')!r}"
-                    )
-                    row.judge_score_experiment = judge.run_sync(exp_summary).output.score
-            except Exception as exc:
-                _logging.getLogger(__name__).warning("Judge experiment failed: %s", exc)
-
-            report.rows.append(row)
-
-        return report

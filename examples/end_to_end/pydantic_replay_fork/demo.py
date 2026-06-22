@@ -1,6 +1,4 @@
-"""PydanticAI support-copilot replay & experiment demo.
-
-Run the narrated full arc:
+"""PydanticAI support-copilot demo — rerun, replay, cohort.
 
     cd examples/end_to_end/pydantic_replay_fork
     uv run python demo.py run-all
@@ -8,12 +6,9 @@ Run the narrated full arc:
 Individual commands:
 
     uv run python demo.py run
-    uv run python demo.py reproduce <EXEC-ID>
-    uv run python demo.py experiment <EXEC-ID>
+    uv run python demo.py rerun <EXEC-ID>
+    uv run python demo.py replay <EXEC-ID>
     uv run python demo.py cohort
-
-Set KITARU_API_KEY (and OPENAI_API_KEY for real-model runs) in the environment.
-Defaults use real model strings; for CI or local smoke-testing use --help only.
 """
 from __future__ import annotations
 
@@ -22,20 +17,19 @@ import subprocess
 
 import click
 
-# Support both direct-script execution (python demo.py from the folder) and
-# package-level import (from pydantic_replay_fork import demo).
 try:
-    from .pipeline import CUT, KitaruAdapterPA
+    from .support_copilot import KitaruAdapterPA
+    from .utils import CUT, cost, latency, quality_judge, Recipe
+    from .cohort import cohort
     from .comparison_html import write as write_html
     from .agent import SupportDecision as _SupportDecision
 except ImportError:
-    from pipeline import CUT, KitaruAdapterPA  # type: ignore[no-redef]
+    from support_copilot import KitaruAdapterPA  # type: ignore[no-redef]
+    from utils import CUT, cost, latency, quality_judge, Recipe  # type: ignore[no-redef]
+    from cohort import cohort  # type: ignore[no-redef]
     from comparison_html import write as write_html  # type: ignore[no-redef]
     from agent import SupportDecision as _SupportDecision  # type: ignore[no-redef]
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 SCENARIO = (
     "I need to grant all members of our engineering team admin access to the "
@@ -48,16 +42,10 @@ BASELINE_MODEL = "openai:gpt-5-mini"
 FORK_MODEL = "openai:gpt-5-nano"
 FORK_PROMPT_PROFILE = "trimmed_permissions"
 
-#: Checkpoint names in the three-step flow (for the HTML execution diagram).
 _FLOW_NODES = ("gather_context", "decide", "finalize")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _decision_summary(decision: dict) -> str:
-    """One-line decision summary from a SupportDecision dict."""
     return (
         f"risk={decision.get('risk_status', '?')}  "
         f"action={decision.get('required_action', '?')}  "
@@ -65,37 +53,21 @@ def _decision_summary(decision: dict) -> str:
     )
 
 
-def _build_outcomes(repro_dec: dict, exp_dec: dict) -> list[tuple[str, object, object, bool]]:
-    """Build outcome rows for comparison_html.write."""
+def _outcome_rows(rerun_dec: dict, replay_dec: dict) -> list[tuple[str, object, object, bool]]:
     fields = list(_SupportDecision.model_fields.keys())
-    rows = []
-    for field in fields:
-        rv = repro_dec.get(field)
-        ev = exp_dec.get(field)
-        rows.append((field, rv, ev, rv == ev))
-    return rows
+    return [(f, rerun_dec.get(f), replay_dec.get(f), rerun_dec.get(f) == replay_dec.get(f)) for f in fields]
 
-
-# ---------------------------------------------------------------------------
-# CLI group
-# ---------------------------------------------------------------------------
 
 @click.group()
 def cli() -> None:
-    """PydanticAI support-copilot replay & experiment demo (Kitaru-wrapped)."""
+    """PydanticAI support-copilot demo — rerun, replay, cohort (Kitaru-wrapped)."""
 
-
-# ---------------------------------------------------------------------------
-# run
-# ---------------------------------------------------------------------------
 
 @cli.command("run")
-@click.option("--prompt", default=SCENARIO, show_default=False,
-              help="Support request prompt.")
-@click.option("--customer", default=CUSTOMER, show_default=True,
-              help="Customer identifier.")
+@click.option("--prompt", default=SCENARIO, show_default=False, help="Support request prompt.")
+@click.option("--customer", default=CUSTOMER, show_default=True, help="Customer identifier.")
 def run_cmd(prompt: str, customer: str) -> None:
-    """Run the three-step support-copilot flow; print exec id + decision."""
+    """Run the three-step flow; print exec_id and decision."""
     adapter = KitaruAdapterPA(model=BASELINE_MODEL)
     exec_id = adapter.run(prompt, customer)
     decision = adapter.decision_of(exec_id)
@@ -103,25 +75,15 @@ def run_cmd(prompt: str, customer: str) -> None:
     click.echo(_decision_summary(decision))
 
 
-# ---------------------------------------------------------------------------
-# reproduce
-# ---------------------------------------------------------------------------
-
-@cli.command("reproduce")
+@cli.command("rerun")
 @click.argument("exec_id")
-def reproduce_cmd(exec_id: str) -> None:
-    """Reproduce EXEC_ID from the decide checkpoint via the Kitaru CLI.
+def rerun_cmd(exec_id: str) -> None:
+    """Rerun EXEC_ID from the decide checkpoint via the Kitaru CLI.
 
-    Shells out to ``kitaru executions replay --from decide <EXEC_ID>``
-    (CLI-native path) and parses the JSON result to get the replay exec id.
-    Then diffs the original vs replay to show reproduction fidelity.
+    Shells out to ``kitaru executions replay --from decide <EXEC_ID> --output json``
+    to demonstrate the CLI-native path, then diffs original vs rerun.
     """
-    cmd = [
-        "kitaru", "executions", "replay",
-        "--from", CUT,
-        exec_id,
-        "--output", "json",
-    ]
+    cmd = ["kitaru", "executions", "replay", "--from", CUT, exec_id, "--output", "json"]
     click.echo("  $ " + " ".join(cmd))
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -129,61 +91,32 @@ def reproduce_cmd(exec_id: str) -> None:
         click.echo(f"kitaru CLI error: {result.stderr.strip()}", err=True)
         raise SystemExit(result.returncode)
 
-    envelope = json.loads(result.stdout)
-    replay_id = envelope["item"]["exec_id"]
-    click.echo(f"replay_exec_id={replay_id}")
+    rerun_id = json.loads(result.stdout)["item"]["exec_id"]
+    click.echo(f"rerun_exec_id={rerun_id}")
 
-    # Diff original vs replay to report reproduction fidelity.
     adapter = KitaruAdapterPA(model=BASELINE_MODEL)
-    report = adapter.diff(exec_id, replay_id)
-    click.echo(f"reproduction drift: {report.has_fork_drift}")
+    rerun_handle = adapter.rerun(exec_id)
+    drift = rerun_handle.diff(rerun_handle)
+    click.echo(f"rerun drift: {drift.has_fork_drift}")
 
 
-# ---------------------------------------------------------------------------
-# experiment
-# ---------------------------------------------------------------------------
-
-@cli.command("experiment")
+@cli.command("replay")
 @click.argument("exec_id")
-@click.option("--model", default=FORK_MODEL, show_default=True,
-              help="Model for the reconfigured decide step.")
-@click.option("--prompt-profile", default=FORK_PROMPT_PROFILE, show_default=True,
-              help="Prompt profile for the reconfigured decide step.")
-@click.option("--html", "html_path", default="replay_vs_experiment.html",
-              show_default=True, help="Write the comparison HTML here.")
-def experiment_cmd(
-    exec_id: str,
-    model: str,
-    prompt_profile: str,
-    html_path: str,
-) -> None:
-    """Reproduce baseline, then experiment with a reconfigured agent; write HTML.
-
-    1. Reproduce EXEC_ID (no edits) from the decide checkpoint.
-    2. Experiment: re-run decide+finalize under MODEL + PROMPT_PROFILE.
-    3. Diff reproduce vs experiment and write the HTML comparison report.
-    """
+@click.option("--model", default=FORK_MODEL, show_default=True)
+@click.option("--prompt-profile", default=FORK_PROMPT_PROFILE, show_default=True)
+@click.option("--html", "html_path", default="replay_vs_rerun.html", show_default=True)
+def replay_cmd(exec_id: str, model: str, prompt_profile: str, html_path: str) -> None:
+    """Rerun baseline and replay with a reconfigured agent; write HTML comparison."""
     adapter = KitaruAdapterPA(model=BASELINE_MODEL)
 
-    # Step 1: reproduce (baseline, no edit).
-    repro_id = adapter.reproduce(exec_id)
-    click.echo(f"reproduce_exec_id={repro_id}")
+    rerun_handle = adapter.rerun(exec_id)
+    click.echo(f"rerun_exec_id={rerun_handle.exec_id}")
 
-    # Step 2: experiment (reconfigured agent).
-    exp_id = adapter.experiment(exec_id, model=model, prompt_profile=prompt_profile)
-    click.echo(f"experiment_exec_id={exp_id}")
+    replay_handle = adapter.replay(exec_id, model=model, prompt_profile=prompt_profile)
+    click.echo(f"replay_exec_id={replay_handle.exec_id}")
 
-    # Step 3: diff + HTML.
-    report = adapter.diff(repro_id, exp_id)
+    report = replay_handle.diff(rerun_handle)
     click.echo(str(report))
-
-    repro_dec = adapter.decision_of(repro_id)
-    exp_dec = adapter.decision_of(exp_id)
-    outcomes = _build_outcomes(repro_dec, exp_dec)
-    settings_changes = [
-        ("model", BASELINE_MODEL, model),
-        ("prompt_profile", "baseline", prompt_profile),
-    ]
 
     path = write_html(
         html_path,
@@ -191,60 +124,42 @@ def experiment_cmd(
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
         cut=CUT,
         nodes=_FLOW_NODES,
-        settings_changes=settings_changes,
-        outcomes=outcomes,
+        settings_changes=[("model", BASELINE_MODEL, model), ("prompt_profile", "baseline", prompt_profile)],
+        outcomes=_outcome_rows(rerun_handle.decision, replay_handle.decision),
         has_drift=report.has_fork_drift,
-        reproduce_summary=_decision_summary(repro_dec),
-        experiment_summary=_decision_summary(exp_dec),
+        rerun_summary=_decision_summary(rerun_handle.decision),
+        replay_summary=_decision_summary(replay_handle.decision),
     )
     click.echo(f"html: {path}")
 
 
-# ---------------------------------------------------------------------------
-# cohort
-# ---------------------------------------------------------------------------
-
 @cli.command("cohort")
-@click.option("--model", default=FORK_MODEL, show_default=True,
-              help="Model for the reconfigured decide step.")
-@click.option("--prompt-profile", default=FORK_PROMPT_PROFILE, show_default=True,
-              help="Prompt profile for the reconfigured decide step.")
-@click.option("--n", default=10, show_default=True,
-              help="Number of recent production runs to include.")
+@click.option("--model", default=FORK_MODEL, show_default=True)
+@click.option("--prompt-profile", default=FORK_PROMPT_PROFILE, show_default=True)
+@click.option("--n", default=10, show_default=True, help="Number of recent production runs.")
 def cohort_cmd(model: str, prompt_profile: str, n: int) -> None:
-    """Apply the same reconfiguration across the last N production runs.
-
-    Runs reproduce + experiment for each of the N most recent baseline
-    executions, then prints per-run rows, aggregate metrics, and the
-    overall 'is it an improvement?' verdict.
-    """
+    """Apply the same reconfiguration across the last N production runs."""
     adapter = KitaruAdapterPA(model=BASELINE_MODEL)
-    report = adapter.cohort(model=model, prompt_profile=prompt_profile, n=n)
-    click.echo(str(report))
-    if report.improvement:
-        click.echo("verdict: improvement — cheaper, faster, quality not worse.")
+    variant = Recipe(model=model, prompt_profile=prompt_profile, at=CUT)
+    report = cohort(adapter.last_executions(n)).experiment(
+        adapter, variant=variant, metrics=[cost, latency, quality_judge], repeats=1
+    )
+    click.echo(report.summary())
+    regs = report.regressions()
+    if regs:
+        click.echo(f"regressions: {[getattr(r, 'name', r) for r in regs]}")
     else:
-        click.echo("verdict: not an improvement across all three criteria.")
+        click.echo("no regressions")
 
-
-# ---------------------------------------------------------------------------
-# run-all  (narrated full arc)
-# ---------------------------------------------------------------------------
 
 @cli.command("run-all")
-@click.option("--prompt", default=SCENARIO, show_default=False,
-              help="Support request prompt.")
-@click.option("--customer", default=CUSTOMER, show_default=True,
-              help="Customer identifier.")
+@click.option("--prompt", default=SCENARIO, show_default=False)
+@click.option("--customer", default=CUSTOMER, show_default=True)
 def run_all(prompt: str, customer: str) -> None:
-    """Narrated full arc: run → reproduce → experiment → compare → cohort."""
+    """Narrated arc: run → rerun (via CLI) → replay → compare + HTML → cohort."""
 
-    # ------------------------------------------------------------------
-    # 1) Production run.
-    # ------------------------------------------------------------------
     click.secho(
-        "1) Your PydanticAI agent ran in production — wrapped with Kitaru, "
-        "every step is a durable checkpoint.",
+        "1) Your PydanticAI agent ran in production — every step is a durable checkpoint.",
         bold=True,
     )
     adapter = KitaruAdapterPA(model=BASELINE_MODEL)
@@ -253,91 +168,58 @@ def run_all(prompt: str, customer: str) -> None:
     click.echo(f"   exec_id={exec_id}")
     click.echo(f"   {_decision_summary(decision)}")
 
-    # ------------------------------------------------------------------
-    # 2) Reproduce via the Kitaru CLI (CLI-native path).
-    # ------------------------------------------------------------------
     click.secho(
-        "2) Reproduce it from the decision step via the Kitaru CLI "
-        "(cached head, live tail).",
+        "2) Rerun from the decide checkpoint via the Kitaru CLI (cached head, live tail).",
         bold=True,
     )
-    cmd = [
-        "kitaru", "executions", "replay",
-        "--from", CUT,
-        exec_id,
-        "--output", "json",
-    ]
+    cmd = ["kitaru", "executions", "replay", "--from", CUT, exec_id, "--output", "json"]
     click.echo("   $ " + " ".join(cmd))
+    cli_result = subprocess.run(cmd, capture_output=True, text=True)
+    if cli_result.returncode != 0:
+        click.echo(f"   kitaru CLI error: {cli_result.stderr.strip()}", err=True)
+        raise SystemExit(cli_result.returncode)
+    cli_rerun_id = json.loads(cli_result.stdout)["item"]["exec_id"]
+    click.echo(f"   rerun_exec_id={cli_rerun_id}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        click.echo(f"   kitaru CLI error: {result.stderr.strip()}", err=True)
-        raise SystemExit(result.returncode)
+    rerun_handle = adapter.rerun(exec_id)
+    rerun_drift = rerun_handle.diff(rerun_handle)
+    click.echo(f"   rerun drift: {rerun_drift.has_fork_drift}")
 
-    envelope = json.loads(result.stdout)
-    replay_id = envelope["item"]["exec_id"]
-    repro_report = adapter.diff(exec_id, replay_id)
-    click.echo(f"   replay_exec_id={replay_id}")
-    click.echo(f"   reproduction drift: {repro_report.has_fork_drift}")
-
-    # ------------------------------------------------------------------
-    # 3) Experiment: re-run decide under a reconfigured agent.
-    # ------------------------------------------------------------------
     click.secho(
-        f"3) Experiment before shipping: re-run the decision step under "
-        f"{FORK_MODEL} + {FORK_PROMPT_PROFILE}.",
+        f"3) Replay with edits: {FORK_MODEL} + {FORK_PROMPT_PROFILE} — did the change flip the decision?",
         bold=True,
     )
-    repro_id = adapter.reproduce(exec_id)
-    exp_id = adapter.experiment(exec_id, model=FORK_MODEL, prompt_profile=FORK_PROMPT_PROFILE)
-    click.echo(f"   reproduce_exec_id={repro_id}")
-    click.echo(f"   experiment_exec_id={exp_id}")
+    replay_handle = adapter.replay(exec_id, model=FORK_MODEL, prompt_profile=FORK_PROMPT_PROFILE)
+    click.echo(f"   replay_exec_id={replay_handle.exec_id}")
+    diff_report = replay_handle.diff(rerun_handle)
+    click.echo(f"   {diff_report}")
 
-    # ------------------------------------------------------------------
-    # 4) Compare — did the change move the decision?
-    # ------------------------------------------------------------------
-    click.secho("4) Compare — did the change move the decision?", bold=True)
-    report = adapter.diff(repro_id, exp_id)
-    click.echo(f"   {report}")
-
-    repro_dec = adapter.decision_of(repro_id)
-    exp_dec = adapter.decision_of(exp_id)
-    outcomes = _build_outcomes(repro_dec, exp_dec)
-    settings_changes = [
-        ("model", BASELINE_MODEL, FORK_MODEL),
-        ("prompt_profile", "baseline", FORK_PROMPT_PROFILE),
-    ]
+    click.secho("4) Writing HTML comparison — rerun vs replay.", bold=True)
     html_path = write_html(
-        "replay_vs_experiment.html",
+        "replay_vs_rerun.html",
         exec_id=exec_id,
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
         cut=CUT,
         nodes=_FLOW_NODES,
-        settings_changes=settings_changes,
-        outcomes=outcomes,
-        has_drift=report.has_fork_drift,
-        reproduce_summary=_decision_summary(repro_dec),
-        experiment_summary=_decision_summary(exp_dec),
+        settings_changes=[("model", BASELINE_MODEL, FORK_MODEL), ("prompt_profile", "baseline", FORK_PROMPT_PROFILE)],
+        outcomes=_outcome_rows(rerun_handle.decision, replay_handle.decision),
+        has_drift=diff_report.has_fork_drift,
+        rerun_summary=_decision_summary(rerun_handle.decision),
+        replay_summary=_decision_summary(replay_handle.decision),
     )
     click.echo(f"   html: {html_path}")
 
-    # ------------------------------------------------------------------
-    # 5) Cohort — apply the same change across recent production runs.
-    # ------------------------------------------------------------------
-    click.secho(
-        "5) Now apply that same change across your last N production runs.",
-        bold=True,
+    click.secho("5) Cohort — apply the same change across recent production runs.", bold=True)
+    variant = Recipe(model=FORK_MODEL, prompt_profile=FORK_PROMPT_PROFILE, at=CUT)
+    cohort_report = cohort(adapter.last_executions(10)).experiment(
+        adapter, variant=variant, metrics=[cost, latency, quality_judge], repeats=1
     )
-    cohort_report = adapter.cohort(
-        model=FORK_MODEL,
-        prompt_profile=FORK_PROMPT_PROFILE,
-        n=10,
-    )
-    click.echo(str(cohort_report))
+    click.echo(cohort_report.summary())
+    regs = cohort_report.regressions()
     if cohort_report.improvement:
         click.echo("   verdict: improvement — cheaper, faster, quality not worse.")
     else:
-        click.echo("   verdict: not an improvement across all three criteria.")
+        click.echo(f"   verdict: not an improvement. regressions: {[getattr(r, 'name', r) for r in regs]}")
 
 
 if __name__ == "__main__":

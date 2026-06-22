@@ -12,7 +12,7 @@ built by a per-step factory that takes ``(model, prompt_profile)``:
   finalize        — assemble the customer-facing answer from the decision.
 
 Each factory returns a plain ``pydantic_ai.Agent``; the ``@checkpoint`` wrappers
-live in ``pipeline.py`` so the step boundaries are explicit in the flow graph.
+live in ``support_copilot.py`` so the step boundaries are explicit in the flow graph.
 
 ``SupportDecision`` and ``SupportDeps`` are defined here and reused by all
 three steps.

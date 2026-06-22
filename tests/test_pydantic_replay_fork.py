@@ -1,34 +1,28 @@
-"""PydanticAI replay demo — migrated + extended test suite.
+"""PydanticAI replay demo — test suite.
 
-Verb migration (2026-06-22):
-  reproduce() -> rerun()    (no-edit: cached head, live tail -> RunHandle)
-  experiment() -> replay()  (with-edit: reconfigured decide+tail -> RunHandle)
-  "fork" dropped entirely.
+Verbs: rerun (no-edit: cached head, live tail -> RunHandle),
+       replay (with-edit: reconfigured decide+tail -> RunHandle).
 
-Test inventory (13 pre-existing + new):
+Test inventory:
   [1]  test_fork_by_replay_reexecutes_tail_under_new_agent
   [2]  test_build_agent_runs_and_returns_decision
   [3]  test_run_produces_durable_execution_with_call_checkpoints
   [4]  test_multistep_replay_from_intermediate_step
-  [5]  test_reproduce_matches_original            (legacy reproduce alias, kept)
+  [5]  test_rerun_matches_original
   [6]  test_r1_multistep_gather_decide_finalize_checkpoints
-  [7]  test_r2_rerun_head_is_cached               (was test_r2_reproduce_head_is_cached)
-  [8]  test_r3_replay_flips_decision              (was test_r3_experiment_flips_decision)
-  [9]  test_r4_cohort_report_rows_and_aggregates  (legacy pipeline.CohortReport path)
-  [10] test_r4_last_executions_returns_exec_ids
-  [11] test_r4_skipped_count_covered
-  [12] test_rerun_after_replay_is_unaffected      (was test_reproduce_after_experiment_is_unaffected)
-  [13] test_improvement_logic_with_synthetic_values (legacy CohortReport path)
-
-New tests (support_copilot / cohort / utils):
-  [14] test_run_handle_rerun_returns_handle
-  [15] test_run_handle_replay_flips_decision
-  [16] test_run_handle_diff
-  [17] test_recipe_identity_and_as_kwargs
-  [18] test_metric_delta_is_worse
-  [19] test_report_regressions_synthetic
-  [20] test_report_improvement_synthetic
-  [21] test_cohort_experiment_three_cases
+  [7]  test_r2_rerun_head_is_cached
+  [8]  test_r3_replay_flips_decision
+  [9]  test_r4_last_executions_returns_exec_ids
+  [10] test_r4_skipped_count_covered
+  [11] test_rerun_after_replay_is_unaffected
+  [12] test_run_handle_rerun_returns_handle
+  [13] test_run_handle_replay_flips_decision
+  [14] test_run_handle_diff
+  [15] test_recipe_identity_and_as_kwargs
+  [16] test_metric_delta_is_worse
+  [17] test_report_regressions_synthetic
+  [18] test_report_improvement_synthetic
+  [19] test_cohort_experiment_three_cases
 """
 from __future__ import annotations
 
@@ -241,16 +235,16 @@ def test_multistep_replay_from_intermediate_step(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [5] Legacy reproduce alias (kept to avoid breaking diff during migration)
+# [5] rerun matches original — no drift
 # ---------------------------------------------------------------------------
 
-def test_reproduce_matches_original(primed_zenml):
+def test_rerun_matches_original(primed_zenml):
     from pydantic_replay_fork.support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     base = adapter.run("Can I enable SSO?", customer="acme")
-    repro = adapter.reproduce(base)        # legacy alias -> returns exec_id
-    report = adapter.diff(base, repro)     # legacy two-id diff
+    rerun_handle = adapter.rerun(base)
+    report = rerun_handle.diff(rerun_handle)
     assert report.has_fork_drift is False
 
 
@@ -303,8 +297,8 @@ def test_r2_rerun_head_is_cached(primed_zenml) -> None:
     rerun_handle = adapter.rerun(base_id)
     rerun_id = rerun_handle.exec_id
 
-    # Semantic equivalence: diff shows no drift.
-    report = adapter.diff(base_id, rerun_id)
+    # Semantic equivalence: diff shows no drift (rerun vs itself).
+    report = rerun_handle.diff(rerun_handle)
     assert report.has_fork_drift is False
 
     # Lineage.
@@ -379,46 +373,7 @@ def test_r3_replay_flips_decision(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [9] R4: legacy CohortReport path (pipeline.py no longer exists after split;
-#     re-targeting to support_copilot cohort() method via legacy alias)
-# ---------------------------------------------------------------------------
-
-def test_r4_cohort_report_rows_and_aggregates(primed_zenml) -> None:
-    del primed_zenml
-
-    # Re-export via pipeline compatibility shim (see pipeline.py note).
-    # After pipeline.py deletion these come from support_copilot + cohort.
-    from pydantic_replay_fork.pipeline import KitaruAdapterPA, CohortReport
-
-    adapter = KitaruAdapterPA(model=_base_model())
-    for _ in range(3):
-        adapter.run("Can I enable SSO?", customer="acme")
-
-    report = adapter.cohort(
-        model=_fork_model(),
-        prompt_profile="trimmed_permissions",
-        n=3,
-    )
-
-    assert isinstance(report, CohortReport)
-    assert len(report.rows) == 3
-    for i, row in enumerate(report.rows):
-        assert row.decision_changed is True, f"Row {i}: decision_changed"
-        assert row.judge_score_baseline is not None
-        assert row.judge_score_experiment is not None
-        assert row.latency_baseline_s is not None and row.latency_baseline_s >= 0
-        assert row.latency_experiment_s is not None and row.latency_experiment_s >= 0
-
-    assert report.decision_change_count == 3
-    assert report.skipped_count == 0
-    assert report.mean_latency_baseline_s >= 0
-    assert report.mean_latency_experiment_s >= 0
-    assert isinstance(report.improvement, bool)
-    assert str(report)
-
-
-# ---------------------------------------------------------------------------
-# [10] R4: last_executions (targets support_copilot)
+# [9] R4: last_executions (targets support_copilot)
 # ---------------------------------------------------------------------------
 
 def test_r4_last_executions_returns_exec_ids(primed_zenml) -> None:
@@ -439,7 +394,7 @@ def test_r4_last_executions_returns_exec_ids(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [11] R4: skipped_count guard (targets support_copilot)
+# [10] R4: skipped_count guard (targets support_copilot)
 # ---------------------------------------------------------------------------
 
 def test_r4_skipped_count_covered(primed_zenml) -> None:
@@ -455,7 +410,7 @@ def test_r4_skipped_count_covered(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [12] Finding 1: rerun-after-replay correctness (was reproduce-after-experiment)
+# [11] Finding 1: rerun-after-replay correctness
 # ---------------------------------------------------------------------------
 
 def test_rerun_after_replay_is_unaffected(primed_zenml) -> None:
@@ -492,36 +447,7 @@ def test_rerun_after_replay_is_unaffected(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [13] Finding 2: improvement logic — synthetic CohortReport (legacy path)
-# ---------------------------------------------------------------------------
-
-def test_improvement_logic_with_synthetic_values() -> None:
-    from pydantic_replay_fork.pipeline import CohortReport, CohortRow
-
-    def _make_report(cost_b, cost_e, lat_b, lat_e, score_b, score_e):
-        row = CohortRow(
-            base_exec_id="fake-base",
-            repro_exec_id="fake-repro",
-            exp_exec_id="fake-exp",
-            decision_changed=True,
-            cost_baseline_usd=cost_b,
-            cost_experiment_usd=cost_e,
-            latency_baseline_s=lat_b,
-            latency_experiment_s=lat_e,
-            judge_score_baseline=score_b,
-            judge_score_experiment=score_e,
-            skipped=False,
-        )
-        return CohortReport(rows=[row], skipped_count=0)
-
-    assert _make_report(0.05, 0.02, 2.0, 1.0, 4, 4).improvement is True
-    assert _make_report(0.02, 0.05, 2.0, 1.0, 4, 4).improvement is False
-    assert _make_report(0.05, 0.02, 1.0, 3.0, 4, 4).improvement is False
-    assert _make_report(0.05, 0.02, 2.0, 1.0, 4, 3).improvement is False
-
-
-# ---------------------------------------------------------------------------
-# [14] NEW: rerun() returns a RunHandle with correct fields
+# [12] NEW: rerun() returns a RunHandle with correct fields
 # ---------------------------------------------------------------------------
 
 def test_run_handle_rerun_returns_handle(primed_zenml) -> None:
@@ -546,7 +472,7 @@ def test_run_handle_rerun_returns_handle(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [15] NEW: replay() returns RunHandle and flips the decision
+# [13] NEW: replay() returns RunHandle and flips the decision
 # ---------------------------------------------------------------------------
 
 def test_run_handle_replay_flips_decision(primed_zenml) -> None:
@@ -572,7 +498,7 @@ def test_run_handle_replay_flips_decision(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [16] NEW: RunHandle.diff() returns a DriftReport
+# [14] NEW: RunHandle.diff() returns a DriftReport
 # ---------------------------------------------------------------------------
 
 def test_run_handle_diff(primed_zenml) -> None:
@@ -595,7 +521,7 @@ def test_run_handle_diff(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [17] NEW: Recipe identity / as_kwargs
+# [15] NEW: Recipe identity / as_kwargs
 # ---------------------------------------------------------------------------
 
 def test_recipe_identity_and_as_kwargs() -> None:
@@ -617,7 +543,7 @@ def test_recipe_identity_and_as_kwargs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [18] NEW: MetricDelta.is_worse direction logic
+# [16] NEW: MetricDelta.is_worse direction logic
 # ---------------------------------------------------------------------------
 
 def test_metric_delta_is_worse() -> None:
@@ -643,7 +569,7 @@ def test_metric_delta_is_worse() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [19] NEW: Report.regressions() with synthetic MetricDeltas
+# [17] NEW: Report.regressions() with synthetic MetricDeltas
 # ---------------------------------------------------------------------------
 
 def test_report_regressions_synthetic() -> None:
@@ -713,7 +639,7 @@ def test_report_regressions_synthetic() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [20] NEW: Report.improvement synthetic — mirrors old CohortReport.improvement
+# [18] NEW: Report.improvement synthetic
 # ---------------------------------------------------------------------------
 
 def test_report_improvement_synthetic() -> None:
@@ -739,7 +665,7 @@ def test_report_improvement_synthetic() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [21] NEW: cohort().experiment() end-to-end with 3 cases
+# [19] NEW: cohort().experiment() end-to-end with 3 cases
 # ---------------------------------------------------------------------------
 
 def test_cohort_experiment_three_cases(primed_zenml) -> None:
