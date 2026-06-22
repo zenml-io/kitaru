@@ -105,3 +105,19 @@ def test_fork_by_replay_reexecutes_tail_under_new_agent(primed_zenml) -> None:
         f"got original_exec_id={fork_exec.original_exec_id!r}. "
         "The fork did not run via the replay path (mechanism A)."
     )
+
+
+def test_build_agent_runs_and_returns_decision():
+    """Task 2: PydanticAI support-copilot agent factory."""
+    from pydantic_ai.models.test import TestModel
+    import importlib, sys, pathlib
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.agent import build_agent, SupportDeps, SupportDecision
+
+    model = TestModel(custom_output_args={
+        "policy_label": "permissions_policy", "risk_status": "needs_review",
+        "required_action": "escalate_to_human", "summary": "s"})
+    agent = build_agent(model, prompt_profile="baseline")
+    out = agent.run_sync("Can I enable SSO?", deps=SupportDeps(customer="acme")).output
+    assert isinstance(out, SupportDecision)
+    assert out.risk_status == "needs_review"
