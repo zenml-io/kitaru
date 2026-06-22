@@ -19,10 +19,25 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
+import kitaru
 from kitaru import checkpoint, flow
 from kitaru._replay_verify_imported_models import RecordedCall
 from kitaru.adapters.langgraph.replay._compiler import CompiledTopology
 from kitaru.adapters.langgraph.replay._edits import Edit, resolve_edits
+
+
+def _json_safe(value: Any) -> Any:
+    """Best-effort conversion to a JSON-friendly value for artifact display."""
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump()
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 @dataclass
@@ -159,8 +174,17 @@ def build_replay_flow(ctx: ReplayContext) -> Any:
             callable_ = ctx.topology.callables[node]
             node_out = callable_(running_state)
 
+        # Surface THIS node's own output as an individual, JSON-clean named
+        # artifact, so the dashboard shows e.g. `decide_action` / `final_response`
+        # as viewable artifacts — not just the opaque accumulated-map blob that
+        # the checkpoint must return for replay. Best-effort: never fail the run.
+        with contextlib.suppress(Exception):
+            if isinstance(node_out, dict) and node_out:
+                kitaru.save(node, _json_safe(node_out), type="output")
+
         # Extend and return the full accumulated results dict so the terminal
-        # step's output IS the complete {node_name: node_output} map.
+        # step's output IS the complete {node_name: node_output} map (load-bearing
+        # for native replay; the individual artifact above is for display).
         return {**accumulated_results, node: node_out}
 
     # --- flow ------------------------------------------------------------------
