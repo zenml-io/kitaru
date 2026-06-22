@@ -1,28 +1,31 @@
 #!/usr/bin/env python
 """Replay & fork a recorded LangGraph→Langfuse trace of the reference agent.
 
-End-to-end demo of `kitaru.adapters.langgraph.replay`:
+Self-contained end-to-end demo of `kitaru.adapters.langgraph.replay`:
 
   1. import a recorded trace (rich Langfuse observation rows) as a Case,
   2. reconstruct it as a native Kitaru execution (the "seed"),
   3. replay the tail live from a cut and compare to the trace  -> reproduction drift,
   4. fork the tail with an edited variant and compare to the replay -> fork drift.
 
-First generate a trace and fetch its observation rows (needs OpenAI + Langfuse):
+The agent it replays is bundled in `./reference_agent` — this example imports
+only `kitaru` and its own bundled package, nothing from sibling examples.
+
+To produce a trace + observation rows (needs OpenAI + Langfuse), use the
+reference-agent example's generator, then fetch one trace's rows:
 
     uv run python examples/end_to_end/replay_verify_reference_agent/generate_traces.py \
         --scenario-set full --variants baseline
     uv run examples/replay_verify_imported_cases/fetch_langfuse_observations.py \
-        --trace-id <TRACE_ID> --output obs.jsonl
+        --trace-id <TRACE_ID> --output examples/end_to_end/replay_fork_demo/obs.jsonl
 
-Then run THIS demo from the repo root (uses your active Kitaru stack, so the
+Then run from this folder (uses your active Kitaru stack, so the
 reconstruct/replay/fork executions show up in your dashboard; the live tail
 re-runs the model, so OPENAI_API_KEY must be set):
 
-    uv run python examples/end_to_end/replay_fork_demo.py obs.jsonl
-
-It is run from `examples/end_to_end/` so the reference agent imports as a normal
-package and Kitaru resolves as the installed library — no PYTHONPATH, no env vars.
+    cd examples/end_to_end/replay_fork_demo
+    set -a && . ./.env && set +a            # if you keep a local .env here
+    uv run python replay_fork_demo.py obs.jsonl
 """
 from __future__ import annotations
 
@@ -30,13 +33,11 @@ import json
 import sys
 from pathlib import Path
 
-from replay_verify_reference_agent import db
-from replay_verify_reference_agent.config import (
-    EXAMPLE_DIR, load_scenarios, load_variant,
-)
-from replay_verify_reference_agent.graph import build_graph
-from replay_verify_reference_agent.mock_api import MockApiServer
-from replay_verify_reference_agent.tools import SupportTools, ToolExecution
+from reference_agent import db
+from reference_agent.config import EXAMPLE_DIR, load_scenarios, load_variant
+from reference_agent.graph import build_graph
+from reference_agent.mock_api import MockApiServer
+from reference_agent.tools import SupportTools, ToolExecution
 
 from kitaru.adapters.langgraph.replay import KitaruReplayAgent, import_trace
 
@@ -96,7 +97,9 @@ def main(obs_path: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    obs = sys.argv[1] if len(sys.argv) == 2 else "obs.jsonl"
+    if not Path(obs).exists():
         print(__doc__)
+        print(f"\nobservation file not found: {obs}")
         raise SystemExit(2)
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(obs))
