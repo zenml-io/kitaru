@@ -51,7 +51,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import kitaru
 from kitaru import flow, KitaruClient
 from kitaru.checkpoint import checkpoint
 
@@ -152,7 +151,7 @@ class KitaruAdapterPA:
             # Ensure all SupportDecision fields are propagated so decision_of
             # can read them from the finalize artifact as a fallback.
             for key in ("policy_label", "risk_status", "required_action", "summary"):
-                if key not in out or not out[key] or out[key] == "unknown":
+                if key not in out or not out[key]:
                     out[key] = decide_out.get(key, "unknown")
             return out
 
