@@ -174,3 +174,16 @@ class KitaruAdapterPA:
             f"Could not extract a SupportDecision from execution {exec_id!r} "
             f"(no cached result, and no decision found in the CUT checkpoint artifact)."
         )
+
+    def reproduce(self, exec_id: str) -> str:
+        """Re-run from the CUT checkpoint without edits; return the replay exec_id."""
+        handle = self._flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
+        handle.wait()
+        return handle.exec_id
+
+    def diff(self, baseline_exec: str, other_exec: str):
+        """Return a DriftReport comparing the two executions' SupportDecision dicts."""
+        from kitaru.adapters.langgraph.replay._drift import DriftReport, compare_decisions
+        base = self.decision_of(baseline_exec)
+        other = self.decision_of(other_exec)
+        return DriftReport(reproduction=[], fork=compare_decisions(base, other))

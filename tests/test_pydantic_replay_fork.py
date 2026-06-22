@@ -152,3 +152,19 @@ def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
         "Check that pipeline.py uses a bare @flow with no outer @checkpoint."
     )
     assert adapter.decision_of(exec_id)["risk_status"] == "needs_review"
+
+
+def test_reproduce_matches_original(primed_zenml):
+    """Task 4: reproduce() re-runs from CUT; diff() reports no fork drift."""
+    from pydantic_ai.models.test import TestModel
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA
+
+    model = TestModel(custom_output_args={"policy_label": "permissions_policy",
+        "risk_status": "needs_review", "required_action": "escalate_to_human", "summary": "s"})
+    adapter = KitaruAdapterPA(model=model)
+    base = adapter.run("Can I enable SSO?", customer="acme")
+    repro = adapter.reproduce(base)
+    report = adapter.diff(base, repro)
+    assert report.has_fork_drift is False   # repro vs base: no change
