@@ -195,10 +195,8 @@ def test_stream_returns_result_from_final_values_and_extracts_usage() -> None:
     runner = KitaruGraphRunner(_count_graph(), name="counter")
 
     result = runner.stream(
-        LangGraphRunRequest.start(
-            {"count": 1, "usage": {"total_tokens": 7}},
-            thread_id="stream-values-thread",
-        ),
+        {"count": 1, "usage": {"total_tokens": 7}},
+        thread_id="stream-values-thread",
         stream_mode="updates",
     )
 
@@ -210,10 +208,8 @@ def test_stream_runs_graph_without_langgraph_checkpointer() -> None:
     runner = KitaruGraphRunner(_count_graph(with_checkpointer=False), name="counter")
 
     result = runner.stream(
-        LangGraphRunRequest.start(
-            {"count": 1},
-            thread_id="stream-no-checkpointer-thread",
-        ),
+        {"count": 1},
+        thread_id="stream-no-checkpointer-thread",
         stream_mode="updates",
     )
 
@@ -954,7 +950,8 @@ async def test_astream_matches_sync_stream_behavior() -> None:
     runner = KitaruGraphRunner(graph)
 
     result = await runner.astream(
-        LangGraphRunRequest.start({"prompt": "hi"}, thread_id="async-thread"),
+        {"prompt": "hi"},
+        thread_id="async-thread",
         stream_mode="updates",
     )
 
@@ -963,25 +960,23 @@ async def test_astream_matches_sync_stream_behavior() -> None:
     assert graph.calls[0][2]["stream_mode"] == ["updates", "values"]
 
 
-def test_stream_rejects_calls_strategy_before_graph_execution() -> None:
+def test_stream_rejects_calls_strategy_before_raw_thread_validation() -> None:
     graph = FakeStreamGraph()
     runner = KitaruGraphRunner(graph, checkpoint_strategy="calls")
 
     with pytest.raises(KitaruUsageError, match="graph_call"):
-        runner.stream(LangGraphRunRequest.start({"prompt": "hi"}, thread_id="thread-1"))
+        runner.stream(cast(Any, {"prompt": "hi"}))
 
     assert graph.calls == []
 
 
 @pytest.mark.anyio
-async def test_astream_rejects_calls_strategy_before_graph_execution() -> None:
+async def test_astream_rejects_calls_strategy_before_raw_thread_validation() -> None:
     graph = FakeStreamGraph()
     runner = KitaruGraphRunner(graph, checkpoint_strategy="calls")
 
     with pytest.raises(KitaruUsageError, match="graph_call"):
-        await runner.astream(
-            LangGraphRunRequest.start({"prompt": "hi"}, thread_id="thread-1")
-        )
+        await runner.astream(cast(Any, {"prompt": "hi"}))
 
     assert graph.calls == []
 

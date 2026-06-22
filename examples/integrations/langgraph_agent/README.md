@@ -116,6 +116,15 @@ Inside that flow, it calls `runner.invoke(...)` twice:
 1. **start call** → graph returns `interrupted`
 2. **resume call** → graph returns `completed`
 
+The fresh start passes raw graph input plus a stable `thread_id`. The resume call stays request-based because LangGraph needs a resume command:
+
+```python
+started = GRAPH_CALL_RUNNER.invoke({"ticket": ticket}, thread_id=THREAD_ID)
+resumed = GRAPH_CALL_RUNNER.invoke(
+    build_resume_request(started, {"approved": True})
+)
+```
+
 The graph has two nodes:
 
 - **`request_decision`** pauses with `interrupt(...)` and asks:
@@ -137,6 +146,12 @@ This is the safe universal mode. Kitaru treats the whole graph call as the repla
 ## Streaming demo: live LangGraph progress, durable result
 
 The streaming demo runs a local `StateGraph` through `runner.stream(...)` inside a Kitaru flow. It does not call an LLM and does not need `OPENAI_API_KEY`.
+
+The stream call uses the same fresh-run shortcut as `invoke(...)`:
+
+```python
+return runner.stream({"ticket": ticket}, thread_id=THREAD_ID)
+```
 
 The story is intentionally small:
 

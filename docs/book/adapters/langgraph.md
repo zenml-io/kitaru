@@ -141,11 +141,7 @@ This pattern has no LLM and no interactive wait prompt. It just shows the defaul
 ```python
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.adapters.langgraph import (
-    KitaruGraphRunner,
-    LangGraphRunRequest,
-    build_resume_request,
-)
+from kitaru.adapters.langgraph import KitaruGraphRunner, build_resume_request
 
 runner = KitaruGraphRunner(graph, name="review_graph")
 
@@ -156,12 +152,7 @@ def persist_summary(summary: dict) -> dict:
 
 @flow
 def review(ticket: str) -> None:
-    first = runner.invoke(
-        LangGraphRunRequest.start(
-            {"ticket": ticket},
-            thread_id=ticket,
-        )
-    )
+    first = runner.invoke({"ticket": ticket}, thread_id=ticket)
 
     if first.status == "interrupted":
         second = runner.invoke(
@@ -190,18 +181,13 @@ Use `runner.stream(...)` or `runner.astream(...)` when you want to watch LangGra
 
 ```python
 from kitaru import flow
-from kitaru.adapters.langgraph import KitaruGraphRunner, LangGraphRunRequest
+from kitaru.adapters.langgraph import KitaruGraphRunner
 
 runner = KitaruGraphRunner(graph, name="review_graph")
 
 @flow
 def review(ticket: str):
-    return runner.stream(
-        LangGraphRunRequest.start(
-            {"ticket": ticket},
-            thread_id=ticket,
-        )
-    )
+    return runner.stream({"ticket": ticket}, thread_id=ticket)
 
 handle = review.run("ticket-42", cache=False)
 ```
@@ -239,6 +225,7 @@ Calls mode needs a graph or agent built with Kitaru's LangChain middleware:
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 
+from kitaru import flow
 from kitaru.adapters.langgraph import KitaruGraphRunner
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
 
@@ -254,6 +241,13 @@ runner = KitaruGraphRunner(
     name="ticket_agent",
     checkpoint_strategy="calls",
 )
+
+@flow
+def handle_ticket(ticket: str):
+    return runner.invoke(
+        {"messages": [{"role": "user", "content": f"Handle {ticket}"}]},
+        thread_id=ticket,
+    )
 ```
 
 In this setup:
@@ -396,9 +390,7 @@ The resume helper creates a LangGraph `Command(resume=...)` for you:
 ```python
 from kitaru.adapters.langgraph import build_resume_request
 
-first = runner.invoke(
-    LangGraphRunRequest.start({"ticket": "ticket-42"}, thread_id="ticket-42")
-)
+first = runner.invoke({"ticket": "ticket-42"}, thread_id="ticket-42")
 
 if first.status == "interrupted":
     resume_request = build_resume_request(first, {"approved": True})
@@ -420,6 +412,8 @@ if first.status == "interrupted":
 ```
 
 `wait_for_interrupt(...)` must be called from the flow body, not from inside a checkpoint. That is the same Kitaru rule as regular waits: a flow can pause safely, but a checkpoint body should either complete or fail.
+
+Use raw input plus `thread_id=...` for ordinary fresh runs. Use `LangGraphRunRequest` when you are resuming, using `build_resume_request(...)` or `wait_for_interrupt(...)`, serializing a request explicitly, or passing advanced fields as a prebuilt request object.
 
 If you pass `metadata=...`, the adapter attaches it in two places: under `user_metadata` on the Kitaru wait record, and as `metadata` on the `LangGraphRunRequest` returned for the resume call. The wait record also gets adapter metadata such as `interrupt_index`, `task_id`, and `node_name` so you can trace which LangGraph interrupt produced the pause without user metadata overwriting those adapter keys.
 

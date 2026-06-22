@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from importlib import metadata
-from typing import Any, cast
+from typing import Any, Literal, cast, overload
 
 from kitaru._llm_usage import (
     add_optional_token_count,
@@ -67,6 +67,61 @@ def langgraph_version() -> str:
         return metadata.version("langgraph")
     except metadata.PackageNotFoundError:
         return "unknown"
+
+
+class _UnsetType:
+    """Private sentinel for omitted convenience-start keyword arguments."""
+
+
+_UNSET = _UnsetType()
+_FRESH_START_KWARG_NAMES = (
+    "thread_id",
+    "checkpoint_id",
+    "checkpoint_ns",
+    "context",
+    "configurable",
+    "config",
+    "durability",
+    "metadata",
+)
+_LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX = "kitaru.adapters.langgraph._types"
+
+
+def _is_aliased_run_request(value: Any) -> bool:
+    value_type = type(value)
+    if value_type.__name__ != "LangGraphRunRequest":
+        return False
+    if value_type.__qualname__ != "LangGraphRunRequest":
+        return False
+    module_path = value_type.__module__.removeprefix("src.")
+    if module_path != _LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX:
+        return False
+    model_fields = getattr(value_type, "model_fields", None)
+    return isinstance(model_fields, Mapping) and set(model_fields) == set(
+        LangGraphRunRequest.model_fields
+    )
+
+
+def _canonicalize_run_request(value: Any) -> LangGraphRunRequest | None:
+    """Return aliased LangGraph run requests with local class identity.
+
+    ZenML can materialize the same source file through both ``kitaru...`` and
+    ``src.kitaru...`` module names. When that happens, the request has the same
+    Pydantic fields but a different class object, so an exact ``isinstance``
+    check misses it.
+    """
+    if isinstance(value, LangGraphRunRequest):
+        return value
+    if not _is_aliased_run_request(value):
+        return None
+
+    model_dump = getattr(value, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    payload = model_dump(mode="python", exclude_unset=True)
+    if not isinstance(payload, Mapping):
+        return None
+    return LangGraphRunRequest.model_validate(payload)
 
 
 class KitaruGraphRunner:
@@ -164,8 +219,49 @@ class KitaruGraphRunner:
     def call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
         return self._call_checkpoint_policy
 
-    def invoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
+    @overload
+    def invoke(self, request: LangGraphRunRequest) -> LangGraphRunResult: ...
+
+    @overload
+    def invoke(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LangGraphRunResult: ...
+
+    def invoke(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+    ) -> LangGraphRunResult:
         """Invoke the wrapped graph synchronously."""
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="invoke")
 
         config = self._prepared_config(request)
@@ -189,8 +285,49 @@ class KitaruGraphRunner:
         self._track_result("invoke", result, request=request, config=config)
         return result
 
-    async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
+    @overload
+    async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult: ...
+
+    @overload
+    async def ainvoke(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LangGraphRunResult: ...
+
+    async def ainvoke(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+    ) -> LangGraphRunResult:
         """Invoke the wrapped graph asynchronously when the graph supports it."""
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="ainvoke")
 
         config = self._prepared_config(request)
@@ -214,15 +351,60 @@ class KitaruGraphRunner:
         self._track_result("ainvoke", result, request=request, config=config)
         return result
 
+    @overload
     def stream(
         self,
         request: LangGraphRunRequest,
         *,
         stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
         subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    @overload
+    def stream(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    def stream(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph synchronously and forward best-effort live stream events."""
         self._require_streaming_graph_call()
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="stream")
         options = resolve_stream_options(
             stream_mode,
@@ -255,15 +437,60 @@ class KitaruGraphRunner:
         self._track_result("stream", result, request=request, config=config)
         return result
 
+    @overload
     async def astream(
         self,
         request: LangGraphRunRequest,
         *,
         stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
         subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    @overload
+    async def astream(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    async def astream(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph asynchronously and forward best-effort live stream events."""
         self._require_streaming_graph_call()
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="astream")
         options = resolve_stream_options(
             stream_mode,
@@ -297,6 +524,61 @@ class KitaruGraphRunner:
         result = canonicalize_result_model(result, LangGraphRunResult)
         self._track_result("astream", result, request=request, config=config)
         return result
+
+    def _coerce_run_request(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType,
+        checkpoint_id: str | None | _UnsetType,
+        checkpoint_ns: str | None | _UnsetType,
+        context: Any | None | _UnsetType,
+        configurable: dict[str, Any] | None | _UnsetType,
+        config: dict[str, Any] | None | _UnsetType,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType,
+        metadata: dict[str, Any] | None | _UnsetType,
+    ) -> LangGraphRunRequest:
+        supplied = {
+            "thread_id": thread_id,
+            "checkpoint_id": checkpoint_id,
+            "checkpoint_ns": checkpoint_ns,
+            "context": context,
+            "configurable": configurable,
+            "config": config,
+            "durability": durability,
+            "metadata": metadata,
+        }
+        prebuilt_request = _canonicalize_run_request(request)
+        if prebuilt_request is not None:
+            explicit_names = [
+                name
+                for name in _FRESH_START_KWARG_NAMES
+                if supplied[name] is not _UNSET
+            ]
+            if explicit_names:
+                arguments = ", ".join(f"`{name}`" for name in explicit_names)
+                raise KitaruUsageError(
+                    "Fresh-run keyword arguments cannot be combined with a "
+                    f"prebuilt LangGraphRunRequest: {arguments}. Put those "
+                    "values on `LangGraphRunRequest.start(...)` or pass raw "
+                    "graph input with `thread_id=...`."
+                )
+            return prebuilt_request
+
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise KitaruUsageError(
+                "Raw LangGraph runner input requires a stable non-empty "
+                "`thread_id`. Use `runner.invoke(input, thread_id=...)` for "
+                "fresh runs, or pass a prebuilt `LangGraphRunRequest` for "
+                "advanced and resume flows."
+            )
+
+        start_kwargs: dict[str, Any] = {"thread_id": thread_id}
+        for name in _FRESH_START_KWARG_NAMES:
+            if name == "thread_id" or supplied[name] is _UNSET:
+                continue
+            start_kwargs[name] = supplied[name]
+        return LangGraphRunRequest.start(request, **start_kwargs)
 
     def _invoke_graph_sync(
         self, request: LangGraphRunRequest, *, config: dict[str, Any]

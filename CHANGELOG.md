@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added a LangGraph runner convenience API so fresh `invoke`, `ainvoke`, `stream`, and `astream` calls can pass raw graph input with `thread_id=...` instead of manually building `LangGraphRunRequest.start(...)`, while keeping request objects as the resume and advanced path.
+
+### Security
+- Bumped audited dependency locks for current security advisories.
+
 ## [0.17.0] - 2026-06-19
 
 ### Added

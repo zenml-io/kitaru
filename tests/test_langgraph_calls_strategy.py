@@ -15,7 +15,6 @@ from kitaru.adapters.langgraph import (
     KitaruGraphRunner,
     LangGraphCallCheckpointPolicy,
     LangGraphCapturePolicy,
-    LangGraphRunRequest,
     SandboxCommandToolArgs,
     create_sandbox_command_tool,
 )
@@ -173,7 +172,7 @@ def test_runner_calls_mode_uses_middleware_without_outer_graph_checkpoint(
     monkeypatch.setattr(middleware_module, "is_inside_checkpoint", lambda: False)
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    result = runner.invoke(LangGraphRunRequest.start({"x": 1}, thread_id="thread-1"))
+    result = runner.invoke({"x": 1}, thread_id="thread-1")
 
     all_step_names = [
         *runner_checkpoints,
@@ -353,10 +352,8 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     )
 
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {"messages": [{"role": "user", "content": "use the tool"}]},
-            thread_id="real-langchain-thread",
-        )
+        {"messages": [{"role": "user", "content": "use the tool"}]},
+        thread_id="real-langchain-thread",
     )
 
     all_step_names = [
@@ -524,10 +521,8 @@ def test_sandbox_command_tool_uses_calls_mode_true_tool_checkpoint(
     )
 
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {"messages": [{"role": "user", "content": "run the sandbox command"}]},
-            thread_id="sandbox-thread",
-        )
+        {"messages": [{"role": "user", "content": "run the sandbox command"}]},
+        thread_id="sandbox-thread",
     )
 
     all_step_names = [
@@ -747,14 +742,12 @@ def test_calls_mode_run_summary_omits_message_free_text(monkeypatch) -> None:
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
     runner.invoke(
-        LangGraphRunRequest.start(
-            {
-                "messages": [{"role": "user", "content": "user secret sk-run-summary"}],
-                "system_message": {"content": "system secret run summary"},
-                "ticket_id": "TICKET-1",
-            },
-            thread_id="thread-1",
-        )
+        {
+            "messages": [{"role": "user", "content": "user secret sk-run-summary"}],
+            "system_message": {"content": "system secret run summary"},
+            "ticket_id": "TICKET-1",
+        },
+        thread_id="thread-1",
     )
 
     constants = importlib.import_module("kitaru.adapters.langgraph._constants")
@@ -802,7 +795,7 @@ def test_calls_mode_run_summary_handles_cyclic_payloads(monkeypatch) -> None:
     monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_summary_checkpoint)
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    runner.invoke(LangGraphRunRequest.start(payload, thread_id="thread-cycle"))
+    runner.invoke(payload, thread_id="thread-cycle")
 
     constants = importlib.import_module("kitaru.adapters.langgraph._constants")
     summaries = cast(
@@ -1201,9 +1194,7 @@ def test_calls_mode_can_disable_run_artifact_persistence(monkeypatch) -> None:
             persist_run_artifacts=False,
         ),
     )
-    result = runner.invoke(
-        LangGraphRunRequest.start({"input": "value"}, thread_id="thread-1")
-    )
+    result = runner.invoke({"input": "value"}, thread_id="thread-1")
 
     assert result.status == "completed"
     assert result.event_log_artifact_name is None
@@ -1234,9 +1225,7 @@ def test_calls_mode_summary_checkpoint_failure_falls_back_to_logged_metadata(
     )
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    result = runner.invoke(
-        LangGraphRunRequest.start({"input": "value"}, thread_id="thread-1")
-    )
+    result = runner.invoke({"input": "value"}, thread_id="thread-1")
 
     assert result.status == "completed"
     events = _logged_events(logged)

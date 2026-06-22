@@ -27,7 +27,6 @@ from kitaru.adapters.langgraph import (
     DEFAULT_SANDBOX_COMMAND_TOOL_NAME,
     KitaruGraphRunner,
     LangGraphCallCheckpointPolicy,
-    LangGraphRunRequest,
     build_resume_request,
     create_sandbox_command_tool,
 )
@@ -386,9 +385,7 @@ def run_demo_flow(strategy: Strategy, ticket: str) -> None:
 
 def _run_graph_call_demo(ticket: str) -> dict[str, Any]:
     """Run the coarse graph-call checkpoint demo."""
-    started = GRAPH_CALL_RUNNER.invoke(
-        LangGraphRunRequest.start({"ticket": ticket}, thread_id=THREAD_ID)
-    )
+    started = GRAPH_CALL_RUNNER.invoke({"ticket": ticket}, thread_id=THREAD_ID)
     if started.status != "interrupted":
         raise RuntimeError(f"Expected interrupted status, got: {started.status}")
 
@@ -439,21 +436,19 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
         checkpoint_strategy="calls",
     )
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Please handle support ticket {ticket}. Look up the "
-                            "ticket first, approve it if escalation is needed, and "
-                            "then give me the status, approval result, and next step."
-                        ),
-                    }
-                ]
-            },
-            thread_id=THREAD_ID,
-        )
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Please handle support ticket {ticket}. Look up the "
+                        "ticket first, approve it if escalation is needed, and "
+                        "then give me the status, approval result, and next step."
+                    ),
+                }
+            ]
+        },
+        thread_id=THREAD_ID,
     )
     if result.status != "completed":
         raise RuntimeError(f"Expected completed status, got: {result.status}")
@@ -495,20 +490,18 @@ def _run_sandbox_demo() -> dict[str, Any]:
         ),
     )
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Use {SANDBOX_COMMAND_TOOL_NAME} to run this exact "
-                            f"command: {SANDBOX_DEMO_COMMAND}"
-                        ),
-                    }
-                ]
-            },
-            thread_id=THREAD_ID,
-        )
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Use {SANDBOX_COMMAND_TOOL_NAME} to run this exact "
+                        f"command: {SANDBOX_DEMO_COMMAND}"
+                    ),
+                }
+            ]
+        },
+        thread_id=THREAD_ID,
     )
     if result.status != "completed":
         raise RuntimeError(f"Expected completed status, got: {result.status}")
