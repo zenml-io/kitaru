@@ -6,6 +6,14 @@ docs/superpowers/plans/2026-06-22-pydantic-replay-fork-demo.md).
 Findings from the /tmp/pa_spike.py run:
 - CUT selector pattern: ``{agent_name}_model_request``
 - Mechanism A (fork-by-replay with a different agent) works.
+
+Multi-step spike findings (2026-06-22,
+docs/superpowers/notes/2026-06-22-pydantic-multistep-spike.md):
+- Chosen structure: two explicit @checkpoint functions in one @flow (b2).
+- CUT selector: ``"decide_step"`` (name of the second, terminal checkpoint).
+- Replay from CUT: ``fork_flow.replay(exec_id, from_="decide_step", cache=False)``.
+- Override first invocation of CUT's upstream: ``overrides={"checkpoint.gather_step": value}``.
+- Global config change: build fork flow with a different agent closure.
 """
 
 from __future__ import annotations
@@ -20,6 +28,7 @@ from pydantic_ai.models.test import TestModel
 
 from kitaru import flow, KitaruClient
 from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru.checkpoint import checkpoint
 
 
 class _Decision(BaseModel):
@@ -152,6 +161,120 @@ def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
         "Check that pipeline.py uses a bare @flow with no outer @checkpoint."
     )
     assert adapter.decision_of(exec_id)["risk_status"] == "needs_review"
+
+
+def test_multistep_replay_from_intermediate_step(primed_zenml) -> None:
+    """Multi-step spike: two @checkpoint functions chained in one @flow.
+
+    Spike verdict (docs/superpowers/notes/2026-06-22-pydantic-multistep-spike.md):
+    - Structure (b2): two sequential @checkpoint calls in @flow; each wraps a raw Agent.
+    - CUT selector: ``"decide_step"`` (name of the second, terminal checkpoint).
+    - Replay from CUT: gather_step served from cache; decide_step re-runs.
+    - Override upstream step output: ``overrides={"checkpoint.gather_step": value}``
+      injects a new dict into decide_step's input, composing with the global config change.
+
+    NON-VACUOUS assertion: the locking assertion is ``received_triage == "critical"``
+    (injected value reached decide) AND ``verdict == "reject"`` (fork agent drove it).
+    If the override were silently dropped, decide would see ``triage='medium'`` from
+    cache and the assertion would fail.  If the fork agent were not used, verdict would
+    be ``'approved'`` and the assertion would fail.
+    """
+    del primed_zenml  # fixture used for ZenML store init side-effect
+
+    # ---- helpers ----
+
+    class _GatherOut(BaseModel):
+        triage: str = "unknown"
+
+    class _DecideOut(BaseModel):
+        verdict: str = "pending"
+        received_triage: str = "unset"
+
+    def _build_flow(triage_val: str, verdict_val: str):
+        """Build the two-@checkpoint flow with inline agent closures."""
+        _gather_agent = Agent(
+            TestModel(custom_output_args={"triage": triage_val}),
+            name="ms_gather_agent",
+            output_type=_GatherOut,
+        )
+        _decide_agent = Agent(
+            TestModel(custom_output_args={"verdict": verdict_val, "received_triage": "n/a"}),
+            name="ms_decide_agent",
+            output_type=_DecideOut,
+        )
+
+        @checkpoint
+        def gather_step(prompt: str) -> dict:  # type: ignore[return]
+            return _gather_agent.run_sync(prompt).output.model_dump()
+
+        @checkpoint
+        def decide_step(triage_result: dict) -> dict:  # type: ignore[return]
+            out = _decide_agent.run_sync(f"triage={triage_result['triage']}").output.model_dump()
+            out["received_triage"] = triage_result["triage"]
+            return out
+
+        @flow(cache=False)
+        def ms_flow(prompt: str) -> dict:  # type: ignore[return]
+            gathered = gather_step(prompt)
+            decided = decide_step(gathered)
+            return decided
+
+        return ms_flow
+
+    # ---- baseline run ----
+    base_flow = _build_flow("medium", "approved")
+    base_handle = base_flow.run("analyze ticket")
+    base_exec_id = base_handle.exec_id
+    base_result = base_handle.wait()
+
+    # Flow returns decide_step's output; gather_step's triage is recorded in received_triage.
+    assert base_result == {"verdict": "approved", "received_triage": "medium"}, (
+        f"Unexpected baseline result: {base_result!r}"
+    )
+
+    client = KitaruClient()
+    base_run = client.executions.get(base_exec_id)
+    cp_names = [c.name for c in base_run.checkpoints]
+
+    assert cp_names == ["gather_step", "decide_step"], (
+        f"Expected ['gather_step', 'decide_step']; got: {cp_names!r}. "
+        "The two @checkpoint functions must produce a chained DAG."
+    )
+
+    CUT = "decide_step"
+
+    # ---- fork: replay from CUT + inject override on gather + different agent ----
+    # fork_flow uses a different agent: verdict="reject" (global config change)
+    fork_flow = _build_flow("low", "reject")  # triage="low" never runs; "reject" is the fork model
+
+    fork_handle = fork_flow.replay(
+        base_exec_id,
+        from_=CUT,
+        cache=False,
+        overrides={"checkpoint.gather_step": {"triage": "critical"}},  # inject new gather output
+    )
+    fork_exec_id = fork_handle.exec_id
+    fork_result = fork_handle.wait()
+
+    # gather was served from cache (skipped); decide re-ran under the fork agent
+    # with the injected triage="critical" value.
+    assert fork_result["received_triage"] == "critical", (
+        f"Override not applied: decide_step should have received triage='critical', "
+        f"got received_triage={fork_result.get('received_triage')!r}. "
+        f"Full result: {fork_result!r}"
+    )
+    assert fork_result["verdict"] == "reject", (
+        f"Fork agent not used: expected verdict='reject', got {fork_result.get('verdict')!r}. "
+        f"Full result: {fork_result!r}"
+    )
+
+    # ---- lineage assertion (locks test to the replay path) ----
+    fork_exec = client.executions.get(fork_exec_id)
+    assert fork_exec.original_exec_id == base_exec_id, (
+        f"Replay lineage broken: expected original_exec_id={base_exec_id!r}, "
+        f"got original_exec_id={fork_exec.original_exec_id!r}. "
+        "The fork did not run via the replay path."
+    )
 
 
 def test_reproduce_matches_original(primed_zenml):
