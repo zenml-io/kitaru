@@ -48,3 +48,10 @@ class DriftReport:
     @property
     def has_fork_drift(self) -> bool:
         return any(not c.matches for c in self.fork)
+
+    def __str__(self) -> str:
+        changed = [
+            f"{c.field}: {c.baseline_value!r} -> {c.comparison_value!r}"
+            for c in self.fork if not c.matches
+        ]
+        return "fork drift — " + "; ".join(changed) if changed else "no fork drift"

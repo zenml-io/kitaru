@@ -1,0 +1,124 @@
+"""High-level surface over the LangGraph replay machinery.
+
+Keeps the call site as small as the PRD sketch:
+
+    from kitaru.adapters.langgraph.replay import KitaruAdapter, import_langgraph_trace
+
+    agent  = KitaruAdapter(graph, cut="decide")        # wrap your graph
+    case   = import_langgraph_trace("langfuse:<id>")   # a recorded run you can fork
+    replay = agent.replay(case)                        # cached head, live tail
+    fork   = agent.fork(case, model="gpt-5-nano").run()# branch + edit, run forward
+    fork.diff(replay)                                  # compare -> drift report
+
+``cut`` is a node-level fork point (call-level cuts/edits are not built yet).
+Agents whose state is JSON-native need no ``rehydrate``; agents with typed
+(pydantic) state pass a hook that returns ``(root_state, node_outputs)``.
+"""
+from __future__ import annotations
+
+import json
+import time
+from typing import Any, Callable
+
+from kitaru.adapters.langgraph.replay._agent import KitaruReplayAgent
+from kitaru.adapters.langgraph.replay._drift import DriftReport
+from kitaru.adapters.langgraph.replay._importer import import_trace
+
+RehydrateHook = Callable[[Any], "tuple[dict | None, dict | None]"]
+
+
+def import_langgraph_trace(ref: str | None = None, *, rows: Any = None) -> Any:
+    """Import a recorded LangGraph run as a forkable Case.
+
+    Pass ``"langfuse:<trace_id>"`` to fetch the rich observation rows live, or
+    ``rows=`` if you already have them.
+    """
+    if rows is not None:
+        return import_trace(list(rows))
+    if isinstance(ref, str) and ref.startswith("langfuse:"):
+        return import_trace(_fetch_langfuse_rows(ref.split(":", 1)[1]))
+    raise ValueError("Pass rows=… or a 'langfuse:<trace_id>' reference.")
+
+
+def _fetch_langfuse_rows(trace_id: str, *, timeout: float = 120.0) -> list[dict]:
+    """Poll Langfuse until the trace is fully ingested (count stops growing)."""
+    from langfuse import Langfuse
+
+    client = Langfuse()
+    deadline = time.monotonic() + timeout
+    rows: list[dict] = []
+    last = -1
+    while time.monotonic() < deadline:
+        resp = client.api.observations.get_many(
+            trace_id=trace_id, limit=100,
+            fields="core,basic,io,metadata,model,usage",
+        )
+        rows = [json.loads(obs.model_dump_json()) for obs in resp.data]
+        if rows and len(rows) == last:
+            return rows  # stable across two polls -> ingestion done
+        last = len(rows)
+        time.sleep(3)
+    if not rows:
+        raise SystemExit(f"No rows for trace {trace_id} after {timeout:.0f}s.")
+    return rows
+
+
+class _RunResult:
+    """One replay/fork execution; ``.diff(other)`` compares against another run."""
+
+    def __init__(self, adapter: "KitaruAdapter", case: Any, result: Any) -> None:
+        self._adapter = adapter
+        self._case = case
+        self.result = result
+
+    def diff(self, other: "_RunResult") -> DriftReport:
+        # self is the fork, `other` is the unchanged replay (PRD: fork.diff(replay)).
+        return self._adapter._agent.diff(self._case, other.result, self.result)
+
+
+class _Fork:
+    """A pending fork; call ``.run()`` to execute it."""
+
+    def __init__(self, adapter: "KitaruAdapter", case: Any, *, at: str | None,
+                 variant: dict[str, Any]) -> None:
+        self._adapter = adapter
+        self._case = case
+        self._at = at
+        self._variant = variant
+
+    def run(self) -> _RunResult:
+        seed = self._adapter._seed(self._case)
+        cut = self._at or self._adapter._cut
+        result = self._adapter._agent.fork(seed, from_=cut, variant=self._variant or None)
+        return _RunResult(self._adapter, self._case, result)
+
+
+class KitaruAdapter:
+    """Wrap a compiled LangGraph graph; replay and fork recorded runs of it."""
+
+    def __init__(self, graph: Any, *, cut: str, fanout_node: str | None = None,
+                 rehydrate: RehydrateHook | None = None) -> None:
+        self._agent = KitaruReplayAgent(graph, fanout_node=fanout_node)
+        self._cut = cut
+        self._rehydrate = rehydrate
+        self._seeds: dict[int, str] = {}
+
+    def _seed(self, case: Any) -> str:
+        key = id(case)
+        if key not in self._seeds:
+            root_state, node_outputs = (
+                self._rehydrate(case) if self._rehydrate else (None, None)
+            )
+            self._seeds[key] = self._agent.reconstruct(
+                case, root_state=root_state, node_outputs=node_outputs
+            )
+        return self._seeds[key]
+
+    def replay(self, case: Any, *, at: str | None = None) -> _RunResult:
+        """Reproduce the run: cached before the cut, live after — no edits."""
+        result = self._agent.replay(self._seed(case), from_=at or self._cut)
+        return _RunResult(self, case, result)
+
+    def fork(self, case: Any, *, at: str | None = None, **edits: Any) -> _Fork:
+        """Branch at the cut and change global config (e.g. ``model=…``)."""
+        return _Fork(self, case, at=at, variant={k: v for k, v in edits.items() if v is not None})
