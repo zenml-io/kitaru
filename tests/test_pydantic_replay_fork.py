@@ -78,7 +78,9 @@ def test_fork_by_replay_reexecutes_tail_under_new_agent(primed_zenml) -> None:
 
     # --- fork-by-replay (mechanism A) ---
     fork_flow = _make_flow("forktest_agent", "safe")
-    fork_result = fork_flow.replay(base_exec_id, from_=cut, cache=False).wait()
+    fork_handle = fork_flow.replay(base_exec_id, from_=cut, cache=False)
+    fork_exec_id = fork_handle.exec_id
+    fork_result = fork_handle.wait()
 
     # The fork re-ran the model-call checkpoint under the fork agent.
     # The result from wait() is the ModelResponse stored by the calls-strategy
@@ -91,4 +93,15 @@ def test_fork_by_replay_reexecutes_tail_under_new_agent(primed_zenml) -> None:
     )
     assert "needs_review" not in result_text, (
         f"Fork result still shows baseline 'needs_review'. Got: {fork_result!r}"
+    )
+
+    # --- lineage assertion (locks test to the replay path) ---
+    # A fork-by-replay execution must record the source execution in original_exec_id.
+    # This assertion is NON-VACUOUS: if the mechanism degraded to a fresh run (no
+    # replay lineage), original_exec_id would be None and this assertion would fail.
+    fork_exec = client.executions.get(fork_exec_id)
+    assert fork_exec.original_exec_id == base_exec_id, (
+        f"Replay lineage broken: expected original_exec_id={base_exec_id!r}, "
+        f"got original_exec_id={fork_exec.original_exec_id!r}. "
+        "The fork did not run via the replay path (mechanism A)."
     )

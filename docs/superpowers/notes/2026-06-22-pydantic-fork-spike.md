@@ -96,3 +96,30 @@ return value.
 3. **Agent name collision across test runs:** stable names like `"forktest_agent"` should
    use `uuid` suffixes in production to avoid cross-test ZenML source-alias collisions.
    The locking test uses a stable name intentionally (to prove the selector pattern).
+
+---
+
+## Lineage assertion (2026-06-22 follow-up)
+
+**Lineage field:** `Execution.original_exec_id` (`src/kitaru/_client/_models.py:493`)
+
+After the fork-by-replay completes, the replay `Execution` object has `original_exec_id`
+set to the base execution's ID. This links a replay to its source at the metadata level
+and is set unconditionally by the ZenML pipeline-run mapper
+(`src/kitaru/_client/_mappers.py:617-640`).
+
+**The locking test now asserts:**
+```python
+fork_exec = client.executions.get(fork_exec_id)
+assert fork_exec.original_exec_id == base_exec_id
+```
+
+This assertion is NON-VACUOUS: if the fork degraded to a fresh run (no replay lineage),
+`original_exec_id` would be `None` and the test would fail.
+
+**RED evidence:** With `== "bogus-id"`, pytest reported:
+```
+FAILED — AssertionError: Replay lineage broken: expected original_exec_id='42f8843b-...', got original_exec_id='42f8843b-...'.
+assert '42f8843b-3ea4-49d2-bfd3-bcafc8662ad9' == 'bogus-id'
+```
+The assertion correctly failed; restored to `== base_exec_id` → GREEN (1 passed, 10.66s).
