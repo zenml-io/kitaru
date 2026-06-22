@@ -298,3 +298,6 @@ docs/reviews/
 plans/
 replay-verify-reports-live/
 replay-verify-reports/
+
+# generated demo artifacts
+examples/end_to_end/pydantic_replay_fork/*.html
