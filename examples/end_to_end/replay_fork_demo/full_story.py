@@ -44,11 +44,32 @@ from reference_agent.tools import SupportTools, ToolExecution
 
 from kitaru.adapters.langgraph.replay import KitaruReplayAgent, import_trace
 
+import comparison_html
+
 # A permission-sensitive scenario: the kind where a cheaper/looser fork is most
 # likely to drift in a way that matters.
 SCENARIO_ID = "enterprise_permission_request"
 VARIANT_NAME = "baseline"
 FORK_VARIANT = {"model": "gpt-5-nano", "prompt_profile": "trimmed_permissions"}
+# The reference agent's fixed node order; the fork point is decide_action.
+NODES = ["receive_request", "collect_evidence_with_tools", "summarize_evidence",
+         "decide_action", "final_response"]
+CUT = "decide_action"
+
+
+def _decision_of(result) -> dict:
+    """Pull the decision dict out of a replay/fork result's node-output map."""
+    outputs = getattr(result, "node_outputs", {}) or {}
+    for node in ("decide_action", "final_response"):
+        block = outputs.get(node) or {}
+        if not isinstance(block, dict):
+            continue
+        dec = block.get("decision")
+        if dec is None and isinstance(block.get("final_output"), dict):
+            dec = block["final_output"].get("decision")
+        if dec is not None:
+            return dec.model_dump() if hasattr(dec, "model_dump") else dict(dec)
+    return {}
 
 
 def _generate_trace(scenario, variant) -> str:
@@ -193,8 +214,8 @@ def main(obs_file: str | None) -> int:
             root_state={"scenario": scenario, "variant": variant},
             node_outputs=_typed_node_outputs(case) or None,
         )
-        replay = agent.replay(seed, from_="decide_action")
-        fork = agent.fork(seed, from_="decide_action", variant=FORK_VARIANT)
+        replay = agent.replay(seed, from_=CUT)
+        fork = agent.fork(seed, from_=CUT, variant=FORK_VARIANT)
         report = agent.diff(case, replay, fork)
 
     # 4) COMPARE ------------------------------------------------------------ #
@@ -203,6 +224,25 @@ def main(obs_file: str | None) -> int:
     print(f"        fork          (fork  vs replay): drift={report.has_fork_drift}")
     changes = [(c.field, c.baseline_value, c.comparison_value) for c in report.fork if not c.matches]
     print(f"        fork changes : {changes or 'none'}")
+
+    # HTML comparison report — the PRD "compare original vs fork" view.
+    out_path = comparison_html.write(
+        "replay_vs_fork.html",
+        case_id=case.case_id,
+        scenario=cfg["scenario_id"],
+        cut=CUT,
+        nodes=NODES,
+        settings_changes=[
+            (k, getattr(variant, k, None), v)
+            for k, v in FORK_VARIANT.items()
+            if getattr(variant, k, None) != v
+        ],
+        outcomes=[(c.field, c.baseline_value, c.comparison_value, c.matches) for c in report.fork],
+        has_fork_drift=report.has_fork_drift,
+        replay_summary=_decision_of(replay).get("summary", ""),
+        fork_summary=_decision_of(fork).get("summary", ""),
+    )
+    print(f"        html report   : {out_path}")
     return 0
 
 
