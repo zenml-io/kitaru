@@ -136,14 +136,18 @@ package includes `/kitaru:kitaru-langgraph-migration` for choosing between the o
 
 ## Minimal `graph_call` flow pattern
 
-This pattern has no LLM and no interactive wait prompt. It just shows the default adapter shape.
+This is the normal happy path: call the graph through the runner, give LangGraph a stable `thread_id`, and use the completed result. It is intentionally close to LangGraph's own `graph.invoke(input)` shape.
 
 ```python
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.adapters.langgraph import KitaruGraphRunner, build_resume_request
+from kitaru.adapters.langgraph import KitaruGraphRunner
 
-runner = KitaruGraphRunner(graph, name="review_graph")
+runner = KitaruGraphRunner(
+    graph,
+    name="review_graph",
+    checkpoint_strategy="graph_call",  # default; shown here for clarity
+)
 
 @checkpoint
 def persist_summary(summary: dict) -> dict:
@@ -151,29 +155,27 @@ def persist_summary(summary: dict) -> dict:
     return summary
 
 @flow
-def review(ticket: str) -> None:
-    first = runner.invoke({"ticket": ticket}, thread_id=ticket)
+def review(ticket: str) -> dict:
+    result = runner.invoke({"ticket": ticket}, thread_id=ticket)
 
-    if first.status == "interrupted":
-        second = runner.invoke(
-            build_resume_request(first, {"approved": True})
-        )
-        _ = persist_summary(
-            {
-                "thread_id": second.thread_id,
-                "first_status": first.status,
-                "second_status": second.status,
-                "latest_checkpoint_id": second.latest_checkpoint_id,
-                "output": second.output,
-            }
-        )
+    return persist_summary(
+        {
+            "thread_id": result.thread_id,
+            "status": result.status,
+            "latest_checkpoint_id": result.latest_checkpoint_id,
+            "output": result.output,
+        }
+    )
 ```
 
-There are three important details in this small example:
+There are four important details in this small example:
 
-1. `thread_id=ticket` gives LangGraph a stable conversation key.
-2. `runner.invoke(...)` is called from flow scope, so Kitaru can create graph-call checkpoints.
-3. `kitaru.save(...)` happens inside a normal `@checkpoint`, so the summary becomes a Kitaru artifact.
+1. `checkpoint_strategy="graph_call"` asks Kitaru for one outer checkpoint around the graph invocation. You can omit it because this is the default.
+2. `runner.invoke({"ticket": ticket}, thread_id=ticket)` is the fresh-run convenience form. You do not need to build a `LangGraphRunRequest` for ordinary starts.
+3. `runner.invoke(...)` is called from flow scope, so Kitaru can create the graph-call checkpoint.
+4. `kitaru.save(...)` happens inside a normal `@checkpoint`, so the summary becomes a Kitaru artifact.
+
+If the graph uses LangGraph interrupts, `result.status` may be `"interrupted"`. Keep that branch out of the minimal example; use the [Interrupt and resume](#interrupt-and-resume) pattern below when you need to resume a paused graph.
 
 ## Graph-call streaming
 
