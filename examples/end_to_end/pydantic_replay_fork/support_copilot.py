@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from kitaru import KitaruClient, flow
+from kitaru import ImageSettings, KitaruClient, flow
 from kitaru.checkpoint import checkpoint
 
 from agent import build_decide_agent, build_finalize_agent, build_gather_agent
@@ -80,7 +80,16 @@ def finalize(decide_out: dict, model: str, prompt_profile: str) -> dict:
     return out
 
 
-@flow(cache=False)
+# On a containerized stack (e.g. Kubernetes) the steps run in the image, so it
+# needs pydantic-ai installed and OPENAI_API_KEY in the pod. The latter comes from
+# the `openai-creds` secret (see the README); locally it comes from your env.
+@flow(
+    cache=False,
+    image=ImageSettings(
+        requirements=["pydantic-ai"],
+        secret_environment_from=["openai-creds"],
+    ),
+)
 def support_copilot_flow(prompt: str, customer: str, model: str, prompt_profile: str) -> dict:
     """gather_context -> decide -> finalize, each running under (model, prompt_profile)."""
     gathered = gather_context(prompt, customer, model, prompt_profile)

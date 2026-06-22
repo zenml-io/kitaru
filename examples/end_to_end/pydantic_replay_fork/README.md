@@ -60,6 +60,31 @@ Individual commands:
 | `uv run python demo.py replay <EXEC-ID>` | re-run `decide` under `gpt-5-nano` + looser prompt; write `replay_vs_rerun.html` |
 | `uv run python demo.py cohort` | apply the change to the last N runs; print metric deltas + regressions |
 
+## Running on a remote stack (Kubernetes)
+
+The same demo runs unchanged on a containerized stack — the flow declares its image
+needs (`@flow(image=ImageSettings(...))` in `support_copilot.py`): it installs
+`pydantic-ai` into the image and pulls `OPENAI_API_KEY` into the pod from a Kitaru
+secret named `openai-creds`.
+
+Create that secret once (the key must be named `OPENAI_API_KEY` so pydantic-ai picks
+it up automatically):
+
+```bash
+kitaru secrets set openai-creds --private --OPENAI_API_KEY=sk-...
+```
+
+Then point at your stack and run as usual:
+
+```bash
+kitaru stack use <your-k8s-stack>
+uv run python demo.py run-all
+```
+
+> **Troubleshooting:** if you hit `ApiClient.call_api() got an unexpected keyword
+> argument 'response_type'` when submitting to Kubernetes, your local `kubernetes`
+> client is too new for the stack's connector — pin it: `uv pip install "kubernetes<26"`.
+
 ## The same operations from the CLI
 
 `demo.py` is the SDK story. Both rerun and replay are also first-class Kitaru CLI commands — the SDK
