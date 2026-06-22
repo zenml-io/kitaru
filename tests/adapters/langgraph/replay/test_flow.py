@@ -7,7 +7,13 @@ These tests verify:
 
 from __future__ import annotations
 
+import importlib
+
 from kitaru._replay_verify_imported_models import RecordedCall
+from kitaru._source_aliases import (
+    build_checkpoint_source_alias,
+    build_pipeline_source_alias,
+)
 from kitaru.adapters.langgraph.replay._compiler import CompiledTopology
 from kitaru.adapters.langgraph.replay._flow import ReplayContext, run_seed
 
@@ -25,6 +31,58 @@ def _topology(live_calls: list[str]) -> CompiledTopology:
         callables={n: make(n) for n in nodes},
         fanout_node="collect_evidence_with_tools",
     )
+
+
+def _ctx(live_calls: list[str], *, playback: bool) -> ReplayContext:
+    return ReplayContext(
+        topology=_topology(live_calls),
+        recorded_by_node={
+            "collect_evidence_with_tools": [
+                RecordedCall(
+                    kind="tool",
+                    name="lookup_customer",
+                    node="collect_evidence_with_tools",
+                    call_index=0,
+                    output_payload={"found": True},
+                ),
+            ],
+        },
+        node_output_by_node={
+            "receive_request": {"receive_request": "recorded"},
+            "collect_evidence_with_tools": {
+                "collect_evidence_with_tools": "recorded"
+            },
+            "decide_action": {"decide_action": "recorded"},
+        },
+        playback=playback,
+        variant=None,
+        edits=[],
+    )
+
+
+def test_generated_replay_flow_registers_importable_source_aliases() -> None:
+    live_calls: list[str] = []
+    ctx = _ctx(live_calls, playback=True)
+    from kitaru.adapters.langgraph.replay._flow import build_replay_flow
+
+    flow_def = build_replay_flow(ctx)
+    pipeline_alias = build_pipeline_source_alias("replay_flow")
+    checkpoint_alias = build_checkpoint_source_alias("node_step")
+    importable_modules = []
+
+    for module_name in (
+        "kitaru.adapters.langgraph.replay._flow",
+        "src.kitaru.adapters.langgraph.replay._flow",
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        importable_modules.append(module_name)
+        assert getattr(module, pipeline_alias) is flow_def._pipeline
+        assert getattr(module, checkpoint_alias) is not None
+
+    assert importable_modules
 
 
 def test_seed_run_serves_recorded_and_makes_no_live_calls(primed_zenml) -> None:
@@ -79,3 +137,87 @@ def test_live_run_executes_tail_nodes(primed_zenml) -> None:
     handle = flow_def.run(False)
     handle.wait()
     assert "decide_action" in live_calls  # tail executed live
+
+
+def test_generated_replay_flow_refreshes_source_aliases_before_run(
+    primed_zenml,
+) -> None:
+    first_live_calls: list[str] = []
+    second_live_calls: list[str] = []
+    from kitaru.adapters.langgraph.replay._flow import build_replay_flow
+
+    first_flow = build_replay_flow(_ctx(first_live_calls, playback=True))
+    second_flow = build_replay_flow(_ctx(second_live_calls, playback=True))
+    pipeline_alias = build_pipeline_source_alias("replay_flow")
+    modules = [
+        importlib.import_module(name)
+        for name in (
+            "kitaru.adapters.langgraph.replay._flow",
+            "src.kitaru.adapters.langgraph.replay._flow",
+        )
+    ]
+
+    assert all(
+        getattr(module, pipeline_alias) is second_flow._pipeline for module in modules
+    )
+
+    handle = first_flow.run(True)
+    handle.wait()
+
+    assert all(
+        getattr(module, pipeline_alias) is first_flow._pipeline for module in modules
+    )
+
+
+def test_seeded_mirror_flow_replays_tail_without_dynamic_source_error(
+    primed_zenml,
+) -> None:
+    live_calls: list[str] = []
+    ctx = _ctx(live_calls, playback=True)
+    from kitaru.adapters.langgraph.replay._flow import build_replay_flow
+
+    flow_def = build_replay_flow(ctx)
+    seed_handle = flow_def.run(True)
+    seed_handle.wait()
+    assert live_calls == []
+
+    replay_handle = flow_def.replay(
+        seed_handle.exec_id,
+        from_="collect_evidence_with_tools",
+        cache=False,
+        playback=False,
+    )
+    result = replay_handle.wait()
+
+    assert "receive_request" not in live_calls
+    assert live_calls == ["collect_evidence_with_tools", "decide_action"]
+    assert result["receive_request"] == {"receive_request": "recorded"}
+    assert result["decide_action"] == {"decide_action": "live"}
+
+
+def test_rebuilt_mirror_flow_replays_seed_execution_without_dynamic_source_error(
+    primed_zenml,
+) -> None:
+    seed_live_calls: list[str] = []
+    seed_ctx = _ctx(seed_live_calls, playback=True)
+    from kitaru.adapters.langgraph.replay._flow import build_replay_flow
+
+    seed_flow = build_replay_flow(seed_ctx)
+    seed_handle = seed_flow.run(True)
+    seed_handle.wait()
+    assert seed_live_calls == []
+
+    fork_live_calls: list[str] = []
+    fork_ctx = _ctx(fork_live_calls, playback=False)
+    fork_flow = build_replay_flow(fork_ctx)
+    fork_handle = fork_flow.replay(
+        seed_handle.exec_id,
+        from_="collect_evidence_with_tools",
+        cache=False,
+        playback=False,
+    )
+    result = fork_handle.wait()
+
+    assert fork_live_calls == ["collect_evidence_with_tools", "decide_action"]
+    assert result["receive_request"] == {"receive_request": "recorded"}
+    assert result["decide_action"] == {"decide_action": "live"}

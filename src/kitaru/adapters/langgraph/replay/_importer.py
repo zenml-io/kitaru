@@ -48,6 +48,23 @@ def _own_node(row: Mapping[str, Any]) -> str | None:
     return node if isinstance(node, str) and node else None
 
 
+def _row_trace_id(row: Mapping[str, Any]) -> str | None:
+    return _first_str(row, "traceId", "trace_id")
+
+
+def trace_ids_in_rows(rows: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Return unique Langfuse trace ids in first-seen order."""
+    trace_ids: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        trace_id = _row_trace_id(row)
+        if trace_id is None or trace_id in seen:
+            continue
+        seen.add(trace_id)
+        trace_ids.append(trace_id)
+    return trace_ids
+
+
 def build_node_map(rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
     """Map each observation id to its enclosing LangGraph node, via the trace tree.
 

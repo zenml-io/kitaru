@@ -16,12 +16,19 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import importlib
+import sys
 from dataclasses import dataclass, field
+from functools import wraps
 from typing import Any
 
 import kitaru
 from kitaru import checkpoint, flow
 from kitaru._replay_verify_imported_models import RecordedCall
+from kitaru._source_aliases import (
+    build_checkpoint_source_alias,
+    build_pipeline_source_alias,
+)
 from kitaru.adapters.langgraph.replay._compiler import CompiledTopology
 from kitaru.adapters.langgraph.replay._edits import Edit, resolve_edits
 
@@ -40,6 +47,83 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _module_import_names() -> set[str]:
+    """Return module names ZenML may use for this replay adapter."""
+    names = {__name__}
+    if __name__.startswith("src."):
+        names.add(__name__.removeprefix("src."))
+    else:
+        names.add(f"src.{__name__}")
+    return names
+
+
+def _import_module_for_alias(module_name: str) -> Any:
+    """Import a module the same ways ZenML may import dynamic sources."""
+    module = sys.modules.get(module_name)
+    if module is not None:
+        return module
+
+    with contextlib.suppress(ModuleNotFoundError):
+        return importlib.import_module(module_name)
+
+    with contextlib.suppress(Exception):
+        from zenml.utils.source_utils import get_source_root, prepend_python_path
+
+        with prepend_python_path(get_source_root()):
+            return importlib.import_module(module_name)
+
+    return None
+
+
+def _register_generated_source_aliases(*, node_step: Any, replay_flow: Any) -> None:
+    """Expose generated replay objects under Kitaru source-alias names.
+
+    ``node_step`` and ``replay_flow`` are created inside ``build_replay_flow`` so
+    they close over the trace-specific ``ReplayContext``.  ZenML later reloads
+    dynamic pipelines by importing this module and looking up the Kitaru source
+    alias.  Without these module attributes, replay/fork runs cannot find the
+    generated objects that were built in the current process.
+    """
+    step_obj = getattr(node_step, "_step", None)
+    pipeline_obj = getattr(replay_flow, "_pipeline", None)
+    if step_obj is None or pipeline_obj is None:
+        return
+
+    aliases = {
+        build_checkpoint_source_alias("node_step"): step_obj,
+        build_pipeline_source_alias("replay_flow"): pipeline_obj,
+    }
+    for module_name in _module_import_names():
+        module = _import_module_for_alias(module_name)
+        if module is None:
+            continue
+        for alias, obj in aliases.items():
+            setattr(module, alias, obj)
+
+
+def _wrap_alias_registration_around_execution(
+    *,
+    node_step: Any,
+    replay_flow: Any,
+) -> None:
+    """Refresh source aliases before this generated flow runs or replays."""
+    original_run = replay_flow.run
+    original_replay = replay_flow.replay
+
+    @wraps(original_run)
+    def run_with_aliases(*args: Any, **kwargs: Any) -> Any:
+        _register_generated_source_aliases(node_step=node_step, replay_flow=replay_flow)
+        return original_run(*args, **kwargs)
+
+    @wraps(original_replay)
+    def replay_with_aliases(*args: Any, **kwargs: Any) -> Any:
+        _register_generated_source_aliases(node_step=node_step, replay_flow=replay_flow)
+        return original_replay(*args, **kwargs)
+
+    replay_flow.run = run_with_aliases
+    replay_flow.replay = replay_with_aliases
+
+
 @dataclass
 class ReplayContext:
     """All context needed to build or run a mirror replay flow."""
@@ -47,7 +131,9 @@ class ReplayContext:
     topology: CompiledTopology
     recorded_by_node: dict[str, list[RecordedCall]]
     node_output_by_node: dict[str, Any]
-    playback: bool  # Not the runtime switch; the actual switch is the playback flow input threaded to node_step.
+    # Not the runtime switch; the actual switch is the playback flow input
+    # threaded to node_step.
+    playback: bool
     variant: dict[str, Any] | None = None
     edits: list[Edit] = field(default_factory=list)
     root_state: dict[str, Any] = field(default_factory=dict)
@@ -223,6 +309,11 @@ def build_replay_flow(ctx: ReplayContext) -> Any:
         # the flow can return a plain serialisable dict (not a StepFuture).
         return prev_handle.load()
 
+    _register_generated_source_aliases(node_step=node_step, replay_flow=replay_flow)
+    _wrap_alias_registration_around_execution(
+        node_step=node_step,
+        replay_flow=replay_flow,
+    )
     return replay_flow
 
 
