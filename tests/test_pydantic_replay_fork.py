@@ -121,3 +121,21 @@ def test_build_agent_runs_and_returns_decision():
     out = agent.run_sync("Can I enable SSO?", deps=SupportDeps(customer="acme")).output
     assert isinstance(out, SupportDecision)
     assert out.risk_status == "needs_review"
+
+
+def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
+    """Task 3: KitaruAdapterPA wraps the agent as a durable Kitaru execution."""
+    from pydantic_ai.models.test import TestModel
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA
+    from kitaru import KitaruClient
+
+    model = TestModel(custom_output_args={
+        "policy_label": "permissions_policy", "risk_status": "needs_review",
+        "required_action": "escalate_to_human", "summary": "s"})
+    adapter = KitaruAdapterPA(model=model)
+    exec_id = adapter.run("Can I enable SSO?", customer="acme")
+    run = KitaruClient().executions.get(exec_id)
+    assert run.checkpoints                      # per-call checkpoints exist
+    assert adapter.decision_of(exec_id)["risk_status"] == "needs_review"
