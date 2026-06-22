@@ -1,35 +1,108 @@
-"""Replay & fork a recorded LangGraph run — the whole thing, at a glance.
+"""Replay & fork a recorded LangGraph run — pick a step, or run the whole arc.
 
     set -a && . ./.env && set +a
-    uv run python demo.py langfuse:<trace_id>     # fetch a live trace, or
-    uv run python demo.py obs.jsonl               # use a saved one
 
-`glue` is the only domain-specific part (build the graph + rehydrate typed
-state); a JSON-native agent wouldn't need it.
+    uv run python demo.py run-all                    # generate → import → replay → fork → compare
+    uv run python demo.py create-trace               # run the agent → Langfuse, print a trace id
+    uv run python demo.py import-trace langfuse:<id> # import a trace (or: import-trace obs.jsonl)
+    uv run python demo.py replay obs.jsonl           # reproduce: cached head, live tail
+    uv run python demo.py fork obs.jsonl             # fork it, compare to the replay, write HTML
+
+`utils` is the only domain-specific part (build the graph, rehydrate typed
+state, generate a trace). A JSON-native agent wouldn't need it.
 """
 import json
-import sys
+
+import click
 
 from kitaru.adapters.langgraph.replay import KitaruAdapter, import_langgraph_trace
 
-import glue
+import utils
 
-# wrap your existing LangGraph agent
-agent = KitaruAdapter(glue.graph(), cut=glue.CUT, rehydrate=glue.rehydrate)
+FORK_EDITS = {"model": "gpt-5-nano", "prompt_profile": "trimmed_permissions"}
 
-# a case is a recorded run you can fork
-ref = sys.argv[1] if len(sys.argv) > 1 else "obs.jsonl"
-case = (
-    import_langgraph_trace(ref)
-    if ref.startswith("langfuse:")
-    else import_langgraph_trace(rows=[json.loads(l) for l in open(ref) if l.strip()])
-)
 
-# REPLAY — reproduce from the cut: cached before, live after
-replay = agent.replay(case)
+def _agent() -> KitaruAdapter:
+    return KitaruAdapter(utils.graph(), cut=utils.CUT, rehydrate=utils.rehydrate)
 
-# FORK — branch at the cut, change the model (+ a looser prompt), run forward
-fork = agent.fork(case, model="gpt-5-nano", prompt_profile="trimmed_permissions").run()
 
-# COMPARE — fork vs replay
-print(fork.diff(replay))
+def _load(ref: str):
+    if ref.startswith("langfuse:"):
+        return import_langgraph_trace(ref)
+    return import_langgraph_trace(rows=[json.loads(l) for l in open(ref) if l.strip()])
+
+
+@click.group()
+def cli() -> None:
+    """Replay & fork demo for the bundled LangGraph reference agent."""
+
+
+@cli.command("create-trace")
+@click.option("--scenario", default=utils.SCENARIO, show_default=True)
+@click.option("--variant", default=utils.VARIANT, show_default=True)
+def create_trace(scenario: str, variant: str) -> None:
+    """Run the agent once and trace it to Langfuse; print the trace id."""
+    trace_id = utils.generate_trace(scenario, variant)
+    click.echo(f"trace_id={trace_id}")
+    click.echo(f"next:  python demo.py import-trace langfuse:{trace_id}")
+
+
+@cli.command("import-trace")
+@click.argument("ref")
+def import_trace_cmd(ref: str) -> None:
+    """Import a recorded run as a Case.  REF = langfuse:<id> or a rows .jsonl."""
+    case = _load(ref)
+    d = case.observed_output.get("decision", {})
+    click.echo(f"{case.case_id}: {len(case.recorded_calls)} recorded calls; "
+               f"observed risk_status={d.get('risk_status')} "
+               f"required_action={d.get('required_action')}")
+
+
+@cli.command()
+@click.argument("ref")
+def replay(ref: str) -> None:
+    """Reproduce the run from the cut (cached head, live tail)."""
+    report = _agent().replay(_load(ref)).vs_trace()
+    click.echo(f"reproduction drift: {report.has_reproduction_drift}")
+
+
+@cli.command()
+@click.argument("ref")
+@click.option("--model", default=FORK_EDITS["model"], show_default=True)
+@click.option("--prompt-profile", default=FORK_EDITS["prompt_profile"], show_default=True)
+@click.option("--html", "html_path", default="replay_vs_fork.html", show_default=True,
+              help="write the comparison HTML here")
+def fork(ref: str, model: str, prompt_profile: str, html_path: str) -> None:
+    """Fork the run (model/prompt edit) and compare to the unchanged replay."""
+    agent, case = _agent(), _load(ref)
+    replay_run = agent.replay(case)
+    edits = {"model": model, "prompt_profile": prompt_profile}
+    fork_run = agent.fork(case, **edits).run()
+    report = fork_run.diff(replay_run)
+    click.echo(str(report))
+    path = utils.write_report(html_path, case=case, replay_run=replay_run,
+                              fork_run=fork_run, report=report, edits=edits)
+    click.echo(f"html: {path}")
+
+
+@cli.command("run-all")
+@click.option("--scenario", default=utils.SCENARIO, show_default=True)
+@click.option("--variant", default=utils.VARIANT, show_default=True)
+def run_all(scenario: str, variant: str) -> None:
+    """Generate a fresh trace, then import → replay → fork → compare."""
+    trace_id = utils.generate_trace(scenario, variant)
+    click.echo(f"generated trace_id={trace_id}")
+    case = import_langgraph_trace(f"langfuse:{trace_id}")
+    agent = _agent()
+    replay_run = agent.replay(case)
+    fork_run = agent.fork(case, **FORK_EDITS).run()
+    report = fork_run.diff(replay_run)
+    click.echo(f"reproduction drift: {replay_run.vs_trace().has_reproduction_drift}")
+    click.echo(str(report))
+    path = utils.write_report("replay_vs_fork.html", case=case, replay_run=replay_run,
+                              fork_run=fork_run, report=report, edits=FORK_EDITS)
+    click.echo(f"html: {path}")
+
+
+if __name__ == "__main__":
+    cli()

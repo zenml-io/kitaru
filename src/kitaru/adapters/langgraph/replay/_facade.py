@@ -20,7 +20,7 @@ import json
 import time
 from typing import Any, Callable
 
-from kitaru.adapters.langgraph.replay._agent import KitaruReplayAgent
+from kitaru.adapters.langgraph.replay._agent import KitaruReplayAgent, _decision_of_result
 from kitaru.adapters.langgraph.replay._drift import DriftReport
 from kitaru.adapters.langgraph.replay._importer import import_trace
 
@@ -71,9 +71,18 @@ class _RunResult:
         self._case = case
         self.result = result
 
+    @property
+    def decision(self) -> dict:
+        """The decision this run produced."""
+        return _decision_of_result(self.result)
+
     def diff(self, other: "_RunResult") -> DriftReport:
         # self is the fork, `other` is the unchanged replay (PRD: fork.diff(replay)).
         return self._adapter._agent.diff(self._case, other.result, self.result)
+
+    def vs_trace(self) -> DriftReport:
+        """Compare this run against the original recorded trace (reproduction)."""
+        return self._adapter._agent.diff(self._case, self.result, self.result)
 
 
 class _Fork:
