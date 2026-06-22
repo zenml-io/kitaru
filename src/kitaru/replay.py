@@ -254,19 +254,28 @@ def _split_overrides(
 def build_replay_plan(
     *,
     run: PipelineRunResponse,
-    from_: str,
+    from_: str | None = None,
+    skip: Sequence[str] | None = None,
     overrides: Mapping[str, Any] | None = None,
     flow_inputs: Mapping[str, Any] | None = None,
 ) -> ReplayPlan:
     """Build a replay plan for a completed/paused execution.
 
-    Replay starts from the explicit ``from_`` checkpoint. For checkpoint
-    overrides, the direct consumers of each overridden source are added as
-    replay roots (the source itself is not forced to re-execute).
+    Exactly one of ``from_`` or ``skip`` must be provided.
+
+    When ``from_`` is given, replay starts from the explicit checkpoint.
+    For checkpoint overrides, the direct consumers of each overridden source
+    are added as replay roots (the source itself is not forced to re-execute).
+
+    When ``skip`` is given, the named checkpoints are frozen (kept cached)
+    and everything else re-executes.
 
     Args:
         run: Source execution to replay from.
         from_: Checkpoint selector (checkpoint name, invocation ID, or call ID).
+            Mutually exclusive with ``skip``.
+        skip: List of checkpoint selectors to keep cached (freeze). Everything
+            else re-executes. Mutually exclusive with ``from_``.
         overrides: Optional checkpoint override map (`checkpoint.*` keys).
         flow_inputs: Optional flow input overrides.
 
@@ -283,10 +292,30 @@ def build_replay_plan(
             f"Execution '{run.id}' has no checkpoint history to replay."
         )
 
-    if not from_.strip():
-        raise KitaruUsageError("`from_` must be a non-empty selector.")
+    if (from_ is None) == (skip is None):
+        raise KitaruUsageError("Provide exactly one of `from_` or `skip`.")
 
     checkpoint_overrides = _split_overrides(overrides)
+
+    if skip is not None:
+        if checkpoint_overrides:
+            raise KitaruUsageError(
+                "`overrides` is only supported with `from_`, not `skip`."
+            )
+        frozen = {
+            _resolve_checkpoint_selector(sel, checkpoints).invocation_id for sel in skip
+        }
+        all_steps = {cp.invocation_id for cp in checkpoints}
+        steps_to_skip = frozen & all_steps
+        return ReplayPlan(
+            original_run_id=str(run.id),
+            steps_to_skip=steps_to_skip,
+            input_overrides=dict(flow_inputs or {}),
+            step_input_overrides={},
+        )
+
+    if not from_ or not from_.strip():
+        raise KitaruUsageError("`from_` must be a non-empty selector.")
 
     explicit_checkpoint = _resolve_checkpoint_selector(from_, checkpoints)
 
