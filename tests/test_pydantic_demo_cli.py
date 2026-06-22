@@ -24,9 +24,6 @@ pytest.importorskip("pydantic_ai")
 @pytest.fixture(scope="module")
 def demo_cli():
     """Import and return the cli group from demo.py."""
-    examples_path = str(pathlib.Path(__file__).parent.parent / "examples" / "end_to_end")
-    if examples_path not in sys.path:
-        sys.path.insert(0, examples_path)
     from pydantic_replay_fork import demo
     return demo.cli
 

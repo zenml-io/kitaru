@@ -1,25 +1,20 @@
-"""PydanticAI support-copilot for the replay & fork demo — multi-step structure.
+"""PydanticAI support-copilot — multi-step agent factories.
 
-The agent is composed as three explicit steps, each a raw ``pydantic_ai.Agent``
-built by a per-step factory that takes ``(model, prompt_profile)``:
+Three raw ``pydantic_ai.Agent`` factories, one per step:
 
-  gather_context  — triage / classify the incoming support request.
-  decide          — produce the ``SupportDecision`` (policy label, risk status,
-                    required action, summary).  This is the CUT.  The ``decide``
-                    step's system prompt is the one that switches behaviour when
-                    ``prompt_profile="trimmed_permissions"`` is supplied, so
-                    reconfiguring it later flips the decision.
-  finalize        — assemble the customer-facing answer from the decision.
+  build_gather_agent  — triage / classify the incoming support request.
+  build_decide_agent  — produce the ``SupportDecision`` (policy label, risk
+                        status, required action, summary). This is the CUT.
+                        The decide step's system prompt is what changes when
+                        ``prompt_profile="trimmed_permissions"`` is supplied,
+                        which flips the decision on replay.
+  build_finalize_agent — assemble the customer-facing answer from the decision.
 
-Each factory returns a plain ``pydantic_ai.Agent``; the ``@checkpoint`` wrappers
-live in ``support_copilot.py`` so the step boundaries are explicit in the flow graph.
-
-``SupportDecision`` and ``SupportDeps`` are defined here and reused by all
-three steps.
+Each factory returns a plain ``pydantic_ai.Agent``; the ``@checkpoint``
+wrappers live in ``support_copilot.py`` so the step boundaries are explicit
+in the flow graph.
 """
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -54,15 +49,6 @@ class FinalAnswer(BaseModel):
     risk_status: str = "unknown"
     required_action: str = "unknown"
     summary: str = ""
-
-
-@dataclass
-class SupportDeps:
-    """Runtime dependencies shared across all steps."""
-
-    customer: str
-    plan: str = "Enterprise"
-    role: str = "account_owner"
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +127,10 @@ def build_decide_agent(
 ) -> Agent:
     """Build the decide step agent (the CUT).
 
-    Produces a ``SupportDecision`` from the triage result.  This step's prompt
-    is the one that distinguishes ``baseline`` from ``trimmed_permissions``:
-    the baseline prompt restricts permission/SSO changes (``needs_review``),
-    while ``trimmed_permissions`` allows more direct answers.  Reconfiguring
-    this step therefore flips the decision.
+    Produces a ``SupportDecision`` from the triage result.  The baseline prompt
+    restricts permission/SSO changes (``needs_review``), while
+    ``trimmed_permissions`` allows more direct answers.  Reconfiguring this step
+    flips the decision.
     """
     return Agent(
         model,
@@ -171,33 +156,4 @@ def build_finalize_agent(
         name=name,
         output_type=FinalAnswer,
         instructions=_FINALIZE_PROMPTS[prompt_profile],
-    )
-
-
-# ---------------------------------------------------------------------------
-# Legacy single-step factory (kept for test_build_agent_runs_and_returns_decision)
-# ---------------------------------------------------------------------------
-
-_PROMPTS: dict[str, str] = _DECIDE_PROMPTS  # alias for backwards compat
-
-
-def build_agent(
-    model,
-    *,
-    prompt_profile: str = "baseline",
-    name: str = "support_copilot",
-) -> Agent:
-    """Legacy single-step agent factory.
-
-    Used by the Task 2 test (``test_build_agent_runs_and_returns_decision``).
-    Returns a ``SupportDecision``-typed agent.
-    """
-    from pydantic_ai import Agent as _Agent
-
-    return _Agent(
-        model,
-        name=name,
-        deps_type=SupportDeps,
-        output_type=SupportDecision,
-        instructions=_PROMPTS[prompt_profile],
     )

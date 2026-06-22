@@ -1,4 +1,4 @@
-"""Boilerplate utilities for the PydanticAI support-copilot demo.
+"""Shared utilities for the PydanticAI support-copilot demo.
 
 Public surface
 --------------
@@ -11,6 +11,8 @@ quality_judge BYO metric: score baseline and variant with the judge.
 cost          BYO metric (lower_is_better=True): display_cost_usd delta.
 latency       BYO metric (lower_is_better=True): wall-clock latency delta.
 decision_of   Read the SupportDecision dict from an execution (unified).
+DriftReport   Re-exported type for drift comparison results.
+diff_decisions Compare two SupportDecision dicts and return a DriftReport.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from pydantic_ai import Agent
 from kitaru import KitaruClient
 
 if TYPE_CHECKING:
-    pass
+    from .support_copilot import RunHandle
 
 _log = logging.getLogger(__name__)
 
@@ -35,6 +37,24 @@ _log = logging.getLogger(__name__)
 
 #: The fixed checkpoint name for the intermediate decide step.
 CUT: str = "decide"
+
+
+# ---------------------------------------------------------------------------
+# Drift comparison — single import point so no other file reaches into internals
+# ---------------------------------------------------------------------------
+
+from kitaru.adapters.langgraph.replay._drift import DriftReport  # noqa: E402
+from kitaru.adapters.langgraph.replay._drift import compare_decisions as _compare_decisions
+
+
+def diff_decisions(baseline: dict, other: dict) -> DriftReport:
+    """Compare two SupportDecision dicts and return a DriftReport.
+
+    The comparator is framework-agnostic (lives in kitaru.adapters.langgraph
+    for historical reasons but operates on plain dicts with no LangGraph dep).
+    ``has_fork_drift`` is True when any semantic field differs.
+    """
+    return DriftReport(reproduction=[], fork=_compare_decisions(baseline, other))
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +277,7 @@ def decision_of(client: KitaruClient, exec_id: str, cache: dict | None = None) -
 # Built-in BYO metrics
 # ---------------------------------------------------------------------------
 
-def cost(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type: ignore[name-defined]
+def cost(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:
     """BYO metric: display_cost_usd (lower_is_better=True)."""
     client = KitaruClient()
     b = _extract_cost(client, baseline.exec_id)
@@ -265,7 +285,7 @@ def cost(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type: i
     return MetricDelta(name="cost", baseline_value=b, variant_value=v, lower_is_better=True)
 
 
-def latency(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type: ignore[name-defined]
+def latency(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:
     """BYO metric: wall-clock latency in seconds (lower_is_better=True)."""
     client = KitaruClient()
     b = _extract_latency_s(client, baseline.exec_id)
@@ -273,7 +293,7 @@ def latency(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type
     return MetricDelta(name="latency", baseline_value=b, variant_value=v, lower_is_better=True)
 
 
-def quality_judge(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  # type: ignore[name-defined]
+def quality_judge(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:
     """BYO metric: LLM judge quality score (lower_is_better=False).
 
     Reads ``baseline.model`` — the model stored on the RunHandle at creation
@@ -300,4 +320,3 @@ def quality_judge(baseline: "RunHandle", variant: "RunHandle") -> MetricDelta:  
     b_score = _score(baseline.decision)
     v_score = _score(variant.decision)
     return MetricDelta(name="quality", baseline_value=b_score, variant_value=v_score, lower_is_better=False)
-

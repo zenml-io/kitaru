@@ -5,24 +5,24 @@ Verbs: rerun (no-edit: cached head, live tail -> RunHandle),
 
 Test inventory:
   [1]  test_fork_by_replay_reexecutes_tail_under_new_agent
-  [2]  test_build_agent_runs_and_returns_decision
-  [3]  test_run_produces_durable_execution_with_call_checkpoints
-  [4]  test_multistep_replay_from_intermediate_step
-  [5]  test_rerun_matches_original
-  [6]  test_r1_multistep_gather_decide_finalize_checkpoints
-  [7]  test_r2_rerun_head_is_cached
-  [8]  test_r3_replay_flips_decision
-  [9]  test_r4_last_executions_returns_exec_ids
-  [10] test_r4_skipped_count_covered
-  [11] test_rerun_after_replay_is_unaffected
-  [12] test_run_handle_rerun_returns_handle
-  [13] test_run_handle_replay_flips_decision
-  [14] test_run_handle_diff
-  [15] test_recipe_identity_and_as_kwargs
-  [16] test_metric_delta_is_worse
-  [17] test_report_regressions_synthetic
-  [18] test_report_improvement_synthetic
-  [19] test_cohort_experiment_three_cases
+  [2]  test_run_produces_durable_execution_with_call_checkpoints
+  [3]  test_multistep_replay_from_intermediate_step
+  [4]  test_rerun_matches_original
+  [5]  test_r1_multistep_gather_decide_finalize_checkpoints
+  [6]  test_r2_rerun_head_is_cached
+  [7]  test_r3_replay_flips_decision
+  [8]  test_r4_last_executions_returns_exec_ids
+  [9]  test_r4_skipped_count_covered
+  [10] test_rerun_after_replay_is_unaffected
+  [11] test_run_handle_rerun_returns_handle
+  [12] test_run_handle_replay_flips_decision
+  [13] test_run_handle_diff
+  [14] test_recipe_identity_and_as_kwargs
+  [15] test_metric_delta_is_worse
+  [16] test_report_regressions_synthetic
+  [17] test_report_improvement_synthetic
+  [18] test_cohort_experiment_three_cases
+  [19] test_cohort_repeats_averaging
 """
 from __future__ import annotations
 
@@ -131,21 +131,7 @@ def test_fork_by_replay_reexecutes_tail_under_new_agent(primed_zenml) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [2] Pre-existing: build_agent factory (unchanged)
-# ---------------------------------------------------------------------------
-
-def test_build_agent_runs_and_returns_decision():
-    from pydantic_replay_fork.agent import build_agent, SupportDeps, SupportDecision
-
-    model = TestModel(custom_output_args=_BASE_ARGS)
-    agent = build_agent(model, prompt_profile="baseline")
-    out = agent.run_sync("Can I enable SSO?", deps=SupportDeps(customer="acme")).output
-    assert isinstance(out, SupportDecision)
-    assert out.risk_status == "needs_review"
-
-
-# ---------------------------------------------------------------------------
-# [3] Pre-existing: durable execution with checkpoints (support_copilot.py)
+# [2] Pre-existing: durable execution with checkpoints (support_copilot.py)
 # ---------------------------------------------------------------------------
 
 def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
@@ -710,3 +696,41 @@ def test_cohort_experiment_three_cases(primed_zenml) -> None:
 
     # improvement is a bool.
     assert isinstance(report.improvement, bool)
+
+
+# ---------------------------------------------------------------------------
+# [19] repeats averaging — unit test for the averaging logic
+# ---------------------------------------------------------------------------
+
+def test_cohort_repeats_averaging() -> None:
+    """Cohort.experiment averages metric variant_values across repeats.
+
+    We test the averaging logic directly on Report with synthetic _CohortRow
+    data rather than running live executions, so no Kitaru server is required.
+
+    The assertion: when two repeats produce variant_values 2.0 and 4.0, the
+    Report's _mean_variant for that metric must be 3.0.
+    """
+    from pydantic_replay_fork.cohort import Report, _CohortRow
+    from pydantic_replay_fork.utils import MetricDelta
+
+    row1 = _CohortRow(
+        base_exec_id="case-a",
+        decision_changed=False,
+        deltas=[
+            MetricDelta("cost", baseline_value=1.0, variant_value=2.0, lower_is_better=True),
+        ],
+    )
+    row2 = _CohortRow(
+        base_exec_id="case-a",
+        decision_changed=False,
+        deltas=[
+            MetricDelta("cost", baseline_value=1.0, variant_value=4.0, lower_is_better=True),
+        ],
+    )
+
+    report = Report(rows=[row1, row2], skipped_count=0)
+    mean_variant = report._mean_variant("cost")
+    assert mean_variant == 3.0, f"Expected 3.0 (average of 2.0 and 4.0), got {mean_variant}"
+    mean_baseline = report._mean_baseline("cost")
+    assert mean_baseline == 1.0, f"Expected baseline mean 1.0, got {mean_baseline}"

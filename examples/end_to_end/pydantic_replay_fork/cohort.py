@@ -6,8 +6,9 @@ cohort(cases) -> Cohort
     Wrap a list of exec_ids in a Cohort ready to run an experiment.
 
 Cohort.experiment(agent, *, variant: Recipe, metrics: list, repeats: int = 1) -> Report
-    For each case: rerun (baseline) and replay (variant).  Apply each metric.
-    Track decision changes.  Skip cases whose CUT cannot be resolved.
+    For each case: rerun (baseline) and replay (variant, averaged over repeats).
+    Apply each metric. Track decision changes.  Skip cases whose CUT cannot be
+    resolved.
 
 Report.summary()
     Print/return aggregate deltas per metric (mean baseline vs variant),
@@ -54,12 +55,11 @@ class Report:
     """Aggregate result of a cohort experiment.
 
     Attributes:
-        rows:           Internal per-case rows (non-skipped only).
-        skipped:        Number of skipped cases.
-        _all_rows:      All rows including skipped (for internal use).
+        rows:     Non-skipped per-case rows.
+        skipped:  Number of skipped cases.
     """
 
-    QUALITY_TOLERANCE: float = 0.1  # experiment >= baseline - tolerance for quality
+    QUALITY_TOLERANCE: float = 0.1
 
     def __init__(self, rows: list[_CohortRow], skipped_count: int) -> None:
         self._all_rows = rows
@@ -112,7 +112,6 @@ class Report:
             v = self._mean_variant(name)
             if b is None or v is None:
                 continue
-            # Determine direction from any row that has this metric.
             lower_is_better = next(
                 (d.lower_is_better for r in self.rows for d in r.deltas if d.name == name),
                 True,
@@ -121,7 +120,6 @@ class Report:
                 if v > b:
                     return False
             else:
-                # quality: allow QUALITY_TOLERANCE
                 if v < b - self.QUALITY_TOLERANCE:
                     return False
         return True
@@ -160,7 +158,11 @@ class Report:
 
     def summary(self) -> str:
         """Return and print a human-readable summary of the experiment."""
-        lines = ["Report.summary()", f"  rows: {len(self.rows)} | skipped: {self.skipped} | decision_changed: {self.decision_change_count}"]
+        lines = [
+            f"cohort experiment — {len(self.rows)} runs",
+            f"  rows: {len(self.rows)} | skipped: {self.skipped}"
+            f" | decision_changed: {self.decision_change_count}",
+        ]
         for name in self._metric_names():
             b = self._mean_baseline(name)
             v = self._mean_variant(name)
@@ -169,9 +171,7 @@ class Report:
                 True,
             )
             direction = "↓ better" if lower_is_better else "↑ better"
-            lines.append(
-                f"  {name:<12} baseline={b}  variant={v}  ({direction})"
-            )
+            lines.append(f"  {name:<12} baseline={b}  variant={v}  ({direction})")
         lines.append(f"  improvement: {self.improvement}")
         out = "\n".join(lines)
         print(out)
@@ -202,10 +202,11 @@ class Cohort:
         """Apply a config change across all cases and measure the delta.
 
         For each case:
-        1. ``agent.rerun(case)`` -> baseline RunHandle.
-        2. ``agent.replay(case, **variant.as_kwargs())`` -> variant RunHandle.
+        1. ``agent.rerun(case)`` -> baseline RunHandle (run once).
+        2. ``agent.replay(case, **variant.as_kwargs())`` -> variant RunHandle,
+           repeated ``repeats`` times; metric variant_values are averaged.
         3. Apply each metric callable to (baseline, variant).
-        4. Track decision changes.
+        4. Track decision changes from the first repeat.
         5. Skip cases where CUT cannot be resolved (record in skipped count).
 
         Args:
@@ -213,7 +214,8 @@ class Cohort:
             variant: The Recipe describing the config change.
             metrics: List of BYO metric callables
                      ``metric(baseline: RunHandle, variant: RunHandle) -> MetricDelta``.
-            repeats: Number of repeats per case (default 1).
+            repeats: Number of variant replays per case (default 1).
+                     Metric variant_values are averaged across repeats.
 
         Returns:
             A Report with per-case rows and aggregate metrics.
@@ -224,7 +226,6 @@ class Cohort:
         for base_id in self._cases:
             row = _CohortRow(base_exec_id=base_id)
 
-            # Validate CUT.
             try:
                 agent.cut_of(base_id)
             except Exception as exc:
@@ -235,7 +236,6 @@ class Cohort:
                 _log.warning("Skipping exec %s (CUT not resolvable): %s", base_id, exc)
                 continue
 
-            # Baseline: rerun (no edit).
             try:
                 baseline_handle = agent.rerun(base_id)
             except Exception as exc:
@@ -246,9 +246,10 @@ class Cohort:
                 _log.warning("Skipping exec %s (rerun failed): %s", base_id, exc)
                 continue
 
-            # Variant: replay (with edit).
+            variant_handles: list["RunHandle"] = []
             try:
-                variant_handle = agent.replay(base_id, **variant.as_kwargs())
+                for _ in range(max(1, repeats)):
+                    variant_handles.append(agent.replay(base_id, **variant.as_kwargs()))
             except Exception as exc:
                 row.skipped = True
                 row.skip_reason = f"replay failed: {exc}"
@@ -257,24 +258,39 @@ class Cohort:
                 _log.warning("Skipping exec %s (replay failed): %s", base_id, exc)
                 continue
 
+            first_variant = variant_handles[0]
             row.baseline_handle = baseline_handle
-            row.variant_handle = variant_handle
+            row.variant_handle = first_variant
 
-            # Decision change.
             try:
-                dr = baseline_handle.diff(variant_handle)
+                dr = baseline_handle.diff(first_variant)
                 row.decision_changed = dr.has_fork_drift
             except Exception as exc:
-                _log.warning("diff failed for %s vs %s: %s", baseline_handle.exec_id, variant_handle.exec_id, exc)
+                _log.warning(
+                    "diff failed for %s vs %s: %s",
+                    baseline_handle.exec_id, first_variant.exec_id, exc,
+                )
                 row.decision_changed = None
 
-            # BYO metrics.
             for metric_fn in metrics:
                 try:
-                    delta = metric_fn(baseline_handle, variant_handle)
-                    row.deltas.append(delta)
+                    per_repeat = [metric_fn(baseline_handle, vh) for vh in variant_handles]
+                    first = per_repeat[0]
+                    if len(per_repeat) == 1:
+                        row.deltas.append(first)
+                    else:
+                        variant_vals = [d.variant_value for d in per_repeat if d.variant_value is not None]
+                        avg_variant = sum(variant_vals) / len(variant_vals) if variant_vals else None
+                        row.deltas.append(MetricDelta(
+                            name=first.name,
+                            baseline_value=first.baseline_value,
+                            variant_value=avg_variant,
+                            lower_is_better=first.lower_is_better,
+                        ))
                 except Exception as exc:
-                    _log.warning("Metric %s failed: %s", getattr(metric_fn, "__name__", metric_fn), exc)
+                    _log.warning(
+                        "Metric %s failed: %s", getattr(metric_fn, "__name__", metric_fn), exc,
+                    )
 
             all_rows.append(row)
 

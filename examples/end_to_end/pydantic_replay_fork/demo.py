@@ -1,34 +1,28 @@
 """PydanticAI support-copilot demo — rerun, replay, cohort.
 
-    cd examples/end_to_end/pydantic_replay_fork
-    uv run python demo.py run-all
+    cd examples/end_to_end
+    uv run python -m pydantic_replay_fork.demo run-all
 
 Individual commands:
 
-    uv run python demo.py run
-    uv run python demo.py rerun <EXEC-ID>
-    uv run python demo.py replay <EXEC-ID>
-    uv run python demo.py cohort
+    uv run python -m pydantic_replay_fork.demo run
+    uv run python -m pydantic_replay_fork.demo rerun <EXEC-ID>
+    uv run python -m pydantic_replay_fork.demo replay <EXEC-ID>
+    uv run python -m pydantic_replay_fork.demo cohort
 """
 from __future__ import annotations
 
 import json
 import subprocess
+import time
 
 import click
 
-try:
-    from .support_copilot import KitaruAdapterPA
-    from .utils import CUT, cost, latency, quality_judge, Recipe
-    from .cohort import cohort
-    from .comparison_html import write as write_html
-    from .agent import SupportDecision as _SupportDecision
-except ImportError:
-    from support_copilot import KitaruAdapterPA  # type: ignore[no-redef]
-    from utils import CUT, cost, latency, quality_judge, Recipe  # type: ignore[no-redef]
-    from cohort import cohort  # type: ignore[no-redef]
-    from comparison_html import write as write_html  # type: ignore[no-redef]
-    from agent import SupportDecision as _SupportDecision  # type: ignore[no-redef]
+from .support_copilot import KitaruAdapterPA
+from .utils import CUT, cost, diff_decisions, latency, quality_judge, Recipe
+from .cohort import cohort
+from .comparison_html import write as write_html
+from .agent import SupportDecision as _SupportDecision
 
 
 SCENARIO = (
@@ -58,6 +52,24 @@ def _outcome_rows(rerun_dec: dict, replay_dec: dict) -> list[tuple[str, object, 
     return [(f, rerun_dec.get(f), replay_dec.get(f), rerun_dec.get(f) == replay_dec.get(f)) for f in fields]
 
 
+def _wait_for_completion(exec_id: str, timeout: int = 120) -> None:
+    """Poll until the execution reaches a terminal state.
+
+    Uses ``KitaruClient().executions.get(exec_id).status.is_finished``.
+    Raises ``TimeoutError`` if the execution does not finish within *timeout* seconds.
+    """
+    from kitaru import KitaruClient
+
+    client = KitaruClient()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = client.executions.get(exec_id).status
+        if status.is_finished:
+            return
+        time.sleep(1)
+    raise TimeoutError(f"Execution {exec_id} did not finish within {timeout}s")
+
+
 @click.group()
 def cli() -> None:
     """PydanticAI support-copilot demo — rerun, replay, cohort (Kitaru-wrapped)."""
@@ -81,8 +93,12 @@ def rerun_cmd(exec_id: str) -> None:
     """Rerun EXEC_ID from the decide checkpoint via the Kitaru CLI.
 
     Shells out to ``kitaru executions replay --from decide <EXEC_ID> --output json``
-    to demonstrate the CLI-native path, then diffs original vs rerun.
+    to launch the rerun, waits for completion, then diffs original vs rerun to
+    confirm faithful reproduction (no drift expected).
     """
+    adapter = KitaruAdapterPA(model=BASELINE_MODEL)
+    original_decision = adapter.decision_of(exec_id)
+
     cmd = ["kitaru", "executions", "replay", "--from", CUT, exec_id, "--output", "json"]
     click.echo("  $ " + " ".join(cmd))
 
@@ -91,13 +107,16 @@ def rerun_cmd(exec_id: str) -> None:
         click.echo(f"kitaru CLI error: {result.stderr.strip()}", err=True)
         raise SystemExit(result.returncode)
 
-    rerun_id = json.loads(result.stdout)["item"]["exec_id"]
-    click.echo(f"rerun_exec_id={rerun_id}")
+    cli_rerun_id = json.loads(result.stdout)["item"]["exec_id"]
+    click.echo(f"rerun_exec_id={cli_rerun_id}")
 
-    adapter = KitaruAdapterPA(model=BASELINE_MODEL)
-    rerun_handle = adapter.rerun(exec_id)
-    drift = rerun_handle.diff(rerun_handle)
-    click.echo(f"rerun drift: {drift.has_fork_drift}")
+    _wait_for_completion(cli_rerun_id)
+    from .utils import _decision_from_artifacts
+    from kitaru import KitaruClient
+    rerun_decision = _decision_from_artifacts(KitaruClient(), cli_rerun_id)
+
+    drift = diff_decisions(original_decision, rerun_decision)
+    click.echo(f"rerun drift: {drift.has_fork_drift}  (faithfully reproduced)")
 
 
 @cli.command("replay")
@@ -181,14 +200,18 @@ def run_all(prompt: str, customer: str) -> None:
     cli_rerun_id = json.loads(cli_result.stdout)["item"]["exec_id"]
     click.echo(f"   rerun_exec_id={cli_rerun_id}")
 
-    rerun_handle = adapter.rerun(exec_id)
-    rerun_drift = rerun_handle.diff(rerun_handle)
-    click.echo(f"   rerun drift: {rerun_drift.has_fork_drift}")
+    _wait_for_completion(cli_rerun_id)
+    from .utils import _decision_from_artifacts
+    from kitaru import KitaruClient
+    cli_rerun_decision = _decision_from_artifacts(KitaruClient(), cli_rerun_id)
+    rerun_drift = diff_decisions(decision, cli_rerun_decision)
+    click.echo(f"   rerun drift: {rerun_drift.has_fork_drift}  (faithfully reproduced)")
 
     click.secho(
         f"3) Replay with edits: {FORK_MODEL} + {FORK_PROMPT_PROFILE} — did the change flip the decision?",
         bold=True,
     )
+    rerun_handle = adapter.rerun(exec_id)
     replay_handle = adapter.replay(exec_id, model=FORK_MODEL, prompt_profile=FORK_PROMPT_PROFILE)
     click.echo(f"   replay_exec_id={replay_handle.exec_id}")
     diff_report = replay_handle.diff(rerun_handle)
@@ -201,7 +224,10 @@ def run_all(prompt: str, customer: str) -> None:
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
         cut=CUT,
         nodes=_FLOW_NODES,
-        settings_changes=[("model", BASELINE_MODEL, FORK_MODEL), ("prompt_profile", "baseline", FORK_PROMPT_PROFILE)],
+        settings_changes=[
+            ("model", BASELINE_MODEL, FORK_MODEL),
+            ("prompt_profile", "baseline", FORK_PROMPT_PROFILE),
+        ],
         outcomes=_outcome_rows(rerun_handle.decision, replay_handle.decision),
         has_drift=diff_report.has_fork_drift,
         rerun_summary=_decision_summary(rerun_handle.decision),

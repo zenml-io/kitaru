@@ -1,4 +1,4 @@
-"""THE STORY SURFACE — PydanticAI support-copilot with Kitaru durable execution.
+"""Durable PydanticAI support-copilot with Kitaru checkpoints and replay.
 
     from support_copilot import KitaruAdapterPA
     from utils import cost, latency, quality_judge
@@ -21,10 +21,10 @@
 
 Module structure:
 - Module-level @checkpoint steps (gather_context / decide / finalize) and
-  the @flow are registered ONCE at import — never clobbered.
-- ContextVar _active_agents + _activate() fix the alias-overwrite race:
-  each adapter sets the ContextVar before dispatching the flow, so
-  rerun-after-replay always uses the correct adapter's agents.
+  the @flow are registered once at import — never clobbered.
+- ContextVar _active_agents holds the three step agents for the in-flight run;
+  steps read them at execution time; kept ambient so they're never serialized
+  as checkpoint inputs.
 - RunHandle is the small return value of rerun/replay: .exec_id, .decision,
   .model, .recipe, .diff(other) -> DriftReport.
 """
@@ -45,24 +45,22 @@ from .agent import (
     build_finalize_agent,
     build_gather_agent,
 )
-from .utils import CUT, Recipe, decision_of, _decision_from_artifacts
+from .utils import CUT, DriftReport, Recipe, decision_of, diff_decisions, _decision_from_artifacts
 
 _log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# ContextVar for ambient agents (alias-overwrite race fix — Finding 1)
+# Ambient agents — set by _activate() before each flow dispatch so that the
+# module-level @checkpoint steps pick up the correct per-adapter agents without
+# requiring them as serialized checkpoint inputs.
 # ---------------------------------------------------------------------------
 
-# Holds the three pydantic_ai agents for the currently-dispatching adapter.
-# KitaruAdapterPA._activate() sets this before any flow dispatch.
-# The module-level @checkpoint steps read from it at execution time.
-# NOT a checkpoint input — stays ambient/config, never serialized.
 _active_agents: ContextVar[tuple[Agent, Agent, Agent]] = ContextVar("_active_agents")
 
 
 # ---------------------------------------------------------------------------
-# Module-level @checkpoint steps (registered ONCE at import, never clobbered)
+# Module-level @checkpoint steps (registered once at import, never clobbered)
 # ---------------------------------------------------------------------------
 
 @checkpoint
@@ -100,8 +98,6 @@ def finalize(decide_out: dict) -> dict:  # type: ignore[return]
     )
     result = _finalize_agent.run_sync(decision_summary)
     out = result.output.model_dump()
-    # Propagate SupportDecision fields so decision_of can read them from the
-    # finalize artifact as a fallback.
     for key in ("policy_label", "risk_status", "required_action", "summary"):
         if key not in out or not out[key]:
             out[key] = decide_out.get(key, "unknown")
@@ -109,7 +105,7 @@ def finalize(decide_out: dict) -> dict:  # type: ignore[return]
 
 
 # ---------------------------------------------------------------------------
-# Module-level @flow (registered ONCE at import, never clobbered)
+# Module-level @flow (registered once at import, never clobbered)
 # ---------------------------------------------------------------------------
 
 @flow(cache=False)
@@ -147,18 +143,9 @@ class RunHandle:
         self.recipe = recipe
         self.model = model
 
-    def diff(self, other: "RunHandle") -> "DriftReport":
+    def diff(self, other: "RunHandle") -> DriftReport:
         """Compare this handle's decision against *other*'s decision."""
-        from kitaru.adapters.langgraph.replay._drift import DriftReport as _DR
-        from kitaru.adapters.langgraph.replay._drift import compare_decisions
-        return _DR(reproduction=[], fork=compare_decisions(self.decision, other.decision))
-
-
-# Re-export DriftReport so callers can type-annotate without reaching into kitaru internals.
-try:
-    from kitaru.adapters.langgraph.replay._drift import DriftReport  # noqa: F401
-except ImportError:
-    pass
+        return diff_decisions(self.decision, other.decision)
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +179,6 @@ class KitaruAdapterPA:
         self._prompt_profile = prompt_profile
         self._client = KitaruClient()
 
-        # Build per-step raw pydantic_ai.Agent objects.
-        # Raw agents are correct here — @checkpoint provides the Kitaru boundary.
         self._gather_agent = build_gather_agent(
             model, prompt_profile=prompt_profile, name=f"{name}_gather",
         )
@@ -205,18 +190,10 @@ class KitaruAdapterPA:
         )
 
         self._flow = support_copilot_flow
-
-        # In-memory decision cache populated at run() time for fast lookup.
         self._results: dict[str, dict] = {}
 
     def _activate(self) -> None:
-        """Set the ContextVar to this adapter's agents before any dispatch.
-
-        Must be called at the top of every method that dispatches the flow
-        (``run``, ``rerun``, and the reconfigured adapter's dispatch in
-        ``replay``).  This ensures that the module-level @checkpoint steps
-        read from the correct adapter's agents.
-        """
+        """Set the ContextVar to this adapter's agents before any dispatch."""
         _active_agents.set((self._gather_agent, self._decide_agent, self._finalize_agent))
 
     def run(self, prompt: str, customer: str) -> str:
@@ -233,7 +210,7 @@ class KitaruAdapterPA:
             self._results[exec_id] = result
         return exec_id
 
-    def _cut_of(self, exec_id: str) -> str:
+    def cut_of(self, exec_id: str) -> str:
         """Return the CUT checkpoint name for *exec_id*.
 
         Raises:
@@ -247,12 +224,6 @@ class KitaruAdapterPA:
                 f"Checkpoints present: {names}."
             )
         return CUT
-
-    # Keep cut_of as a public alias so existing tests that call adapter.cut_of(...)
-    # continue to work during the migration period.
-    def cut_of(self, exec_id: str) -> str:
-        """Public alias for _cut_of (kept for test compatibility)."""
-        return self._cut_of(exec_id)
 
     def decision_of(self, exec_id: str) -> dict:
         """Return the SupportDecision dict for *exec_id*.
@@ -271,7 +242,7 @@ class KitaruAdapterPA:
             A RunHandle with the identity Recipe and the re-run decision.
         """
         self._activate()
-        handle = self._flow.replay(exec_id, from_=self._cut_of(exec_id), cache=False)
+        handle = self._flow.replay(exec_id, from_=self.cut_of(exec_id), cache=False)
         result = handle.wait()
         replay_id = handle.exec_id
         if isinstance(result, dict) and "risk_status" in result:
@@ -344,4 +315,3 @@ class KitaruAdapterPA:
         )
         originals = [e for e in executions if e.original_exec_id is None]
         return [e.exec_id for e in originals[:n]]
-
