@@ -10,6 +10,7 @@ build_judge   Build a raw pydantic_ai.Agent that scores an answer 1-5.
 quality_judge BYO metric: score baseline and variant with the judge.
 cost          BYO metric (lower_is_better=True): display_cost_usd delta.
 latency       BYO metric (lower_is_better=True): wall-clock latency delta.
+decision_from_artifacts  Read SupportDecision dict from artifact store.
 decision_of   Read the SupportDecision dict from an execution (unified).
 DriftReport   Re-exported type for drift comparison results.
 diff_decisions Compare two SupportDecision dicts and return a DriftReport.
@@ -26,7 +27,7 @@ from pydantic_ai import Agent
 from kitaru import KitaruClient
 
 if TYPE_CHECKING:
-    from .support_copilot import RunHandle
+    from support_copilot import RunHandle
 
 _log = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
         return None
 
 
-def _decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
+def decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
     """Read the SupportDecision dict from the execution artifact store.
 
     Searches checkpoints in priority order: ``decide`` first, then
@@ -208,7 +209,7 @@ def _decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
     Raises:
         RuntimeError: If the decision cannot be found via artifact lookup.
     """
-    from .agent import SupportDecision
+    from agent import SupportDecision
 
     run = client.executions.get(exec_id)
 
@@ -270,7 +271,7 @@ def decision_of(client: KitaruClient, exec_id: str, cache: dict | None = None) -
         cached = cache.get(exec_id)
         if cached is not None:
             return cached
-    return _decision_from_artifacts(client, exec_id)
+    return decision_from_artifacts(client, exec_id)
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,14 @@
 """PydanticAI support-copilot demo — rerun, replay, cohort.
 
-    cd examples/end_to_end
-    uv run python -m pydantic_replay_fork.demo run-all
+    cd examples/end_to_end/pydantic_replay_fork
+    uv run python demo.py run-all
 
 Individual commands:
 
-    uv run python -m pydantic_replay_fork.demo run
-    uv run python -m pydantic_replay_fork.demo rerun <EXEC-ID>
-    uv run python -m pydantic_replay_fork.demo replay <EXEC-ID>
-    uv run python -m pydantic_replay_fork.demo cohort
+    uv run python demo.py run
+    uv run python demo.py rerun <EXEC-ID>
+    uv run python demo.py replay <EXEC-ID>
+    uv run python demo.py cohort
 """
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ import time
 
 import click
 
-from .support_copilot import KitaruAdapterPA
-from .utils import CUT, cost, diff_decisions, latency, quality_judge, Recipe
-from .cohort import cohort
-from .comparison_html import write as write_html
-from .agent import SupportDecision as _SupportDecision
+from support_copilot import KitaruAdapterPA
+from utils import CUT, cost, diff_decisions, latency, quality_judge, Recipe
+from cohort import cohort
+from comparison_html import write as write_html
+from agent import SupportDecision as _SupportDecision
 
 
 SCENARIO = (
@@ -111,9 +111,9 @@ def rerun_cmd(exec_id: str) -> None:
     click.echo(f"rerun_exec_id={cli_rerun_id}")
 
     _wait_for_completion(cli_rerun_id)
-    from .utils import _decision_from_artifacts
+    from utils import decision_from_artifacts
     from kitaru import KitaruClient
-    rerun_decision = _decision_from_artifacts(KitaruClient(), cli_rerun_id)
+    rerun_decision = decision_from_artifacts(KitaruClient(), cli_rerun_id)
 
     drift = diff_decisions(original_decision, rerun_decision)
     click.echo(f"rerun drift: {drift.has_fork_drift}  (faithfully reproduced)")
@@ -201,9 +201,9 @@ def run_all(prompt: str, customer: str) -> None:
     click.echo(f"   rerun_exec_id={cli_rerun_id}")
 
     _wait_for_completion(cli_rerun_id)
-    from .utils import _decision_from_artifacts
+    from utils import decision_from_artifacts
     from kitaru import KitaruClient
-    cli_rerun_decision = _decision_from_artifacts(KitaruClient(), cli_rerun_id)
+    cli_rerun_decision = decision_from_artifacts(KitaruClient(), cli_rerun_id)
     rerun_drift = diff_decisions(decision, cli_rerun_decision)
     click.echo(f"   rerun drift: {rerun_drift.has_fork_drift}  (faithfully reproduced)")
 

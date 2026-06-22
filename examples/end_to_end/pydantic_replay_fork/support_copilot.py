@@ -39,13 +39,13 @@ from pydantic_ai import Agent
 from kitaru import flow, KitaruClient
 from kitaru.checkpoint import checkpoint
 
-from .agent import (
+from agent import (
     SupportDecision,
     build_decide_agent,
     build_finalize_agent,
     build_gather_agent,
 )
-from .utils import CUT, DriftReport, Recipe, decision_of, diff_decisions, _decision_from_artifacts
+from utils import CUT, DriftReport, Recipe, decision_of, diff_decisions, decision_from_artifacts
 
 _log = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ class KitaruAdapterPA:
         replay_id = handle.exec_id
         if isinstance(result, dict) and "risk_status" in result:
             self._results[replay_id] = result
-        dec = _decision_from_artifacts(self._client, replay_id)
+        dec = decision_from_artifacts(self._client, replay_id)
         return RunHandle(
             exec_id=replay_id,
             decision=dec,
@@ -293,7 +293,7 @@ class KitaruAdapterPA:
         replay_id = handle.exec_id
         if isinstance(result, dict) and "risk_status" in result:
             self._results[replay_id] = result
-        dec = _decision_from_artifacts(self._client, replay_id)
+        dec = decision_from_artifacts(self._client, replay_id)
         recipe = Recipe(model=model, prompt_profile=prompt_profile, at=at)
         return RunHandle(
             exec_id=replay_id,

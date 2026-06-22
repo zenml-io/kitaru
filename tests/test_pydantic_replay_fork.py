@@ -33,8 +33,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# Ensure examples/ is importable.
-sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+# Ensure the example folder is directly importable (flat-import layout).
+sys.path.insert(0, str(pathlib.Path("examples/end_to_end/pydantic_replay_fork").resolve()))
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -135,7 +135,7 @@ def test_fork_by_replay_reexecutes_tail_under_new_agent(primed_zenml) -> None:
 # ---------------------------------------------------------------------------
 
 def test_run_produces_durable_execution_with_call_checkpoints(primed_zenml):
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     exec_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -225,7 +225,7 @@ def test_multistep_replay_from_intermediate_step(primed_zenml) -> None:
 # ---------------------------------------------------------------------------
 
 def test_rerun_matches_original(primed_zenml):
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     base = adapter.run("Can I enable SSO?", customer="acme")
@@ -241,8 +241,8 @@ def test_rerun_matches_original(primed_zenml):
 def test_r1_multistep_gather_decide_finalize_checkpoints(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
-    from pydantic_replay_fork.utils import CUT
+    from support_copilot import KitaruAdapterPA
+    from utils import CUT
 
     adapter = KitaruAdapterPA(model=_base_model())
     exec_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -274,7 +274,7 @@ def test_r1_multistep_gather_decide_finalize_checkpoints(primed_zenml) -> None:
 def test_r2_rerun_head_is_cached(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     base_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -316,7 +316,7 @@ def test_r2_rerun_head_is_cached(primed_zenml) -> None:
 def test_r3_replay_flips_decision(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     base_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -365,7 +365,7 @@ def test_r3_replay_flips_decision(primed_zenml) -> None:
 def test_r4_last_executions_returns_exec_ids(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     id1 = adapter.run("Can I enable SSO?", customer="acme")
@@ -386,7 +386,7 @@ def test_r4_last_executions_returns_exec_ids(primed_zenml) -> None:
 def test_r4_skipped_count_covered(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     adapter.run("Can I enable SSO?", customer="acme")
@@ -411,7 +411,7 @@ def test_rerun_after_replay_is_unaffected(primed_zenml) -> None:
     """
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter_A = KitaruAdapterPA(model=_base_model())
     base_exec = adapter_A.run("Can I enable SSO?", customer="acme")
@@ -439,8 +439,8 @@ def test_rerun_after_replay_is_unaffected(primed_zenml) -> None:
 def test_run_handle_rerun_returns_handle(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA, RunHandle
-    from pydantic_replay_fork.utils import Recipe
+    from support_copilot import KitaruAdapterPA, RunHandle
+    from utils import Recipe
 
     adapter = KitaruAdapterPA(model=_base_model())
     base_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -464,8 +464,8 @@ def test_run_handle_rerun_returns_handle(primed_zenml) -> None:
 def test_run_handle_replay_flips_decision(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA, RunHandle
-    from pydantic_replay_fork.utils import Recipe
+    from support_copilot import KitaruAdapterPA, RunHandle
+    from utils import Recipe
 
     adapter = KitaruAdapterPA(model=_base_model())
     base_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -490,7 +490,7 @@ def test_run_handle_replay_flips_decision(primed_zenml) -> None:
 def test_run_handle_diff(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
+    from support_copilot import KitaruAdapterPA
 
     adapter = KitaruAdapterPA(model=_base_model())
     base_id = adapter.run("Can I enable SSO?", customer="acme")
@@ -511,7 +511,7 @@ def test_run_handle_diff(primed_zenml) -> None:
 # ---------------------------------------------------------------------------
 
 def test_recipe_identity_and_as_kwargs() -> None:
-    from pydantic_replay_fork.utils import Recipe, CUT
+    from utils import Recipe, CUT
 
     # Identity recipe (rerun).
     r0 = Recipe()
@@ -533,7 +533,7 @@ def test_recipe_identity_and_as_kwargs() -> None:
 # ---------------------------------------------------------------------------
 
 def test_metric_delta_is_worse() -> None:
-    from pydantic_replay_fork.utils import MetricDelta
+    from utils import MetricDelta
 
     # lower_is_better: variant higher = worse.
     d1 = MetricDelta("cost", 0.01, 0.05, lower_is_better=True)
@@ -559,8 +559,8 @@ def test_metric_delta_is_worse() -> None:
 # ---------------------------------------------------------------------------
 
 def test_report_regressions_synthetic() -> None:
-    from pydantic_replay_fork.cohort import Report, _CohortRow
-    from pydantic_replay_fork.utils import MetricDelta
+    from cohort import Report, _CohortRow
+    from utils import MetricDelta
 
     # Case: clearly improved — no regressions.
     row_ok = _CohortRow(
@@ -629,8 +629,8 @@ def test_report_regressions_synthetic() -> None:
 # ---------------------------------------------------------------------------
 
 def test_report_improvement_synthetic() -> None:
-    from pydantic_replay_fork.cohort import Report, _CohortRow
-    from pydantic_replay_fork.utils import MetricDelta
+    from cohort import Report, _CohortRow
+    from utils import MetricDelta
 
     def _make(cost_b, cost_e, lat_b, lat_e, score_b, score_e):
         row = _CohortRow(
@@ -657,9 +657,9 @@ def test_report_improvement_synthetic() -> None:
 def test_cohort_experiment_three_cases(primed_zenml) -> None:
     del primed_zenml
 
-    from pydantic_replay_fork.support_copilot import KitaruAdapterPA
-    from pydantic_replay_fork.utils import cost, latency, quality_judge, Recipe
-    from pydantic_replay_fork.cohort import cohort, Report
+    from support_copilot import KitaruAdapterPA
+    from utils import cost, latency, quality_judge, Recipe
+    from cohort import cohort, Report
 
     adapter = KitaruAdapterPA(model=_base_model())
     # Seed 3 baseline executions.
@@ -711,8 +711,8 @@ def test_cohort_repeats_averaging() -> None:
     The assertion: when two repeats produce variant_values 2.0 and 4.0, the
     Report's _mean_variant for that metric must be 3.0.
     """
-    from pydantic_replay_fork.cohort import Report, _CohortRow
-    from pydantic_replay_fork.utils import MetricDelta
+    from cohort import Report, _CohortRow
+    from utils import MetricDelta
 
     row1 = _CohortRow(
         base_exec_id="case-a",

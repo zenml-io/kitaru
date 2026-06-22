@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-_EXAMPLES_PATH = str(pathlib.Path(__file__).parent.parent / "examples" / "end_to_end")
+_EXAMPLES_PATH = str(pathlib.Path(__file__).parent.parent / "examples" / "end_to_end" / "pydantic_replay_fork")
 if _EXAMPLES_PATH not in sys.path:
     sys.path.insert(0, _EXAMPLES_PATH)
 
@@ -24,7 +24,7 @@ pytest.importorskip("pydantic_ai")
 @pytest.fixture(scope="module")
 def demo_cli():
     """Import and return the cli group from demo.py."""
-    from pydantic_replay_fork import demo
+    import demo
     return demo.cli
 
 

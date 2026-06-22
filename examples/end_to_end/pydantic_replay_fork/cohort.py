@@ -27,10 +27,10 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from .utils import MetricDelta, Recipe
+from utils import MetricDelta, Recipe
 
 if TYPE_CHECKING:
-    from .support_copilot import KitaruAdapterPA, RunHandle
+    from support_copilot import KitaruAdapterPA, RunHandle
 
 _log = logging.getLogger(__name__)
 
