@@ -12,7 +12,7 @@ cost          BYO metric (lower_is_better=True): display_cost_usd delta.
 latency       BYO metric (lower_is_better=True): wall-clock latency delta.
 decision_from_artifacts  Read SupportDecision dict from artifact store.
 decision_of   Read the SupportDecision dict from an execution (unified).
-DriftReport   Re-exported type for drift comparison results.
+DriftReport   Decision-field drift report (.has_fork_drift).
 diff_decisions Compare two SupportDecision dicts and return a DriftReport.
 """
 from __future__ import annotations
@@ -41,11 +41,8 @@ CUT: str = "decide"
 
 
 # ---------------------------------------------------------------------------
-# Drift comparison — single import point so no other file reaches into internals
+# Drift comparison — self-contained, no framework dependency
 # ---------------------------------------------------------------------------
-
-from kitaru.adapters.langgraph.replay._drift import DriftReport  # noqa: E402
-from kitaru.adapters.langgraph.replay._drift import compare_decisions as _compare_decisions
 
 #: The decision fields that define "did the decision move". ``policy_label`` and
 #: ``summary`` are free-text the model rewords every call, so they are excluded —
@@ -53,16 +50,46 @@ from kitaru.adapters.langgraph.replay._drift import compare_decisions as _compar
 DECISION_FIELDS = ("risk_status", "required_action")
 
 
-def diff_decisions(baseline: dict, other: dict) -> DriftReport:
-    """Compare two SupportDecision dicts on the decision fields; return a DriftReport.
+@dataclasses.dataclass
+class FieldChange:
+    """One decision field compared across two runs."""
 
-    The comparator is framework-agnostic (lives in kitaru.adapters.langgraph for
-    historical reasons but operates on plain dicts with no LangGraph dep). We scope
-    it to ``DECISION_FIELDS`` so ``has_fork_drift`` means the decision changed, not
-    that the model reworded a label or summary.
+    field: str
+    baseline_value: Any
+    comparison_value: Any
+
+    @property
+    def matches(self) -> bool:
+        return self.baseline_value == self.comparison_value
+
+
+@dataclasses.dataclass
+class DriftReport:
+    """The decision-field differences between a baseline run and another run."""
+
+    changes: list[FieldChange]
+
+    @property
+    def has_fork_drift(self) -> bool:
+        """True when any decision field differs."""
+        return any(not c.matches for c in self.changes)
+
+    def __str__(self) -> str:
+        diffs = [
+            f"{c.field}: {c.baseline_value!r} -> {c.comparison_value!r}"
+            for c in self.changes
+            if not c.matches
+        ]
+        return "decision changed — " + "; ".join(diffs) if diffs else "no decision drift"
+
+
+def diff_decisions(baseline: dict, other: dict) -> DriftReport:
+    """Compare two SupportDecision dicts on the decision fields.
+
+    Scoped to ``DECISION_FIELDS`` so ``has_fork_drift`` means the decision changed,
+    not that the model reworded a label or summary.
     """
-    keep = lambda d: {k: d.get(k) for k in DECISION_FIELDS}  # noqa: E731
-    return DriftReport(reproduction=[], fork=_compare_decisions(keep(baseline), keep(other)))
+    return DriftReport([FieldChange(f, baseline.get(f), other.get(f)) for f in DECISION_FIELDS])
 
 
 # ---------------------------------------------------------------------------
