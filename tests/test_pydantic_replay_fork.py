@@ -375,3 +375,191 @@ def test_r1_multistep_gather_decide_finalize_checkpoints(primed_zenml) -> None:
     assert run.original_exec_id is None, (
         f"A fresh run should not have original_exec_id set; got {run.original_exec_id!r}"
     )
+
+
+def test_r2_reproduce_head_is_cached(primed_zenml) -> None:
+    """R2: reproduce() caches the gather_context head; only decide+finalize re-run.
+
+    NON-VACUOUS proof: on the reproduce execution, the gather_context checkpoint's
+    original_call_id must be set (pointing back to the baseline's gather_context
+    call), proving it was served from cache rather than re-executed.  If the head
+    were re-executed, original_call_id would be None and the assertion fails.
+
+    Also asserts:
+    - diff(base, repro).has_fork_drift is False (reproduce matches baseline);
+    - the reproduce execution's original_exec_id == base exec_id (lineage);
+    - the decide/finalize checkpoints have original_call_id None (they re-ran).
+    """
+    del primed_zenml  # fixture used for ZenML store init side-effect
+
+    from pydantic_ai.models.test import TestModel
+    import sys
+    import pathlib
+
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA
+    from kitaru import KitaruClient
+
+    model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "needs_review",
+            "required_action": "escalate_to_human",
+            "summary": "needs human review",
+        }
+    )
+    adapter = KitaruAdapterPA(model=model)
+    base = adapter.run("Can I enable SSO?", customer="acme")
+
+    # Reproduce: replay from CUT (decide), same config.
+    repro = adapter.reproduce(base)
+
+    # 1. Semantic equivalence.
+    report = adapter.diff(base, repro)
+    assert report.has_fork_drift is False, (
+        f"reproduce() should match baseline; got drift: {report.fork}"
+    )
+
+    # 2. Lineage: reproduce execution links back to baseline.
+    client = KitaruClient()
+    repro_run = client.executions.get(repro)
+    assert repro_run.original_exec_id == base, (
+        f"Reproduce execution must link to baseline via original_exec_id. "
+        f"Expected {base!r}, got {repro_run.original_exec_id!r}."
+    )
+
+    # 3. Non-vacuous head-cached proof: gather_context has original_call_id set.
+    repro_cp_by_name = {c.name: c for c in repro_run.checkpoints}
+
+    gather_cp = repro_cp_by_name.get("gather_context")
+    assert gather_cp is not None, (
+        f"'gather_context' checkpoint missing from reproduce execution. "
+        f"Checkpoints: {list(repro_cp_by_name)}"
+    )
+    assert gather_cp.original_call_id is not None, (
+        "gather_context.original_call_id is None on the reproduce execution — "
+        "the head was NOT served from cache (it re-ran). "
+        "Replay from 'decide' should skip gather_context (head) from cache."
+    )
+
+    # 4. decide and finalize re-ran (their original_call_id should be None).
+    for step_name in ("decide", "finalize"):
+        cp = repro_cp_by_name.get(step_name)
+        assert cp is not None, (
+            f"'{step_name}' checkpoint missing from reproduce execution. "
+            f"Checkpoints: {list(repro_cp_by_name)}"
+        )
+        assert cp.original_call_id is None, (
+            f"'{step_name}'.original_call_id is set on the reproduce execution — "
+            f"this step should have re-run, not been served from cache. "
+            f"original_call_id={cp.original_call_id!r}"
+        )
+
+
+def test_r3_experiment_flips_decision(primed_zenml) -> None:
+    """R3: experiment() re-runs decide+finalize under a reconfigured agent (kind #2).
+
+    The experiment builds a new KitaruAdapterPA with a different model/prompt_profile
+    and replays from CUT so gather_context is served from cache while decide and
+    finalize run under the new config.
+
+    Assertions:
+    - experiment(base, model=fork_model, prompt_profile="trimmed_permissions") returns
+      an exec_id;
+    - diff(repro, exp) shows risk_status changed (needs_review → safe);
+    - the experiment execution's original_exec_id == base exec_id (lineage);
+    - gather_context has original_call_id set on the experiment run (head cached);
+    - decide/finalize have original_call_id None (they re-ran under new config).
+
+    NON-VACUOUS: if experiment used output-override instead of re-running the step,
+    or if the new model was not applied, the risk_status field in the experiment
+    decision would still be 'needs_review' and the changed-fields assertion fails.
+    """
+    del primed_zenml  # fixture used for ZenML store init side-effect
+
+    from pydantic_ai.models.test import TestModel
+    import sys
+    import pathlib
+
+    sys.path.insert(0, str(pathlib.Path("examples/end_to_end").resolve()))
+    from pydantic_replay_fork.pipeline import KitaruAdapterPA
+    from kitaru import KitaruClient
+
+    # Baseline: needs_review.
+    base_model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "needs_review",
+            "required_action": "escalate_to_human",
+            "summary": "needs human review",
+        }
+    )
+    # Fork model: safe (different TestModel simulating a cheaper/looser-prompt agent).
+    fork_model = TestModel(
+        custom_output_args={
+            "policy_label": "permissions_policy",
+            "risk_status": "safe",
+            "required_action": "answer_directly",
+            "summary": "safe to answer",
+        }
+    )
+
+    adapter = KitaruAdapterPA(model=base_model)
+    base = adapter.run("Can I enable SSO?", customer="acme")
+    repro = adapter.reproduce(base)
+
+    # R3: experiment with reconfigured decide step.
+    exp = adapter.experiment(base, model=fork_model, prompt_profile="trimmed_permissions")
+
+    # 1. diff(repro, exp) shows risk_status changed.
+    report = adapter.diff(repro, exp)
+    assert report.has_fork_drift is True, (
+        "experiment should produce a different decision than the reproduction. "
+        f"Diff: {report.fork}"
+    )
+    changed_fields = {c.field for c in report.fork if not c.matches}
+    assert "risk_status" in changed_fields, (
+        f"risk_status should have changed (needs_review → safe). "
+        f"Changed fields: {changed_fields}; diff: {report.fork}"
+    )
+
+    # 2. Experiment decision is 'safe'.
+    exp_decision = adapter.decision_of(exp)
+    assert exp_decision["risk_status"] == "safe", (
+        f"experiment decision risk_status should be 'safe'; got {exp_decision['risk_status']!r}"
+    )
+
+    # 3. Lineage: experiment execution links back to baseline.
+    client = KitaruClient()
+    exp_run = client.executions.get(exp)
+    assert exp_run.original_exec_id == base, (
+        f"Experiment execution must link to baseline via original_exec_id. "
+        f"Expected {base!r}, got {exp_run.original_exec_id!r}."
+    )
+
+    # 4. Head cached: gather_context has original_call_id set.
+    exp_cp_by_name = {c.name: c for c in exp_run.checkpoints}
+
+    gather_cp = exp_cp_by_name.get("gather_context")
+    assert gather_cp is not None, (
+        f"'gather_context' checkpoint missing from experiment execution. "
+        f"Checkpoints: {list(exp_cp_by_name)}"
+    )
+    assert gather_cp.original_call_id is not None, (
+        "gather_context.original_call_id is None on the experiment execution — "
+        "the head was NOT served from cache (it re-ran). "
+        "experiment() replay from 'decide' should skip gather_context from cache."
+    )
+
+    # 5. decide and finalize re-ran under new config (original_call_id None).
+    for step_name in ("decide", "finalize"):
+        cp = exp_cp_by_name.get(step_name)
+        assert cp is not None, (
+            f"'{step_name}' checkpoint missing from experiment execution. "
+            f"Checkpoints: {list(exp_cp_by_name)}"
+        )
+        assert cp.original_call_id is None, (
+            f"'{step_name}'.original_call_id is set on the experiment execution — "
+            f"this step should have re-run under the new config, not been cached. "
+            f"original_call_id={cp.original_call_id!r}"
+        )

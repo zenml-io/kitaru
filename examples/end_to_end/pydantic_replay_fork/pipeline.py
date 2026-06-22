@@ -95,6 +95,8 @@ class KitaruAdapterPA:
         name: str = "support_copilot",
     ) -> None:
         self.name = name
+        self._model = model
+        self._prompt_profile = prompt_profile
         self._client = KitaruClient()
 
         # Build per-step raw pydantic_ai.Agent objects.
@@ -286,3 +288,56 @@ class KitaruAdapterPA:
         base = self.decision_of(baseline_exec)
         other = self.decision_of(other_exec)
         return DriftReport(reproduction=[], fork=compare_decisions(base, other))
+
+    def experiment(
+        self,
+        exec_id: str,
+        *,
+        model: Any = None,
+        prompt_profile: str | None = None,
+    ) -> str:
+        """Re-run decide+finalize under a reconfigured agent (kind #2 replay).
+
+        Builds a new ``KitaruAdapterPA`` with the supplied ``model`` and/or
+        ``prompt_profile`` (falling back to ``self``'s values when not supplied),
+        then replays ``exec_id`` from the CUT (``"decide"``).  The
+        ``gather_context`` head is served from cache; ``decide`` and ``finalize``
+        re-run under the new configuration.
+
+        This is kind #2 (re-run the step under a new config) — NOT an
+        ``overrides=`` output substitution.  The reconfigured adapter uses the
+        same ``@checkpoint`` step names (``gather_context``, ``decide``,
+        ``finalize``) so the replay resolves correctly.
+
+        Args:
+            exec_id: The baseline execution to replay.
+            model: A PydanticAI-compatible model for the reconfigured adapter.
+                Defaults to ``self``'s model when not supplied (not useful on its
+                own, but allows ``prompt_profile``-only reconfiguration).
+            prompt_profile: System-prompt profile for the reconfigured adapter
+                (``"baseline"`` or ``"trimmed_permissions"``).  Defaults to
+                ``self``'s prompt profile when not supplied.
+
+        Returns:
+            The experiment execution's exec_id.
+        """
+        # Build a reconfigured adapter with the same checkpoint step names.
+        # Supplying the same name keeps the flow/checkpoint names identical so
+        # flow.replay() can resolve the head checkpoint from the baseline execution.
+        resolved_model = model if model is not None else self._model
+        resolved_profile = prompt_profile if prompt_profile is not None else self._prompt_profile
+        reconfigured = KitaruAdapterPA(
+            model=resolved_model,
+            prompt_profile=resolved_profile,
+            name=self.name,
+        )
+        handle = reconfigured._flow.replay(
+            exec_id,
+            from_=self.cut_of(exec_id),
+            cache=False,
+        )
+        result = handle.wait()
+        replay_id = handle.exec_id
+        if isinstance(result, dict) and "risk_status" in result:
+            self._results[replay_id] = result
+        return replay_id
