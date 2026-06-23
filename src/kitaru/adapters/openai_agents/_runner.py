@@ -319,13 +319,25 @@ def _interruptions_from_state(state: Any) -> list[Any]:
 
 def _usage_from_result(sdk_result: Any) -> dict[str, Any] | None:
     raw_usage = getattr(getattr(sdk_result, "context_wrapper", None), "usage", None)
+    model_name: str | None = None
     if raw_usage is None:
         raw_responses = getattr(sdk_result, "raw_responses", None) or []
-        if raw_responses:
+        if len(raw_responses) == 1:
+            raw_response = raw_responses[0]
+            raw_usage = getattr(raw_response, "usage", None)
+            raw_model = getattr(raw_response, "model", None)
+            model_name = raw_model if isinstance(raw_model, str) else None
+        elif raw_responses:
             raw_usage = getattr(raw_responses[-1], "usage", None)
     if raw_usage is None:
         return None
-    return normalize_usage(to_json_safe(raw_usage)).model_dump(mode="json")
+    summary = normalize_usage(to_json_safe(raw_usage), model_name=model_name)
+    usage_payload = summary.model_dump(mode="json")
+    if model_name is not None:
+        raw_payload = usage_payload.get("raw")
+        if isinstance(raw_payload, dict):
+            raw_payload.setdefault("model", model_name)
+    return usage_payload
 
 
 def _summarize_interruption(

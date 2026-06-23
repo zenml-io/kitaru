@@ -7,12 +7,14 @@ observation aggregates those records into execution-level metadata.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import logging
 import math
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Literal, cast
 
 from pydantic_core import to_jsonable_python
@@ -215,6 +217,7 @@ class CalculatedCostMetadata:
     estimated_cost_usd: float | None
     cost_source: LLMCostSource
     cost_source_label: str | None
+    pricing_version: str | None = None
 
 
 def calculated_cost_metadata(
@@ -277,6 +280,326 @@ def estimate_calculated_cost_usd(
         adapter_name=adapter_name,
         source_label="cost_calculator",
     ).estimated_cost_usd
+
+
+_GENAI_PRICES_SOURCE_LABEL = "genai-prices"
+_PROVIDER_ID_ALIASES = {
+    "anthropic": "anthropic",
+    "claude": "anthropic",
+    "google": "google",
+    "google_gemini": "google",
+    "google-gemini": "google",
+    "google_gla": "google",
+    "google-gla": "google",
+    "google_vertex": "google",
+    "google-vertex": "google",
+    "vertex": "google",
+    "vertexai": "google",
+    "gemini": "google",
+    "openai": "openai",
+}
+
+
+@lru_cache(maxsize=1)
+def genai_prices_version() -> str:
+    """Return the installed genai-prices package version for provenance."""
+    try:
+        return importlib.metadata.version("genai-prices")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _resolve_genai_cost_policy(*, warnings: list[str], adapter_name: str) -> str | None:
+    try:
+        from kitaru.config import resolve_llm_estimated_cost_policy
+
+        return resolve_llm_estimated_cost_policy()
+    except Exception as exc:
+        warnings.append(
+            f"Kitaru could not resolve the {adapter_name} estimated-cost policy; "
+            "tokens were recorded without an estimated cost: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def _normalize_provider_id(provider: str | None, model_ref: str | None) -> str | None:
+    candidate = (provider or "").strip().lower()
+    if not candidate and model_ref and "/" in model_ref:
+        candidate = model_ref.split("/", 1)[0].strip().lower()
+    if not candidate and model_ref and ":" in model_ref:
+        candidate = model_ref.split(":", 1)[0].strip().lower()
+    return _PROVIDER_ID_ALIASES.get(candidate)
+
+
+def _provider_model_ref(model_ref: str | None, provider_id: str | None) -> str | None:
+    if model_ref is None:
+        return None
+    normalized = model_ref.strip()
+    if not normalized:
+        return None
+    for separator in ("/", ":"):
+        if separator not in normalized:
+            continue
+        prefix, _, suffix = normalized.partition(separator)
+        if _normalize_provider_id(prefix, None) == provider_id and suffix.strip():
+            normalized = suffix.strip()
+            break
+    if provider_id == "google":
+        if normalized.startswith("models/"):
+            return normalized.removeprefix("models/")
+        if normalized.startswith("publishers/google/models/"):
+            return normalized.removeprefix("publishers/google/models/")
+        marker = "/publishers/google/models/"
+        if marker in normalized:
+            return normalized.rsplit(marker, 1)[1]
+    return normalized
+
+
+def _usage_has_genai_pricing_tokens(usage: Mapping[str, Any] | None) -> bool:
+    if usage is None:
+        return False
+    return any(
+        _int_or_none(usage.get(key)) is not None
+        for key in (
+            "input_tokens",
+            "prompt_tokens",
+            "output_tokens",
+            "completion_tokens",
+            "cached_input_tokens",
+            "cached_prompt_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        )
+    )
+
+
+def _normalized_pricing_token_counts(
+    *,
+    provider_id: str,
+    usage: Mapping[str, Any],
+) -> tuple[int | None, int | None, int | None, int | None]:
+    token_usage = token_usage_from_mapping(usage)
+    input_tokens = token_usage["input_tokens"]
+    output_tokens = token_usage["output_tokens"]
+    cache_read_tokens = token_usage["cached_input_tokens"]
+    cache_write_tokens = _int_or_none(
+        _first_present(usage, "cache_creation_input_tokens", "cache_write_tokens")
+    )
+    return input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+
+
+def _coerce_genai_price_result(
+    price: Any,
+    *,
+    warnings: list[str],
+    adapter_name: str,
+    model_ref: str,
+    failure_cost_source: LLMCostSource,
+) -> CalculatedCostMetadata:
+    estimated_cost = coerce_cost_usd(getattr(price, "total_price", None))
+    if estimated_cost is None:
+        warnings.append(
+            "genai-prices returned an invalid estimated cost for "
+            f"{adapter_name} model {model_ref!r}; tokens were recorded without "
+            "an estimated cost."
+        )
+        return CalculatedCostMetadata(
+            estimated_cost_usd=None,
+            cost_source=failure_cost_source,
+            cost_source_label=_GENAI_PRICES_SOURCE_LABEL,
+        )
+    return CalculatedCostMetadata(
+        estimated_cost_usd=estimated_cost,
+        cost_source="calculator",
+        cost_source_label=_GENAI_PRICES_SOURCE_LABEL,
+        pricing_version=f"genai-prices:{genai_prices_version()}",
+    )
+
+
+def estimate_genai_prices_cost(
+    *,
+    provider: str | None,
+    model: str | None,
+    usage: Mapping[str, Any] | None,
+    warnings: list[str],
+    adapter_name: str,
+    failure_cost_source: LLMCostSource = "calculator_error",
+) -> CalculatedCostMetadata:
+    """Estimate cost with genai-prices from known provider/model/token data."""
+    provider_id = _normalize_provider_id(provider, model)
+    model_ref = _provider_model_ref(model, provider_id)
+    if (
+        provider_id is None
+        or model_ref is None
+        or not _usage_has_genai_pricing_tokens(usage)
+    ):
+        return CalculatedCostMetadata(None, "none", None)
+
+    policy = _resolve_genai_cost_policy(warnings=warnings, adapter_name=adapter_name)
+    if policy != "auto":
+        return CalculatedCostMetadata(None, "none", None)
+
+    assert usage is not None  # Narrowed by _usage_has_genai_pricing_tokens.
+    try:
+        from genai_prices import Usage, calc_price
+    except ImportError:
+        warnings.append(
+            "genai-prices is not installed; LLM tokens were recorded without "
+            "an estimated cost."
+        )
+        return CalculatedCostMetadata(
+            None,
+            failure_cost_source,
+            _GENAI_PRICES_SOURCE_LABEL,
+        )
+
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens = (
+        _normalized_pricing_token_counts(provider_id=provider_id, usage=usage)
+    )
+    try:
+        genai_usage = Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+        )
+        price = calc_price(genai_usage, model_ref, provider_id=provider_id)
+    except Exception as exc:
+        warnings.append(
+            "genai-prices could not estimate LLM cost for "
+            f"{adapter_name} model {model_ref!r}; tokens were recorded without "
+            f"an estimated cost: {type(exc).__name__}: {exc}"
+        )
+        return CalculatedCostMetadata(
+            None,
+            failure_cost_source,
+            _GENAI_PRICES_SOURCE_LABEL,
+        )
+
+    return _coerce_genai_price_result(
+        price,
+        warnings=warnings,
+        adapter_name=adapter_name,
+        model_ref=model_ref,
+        failure_cost_source=failure_cost_source,
+    )
+
+
+def estimate_genai_prices_cost_from_response(
+    *,
+    provider: str | None,
+    model: str | None,
+    response_data: Mapping[str, Any],
+    warnings: list[str],
+    adapter_name: str,
+    api_flavor: str | None = None,
+    missing_package_warning: str | None = None,
+    failure_warning_prefix: str | None = None,
+    invalid_warning: str | None = None,
+    failure_cost_source: LLMCostSource = "calculator_error",
+) -> CalculatedCostMetadata:
+    """Estimate cost with genai-prices by extracting usage from provider-shaped data."""
+    provider_id = _normalize_provider_id(provider, model)
+    model_ref = _provider_model_ref(model, provider_id)
+    usage = _mapping_or_none(response_data.get("usage"))
+    if (
+        provider_id is None
+        or model_ref is None
+        or not _usage_has_genai_pricing_tokens(usage)
+    ):
+        return CalculatedCostMetadata(None, "none", None)
+
+    policy = _resolve_genai_cost_policy(warnings=warnings, adapter_name=adapter_name)
+    if policy != "auto":
+        return CalculatedCostMetadata(None, "none", None)
+
+    try:
+        from genai_prices import extract_usage
+    except ImportError:
+        warnings.append(
+            missing_package_warning
+            or "genai-prices is not installed; LLM tokens were recorded without "
+            "an estimated cost."
+        )
+        return CalculatedCostMetadata(
+            None,
+            failure_cost_source,
+            _GENAI_PRICES_SOURCE_LABEL,
+        )
+
+    extract_kwargs: dict[str, Any] = {"provider_id": provider_id}
+    if api_flavor is not None:
+        extract_kwargs["api_flavor"] = api_flavor
+    try:
+        extracted_usage = extract_usage(response_data, **extract_kwargs)
+        price = extracted_usage.calc_price()
+    except Exception as exc:
+        if failure_warning_prefix is None:
+            warnings.append(
+                "genai-prices could not estimate LLM cost for "
+                f"{adapter_name} model {model_ref!r}; tokens were recorded "
+                f"without an estimated cost: {type(exc).__name__}: {exc}"
+            )
+        else:
+            warnings.append(f"{failure_warning_prefix}: {type(exc).__name__}: {exc}")
+        return CalculatedCostMetadata(
+            None,
+            failure_cost_source,
+            _GENAI_PRICES_SOURCE_LABEL,
+        )
+
+    if invalid_warning is not None:
+        estimated_cost = coerce_cost_usd(getattr(price, "total_price", None))
+        if estimated_cost is None:
+            warnings.append(invalid_warning)
+            return CalculatedCostMetadata(
+                None,
+                failure_cost_source,
+                _GENAI_PRICES_SOURCE_LABEL,
+            )
+        return CalculatedCostMetadata(
+            estimated_cost,
+            "calculator",
+            _GENAI_PRICES_SOURCE_LABEL,
+            f"genai-prices:{genai_prices_version()}",
+        )
+    return _coerce_genai_price_result(
+        price,
+        warnings=warnings,
+        adapter_name=adapter_name,
+        model_ref=model_ref,
+        failure_cost_source=failure_cost_source,
+    )
+
+
+def calculated_or_genai_cost_metadata(
+    *,
+    calculator: Callable[[Any], Any] | None,
+    calculator_usage: Any | None,
+    genai_provider: str | None,
+    genai_model: str | None,
+    genai_usage: Mapping[str, Any] | None,
+    warnings: list[str],
+    adapter_name: str,
+    calculator_source_label: str,
+) -> CalculatedCostMetadata:
+    """Use a user calculator when configured, otherwise try genai-prices."""
+    if calculator is not None:
+        return calculated_cost_metadata(
+            calculator=calculator,
+            usage=calculator_usage,
+            warnings=warnings,
+            adapter_name=adapter_name,
+            source_label=calculator_source_label,
+        )
+    return estimate_genai_prices_cost(
+        provider=genai_provider,
+        model=genai_model,
+        usage=genai_usage,
+        warnings=warnings,
+        adapter_name=adapter_name,
+    )
 
 
 def strip_usage_record_bookkeeping(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -358,6 +681,9 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
 
     details = _mapping_or_none(mapping.get("details")) or {}
     output_details = _mapping_or_none(mapping.get("output_tokens_details")) or {}
+    completion_details = (
+        _mapping_or_none(mapping.get("completion_tokens_details")) or {}
+    )
     cached_input_value = _first_present(
         mapping,
         "cached_input_tokens",
@@ -373,6 +699,10 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
         "thoughts_token_count",
         "thoughtsTokenCount",
     )
+    if reasoning_value is None:
+        reasoning_value = _first_present(output_details, "reasoning_tokens")
+    if reasoning_value is None:
+        reasoning_value = _first_present(completion_details, "reasoning_tokens")
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -382,11 +712,7 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
             if cached_input_value is not None
             else _first_present(details, "cached_tokens")
         ),
-        "reasoning_tokens": _int_or_none(
-            reasoning_value
-            if reasoning_value is not None
-            else _first_present(output_details, "reasoning_tokens")
-        ),
+        "reasoning_tokens": _int_or_none(reasoning_value),
         "raw": _jsonable_mapping(value),
     }
 

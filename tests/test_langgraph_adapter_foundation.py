@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
 def _config_with_injected_checkpointer(
@@ -1404,6 +1405,60 @@ def test_graph_call_samples_raw_usage_metadata_for_many_payloads(
     assert logged[0]["usage"]["input_tokens"] == 7
     assert logged[0]["usage"]["output_tokens"] == 14
     assert logged[0]["usage"]["total_tokens"] == 21
+    assert logged[0]["cost"]["source"] == "none"
+    assert logged[0]["cost"]["estimated_cost_usd"] is None
+
+
+def test_graph_call_uses_genai_prices_for_known_single_model(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.67)
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    monkeypatch.setattr(
+        runner,
+        "_usage_from_model_events",
+        lambda _tracker: langgraph_adapter.LangGraphUsageSummary(
+            model_name="openai/gpt-4o-mini",
+            input_tokens=3,
+            output_tokens=4,
+        ),
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.estimated_cost_usd == 0.67
+    assert logged[0]["cost"]["source"] == "calculator"
+    assert logged[0]["cost"]["source_label"] == "genai-prices"
+    assert logged[0]["cost"]["pricing_version"].startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
 
 
 def test_graph_call_keeps_successful_run_when_cost_calculator_fails(

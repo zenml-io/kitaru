@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 from kitaru._llm_usage import (
     CalculatedCostMetadata,
     build_usage_record,
-    calculated_cost_metadata,
+    calculated_or_genai_cost_metadata,
     log_usage_record,
     token_usage_from_mapping,
 )
@@ -658,12 +658,23 @@ class KitaruGeminiInteractionsRunner:
         request: GeminiInteractionRequest,
         warnings: list[str],
     ) -> CalculatedCostMetadata:
-        return calculated_cost_metadata(
+        usage_summary = self._usage_summary(payload=payload, request=request)
+        usage_payload = (
+            usage_summary.model_dump(mode="json") if usage_summary is not None else None
+        )
+        return calculated_or_genai_cost_metadata(
             calculator=self._cost_calculator,
-            usage=self._usage_summary(payload=payload, request=request),
+            calculator_usage=usage_summary,
+            genai_provider="google_gemini",
+            genai_model=(
+                usage_summary.resolved_model or usage_summary.model_name
+                if usage_summary is not None
+                else None
+            ),
+            genai_usage=usage_payload,
             warnings=warnings,
             adapter_name="Gemini Interactions",
-            source_label="gemini.cost_calculator",
+            calculator_source_label="gemini.cost_calculator",
         )
 
     def _log_canonical_llm_call_record(
@@ -711,6 +722,7 @@ class KitaruGeminiInteractionsRunner:
                 estimated_cost_usd=cost_metadata.estimated_cost_usd,
                 cost_source=cost_metadata.cost_source,
                 cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 latency_ms=payload.duration_ms,
                 status="completed",
                 billing_effect="incurred",

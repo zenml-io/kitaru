@@ -25,11 +25,223 @@ from kitaru._llm_usage import (
     add_optional_token_count,
     aggregate_usage_records,
     build_usage_record,
+    calculated_or_genai_cost_metadata,
+    estimate_genai_prices_cost,
     execution_metadata_from_records,
     log_usage_record_best_effort,
     parse_usage_summary,
     usage_records_from_metadata,
 )
+from tests._genai_prices_helpers import install_fake_genai_calc_price
+
+
+def test_genai_prices_helper_estimates_gemini_with_normalized_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.007)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="google_gemini",
+        model="gemini/gemini-1.5-flash",
+        usage={"input_tokens": 1000, "output_tokens": 500, "thoughtsTokenCount": 100},
+        warnings=warnings,
+        adapter_name="Gemini Interactions",
+    )
+
+    assert metadata.estimated_cost_usd == 0.007
+    assert metadata.cost_source == "calculator"
+    assert metadata.cost_source_label == "genai-prices"
+    assert metadata.pricing_version is not None
+    assert metadata.pricing_version.startswith("genai-prices:")
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 500,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gemini-1.5-flash",
+            "provider_id": "google",
+        }
+    ]
+
+
+def test_genai_prices_helper_keeps_openai_reasoning_in_completion_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.008)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="openai",
+        model="openai/gpt-4o-mini",
+        usage={
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "completion_tokens_details": {"reasoning_tokens": 10},
+        },
+        warnings=warnings,
+        adapter_name="OpenAI Agents",
+    )
+
+    assert metadata.estimated_cost_usd == 0.008
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("google_gemini", "models/gemini-1.5-flash"),
+        ("google_vertex", "publishers/google/models/gemini-1.5-flash"),
+        (
+            "google_vertex",
+            "projects/demo/locations/us-central1/publishers/google/models/gemini-1.5-flash",
+        ),
+    ],
+)
+def test_genai_prices_helper_normalizes_google_model_resource_names(
+    provider: str,
+    model: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.009)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider=provider,
+        model=model,
+        usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="Gemini Interactions",
+    )
+
+    assert metadata.estimated_cost_usd == 0.009
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gemini-1.5-flash",
+            "provider_id": "google",
+        }
+    ]
+
+
+def test_genai_prices_helper_respects_estimated_cost_opt_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kitaru.config.resolve_llm_estimated_cost_policy",
+        lambda: "off",
+    )
+    calls = install_fake_genai_calc_price(monkeypatch)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="openai",
+        model="gpt-4o-mini",
+        usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="OpenAI Agents",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "none"
+    assert metadata.cost_source_label is None
+    assert warnings == []
+    assert calls == []
+
+
+def test_genai_prices_helper_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_genai_calc_price(
+        monkeypatch,
+        calc_error=LookupError("no price"),
+    )
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="openai",
+        model="gpt-4o-mini",
+        usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="OpenAI Agents",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "calculator_error"
+    assert metadata.cost_source_label == "genai-prices"
+    assert len(warnings) == 1
+    assert "LookupError: no price" in warnings[0]
+
+
+def test_genai_prices_helper_unknown_provider_records_tokens_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider=None,
+        model="unprefixed-model",
+        usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="LangGraph",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "none"
+    assert metadata.cost_source_label is None
+    assert warnings == []
+    assert calls == []
+
+
+def test_calculated_or_genai_cost_metadata_does_not_fallback_after_calculator_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.99)
+    warnings: list[str] = []
+
+    def fail_cost(_usage: object) -> float:
+        raise RuntimeError("boom")
+
+    metadata = calculated_or_genai_cost_metadata(
+        calculator=fail_cost,
+        calculator_usage={"input_tokens": 10, "output_tokens": 5},
+        genai_provider="openai",
+        genai_model="gpt-4o-mini",
+        genai_usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="OpenAI Agents",
+        calculator_source_label="openai_agents.cost_calculator",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "calculator_error"
+    assert metadata.cost_source_label == "openai_agents.cost_calculator"
+    assert genai_calls == []
+    assert len(warnings) == 1
+    assert "RuntimeError: boom" in warnings[0]
 
 
 def test_add_optional_token_count_preserves_missing_values() -> None:

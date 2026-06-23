@@ -6,13 +6,11 @@ and ``openrouter/*`` models. Ollama and OpenRouter use the OpenAI-compatible
 API and require the ``openai`` package (``pip install kitaru[openai]``).
 """
 
-import importlib.metadata
 import os
 import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -20,7 +18,11 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_core import to_jsonable_python
 
 from kitaru._env import _temporary_env
-from kitaru._llm_usage import build_usage_record, coerce_cost_usd, usage_record_metadata
+from kitaru._llm_usage import (
+    build_usage_record,
+    estimate_genai_prices_cost_from_response,
+    usage_record_metadata,
+)
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import (
@@ -28,11 +30,7 @@ from kitaru.checkpoint import (
     _raise_if_checkpoint_output_handle_in_value,
     checkpoint,
 )
-from kitaru.config import (
-    ResolvedModelSelection,
-    resolve_llm_estimated_cost_policy,
-    resolve_model_selection,
-)
+from kitaru.config import ResolvedModelSelection, resolve_model_selection
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -715,26 +713,6 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_llm_estimated_cost_policy() -> str:
-    """Resolve the direct LLM estimated-cost policy for the current process."""
-    return resolve_llm_estimated_cost_policy()
-
-
-def _usage_has_pricing_tokens(usage: _LLMUsage) -> bool:
-    """Return whether there is enough usage information to try pricing."""
-    return any(
-        value is not None
-        for value in (
-            usage.prompt_tokens,
-            usage.completion_tokens,
-            usage.cached_input_tokens,
-            usage.reasoning_tokens,
-            usage.cache_creation_input_tokens,
-            usage.cache_read_input_tokens,
-        )
-    )
-
-
 def _direct_pricing_usage_payload(provider: str, usage: _LLMUsage) -> dict[str, Any]:
     """Build the provider usage mapping expected by genai-prices."""
     if provider == "openai":
@@ -767,15 +745,6 @@ def _direct_pricing_usage_payload(provider: str, usage: _LLMUsage) -> dict[str, 
     return payload
 
 
-@lru_cache(maxsize=1)
-def _genai_prices_version() -> str:
-    """Return the installed genai-prices package version for provenance."""
-    try:
-        return importlib.metadata.version("genai-prices")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
-
-
 def _estimate_direct_llm_cost(
     *,
     resolved_model: str,
@@ -783,66 +752,37 @@ def _estimate_direct_llm_cost(
     warnings: list[str],
 ) -> _DirectCostEstimate:
     """Estimate direct OpenAI/Anthropic call cost with genai-prices."""
-    try:
-        policy = _resolve_llm_estimated_cost_policy()
-    except Exception as exc:
-        warnings.append(
-            "Kitaru could not resolve the direct LLM estimated-cost policy; "
-            "tokens were recorded without an estimated cost: "
-            f"{type(exc).__name__}: {exc}"
-        )
-        return _DirectCostEstimate()
-    if policy == "off":
-        return _DirectCostEstimate()
-
     provider = _provider_name(resolved_model)
-    if provider not in {"openai", "anthropic"}:
-        return _DirectCostEstimate()
     _, _, provider_model = resolved_model.partition("/")
-    if not provider_model or not _usage_has_pricing_tokens(usage):
-        return _DirectCostEstimate()
-
-    try:
-        from genai_prices import extract_usage
-    except ImportError:
-        warnings.append(
-            "genai-prices is not installed; direct LLM tokens were recorded "
-            "without an estimated cost."
-        )
-        return _DirectCostEstimate()
-
     response_data = {
         "model": provider_model,
-        "usage": _direct_pricing_usage_payload(provider, usage),
+        "usage": _direct_pricing_usage_payload(provider or "", usage),
     }
-    extract_kwargs: dict[str, Any] = {"provider_id": provider}
-    if provider == "openai":
-        extract_kwargs["api_flavor"] = "chat"
-
-    try:
-        extracted_usage = extract_usage(response_data, **extract_kwargs)
-        price = extracted_usage.calc_price()
-    except Exception as exc:
-        warnings.append(
+    metadata = estimate_genai_prices_cost_from_response(
+        provider=provider,
+        model=resolved_model,
+        response_data=response_data,
+        warnings=warnings,
+        adapter_name="direct LLM",
+        api_flavor="chat" if provider == "openai" else None,
+        missing_package_warning=(
+            "genai-prices is not installed; direct LLM tokens were recorded "
+            "without an estimated cost."
+        ),
+        failure_warning_prefix=(
             "genai-prices could not estimate direct LLM cost for "
-            f"{resolved_model!r}; tokens were recorded without an estimated "
-            f"cost: {type(exc).__name__}: {exc}"
-        )
-        return _DirectCostEstimate()
-
-    estimated_cost = coerce_cost_usd(getattr(price, "total_price", None))
-    if estimated_cost is None:
-        warnings.append(
+            f"{resolved_model!r}; tokens were recorded without an estimated cost"
+        ),
+        invalid_warning=(
             "genai-prices returned an invalid direct LLM estimated cost for "
             f"{resolved_model!r}; tokens were recorded without an estimated cost."
-        )
-        return _DirectCostEstimate()
-
-    version = _genai_prices_version()
+        ),
+        failure_cost_source="none",
+    )
     return _DirectCostEstimate(
-        estimated_cost_usd=estimated_cost,
-        cost_source_label="genai-prices",
-        pricing_version=f"genai-prices:{version}",
+        estimated_cost_usd=metadata.estimated_cost_usd,
+        cost_source_label=metadata.cost_source_label,
+        pricing_version=metadata.pricing_version,
     )
 
 

@@ -231,15 +231,16 @@ Cost fields are intentionally split:
 - `actual_cost_usd` means the provider reported a final cost for this exact
   call. Treat this as observability, not as a billing invoice.
 - `estimated_cost_usd` means Kitaru or an SDK calculated a cost from token counts
-  and pricing data. Direct OpenAI and Anthropic `kitaru.llm()` calls write this
-  field automatically when the model can be priced. Claude Agent SDK
-  `total_cost_usd` is also recorded here because it is an SDK-side estimate, not
-  a provider invoice line. Adapter-level user calculators also write this field.
+  and pricing data. Direct `kitaru.llm()` calls and framework adapters write this
+  field automatically when Kitaru has reliable provider, model, and token data
+  that `genai-prices` can price. Claude Agent SDK `total_cost_usd` is also
+  recorded here because it is an SDK-side estimate, not a provider invoice line.
+  Adapter-level user calculators also write this field.
 - `display_cost_usd` uses actual cost for a record when present, otherwise
   estimated cost. Treat it as observability, not as a billing invoice.
 
-Direct `kitaru.llm()` cost estimates are on by default for OpenAI and Anthropic
-models. After the provider call succeeds, Kitaru sends the model name and token
+Automatic `genai-prices` cost estimates are on by default. After the provider
+or adapter call succeeds, Kitaru sends the known provider, model name, and token
 usage to [`genai-prices`](https://github.com/pydantic/genai-prices), stores the
 returned value as `estimated_cost_usd`, and records provenance like this:
 
@@ -251,13 +252,19 @@ actual_cost_usd = null
 estimated_cost_usd = <calculated USD estimate>
 ```
 
-The provider call always comes first. If `genai-prices` is missing, cannot price
-the model, returns an invalid value, or cannot read its price data, Kitaru still
-returns the model response and records the token counts. The `llm_usage_v1`
-record gets a warning and no estimated cost, so the execution summary increments
-`records_without_cost_count` for that record.
+The provider or adapter call always comes first. If `genai-prices` is missing,
+cannot price the model, returns an invalid value, or cannot read its price data,
+Kitaru still returns the model response and records the token counts. The
+`llm_usage_v1` record gets a warning and no estimated cost, so the execution
+summary increments `records_without_cost_count` for that record.
 
-To disable direct LLM cost estimates for a process, set:
+Kitaru does not guess when a usage record combines multiple models or lacks a
+trusted provider/model identity. In that case it records tokens only. User
+`cost_calculator=` hooks still take priority over the built-in estimate; if a
+user calculator fails, Kitaru records that calculator error instead of hiding it
+with a fallback estimate.
+
+To disable automatic `genai-prices` estimates for a process, set:
 
 ```bash
 export KITARU_LLM_ESTIMATED_COSTS=off

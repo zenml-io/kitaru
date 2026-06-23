@@ -14,7 +14,7 @@ from kitaru._llm_usage import (
     LLMBillingEffect,
     LLMCacheStatus,
     build_usage_record,
-    calculated_cost_metadata,
+    calculated_or_genai_cost_metadata,
     token_usage_from_mapping,
     usage_records_metadata,
 )
@@ -609,12 +609,15 @@ class EventTracker:
                 event=event,
                 usage_payload=usage_payload,
             )
-            cost_metadata = calculated_cost_metadata(
+            cost_metadata = calculated_or_genai_cost_metadata(
                 calculator=self.cost_calculator,
-                usage=usage_summary,
+                calculator_usage=usage_summary,
+                genai_provider=event.provider_name,
+                genai_model=event.model_name,
+                genai_usage=usage_payload,
                 warnings=warnings,
                 adapter_name="Pydantic AI",
-                source_label="pydantic_ai.cost_calculator",
+                calculator_source_label="pydantic_ai.cost_calculator",
             )
             usage_records.append(
                 build_usage_record(
@@ -631,6 +634,7 @@ class EventTracker:
                     estimated_cost_usd=cost_metadata.estimated_cost_usd,
                     cost_source=cost_metadata.cost_source,
                     cost_source_label=cost_metadata.cost_source_label,
+                    pricing_version=cost_metadata.pricing_version,
                     latency_ms=event.duration_ms,
                     status=event.status,
                     billing_effect=event.billing_effect,

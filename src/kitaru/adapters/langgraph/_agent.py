@@ -10,7 +10,7 @@ from typing import Any, Literal, cast, overload
 from kitaru._llm_usage import (
     add_optional_token_count,
     build_usage_record,
-    calculated_cost_metadata,
+    calculated_or_genai_cost_metadata,
     log_usage_record,
     token_usage_from_mapping,
 )
@@ -1005,12 +1005,16 @@ class KitaruGraphRunner:
         )
         if usage is None and self._capture.save_usage:
             usage = self._usage_from_output(output)
-        cost_metadata = calculated_cost_metadata(
+        usage_payload = usage.model_dump(mode="json") if usage is not None else None
+        cost_metadata = calculated_or_genai_cost_metadata(
             calculator=self._cost_calculator,
-            usage=usage,
+            calculator_usage=usage,
+            genai_provider=None,
+            genai_model=usage.model_name if usage is not None else None,
+            genai_usage=usage_payload,
             warnings=warnings,
             adapter_name="LangGraph",
-            source_label="langgraph.cost_calculator",
+            calculator_source_label="langgraph.cost_calculator",
         )
         if self._capture.save_usage:
             usage_record = build_usage_record(
@@ -1019,11 +1023,12 @@ class KitaruGraphRunner:
                 call_name=self._name,
                 event_id=tracker.run_label,
                 record_id=tracker.run_label,
-                usage=usage.model_dump(mode="json") if usage is not None else None,
+                usage=usage_payload,
                 model=usage.model_name if usage is not None else None,
                 estimated_cost_usd=cost_metadata.estimated_cost_usd,
                 cost_source=cost_metadata.cost_source,
                 cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 status=status,
                 billing_effect="incurred" if status == "completed" else "unknown",
                 cache_status="executed",

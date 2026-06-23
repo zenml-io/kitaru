@@ -464,7 +464,7 @@ inspection and audits:
 
 Each successful Claude invocation logs one canonical `llm_usage_v1` record. The record uses the adapter run label as its stable identity and includes the SDK `usage` payload when Claude reports one.
 
-When the Claude SDK reports `total_cost_usd`, Kitaru records it as `estimated_cost_usd`, not `actual_cost_usd`. The SDK value is useful for spend dashboards, but it is still a calculated SDK value rather than a provider invoice line. If the SDK does not report a cost, you can pass `cost_calculator=` to `KitaruClaudeRunner`; Kitaru calls it with a `ClaudeUsageSummary` and records the returned non-negative number as an estimated USD cost.
+When the Claude SDK reports `total_cost_usd`, Kitaru records it as `estimated_cost_usd`, not `actual_cost_usd`. The SDK value is useful for spend dashboards, but it is still a calculated SDK value rather than a provider invoice line. If the SDK does not report a cost, a `cost_calculator=` you pass to `KitaruClaudeRunner` takes priority; Kitaru calls it with a `ClaudeUsageSummary` and records the returned non-negative number as an estimated USD cost. Without an SDK estimate or user calculator, Kitaru estimates with `genai-prices` when the usage points to one known Anthropic model.
 
 ```python
 from kitaru.adapters.claude_agent_sdk import ClaudeUsageSummary, KitaruClaudeRunner
@@ -485,7 +485,7 @@ runner = KitaruClaudeRunner(
 )
 ```
 
-Kitaru does not run a built-in Claude adapter pricing table here. Direct `kitaru.llm()` calls have their own genai-prices path; adapter runners either use a value reported by the SDK or a calculator you provide.
+The fallback `genai-prices` estimate is still an observability estimate, not a provider invoice. If Claude usage spans multiple models or does not identify the model, Kitaru records tokens only instead of guessing.
 
 Some Claude SDK results expose `model_usage` instead of the top-level `usage` payload. In that case, Kitaru uses `model_usage` as a fallback for the canonical usage record. If both are present, Kitaru uses `usage` and does not add `model_usage` on top; otherwise the same tokens could be counted twice.
 

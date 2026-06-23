@@ -536,7 +536,7 @@ runner = KitaruRunner(
 
 When `save_usage=True` (the default), each completed or interrupted runner call logs one canonical `llm_usage_v1` record. That record uses the OpenAI Agents result usage payload when the SDK exposes one, and it uses the runner name plus the adapter run label as the stable record identity.
 
-If you pass a `cost_calculator=` to `KitaruRunner`, Kitaru stores the returned value as `estimated_cost_usd`. Calculator failures are non-fatal: the runner still returns the OpenAI result, adds a warning, and leaves the estimated cost empty. OpenAI Agents records do not store provider-reported actual cost in this adapter path, so `actual_cost_usd` is normally empty.
+If you pass a `cost_calculator=` to `KitaruRunner`, Kitaru stores the returned value as `estimated_cost_usd`. Calculator failures are non-fatal: the runner still returns the OpenAI result, adds a warning, and leaves the estimated cost empty. Without a user calculator, Kitaru estimates with `genai-prices` when the SDK usage summary names a single OpenAI model and includes priceable token counts. If the run does not expose a reliable model name, Kitaru records tokens only rather than pricing a multi-model or handoff run with the wrong model. OpenAI Agents records do not store provider-reported actual cost in this adapter path, so `actual_cost_usd` is normally empty.
 
 These records roll up into the execution-level LLM usage summary after your code observes the terminal execution with `FlowHandle.wait()` or `FlowHandle.get()`. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
 

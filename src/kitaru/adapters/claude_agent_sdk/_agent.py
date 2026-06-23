@@ -12,7 +12,7 @@ from kitaru._llm_usage import (
     CalculatedCostMetadata,
     add_optional_token_count,
     build_usage_record,
-    calculated_cost_metadata,
+    calculated_or_genai_cost_metadata,
     coerce_cost_usd,
     log_usage_record,
     token_usage_from_mapping,
@@ -572,12 +572,17 @@ class KitaruClaudeRunner:
         canonical_usage = _canonical_usage_payload(payload)
         usage_summary = _usage_summary_from_payload(payload, canonical_usage)
         if payload.cost_usd is None:
-            cost_metadata = calculated_cost_metadata(
+            cost_metadata = calculated_or_genai_cost_metadata(
                 calculator=self._cost_calculator,
-                usage=usage_summary,
+                calculator_usage=usage_summary,
+                genai_provider="anthropic",
+                genai_model=usage_summary.model_name
+                if usage_summary is not None
+                else None,
+                genai_usage=canonical_usage,
                 warnings=warnings,
                 adapter_name="Claude Agent SDK",
-                source_label="claude_agent_sdk.cost_calculator",
+                calculator_source_label="claude_agent_sdk.cost_calculator",
             )
         else:
             estimated_cost = coerce_cost_usd(payload.cost_usd)
@@ -612,6 +617,7 @@ class KitaruClaudeRunner:
                 estimated_cost_usd=cost_metadata.estimated_cost_usd,
                 cost_source=cost_metadata.cost_source,
                 cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 latency_ms=payload.duration_api_ms or payload.duration_ms,
                 status="completed",
                 billing_effect="incurred",

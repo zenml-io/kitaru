@@ -32,6 +32,7 @@ from kitaru.adapters.pydantic_ai._utils import (
     with_default_type,
 )
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
 def test_pydantic_ai_tracker_records_model_call_estimated_cost(
@@ -89,6 +90,56 @@ def test_pydantic_ai_tracker_records_model_call_estimated_cost(
     assert record["cost"]["estimated_cost_usd"] == 0.34
     assert record["cost"]["source"] == "calculator"
     assert record["cost"]["source_label"] == "pydantic_ai.cost_calculator"
+
+
+def test_pydantic_ai_tracker_records_default_genai_prices_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.usage import RequestUsage
+
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+    from kitaru.adapters.pydantic_ai import _tracking
+
+    logged: dict[str, Any] = {}
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.45)
+
+    def fake_log(**metadata: Any) -> None:
+        logged.update(metadata)
+
+    monkeypatch.setattr(_tracking.kitaru, "log", fake_log)
+
+    tracker = _tracking.EventTracker(agent_name="agent")
+    event_id, context = tracker.start_model_event()
+    tracker.record_model_event(
+        event_id,
+        context,
+        status="completed",
+        duration_ms=1.0,
+        artifacts={},
+        model_name="gpt-4o-mini",
+        provider_name="openai",
+        usage=RequestUsage(input_tokens=3, output_tokens=4),
+    )
+
+    tracker.persist()
+
+    record = next(iter(logged[LLM_USAGE_METADATA_KEY].values()))
+    assert record["cost"]["estimated_cost_usd"] == 0.45
+    assert record["cost"]["source"] == "calculator"
+    assert record["cost"]["source_label"] == "genai-prices"
+    assert record["cost"]["pricing_version"].startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
 
 
 def test_pydantic_ai_tracker_cost_calculator_failure_records_warning(

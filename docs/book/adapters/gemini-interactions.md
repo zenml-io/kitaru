@@ -142,14 +142,17 @@ LLM usage record with `status="completed"`: Google returned a stable response,
 and that response is asking your code to send a follow-up turn.
 
 Google reports token usage metadata for these calls, but Kitaru does not receive
-a provider-reported per-call dollar cost from Gemini Interactions and does not
-estimate Gemini price locally here. By default, Gemini records therefore have:
+a provider-reported per-call dollar cost from Gemini Interactions. By default,
+Kitaru estimates with `genai-prices` when the interaction names a Gemini model
+and includes priceable input/output/cache-read token counts. That value is stored
+as `estimated_cost_usd`, not `actual_cost_usd`.
 
-```text
-cost.source = "none"
-actual_cost_usd = null
-estimated_cost_usd = null
-```
+If Kitaru cannot identify the model, cannot price the model, or only has token
+categories that `genai-prices` does not price, the record keeps the tokens and
+leaves the cost empty. Kitaru does not add `thoughts_token_count` /
+`thoughtsTokenCount` to output tokens. It also does not subtract thought tokens
+from Gemini candidate/output token counts unless Google's usage contract proves
+those counts include thoughts.
 
 If you know the pricing you want to use, pass `cost_calculator=` to
 `KitaruGeminiInteractionsRunner`. Kitaru calls it with a `GeminiUsageSummary`
@@ -175,12 +178,7 @@ runner = KitaruGeminiInteractionsRunner(
 )
 ```
 
-Kitaru does not run a built-in Gemini adapter pricing table. Direct `kitaru.llm()`
-calls have their own genai-prices path; Gemini Interactions only records dollars
-when you provide a calculator. If you do not provide one,
-`records_without_cost_count` increasing is expected. It means “this provider call
-had no dollar-cost value attached,” not “usage tracking failed.” Token counts can
-still be present and aggregated.
+User calculators take priority over the built-in estimate. If you disable automatic estimates with `KITARU_LLM_ESTIMATED_COSTS=off`, or if pricing is not possible, `records_without_cost_count` can still increase. It means “this provider call had no dollar-cost value attached,” not “usage tracking failed.” Token counts can still be present and aggregated.
 
 Set `save_usage=False` when you do not want Gemini usage persisted. That disables
 both the raw usage artifact and the canonical `llm_usage_v1` metadata record for

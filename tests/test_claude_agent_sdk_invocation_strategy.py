@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
 def _purge_claude_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1018,15 +1019,17 @@ def test_claude_cost_calculator_fallback_runs_without_sdk_estimate(
     assert cost["source_label"] == "claude_agent_sdk.cost_calculator"
 
 
-def test_claude_no_sdk_cost_without_calculator_records_no_cost_label(
+def test_claude_no_sdk_cost_without_calculator_uses_genai_prices(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_inline_scope(monkeypatch)
     usage_records: list[dict[str, object]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.56)
     result_message = fake_sdk.__dict__["ResultMessage"]()
     result_message.total_cost_usd = None
+    result_message.model_usage = {"claude-3-5-haiku-latest": result_message.usage}
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
     agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
     monkeypatch.setattr(
@@ -1043,9 +1046,24 @@ def test_claude_no_sdk_cost_without_calculator_records_no_cost_label(
     runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
 
     cost = cast(dict[str, object], usage_records[0]["cost"])
-    assert cost["source"] == "none"
-    assert cost["source_label"] is None
-    assert cost["estimated_cost_usd"] is None
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "genai-prices"
+    assert cost["estimated_cost_usd"] == 0.56
+    pricing_version = cost["pricing_version"]
+    assert isinstance(pricing_version, str)
+    assert pricing_version.startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 5,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "claude-3-5-haiku-latest",
+            "provider_id": "anthropic",
+        }
+    ]
 
 
 def test_claude_cost_calculator_failure_records_warning(
