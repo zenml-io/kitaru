@@ -253,7 +253,7 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://docs.zenml.io/kitaru) | Complete reference and guides |
-| [Agent Harness Platform](https://docs.zenml.io/kitaru/agent-harness-platform) | Build a durable agent harness platform stage by stage |
+| [Agent Harness Platform](https://docs.zenml.io/user-guides/agents-guide) | Build a durable agent harness platform stage by stage |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
