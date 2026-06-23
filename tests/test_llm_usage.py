@@ -59,7 +59,7 @@ def test_genai_prices_helper_estimates_gemini_with_normalized_usage(
         {
             "usage": {
                 "input_tokens": 1000,
-                "output_tokens": 500,
+                "output_tokens": 600,
                 "cache_read_tokens": None,
                 "cache_write_tokens": None,
             },
@@ -67,6 +67,50 @@ def test_genai_prices_helper_estimates_gemini_with_normalized_usage(
             "provider_id": "google",
         }
     ]
+
+
+def test_genai_prices_helper_includes_anthropic_cache_buckets_in_pricing_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.006)
+    warnings: list[str] = []
+    usage = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_creation_input_tokens": 7,
+        "cache_read_input_tokens": 11,
+    }
+
+    metadata = estimate_genai_prices_cost(
+        provider="anthropic",
+        model="anthropic/claude-3-5-haiku-latest",
+        usage=usage,
+        warnings=warnings,
+        adapter_name="Claude Agent SDK",
+    )
+    record = build_usage_record(
+        adapter="claude_agent_sdk",
+        surface="agent_invocation",
+        usage=usage,
+    )
+
+    assert metadata.estimated_cost_usd == 0.006
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 28,
+                "output_tokens": 5,
+                "cache_read_tokens": 11,
+                "cache_write_tokens": 7,
+            },
+            "model_ref": "claude-3-5-haiku-latest",
+            "provider_id": "anthropic",
+        }
+    ]
+    assert record["usage"]["input_tokens"] == 10
+    assert record["usage"]["cached_input_tokens"] == 11
+    assert record["usage"]["raw"] == usage
 
 
 def test_genai_prices_helper_keeps_openai_reasoning_in_completion_tokens(

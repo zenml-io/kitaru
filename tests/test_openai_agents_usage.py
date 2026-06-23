@@ -197,6 +197,239 @@ def test_finalize_run_result_uses_genai_prices_when_no_user_calculator(
     ]
 
 
+def test_runner_call_context_wrapper_usage_gets_single_agent_model_for_genai_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+    runner = KitaruRunner(SimpleNamespace(name="agent", model="gpt-4o-mini"))
+    sdk_result = SimpleNamespace(
+        final_output="ok",
+        context_wrapper=SimpleNamespace(
+            usage={"input_tokens": 10, "output_tokens": 6, "total_tokens": 16}
+        ),
+    )
+
+    result = runner._build_and_finalize_run_result(
+        sdk_result,
+        agent=runner.agent,
+        run_config=SimpleNamespace(model=None),
+        tracker=SimpleNamespace(
+            run_label="run-1",
+            event_log_artifact_name="events",
+            run_summary_artifact_name="summary",
+        ),
+    )
+
+    assert result.estimated_cost_usd == 0.42
+    assert result.usage is not None
+    assert result.usage["model_name"] == "gpt-4o-mini"
+    assert result.usage["raw"]["model"] == "gpt-4o-mini"
+    assert logged[0]["cost"]["source"] == "calculator"
+    assert logged[0]["cost"]["source_label"] == "genai-prices"
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 6,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
+
+
+def test_runner_call_context_wrapper_usage_gets_raw_response_model_for_genai_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+    runner = KitaruRunner(SimpleNamespace(name="agent"))
+    sdk_result = SimpleNamespace(
+        final_output="ok",
+        context_wrapper=SimpleNamespace(
+            usage={"input_tokens": 10, "output_tokens": 6, "total_tokens": 16}
+        ),
+        raw_responses=[SimpleNamespace(model="gpt-4o-mini")],
+    )
+
+    result = runner._build_and_finalize_run_result(
+        sdk_result,
+        agent=runner.agent,
+        run_config=SimpleNamespace(model=None),
+        tracker=SimpleNamespace(
+            run_label="run-1",
+            event_log_artifact_name="events",
+            run_summary_artifact_name="summary",
+        ),
+    )
+
+    assert result.estimated_cost_usd == 0.42
+    assert result.usage is not None
+    assert result.usage["model_name"] == "gpt-4o-mini"
+    assert result.usage["raw"]["model"] == "gpt-4o-mini"
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 6,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
+
+
+def test_runner_call_raw_response_usage_aggregates_same_model_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+    runner = KitaruRunner(SimpleNamespace(name="agent"))
+    sdk_result = SimpleNamespace(
+        final_output="ok",
+        raw_responses=[
+            SimpleNamespace(
+                model="gpt-4o-mini",
+                usage={
+                    "input_tokens": 10,
+                    "output_tokens": 3,
+                    "total_tokens": 13,
+                    "input_tokens_details": {"cached_tokens": 4},
+                },
+            ),
+            SimpleNamespace(
+                model="gpt-4o-mini",
+                usage={
+                    "prompt_tokens": 2,
+                    "completion_tokens": 4,
+                    "total_tokens": 6,
+                    "prompt_tokens_details": {"cached_tokens": 1},
+                },
+            ),
+        ],
+    )
+
+    result = runner._build_and_finalize_run_result(
+        sdk_result,
+        agent=runner.agent,
+        run_config=SimpleNamespace(model=None),
+        tracker=SimpleNamespace(
+            run_label="run-1",
+            event_log_artifact_name="events",
+            run_summary_artifact_name="summary",
+        ),
+    )
+
+    assert result.estimated_cost_usd == 0.42
+    assert result.usage is not None
+    assert result.usage["model_name"] == "gpt-4o-mini"
+    assert result.usage["input_tokens"] == 12
+    assert result.usage["output_tokens"] == 7
+    assert result.usage["total_tokens"] == 19
+    assert result.usage["cached_input_tokens"] == 5
+    assert result.usage["raw"]["model"] == "gpt-4o-mini"
+    assert result.usage["raw"]["raw_response_count"] == 2
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7,
+                "cache_read_tokens": 5,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
+    assert logged[0]["usage"]["input_tokens"] == 12
+    assert logged[0]["usage"]["output_tokens"] == 7
+
+
+def test_runner_call_context_wrapper_usage_stays_unpriced_for_response_model_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+    runner = KitaruRunner(SimpleNamespace(name="agent", model="gpt-4o-mini"))
+    sdk_result = SimpleNamespace(
+        final_output="ok",
+        context_wrapper=SimpleNamespace(
+            usage={"input_tokens": 10, "output_tokens": 6, "total_tokens": 16}
+        ),
+        raw_responses=[
+            SimpleNamespace(model="gpt-4o-mini"),
+            SimpleNamespace(model="gpt-4.1-mini"),
+        ],
+    )
+
+    result = runner._build_and_finalize_run_result(
+        sdk_result,
+        agent=runner.agent,
+        run_config=SimpleNamespace(model=None),
+        tracker=SimpleNamespace(
+            run_label="run-1",
+            event_log_artifact_name="events",
+            run_summary_artifact_name="summary",
+        ),
+    )
+
+    assert result.estimated_cost_usd is None
+    assert result.usage is not None
+    assert result.usage["model_name"] is None
+    assert "model" not in result.usage["raw"]
+    assert genai_calls == []
+    assert logged[0]["cost"]["source"] == "none"
+
+
+def test_runner_call_context_wrapper_usage_stays_unpriced_for_handoff_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+    child_agent = SimpleNamespace(name="child", model="gpt-4.1-mini")
+    runner = KitaruRunner(
+        SimpleNamespace(
+            name="parent",
+            model="gpt-4o-mini",
+            handoffs=[SimpleNamespace(_agent_ref=lambda: child_agent)],
+        )
+    )
+    sdk_result = SimpleNamespace(
+        final_output="ok",
+        context_wrapper=SimpleNamespace(
+            usage={"input_tokens": 10, "output_tokens": 6, "total_tokens": 16}
+        ),
+    )
+
+    result = runner._build_and_finalize_run_result(
+        sdk_result,
+        agent=runner.agent,
+        run_config=SimpleNamespace(model=None),
+        tracker=SimpleNamespace(
+            run_label="run-1",
+            event_log_artifact_name="events",
+            run_summary_artifact_name="summary",
+        ),
+    )
+
+    assert result.estimated_cost_usd is None
+    assert result.usage is not None
+    assert result.usage["model_name"] is None
+    assert "model" not in result.usage["raw"]
+    assert genai_calls == []
+    assert logged[0]["cost"]["source"] == "none"
+
+
 def test_finalize_run_result_skips_genai_prices_for_model_name_without_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1029,6 +1029,12 @@ def test_claude_no_sdk_cost_without_calculator_uses_genai_prices(
     genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.56)
     result_message = fake_sdk.__dict__["ResultMessage"]()
     result_message.total_cost_usd = None
+    result_message.usage = {
+        "input_tokens": 3,
+        "output_tokens": 5,
+        "cache_creation_input_tokens": 7,
+        "cache_read_input_tokens": 11,
+    }
     result_message.model_usage = {"claude-3-5-haiku-latest": result_message.usage}
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
     agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
@@ -1055,10 +1061,10 @@ def test_claude_no_sdk_cost_without_calculator_uses_genai_prices(
     assert genai_calls == [
         {
             "usage": {
-                "input_tokens": 3,
+                "input_tokens": 21,
                 "output_tokens": 5,
-                "cache_read_tokens": None,
-                "cache_write_tokens": None,
+                "cache_read_tokens": 11,
+                "cache_write_tokens": 7,
             },
             "model_ref": "claude-3-5-haiku-latest",
             "provider_id": "anthropic",

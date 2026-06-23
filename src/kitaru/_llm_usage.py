@@ -393,6 +393,14 @@ def _normalized_pricing_token_counts(
     cache_write_tokens = _int_or_none(
         _first_present(usage, "cache_creation_input_tokens", "cache_write_tokens")
     )
+    if provider_id == "anthropic":
+        input_tokens = add_optional_token_count(input_tokens, cache_read_tokens)
+        input_tokens = add_optional_token_count(input_tokens, cache_write_tokens)
+    if provider_id == "google":
+        output_tokens = add_optional_token_count(
+            output_tokens,
+            token_usage["reasoning_tokens"],
+        )
     return input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
 
 

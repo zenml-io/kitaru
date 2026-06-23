@@ -273,7 +273,7 @@ def test_run_sync_records_default_genai_prices_gemini_cost(
         {
             "usage": {
                 "input_tokens": 3,
-                "output_tokens": 4,
+                "output_tokens": 6,
                 "cache_read_tokens": 1,
                 "cache_write_tokens": None,
             },

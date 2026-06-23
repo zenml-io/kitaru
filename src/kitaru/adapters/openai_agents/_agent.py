@@ -971,7 +971,12 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
+            return self._build_and_finalize_run_result(
+                sdk_result,
+                agent=agent,
+                run_config=run_config,
+                tracker=tracker,
+            )
 
     def _run_sdk_sync(
         self,
@@ -990,7 +995,12 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
+            return self._build_and_finalize_run_result(
+                sdk_result,
+                agent=agent,
+                run_config=run_config,
+                tracker=tracker,
+            )
 
     async def _run_sdk_stream_async(
         self,
@@ -1018,6 +1028,8 @@ class KitaruRunner:
                 )
                 result = self._build_and_finalize_run_result(
                     sdk_result,
+                    agent=agent,
+                    run_config=run_config,
                     tracker=tracker,
                 )
             except Exception as exc:
@@ -1052,6 +1064,8 @@ class KitaruRunner:
                 )
                 result = self._build_and_finalize_run_result(
                     sdk_result,
+                    agent=agent,
+                    run_config=run_config,
                     tracker=tracker,
                 )
             except Exception as exc:
@@ -1090,12 +1104,16 @@ class KitaruRunner:
         self,
         sdk_result: Any,
         *,
+        agent: Any,
+        run_config: Any,
         tracker: Any,
     ) -> OpenAIRunResult:
         return self._finalize_run_result(
             build_run_result(
                 sdk_result,
                 strict_sdk_version=self._strict_sdk_version,
+                agent=agent,
+                run_config=run_config,
                 context_serializer=self._context_serializer,
                 strict_context=self._strict_context,
                 save_interruption_payloads=self._capture.save_interruption_payloads,

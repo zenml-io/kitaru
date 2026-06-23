@@ -242,6 +242,8 @@ def build_run_result(
     sdk_result: Any,
     *,
     strict_sdk_version: bool,
+    agent: Any | None = None,
+    run_config: Any | None = None,
     context_serializer: Any | None = None,
     strict_context: bool = False,
     warnings: list[str] | None = None,
@@ -249,7 +251,10 @@ def build_run_result(
 ) -> OpenAIRunResult:
     """Convert an OpenAI SDK ``RunResult`` into Kitaru's serializable result."""
     interruptions = list(getattr(sdk_result, "interruptions", []) or [])
-    usage = _usage_from_result(sdk_result)
+    usage = _usage_from_result(
+        sdk_result,
+        model_name=_known_single_runner_model_name(agent=agent, run_config=run_config),
+    )
     if interruptions:
         to_state = getattr(sdk_result, "to_state", None)
         if not callable(to_state):
@@ -317,18 +322,25 @@ def _interruptions_from_state(state: Any) -> list[Any]:
     )
 
 
-def _usage_from_result(sdk_result: Any) -> dict[str, Any] | None:
+def _usage_from_result(
+    sdk_result: Any,
+    *,
+    model_name: str | None = None,
+) -> dict[str, Any] | None:
+    raw_responses = list(getattr(sdk_result, "raw_responses", None) or [])
+    response_model_name, has_multiple_response_models = _single_raw_response_model_name(
+        raw_responses
+    )
+    if has_multiple_response_models:
+        model_name = None
+    elif response_model_name is not None:
+        model_name = (
+            response_model_name if model_name in {None, response_model_name} else None
+        )
+
     raw_usage = getattr(getattr(sdk_result, "context_wrapper", None), "usage", None)
-    model_name: str | None = None
     if raw_usage is None:
-        raw_responses = getattr(sdk_result, "raw_responses", None) or []
-        if len(raw_responses) == 1:
-            raw_response = raw_responses[0]
-            raw_usage = getattr(raw_response, "usage", None)
-            raw_model = getattr(raw_response, "model", None)
-            model_name = raw_model if isinstance(raw_model, str) else None
-        elif raw_responses:
-            raw_usage = getattr(raw_responses[-1], "usage", None)
+        raw_usage = _raw_response_usage(raw_responses)
     if raw_usage is None:
         return None
     summary = normalize_usage(to_json_safe(raw_usage), model_name=model_name)
@@ -338,6 +350,118 @@ def _usage_from_result(sdk_result: Any) -> dict[str, Any] | None:
         if isinstance(raw_payload, dict):
             raw_payload.setdefault("model", model_name)
     return usage_payload
+
+
+def _raw_response_usage(raw_responses: list[Any]) -> Any | None:
+    raw_usages = [
+        usage
+        for response in raw_responses
+        if (usage := getattr(response, "usage", None)) is not None
+    ]
+    if not raw_usages:
+        return None
+    if len(raw_usages) == 1:
+        return raw_usages[0]
+
+    summaries = [normalize_usage(to_json_safe(usage)) for usage in raw_usages]
+    aggregate: dict[str, Any] = {"raw_response_count": len(summaries)}
+    for payload_key, field_name in (
+        ("input_tokens", "input_tokens"),
+        ("output_tokens", "output_tokens"),
+        ("total_tokens", "total_tokens"),
+        ("cached_input_tokens", "cached_input_tokens"),
+        ("reasoning_tokens", "reasoning_tokens"),
+    ):
+        values = [
+            value
+            for summary in summaries
+            if (value := getattr(summary, field_name)) is not None
+        ]
+        if values:
+            aggregate[payload_key] = sum(values)
+    return aggregate
+
+
+def _single_raw_response_model_name(
+    raw_responses: list[Any],
+) -> tuple[str | None, bool]:
+    model_names = {
+        model.strip()
+        for response in raw_responses
+        if isinstance(model := getattr(response, "model", None), str) and model.strip()
+    }
+    if len(model_names) == 1:
+        return next(iter(model_names)), False
+    return None, len(model_names) > 1
+
+
+def _known_single_runner_model_name(
+    *,
+    agent: Any | None,
+    run_config: Any | None,
+) -> str | None:
+    agent_models = _runner_agent_model_names(agent, seen_agent_ids=set())
+    if agent_models:
+        return next(iter(agent_models)) if len(agent_models) == 1 else None
+    if agent_models is None:
+        return None
+
+    config_model = _model_name_from_metadata(getattr(run_config, "model", None))
+    return config_model
+
+
+def _runner_agent_model_names(
+    agent: Any | None,
+    *,
+    seen_agent_ids: set[int],
+) -> set[str] | None:
+    if agent is None:
+        return set()
+    agent_id = id(agent)
+    if agent_id in seen_agent_ids:
+        return set()
+    seen_agent_ids.add(agent_id)
+
+    raw_model = getattr(agent, "model", None)
+    model_name = _model_name_from_metadata(raw_model)
+    if model_name is None:
+        if raw_model is not None:
+            return None
+        model_names: set[str] = set()
+    else:
+        model_names = {model_name}
+
+    for handoff in getattr(agent, "handoffs", []) or []:
+        handoff_agent = _agent_from_handoff_metadata(handoff)
+        if handoff_agent is None:
+            return None
+        handoff_models = _runner_agent_model_names(
+            handoff_agent,
+            seen_agent_ids=seen_agent_ids,
+        )
+        if handoff_models is None:
+            return None
+        model_names.update(handoff_models)
+    return model_names
+
+
+def _model_name_from_metadata(model: Any) -> str | None:
+    if isinstance(model, str) and model.strip():
+        return model
+    for attr_name in ("_requested_model_name", "model_name"):
+        value = getattr(model, attr_name, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _agent_from_handoff_metadata(handoff: Any) -> Any | None:
+    if getattr(handoff, "model", None) is not None:
+        return handoff
+    agent_ref = getattr(handoff, "_agent_ref", None)
+    if not callable(agent_ref):
+        return None
+    return agent_ref()
 
 
 def _summarize_interruption(
