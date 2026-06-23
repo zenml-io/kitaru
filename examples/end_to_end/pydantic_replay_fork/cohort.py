@@ -9,7 +9,7 @@ run_cohort(exec_ids, *, baseline_model, variant_model, variant_prompt_profile,
     ``repeats``). Both replay legs call the real SDK primitive
     ``support_copilot_flow.replay(...)`` directly — there is no wrapper. Apply
     each metric, track original→reproduction and reproduction→edited decision
-    changes, and skip cases without the ``decide`` checkpoint.
+    changes, and skip cases without the replay anchor checkpoint.
 
 Report.summary()
     Print/return aggregate deltas per metric (mean unchanged replay vs edited
@@ -275,7 +275,7 @@ class Report:
 
 
 def _has_cut(client: KitaruClient, exec_id: str) -> bool:
-    """True if *exec_id* has the ``decide`` checkpoint we replay from."""
+    """True if *exec_id* has the replay anchor checkpoint."""
     run = client.executions.get(exec_id)
     return CUT in [c.name for c in run.checkpoints]
 
@@ -287,16 +287,16 @@ def _replay_run(
     model: str,
     prompt_profile: str | None,
 ) -> ReplayRun:
-    """Replay *exec_id* from the ``decide`` checkpoint and collect the result.
+    """Replay *exec_id* from the policy lookup checkpoint and collect the result.
 
     ``prompt_profile=None`` replays with no config edit — the flow reuses the
-    recorded inputs. Passing a profile overrides the decide + finalize config
-    with ``model`` and ``prompt_profile``. Either way this is just the SDK call:
+    recorded inputs. Passing a profile overrides the agent config with ``model``
+    and ``prompt_profile``. Either way this is just the SDK call:
 
         support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
 
-    where ``CUT == "support_decide_model_request"`` (the adapter's "calls"-mode
-    checkpoint for the decide step).
+    where ``CUT == "lookup_policy_tool"`` (the adapter's calls-mode checkpoint
+    for the PydanticAI policy lookup tool).
     """
     edits: dict = {}
     if prompt_profile is not None:
@@ -330,7 +330,7 @@ def run_cohort(
        ``repeats`` times; metric variant_values are averaged.
     4. Apply each metric callable to (unchanged replay, edited replay).
     5. Track original→reproduction and reproduction→edited decision drift.
-    6. Skip cases without the ``decide`` checkpoint.
+    6. Skip cases without the replay anchor checkpoint.
 
     Args:
         exec_ids: Baseline (original) execution IDs to experiment on.

@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from support_agent import CUT, FINALIZE_CHECKPOINT
+from support_agent import FINAL_DECISION_CHECKPOINT, MODEL_CHECKPOINT_PREFIX
 
 from kitaru import KitaruClient
 
@@ -229,11 +229,11 @@ def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
 def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> dict:
     """Read the SupportDecision dict from the execution artifact store.
 
-    Searches checkpoints in priority order: ``support_decide_model_request``
-    (the CUT) first, then ``support_finalize_model_request``. Each is a
-    KitaruAgent "calls" checkpoint whose artifact is a PydanticAI ModelResponse;
-    the decision is its ``final_result`` tool-call args. Always reads from
-    artifacts — never from an in-memory cache.
+    The current demo writes the final decision to ``publish_support_decision``.
+    That is the first place we look because it is the stable, human-readable
+    checkpoint. As a fallback, we scan PydanticAI model-request checkpoints and
+    parse the structured ``final_result`` tool-call args from the recorded
+    ``ModelResponse`` artifact.
 
     Raises:
         RuntimeError: If the decision cannot be found via artifact lookup.
@@ -277,29 +277,47 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
                 return dumped
         return None
 
-    priority = [CUT, FINALIZE_CHECKPOINT]
-    cp_by_name = {c.name: c for c in run.checkpoints}
-    for cp_name in priority:
-        cp = cp_by_name.get(cp_name)
-        if cp is None:
-            continue
-        for art in cp.artifacts:
-            if getattr(art, "direction", None) not in (None, "output"):
+    def _load_from_checkpoint_names(names: list[str]) -> dict | None:
+        cp_by_name = {c.name: c for c in run.checkpoints}
+        for cp_name in names:
+            cp = cp_by_name.get(cp_name)
+            if cp is None:
                 continue
-            try:
-                val = art.load()
-            except Exception:
-                continue
-            extracted = _extract(val)
-            if extracted is not None:
-                return extracted
+            for art in cp.artifacts:
+                if getattr(art, "direction", None) not in (None, "output"):
+                    continue
+                try:
+                    val = art.load()
+                except Exception:
+                    continue
+                extracted = _extract(val)
+                if extracted is not None:
+                    return extracted
+        return None
+
+    # Preferred current path: the explicit final checkpoint.
+    extracted = _load_from_checkpoint_names([FINAL_DECISION_CHECKPOINT])
+    if extracted is not None:
+        return extracted
+
+    # Fallback path: parse the final PydanticAI ModelResponse checkpoint. Repeated
+    # model calls may be normalized with suffixes, so search by prefix and walk
+    # backwards; the last model response is the one most likely to contain the
+    # final_result structured output.
+    model_checkpoint_names = [
+        c.name for c in run.checkpoints if c.name.startswith(MODEL_CHECKPOINT_PREFIX)
+    ]
+    extracted = _load_from_checkpoint_names(list(reversed(model_checkpoint_names)))
+    if extracted is not None:
+        return extracted
 
     raise RuntimeError(
         f"Could not extract a SupportDecision from execution {exec_id!r}. "
-        f"Searched checkpoints: {priority}. "
+        f"Searched checkpoints: {[FINAL_DECISION_CHECKPOINT, *model_checkpoint_names]}. "
         f"Checkpoints present: {[c.name for c in run.checkpoints]}. "
-        "Ensure the flow completed successfully and the "
-        "'support_decide_model_request' checkpoint produced a SupportDecision."
+        "Ensure the flow completed successfully and produced either the "
+        "publish_support_decision checkpoint or a support_copilot_model_request "
+        "checkpoint with a final_result payload."
     )
 
 

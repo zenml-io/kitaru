@@ -1,9 +1,9 @@
 # PydanticAI replay demo — debug a production run, then prove the fix across a cohort
 
-You have a support agent with **PydanticAI** and made each run a durable Kitaru flow. Every run is a durable execution made of checkpoints. Something looks wrong in a production run. This example shows the loop:
+You have a support agent built with **PydanticAI** and wrapped once with the Kitaru PydanticAI adapter. Every run is a durable execution made of model-request and tool-call checkpoints. Something looks wrong in a production run. This example shows the loop:
 
 1. **Original recorded run** — the agent already ran in production.
-2. **Unchanged replay / reproduction** — replay from the `decide` step (its checkpoint is named `support_decide_model_request`) with no edits. Kitaru reuses `gather_context` from cache, then re-runs `decide` and `finalize` live with the recorded config.
+2. **Unchanged replay / reproduction** — replay from the `lookup_policy_tool` checkpoint with no edits. Kitaru reuses the first model request and `gather_context_tool`, then re-runs the policy lookup and final model decision live with the recorded config.
 3. **Edited replay** — replay from the same checkpoint with a cheaper model and looser prompt profile.
 4. **Cohort** — apply that same edit across recent production runs and measure what improved or regressed.
 
@@ -13,10 +13,10 @@ The replay operation is already a first-class Kitaru CLI command. There is no de
 
 ```bash
 # Unchanged reproduction: original recorded run → unchanged replay
-kitaru executions replay <EXEC-ID> --from support_decide_model_request
+kitaru executions replay <EXEC-ID> --from lookup_policy_tool
 
 # Edited replay: unchanged replay → edited replay with new flow-input values
-kitaru executions replay <EXEC-ID> --from support_decide_model_request \
+kitaru executions replay <EXEC-ID> --from lookup_policy_tool \
   --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
 ```
 
@@ -36,7 +36,7 @@ handle = support_copilot_flow.run(prompt, customer, "openai:gpt-5-mini", "baseli
 wait_for_completion(handle)   # see note below
 exec_id = handle.exec_id
 
-# Unchanged replay / reproduction. CUT == "support_decide_model_request".
+# Unchanged replay / reproduction. CUT == "lookup_policy_tool".
 reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
 wait_for_completion(reproduced)
 
@@ -51,12 +51,13 @@ edited = support_copilot_flow.replay(
 wait_for_completion(edited)
 ```
 
-> **Why `wait_for_completion`, not `handle.wait()`?** Each agent step runs as a
-> KitaruAgent `"calls"` checkpoint (`support_gather_model_request`,
-> `support_decide_model_request`, `support_finalize_model_request`), so a single
-> run ends with several terminal checkpoints and `handle.wait()` can't auto-pick
-> one return value. The helper blocks to completion and ignores that ambiguity;
-> the demo reads decisions back from the checkpoint artifacts instead.
+> **Why `wait_for_completion`, not `handle.wait()`?** The adapter's
+> `"calls"` strategy creates model-request and tool-call checkpoints such as
+> `support_copilot_model_request`, `gather_context_tool`, and
+> `lookup_policy_tool`. In that shape a single run can have several terminal
+> checkpoints, so `handle.wait()` may not be able to auto-pick one return value.
+> The helper waits for the execution to finish; the demo then reads the decision
+> from the explicit `publish_support_decision` checkpoint artifact.
 
 The important safety check is sequential:
 
@@ -86,7 +87,7 @@ Individual commands:
 
 ## Running on a remote stack (Kubernetes)
 
-The same demo runs unchanged on a containerized stack. The flow declares its image needs in `support_copilot.py`, installs `pydantic-ai`, and pulls `OPENAI_API_KEY` from a Kitaru secret named `openai-creds`.
+The same demo runs unchanged on a containerized stack. The flow declares its image needs in `support_agent.py`, installs `pydantic-ai`, and pulls `OPENAI_API_KEY` from a Kitaru secret named `openai-creds`.
 
 Create that secret once. The key must be named `OPENAI_API_KEY` so PydanticAI picks it up automatically:
 
@@ -105,26 +106,23 @@ uv run python demo.py run-all
 
 ## The agent
 
-The flow has three steps, each a `pydantic_ai.Agent` wrapped in a `KitaruAgent`
-(the Kitaru PydanticAI adapter) running in the default `"calls"` strategy — so
-each model call becomes its own durable checkpoint, named `<agent>_model_request`,
-with its token usage tracked under it:
+The flow builds one `pydantic_ai.Agent` named `support_copilot`, gives it two tools, and wraps it once in `KitaruAgent(checkpoint_strategy="calls")`. That is the important adapter story: the PydanticAI agent is still the thing deciding when to call tools, and Kitaru records those model requests and tool calls as durable checkpoints.
 
 ```text
-gather_context  →  decide  →  finalize
-                   ↑ replay starts here
+support_copilot_model_request  →  gather_context_tool  →  lookup_policy_tool  →  support_copilot_model_request_2  →  publish_support_decision
+                                                        ↑ replay starts here
 ```
 
-- The replay anchor is the `decide` step's checkpoint,
-  `support_decide_model_request` (the constant `CUT`).
-- Because the adapter checkpoints the model calls, the cohort metrics have real
-  LLM token usage to read; running the raw agents directly would record none.
+- The replay anchor is the PydanticAI `lookup_policy` tool call checkpoint,
+  `lookup_policy_tool` (the constant `CUT`).
+- Replaying from that checkpoint keeps the first model request and gathered context cached, then reruns the policy lookup and final model decision.
+- Because the adapter checkpoints model requests and tool calls, the cohort metrics have real LLM **token** usage and tool-call artifacts to read. Note the PydanticAI adapter records token usage, not provider dollar cost.
 - The `baseline` prompt profile treats permission, SSO, and admin changes as `needs_review`.
-- The `trimmed_permissions` profile is looser and more likely to answer directly.
+- The `trimmed_permissions` profile is looser and may answer directly when the policy tool reports a fast path.
 - Output is a typed `SupportDecision`: policy label, risk status, required action, and summary.
 - “Did the decision move?” is judged on `risk_status` and `required_action`. The model may reword `policy_label` or `summary`, so those do not count as decision drift.
 
-Config (`model` + `prompt_profile`) travels as flow inputs. That is why both the SDK and `kitaru executions replay` can rebuild the agents from a fresh process.
+Config (`model` + `prompt_profile`) travels as flow inputs. That is why both the SDK and `kitaru executions replay` can rebuild the agent from a fresh process.
 
 ## Cohort metrics
 
@@ -147,7 +145,7 @@ Three metrics are provided in `utils.py`:
 
 | file | purpose |
 |---|---|
-| `support_agent.py` | The PydanticAI agent (typed outputs + prompt profiles) wrapped in `KitaruAgent`, the durable `@flow`, `CUT`, `wait_for_completion`, and `recent_exec_ids()`. |
+| `support_agent.py` | The PydanticAI support agent, its tools, the `KitaruAgent` wrapper, the durable `@flow`, and `recent_exec_ids()`. |
 | `demo.py` | The walkthrough: `run`, `replay`, and `cohort` as plain functions over SDK primitives. |
 | `cohort.py` | `run_cohort(...) -> Report` with `summary()`, `regressions()`, and per-case accessors. |
 | `utils.py` | Analysis helpers: metrics, quality judge, decision extraction, and `ReplayRun`. |
