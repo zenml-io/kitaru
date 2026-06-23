@@ -23,6 +23,12 @@ from ._hitl import hitl_tool
 from ._mcp_server import KitaruMCPServer, kitaruify_mcp_server
 from ._model import KitaruModel
 from ._policy import CaptureMode, CapturePolicy
+from ._sandbox import (
+    DEFAULT_SANDBOX_TOOL_MAX_CHARS,
+    SANDBOX_COMMAND_TOOL_NAME,
+    SandboxCommandToolResult,
+    sandbox_command_toolset,
+)
 from ._streaming import (
     PYDANTIC_AI_STREAM_COMPLETED,
     PYDANTIC_AI_STREAM_EVENT,
@@ -110,12 +116,14 @@ def wrap(
 
 
 __all__ = [
+    "DEFAULT_SANDBOX_TOOL_MAX_CHARS",
     "PYDANTIC_AI_STREAM_COMPLETED",
     "PYDANTIC_AI_STREAM_EVENT",
     "PYDANTIC_AI_STREAM_EVENT_KINDS",
     "PYDANTIC_AI_STREAM_FAILED",
     "PYDANTIC_AI_STREAM_STARTED",
     "PYDANTIC_AI_STREAM_TERMINAL_EVENT_KINDS",
+    "SANDBOX_COMMAND_TOOL_NAME",
     "CaptureConfig",
     "CaptureMode",
     "CapturePolicy",
@@ -127,9 +135,11 @@ __all__ = [
     "KitaruMCPServer",
     "KitaruModel",
     "KitaruToolset",
+    "SandboxCommandToolResult",
     "hitl_tool",
     "kitaruify_mcp_server",
     "kitaruify_toolset",
+    "sandbox_command_toolset",
     "validate_checkpoint_strategy",
     "wait_for_input",
     "wrap",

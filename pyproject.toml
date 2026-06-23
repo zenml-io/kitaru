@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.15.0"
+version = "0.17.1"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.6",
+    "zenml[local]>=0.95.1",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +57,7 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.6",
+    "zenml[server]>=0.95.1",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.89.0,<1.104.0",
@@ -82,7 +82,7 @@ claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
 ]
 gemini = [
-    "google-genai>=1.55.0,<2",
+    "google-genai>=2.8.0,<3",
 ]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
@@ -104,6 +104,7 @@ Repository = "https://github.com/zenml-io/kitaru"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+
 [tool.hatch.build]
 artifacts = [
     "src/kitaru/_ui/dist/**",
@@ -115,14 +116,14 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [tool.uv]
 exclude-newer = "3 days"
-exclude-newer-package = { zenml = false, aiohttp = false }
+exclude-newer-package = { zenml = false, aiohttp = false, langsmith = false, pydantic-settings = false }
 
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.6",
+    "zenml[server]>=0.95.1",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
@@ -137,7 +138,7 @@ dev = [
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
-    "google-genai>=1.55.0,<2",
+    "google-genai>=2.8.0,<3",
     "pip-audit>=2.9.0",
 ]
 
@@ -225,5 +226,12 @@ no-matching-overload = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-vv -n auto"
+addopts = "-vv -n auto -m 'not live_llm and not live_openai and not live_anthropic and not live_gemini'"
 pythonpath = ["scripts"]
+markers = [
+    "live_llm: paid or external LLM/provider test; excluded from default pytest runs",
+    "live_openai: live OpenAI provider test; requires OPENAI_API_KEY",
+    "live_anthropic: live Anthropic/Claude provider test; requires ANTHROPIC_API_KEY",
+    "live_gemini: live Gemini/Google provider test; requires GEMINI_API_KEY or GOOGLE_API_KEY",
+    "provider_extended: slower or higher-cost provider test outside the provider-core suite",
+]

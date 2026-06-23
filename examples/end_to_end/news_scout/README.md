@@ -114,7 +114,7 @@ dashboard.
 
 ```
 @flow news_scout
-  ├── scout_agent.run_sync(prompt)
+  ├── new_scout_agent().run_sync(prompt)
   │     ├── model_request_1      ← checkpoint
   │     ├── search_news_tool     ← checkpoint
   │     ├── model_request_2      ← checkpoint

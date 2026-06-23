@@ -31,6 +31,12 @@ exclude = [
     "^https://twitter\\.com",
     # Slack invite redirect returns 403 to bots/link-checkers
     "^https://(www\\.)?zenml\\.io/slack",
+    # katacontainers.io refuses automated link-checker connections
+    "^https://katacontainers\\.io",
+    # TEMPORARY: the Agents guide ships with zenml-io/zenml#4897; this URL
+    # 404s until that PR merges and GitBook syncs the Learn space.
+    "^https://docs\\.zenml\\.io/user-guides/agents-guide$",
+
 ]
 
 # Paths to exclude from scanning

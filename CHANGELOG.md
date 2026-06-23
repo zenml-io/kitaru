@@ -7,11 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-06-22
+
 ### Added
-- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata.
+- Added a LangGraph runner convenience API so fresh `invoke`, `ainvoke`, `stream`, and `astream` calls can pass raw graph input with `thread_id=...` instead of manually building `LangGraphRunRequest.start(...)`, while keeping request objects as the resume and advanced path. (#455)
 
 ### Fixed
-- Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#403)
+- Fixed LangGraph calls-mode checkpoints so tool calls survive model-call materialization and LangGraph routes to tools correctly. (#458)
+
+### Security
+- Bumped audited dependency locks (`langsmith`, `msgpack`, `pydantic-settings`) to clear advisories flagged against the earlier pinned versions. (#455)
+
+## [0.17.0] - 2026-06-19
+
+### Added
+- Added sandbox stack component support and the public `kitaru.run_sandbox_command(...)` SDK helper. Local stacks now get a default local sandbox, stack creation accepts explicit sandbox flavors through CLI/YAML/MCP paths, and `examples/features/sandbox/active_stack_sandbox_command.py` shows a tracked flow checkpoint running a command through the sandbox on the current stack. (#423)
+- Added a PydanticAI sandbox command toolset via `sandbox_command_toolset(...)`, plus docs, example coverage, and `examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py`, so PydanticAI agents can call `run_sandbox_command` through Kitaru's shared sandbox helper. (#429)
+- Added an OpenAI Agents SDK sandbox command tool via `sandbox_command_tool(...)`, plus docs and `examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py`, so OpenAI agents can call a local `FunctionTool` that runs commands through the sandbox on the current stack. (#430)
+- Added caller-owned Gemini custom function execution through Kitaru's sandbox helper, with explicit registered sandbox commands, a dry-run example showcase, and docs that keep Antigravity / Google-owned tool internals outside Kitaru's replay promise. This requires the Gemini extra's current Google GenAI SDK 2.x range (`google-genai>=2.8.0,<3`) for the Interactions step and function-result schema. (#433)
+- Added a LangGraph/LangChain sandbox command tool via `create_sandbox_command_tool(...)`, plus a sandbox strategy in the LangGraph example, so agents can run shell commands through the sandbox on the current stack. (#434)
+- Added a Claude Agent SDK sandbox MCP helper (`create_kitaru_sandbox_mcp_server`) and runnable example at `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`, letting Claude call the sandbox on the current stack through a Kitaru-owned MCP tool while Claude-owned `Bash` stays disabled. (#432)
+
+### Changed
+- Bumped the ZenML dependency floor and aligned runtime surfaces to `zenml>=0.95.1`, which provides the sandbox stack component and sandbox session APIs used by this release.
+- Reworked the prospect scout example (`examples/end_to_end/prospect_scout/`) into a genuinely agentic sweep: the qualifier is now a real PydanticAI agent that calls a `search_web` tool and decides its own searches (instead of being handed pre-fetched snippets), classifies prospects against a `LineOfBusiness` enum, and is built lazily inside its checkpoint so remote runs can inject keys via a secret. The README is reorganized around the durability, agent-observability, type-safety, and human-in-the-loop "aha moments", and a regression test asserts the agent actually invokes its search tool. (#446, #451)
+
+### Fixed
+- Rejected sandbox config overrides when stack creation did not also select a sandbox flavor, avoiding the confusing case where remote stack creation accepted sandbox-looking settings and then created no sandbox.
+- Fixed the LangGraph sandbox demo so its real-model run deterministically executes the documented demo command, and redacted static sandbox tool env values from wrapped provider error messages. (#434)
+- Kept the Claude Agent SDK sandbox MCP helper's default output limits and serialized JSON tool results within Claude Code's MCP result-size ceiling, so Kitaru's stdout/stderr truncation flags match what Claude actually receives. (#432)
+- Fixed the news scout example (`examples/end_to_end/news_scout/`) to build its agent lazily inside the flow body instead of at module import, so remote-stack runs no longer crash at import when the provider key is only applied to the environment at run time. (#446)
+
+## [0.16.0] - 2026-06-15
+
+### Added
+- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata. (#378)
+- Added LLM token tracking: tracked LLM calls (`kitaru.llm()` and the framework adapters) record input/output/total token counts as execution metadata, split into freshly-incurred vs. replay-reused, feeding the new execution statistics metrics. (#378)
+- Added LLM cost tracking where a trustworthy cost source exists: the Claude Agent SDK adapter records provider-reported USD cost automatically, and the LangGraph and OpenAI Agents adapters accept a cost calculator. Calls with no cost source (such as plain `kitaru.llm()`) are tallied under a records-without-cost count rather than reported as free. (#378)
+- Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
+- Added the prospect scout example (`examples/end_to_end/prospect_scout/`): a durable prospect-research sweep with one checkpoint per company, enum-typed PydanticAI qualification, a `kitaru.wait()` shortlist approval gate, per-prospect outreach drafts, and optional Exa-backed web search.
+
+### Fixed
+- Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
+- Fixed `kitaru executions retry` and `kitaru executions resume` so failed or paused executions are reopened correctly before continuation is submitted, preventing local no-ops and server-token failures. (#442)
+- `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side. (#440)
+- Redact credential values from LLM provider error messages raised by `kitaru.llm()`. (#439)
+- Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#409)
+- Fixed duplicate PydanticAI stream events so watched `KitaruAgent` runs no longer emit repeated stream updates. (#428)
+- Fixed streaming wait tools so human-in-the-loop tool calls behave correctly during streamed adapter runs. (#431)
+- Fixed agent instruction drift so adapter-managed agents keep their configured instructions across turns. (#435)
+- Fixed the chatbot example image build so its PydanticAI dependencies resolve correctly. (#427)
 
 ## [0.15.0] - 2026-06-04
 

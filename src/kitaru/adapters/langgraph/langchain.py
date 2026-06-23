@@ -20,6 +20,11 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard only
 
 try:
     from langchain.agents.middleware import AgentMiddleware
+    from langchain_core.messages import (
+        BaseMessage,
+        messages_from_dict,
+        messages_to_dict,
+    )
 except ImportError as exc:  # pragma: no cover - exercised via import-guard tests
     raise ImportError(
         "LangChain is installed, but Kitaru could not import "
@@ -40,6 +45,11 @@ from ._policy import (
     resolve_model_checkpoint_config,
     resolve_tool_call_checkpoint_config,
 )
+from ._sandbox_tool import (
+    _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR,
+    SandboxCommandToolArgs,
+    create_sandbox_command_tool,
+)
 from ._serialization import redact_config, to_cache_identity, to_json_safe
 from ._tracking import (
     EventContext,
@@ -58,6 +68,18 @@ from ._utils import (
 )
 
 CheckpointMode = Literal["true", "metadata_only"]
+
+_MODEL_RESPONSE_CHECKPOINT_ENVELOPE_SCHEMA = (
+    "kitaru.langgraph.langchain.model_response_checkpoint.v1"
+)
+_MODEL_RESPONSE_CHECKPOINT_SCHEMA_KEY = "schema"
+_MODEL_RESPONSE_CHECKPOINT_RESPONSE_KEY = "response"
+_MODEL_RESPONSE_CHECKPOINT_MESSAGES_KEY = "messages"
+_MODEL_RESPONSE_CHECKPOINT_TARGET_KEY = "target"
+_MODEL_RESPONSE_CHECKPOINT_RESULT_IS_SEQUENCE_KEY = "result_is_sequence"
+_MODEL_RESPONSE_CHECKPOINT_RESULT_TARGET = "result"
+_MODEL_RESPONSE_CHECKPOINT_RESPONSE_TARGET = "response"
+ModelResponseCheckpointTarget = Literal["result", "response"]
 
 
 class KitaruLangGraphMiddleware(AgentMiddleware):
@@ -128,7 +150,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                     input_artifacts=input_artifacts,
                     output_artifacts=output_artifacts,
                 ):
-                    return self._tracked_model_call(
+                    response = self._tracked_model_call(
                         request,
                         handler,
                         capture=capture,
@@ -139,8 +161,9 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                         checkpoint_name=checkpoint_name,
                         model_input=model_input,
                     )
+                    return _model_response_checkpoint_envelope(response)
 
-            return run_sync_in_checkpoint(
+            checkpoint_output = run_sync_in_checkpoint(
                 config=effective_config,
                 step_name=checkpoint_name,
                 body=_in_checkpoint,
@@ -150,6 +173,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware):
                 ),
                 checkpoint_inputs=checkpoint_inputs,
             )
+            return _restore_model_response_checkpoint_output(checkpoint_output)
 
         return self._tracked_model_call(
             request,
@@ -587,6 +611,9 @@ def _model_cache_key(request: Any, *, enabled: bool) -> str | None:
             "adapter": "langgraph",
             "integration": "langchain",
             "kind": "model_call",
+            "model_response_checkpoint_schema": (
+                _MODEL_RESPONSE_CHECKPOINT_ENVELOPE_SCHEMA
+            ),
             "model": _model_identity(request),
             "input": _model_cache_identity_envelope(request),
         }
@@ -860,20 +887,65 @@ def _tool_call_ids_from_call_payloads(tool_calls: list[Any]) -> list[str]:
 
 def _persisted_tool_args_envelope(request: Any) -> dict[str, Any]:
     """Return the redacted tool payload safe to persist as checkpoint input."""
+    args = redact_config(_tool_args(request))
+    tool_call = redact_config(getattr(request, "tool_call", None))
+    if _is_sandbox_command_tool_request(request):
+        args = _redact_sandbox_command_text(args)
+        tool_call = _redact_sandbox_command_text(tool_call)
     return _tool_payload_envelope(
         request,
-        args=redact_config(_tool_args(request)),
-        tool_call=redact_config(getattr(request, "tool_call", None)),
+        args=args,
+        tool_call=tool_call,
     )
+
+
+def _is_sandbox_command_tool_request(request: Any) -> bool:
+    tool = getattr(request, "tool", None)
+    return getattr(tool, "args_schema", None) is SandboxCommandToolArgs
+
+
+def _redact_sandbox_command_text(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        redacted: dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = _safe_mapping_key_text(key)
+            redacted[key_text] = (
+                "[REDACTED]"
+                if key_text == "command"
+                else _redact_sandbox_command_text(nested)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sandbox_command_text(item) for item in value]
+    return value
+
+
+def _safe_mapping_key_text(key: Any) -> str:
+    try:
+        return str(key)
+    except Exception:
+        return f"<unprintable key {_type_label(key)}>"
 
 
 def _tool_cache_identity_envelope(request: Any) -> dict[str, Any]:
     """Return the raw-enough tool payload used only for immediate cache hashing."""
-    return _tool_payload_envelope(
+    payload = _tool_payload_envelope(
         request,
         args=to_cache_identity(_tool_args(request)),
         tool_call=to_cache_identity(getattr(request, "tool_call", None)),
     )
+    private_identity = _tool_private_cache_identity(request)
+    if private_identity is not None:
+        payload["tool_private_identity"] = private_identity
+    return payload
+
+
+def _tool_private_cache_identity(request: Any) -> Any | None:
+    tool = getattr(request, "tool", None)
+    identity = getattr(tool, _SANDBOX_COMMAND_TOOL_CACHE_IDENTITY_ATTR, None)
+    if identity is None:
+        return None
+    return to_cache_identity(identity)
 
 
 def _tool_payload_envelope(
@@ -977,13 +1049,197 @@ def _tool_call_ids_from_messages(messages: list[Any]) -> list[str]:
     return ids
 
 
-def _model_response_messages(response: Any) -> list[Any]:
+def _model_response_checkpoint_envelope(response: Any) -> dict[str, Any]:
+    """Return a checkpoint-safe wrapper for LangChain model responses."""
+    payload: dict[str, Any] = {
+        _MODEL_RESPONSE_CHECKPOINT_SCHEMA_KEY: (
+            _MODEL_RESPONSE_CHECKPOINT_ENVELOPE_SCHEMA
+        ),
+        _MODEL_RESPONSE_CHECKPOINT_RESPONSE_KEY: response,
+    }
+    message_payload = _model_response_message_payload(response)
+    if message_payload is not None:
+        payload[_MODEL_RESPONSE_CHECKPOINT_MESSAGES_KEY] = message_payload
+    return payload
+
+
+def _model_response_message_payload(response: Any) -> dict[str, Any] | None:
+    result_ref = _model_response_result_ref(response)
+    if result_ref is not None:
+        _owner, result = result_ref
+        if isinstance(result, list | tuple) and _all_langchain_messages(result):
+            return _model_response_messages_payload(
+                target=_MODEL_RESPONSE_CHECKPOINT_RESULT_TARGET,
+                result_is_sequence=True,
+                messages=list(result),
+            )
+        if isinstance(result, BaseMessage):
+            return _model_response_messages_payload(
+                target=_MODEL_RESPONSE_CHECKPOINT_RESULT_TARGET,
+                result_is_sequence=False,
+                messages=[result],
+            )
+    if isinstance(response, list | tuple) and _all_langchain_messages(response):
+        return _model_response_messages_payload(
+            target=_MODEL_RESPONSE_CHECKPOINT_RESPONSE_TARGET,
+            result_is_sequence=True,
+            messages=list(response),
+        )
+    return None
+
+
+def _model_response_messages_payload(
+    *,
+    target: ModelResponseCheckpointTarget,
+    result_is_sequence: bool,
+    messages: list[BaseMessage],
+) -> dict[str, Any]:
+    return {
+        _MODEL_RESPONSE_CHECKPOINT_TARGET_KEY: target,
+        _MODEL_RESPONSE_CHECKPOINT_RESULT_IS_SEQUENCE_KEY: result_is_sequence,
+        _MODEL_RESPONSE_CHECKPOINT_MESSAGES_KEY: messages_to_dict(messages),
+    }
+
+
+def _restore_model_response_checkpoint_output(output: Any) -> Any:
+    if not _is_model_response_checkpoint_envelope(output):
+        return output
+    response = output.get(_MODEL_RESPONSE_CHECKPOINT_RESPONSE_KEY)
+    message_payload = output.get(_MODEL_RESPONSE_CHECKPOINT_MESSAGES_KEY)
+    if message_payload is None:
+        return response
+    if not isinstance(message_payload, Mapping):
+        raise RuntimeError("Invalid LangGraph model checkpoint envelope: messages.")
+    message_dicts = message_payload.get(_MODEL_RESPONSE_CHECKPOINT_MESSAGES_KEY)
+    if not isinstance(message_dicts, list):
+        raise RuntimeError("Invalid LangGraph model checkpoint envelope: message list.")
+    restored_messages = messages_from_dict(message_dicts)
+    target = message_payload.get(_MODEL_RESPONSE_CHECKPOINT_TARGET_KEY)
+    result_is_sequence = (
+        message_payload.get(_MODEL_RESPONSE_CHECKPOINT_RESULT_IS_SEQUENCE_KEY)
+        is not False
+    )
+    if target == _MODEL_RESPONSE_CHECKPOINT_RESPONSE_TARGET:
+        return (
+            restored_messages
+            if result_is_sequence
+            else _single_restored_message(restored_messages)
+        )
+    if target == _MODEL_RESPONSE_CHECKPOINT_RESULT_TARGET:
+        return _restore_model_response_result(
+            response,
+            restored_messages,
+            result_is_sequence=result_is_sequence,
+        )
+    raise RuntimeError("Invalid LangGraph model checkpoint envelope: target.")
+
+
+def _is_model_response_checkpoint_envelope(output: Any) -> bool:
+    return (
+        isinstance(output, Mapping)
+        and output.get(_MODEL_RESPONSE_CHECKPOINT_SCHEMA_KEY)
+        == _MODEL_RESPONSE_CHECKPOINT_ENVELOPE_SCHEMA
+    )
+
+
+def _restore_model_response_result(
+    response: Any,
+    restored_messages: list[BaseMessage],
+    *,
+    result_is_sequence: bool,
+) -> Any:
+    result_ref = _model_response_result_ref(response)
+    if result_ref is None:
+        raise RuntimeError(
+            "LangGraph model checkpoint response no longer has a result field."
+        )
+    owner, _original_result = result_ref
+    result_value: Any = (
+        restored_messages
+        if result_is_sequence
+        else _single_restored_message(restored_messages)
+    )
+    try:
+        owner.result = result_value
+        return response
+    except Exception as assign_error:
+        copied_owner, copy_error = _copy_with_result(owner, result_value)
+        if copied_owner is None:
+            raise RuntimeError(
+                "LangGraph model checkpoint response could not restore "
+                "LangChain message subclasses."
+            ) from (copy_error or assign_error)
+        if owner is response:
+            return copied_owner
+        try:
+            response.model_response = copied_owner
+            return response
+        except Exception as nested_assign_error:
+            copied_response, nested_copy_error = _copy_with_model_response(
+                response, copied_owner
+            )
+            if copied_response is not None:
+                return copied_response
+            raise RuntimeError(
+                "LangGraph model checkpoint response could not restore nested "
+                "LangChain message subclasses."
+            ) from (nested_copy_error or nested_assign_error)
+
+
+def _single_restored_message(
+    restored_messages: list[BaseMessage],
+) -> BaseMessage | None:
+    return restored_messages[0] if restored_messages else None
+
+
+def _copy_with_result(
+    owner: Any,
+    result: Any,
+) -> tuple[Any | None, Exception | None]:
+    return _copy_with_update(owner, {"result": result})
+
+
+def _copy_with_model_response(
+    response: Any,
+    model_response: Any,
+) -> tuple[Any | None, Exception | None]:
+    return _copy_with_update(response, {"model_response": model_response})
+
+
+def _copy_with_update(
+    value: Any,
+    update: dict[str, Any],
+) -> tuple[Any | None, Exception | None]:
+    last_error: Exception | None = None
+    for method_name in ("model_copy", "copy"):
+        copy_method = getattr(value, method_name, None)
+        if not callable(copy_method):
+            continue
+        try:
+            return copy_method(update=update), None
+        except Exception as error:
+            last_error = error
+    return None, last_error
+
+
+def _model_response_result_ref(response: Any) -> tuple[Any, Any] | None:
     inner = getattr(response, "model_response", response)
-    result = getattr(inner, "result", None)
-    if isinstance(result, list | tuple):
-        return list(result)
-    if result is not None:
-        return [result]
+    return (inner, getattr(inner, "result", None)) if hasattr(inner, "result") else None
+
+
+def _all_langchain_messages(messages: list[Any] | tuple[Any, ...]) -> bool:
+    return all(isinstance(message, BaseMessage) for message in messages)
+
+
+def _model_response_messages(response: Any) -> list[Any]:
+    result_ref = _model_response_result_ref(response)
+    if result_ref is not None:
+        _owner, result = result_ref
+        if isinstance(result, list | tuple):
+            return list(result)
+        if result is not None:
+            return [result]
+    inner = getattr(response, "model_response", response)
     if isinstance(inner, list | tuple):
         return list(inner)
     return [inner]
@@ -1090,4 +1346,8 @@ def _elapsed_ms(started_at: float) -> float:
     return round((time.perf_counter() - started_at) * 1000, 3)
 
 
-__all__ = ["KitaruLangGraphMiddleware"]
+__all__ = [
+    "KitaruLangGraphMiddleware",
+    "SandboxCommandToolArgs",
+    "create_sandbox_command_tool",
+]

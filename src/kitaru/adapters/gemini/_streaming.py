@@ -23,7 +23,7 @@ from ._stream_shapes import (
     delta_text,
     delta_type_value,
     event_type,
-    extract,
+    function_name_from_step,
     interaction_from_event,
     is_safe_stream_text_delta_source,
     normalized_delta_type,
@@ -33,6 +33,7 @@ from ._stream_shapes import (
     step_index,
     step_type_from_step,
     string_from,
+    usage_from,
 )
 
 GEMINI_STREAM_STARTED = "gemini_interactions.stream.started"
@@ -188,10 +189,7 @@ class GeminiStreamPublisher(BaseStreamPublisher):
             payload["status"] = status
         if interaction_id is not None:
             payload["interaction_id"] = interaction_id
-        if (
-            extract(interaction, "usage") is not None
-            or extract(event, "usage") is not None
-        ):
+        if usage_from(interaction) is not None or usage_from(event) is not None:
             payload["has_usage"] = True
         return payload
 
@@ -208,7 +206,7 @@ class GeminiStreamPublisher(BaseStreamPublisher):
         step_type = string_from(step, "type") or string_from(event, "step_type")
         step_id = string_from(step, "id") or string_from(event, "step_id")
         call_id = string_from(step, "call_id")
-        tool_name = string_from(step, "name") or string_from(step, "tool_name")
+        tool_name = function_name_from_step(step)
         payload = self._base_payload(
             category=category,
             display=f"{display}: {step_type}" if step_type else display,
@@ -274,7 +272,7 @@ class GeminiStreamPublisher(BaseStreamPublisher):
             return payload
 
         if normalized_type in ARGUMENT_DELTA_TYPES:
-            tool_name = string_from(step, "name") or string_from(step, "tool_name")
+            tool_name = function_name_from_step(step) or step_snapshot.get("tool_name")
             call_id = string_from(step, "call_id") or string_from(step, "id")
             payload = self._base_payload(
                 category="tool_arguments_delta",
@@ -344,6 +342,9 @@ class GeminiStreamPublisher(BaseStreamPublisher):
             snapshot["role"] = role
         if step_type is not None:
             snapshot["type"] = step_type
+        tool_name = function_name_from_step(step) or function_name_from_step(event)
+        if tool_name is not None:
+            snapshot["tool_name"] = tool_name
         return snapshot
 
     def _base_payload(

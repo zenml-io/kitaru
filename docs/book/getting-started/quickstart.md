@@ -157,13 +157,18 @@ parameter:
     stack="prod-k8s",
     image={
         "base_image": "python:3.12-slim",
-        "requirements": ["httpx", "pydantic-ai"],
+        "requirements": ["kitaru[pydantic-ai,openai]", "httpx"],
         "apt_packages": ["git"],
     },
 )
 def research_agent(topic: str) -> str:
     ...
 ```
+
+This example includes `kitaru[pydantic-ai,openai]` explicitly because setting
+`base_image` means you control the image contents. Kitaru can auto-add plain
+`kitaru` when it builds the requirements list for you, but it does not guess
+optional extras such as the PydanticAI/OpenAI adapter dependencies.
 
 See the [Containerization guide](../guides/containerization.md) for the full set of
 image options, custom Dockerfiles, and how Kitaru packages your source code.

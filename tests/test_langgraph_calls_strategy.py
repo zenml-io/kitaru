@@ -1,21 +1,25 @@
 """Deterministic tests for LangGraph calls-mode LangChain middleware."""
 
-from __future__ import annotations
-
 import asyncio
 import importlib
+import json
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any, cast
 
+from kitaru import SandboxCommandResult, checkpoint, flow
+from kitaru._client._models import ExecutionStatus
 from kitaru.adapters.langgraph import (
     KitaruGraphRunner,
     LangGraphCallCheckpointPolicy,
     LangGraphCapturePolicy,
-    LangGraphRunRequest,
+    SandboxCommandToolArgs,
+    create_sandbox_command_tool,
 )
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
+from kitaru.client import KitaruClient
 
 
 def _patch_runner_summary_runtime(monkeypatch) -> tuple[Any, dict[str, object]]:
@@ -127,6 +131,128 @@ def _logged_events(logged: dict[str, object]) -> list[dict[str, object]]:
     return next(iter(event_payload.values()))
 
 
+def add_one_for_checkpoint_materialization(value: int) -> str:
+    """Add one to the provided value."""
+    return str(value + 1)
+
+
+def _model_checkpoint_output_contains_tool_call(
+    output: Any,
+    tool_call_id: str,
+) -> bool:
+    if not isinstance(output, dict):
+        return False
+    if (
+        output.get("schema")
+        != "kitaru.langgraph.langchain.model_response_checkpoint.v1"
+    ):
+        return False
+    message_payload = output.get("messages")
+    if not isinstance(message_payload, dict):
+        return False
+    messages = message_payload.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        data = message.get("data")
+        if not isinstance(data, dict):
+            continue
+        tool_calls = data.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if isinstance(tool_call, dict) and tool_call.get("id") == tool_call_id:
+                return True
+    return False
+
+
+@checkpoint
+def persist_langgraph_materialization_summary(
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the flow summary through one final result checkpoint."""
+    return summary
+
+
+@flow
+def langgraph_calls_materialization_regression() -> dict[str, Any]:
+    """Run a calls-mode LangGraph agent through real checkpoint materialization."""
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import (
+        FakeMessagesListChatModel,
+    )
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    class BindableFakeMessagesListChatModel(FakeMessagesListChatModel):
+        def bind_tools(
+            self,
+            tools: Any,
+            *,
+            tool_choice: str | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            return self
+
+    model = BindableFakeMessagesListChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "add_one_for_checkpoint_materialization",
+                        "args": {"value": 1},
+                        "id": "call-materialized",
+                    }
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    graph = create_agent(
+        model,
+        tools=[add_one_for_checkpoint_materialization],
+        middleware=[KitaruLangGraphMiddleware()],
+        checkpointer=InMemorySaver(),
+        name="materialized_langchain_agent",
+    )
+    runner = KitaruGraphRunner(
+        graph,
+        name="materialized_langchain_agent",
+        checkpoint_strategy="calls",
+        capture=LangGraphCapturePolicy(save_state_snapshot=False),
+    )
+
+    result = runner.invoke(
+        {"messages": [{"role": "user", "content": "use the tool"}]},
+        thread_id="materialized-langchain-thread",
+    )
+    output = cast(dict[str, Any], result.output)
+    messages = cast(list[Any], output["messages"])
+    summary = {
+        "status": result.status,
+        "message_types": [type(message).__name__ for message in messages],
+        "contents": [str(getattr(message, "content", "")) for message in messages],
+        "tool_call_counts": [
+            len(getattr(message, "tool_calls", None) or []) for message in messages
+        ],
+        "tool_call_ids": [
+            [
+                str(tool_call["id"])
+                for tool_call in cast(
+                    list[dict[str, Any]],
+                    getattr(message, "tool_calls", None) or [],
+                )
+                if "id" in tool_call
+            ]
+            for message in messages
+        ],
+    }
+    return persist_langgraph_materialization_summary(summary)
+
+
 def test_runner_calls_mode_uses_middleware_without_outer_graph_checkpoint(
     monkeypatch,
 ) -> None:
@@ -169,7 +295,7 @@ def test_runner_calls_mode_uses_middleware_without_outer_graph_checkpoint(
     monkeypatch.setattr(middleware_module, "is_inside_checkpoint", lambda: False)
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    result = runner.invoke(LangGraphRunRequest.start({"x": 1}, thread_id="thread-1"))
+    result = runner.invoke({"x": 1}, thread_id="thread-1")
 
     all_step_names = [
         *runner_checkpoints,
@@ -349,10 +475,8 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     )
 
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {"messages": [{"role": "user", "content": "use the tool"}]},
-            thread_id="real-langchain-thread",
-        )
+        {"messages": [{"role": "user", "content": "use the tool"}]},
+        thread_id="real-langchain-thread",
     )
 
     all_step_names = [
@@ -383,6 +507,238 @@ def test_real_langchain_create_agent_calls_mode_reaches_middleware_contextvars(
     ] == ["true", "true", "true"]
     assert events[2]["tool_name"] == "add_one"
     assert events[2]["tool_call_id"] == "call-1"
+
+
+def test_real_materialized_model_checkpoint_preserves_tool_calls(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    handle = langgraph_calls_materialization_regression.run()
+    deadline = time.monotonic() + 15
+    while not handle.status.is_finished:
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"Execution {handle.exec_id} did not finish within 15 seconds."
+            )
+        time.sleep(0.25)
+
+    assert handle.status.is_successful
+    execution = KitaruClient().executions.get(handle.exec_id)
+    assert execution.status == ExecutionStatus.COMPLETED
+    summary_checkpoints = [
+        checkpoint
+        for checkpoint in execution.checkpoints
+        if checkpoint.name == "persist_langgraph_materialization_summary"
+    ]
+    assert len(summary_checkpoints) == 1
+    summary_outputs = [
+        artifact
+        for artifact in summary_checkpoints[0].artifacts
+        if artifact.direction == "output"
+    ]
+    assert len(summary_outputs) == 1
+    summary = cast(dict[str, Any], summary_outputs[0].load())
+    assert summary["status"] == "completed"
+    assert summary["message_types"] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "AIMessage",
+    ]
+    assert summary["tool_call_counts"] == [0, 1, 0, 0]
+    assert summary["tool_call_ids"] == [[], ["call-materialized"], [], []]
+    assert summary["contents"][-2:] == ["2", "done"]
+
+    checkpoint_names = [checkpoint.name for checkpoint in execution.checkpoints]
+    assert any(name.startswith("model_call__") for name in checkpoint_names)
+    assert any(
+        name.startswith(
+            "tool_call__add_one_for_checkpoint_materialization_call_materialized_"
+        )
+        for name in checkpoint_names
+    )
+
+    model_outputs = (
+        artifact.load()
+        for checkpoint in execution.checkpoints
+        if checkpoint.name.startswith("model_call__")
+        for artifact in checkpoint.artifacts
+        if artifact.direction == "output"
+    )
+    assert any(
+        _model_checkpoint_output_contains_tool_call(output, "call-materialized")
+        for output in model_outputs
+    )
+
+
+def test_sandbox_command_tool_uses_calls_mode_true_tool_checkpoint(
+    monkeypatch,
+) -> None:
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import (
+        FakeMessagesListChatModel,
+    )
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    class BindableFakeMessagesListChatModel(FakeMessagesListChatModel):
+        def bind_tools(
+            self,
+            tools: Any,
+            *,
+            tool_choice: str | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            return self
+
+    middleware_module = importlib.import_module("kitaru.adapters.langgraph.langchain")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    sandbox_tool_module = importlib.import_module(
+        "kitaru.adapters.langgraph._sandbox_tool"
+    )
+    checkpoints: list[dict[str, object]] = []
+    checkpoint_state = {"inside": False}
+
+    def fake_run_sync_in_checkpoint(**kwargs: object) -> object:
+        entry = dict(kwargs)
+        checkpoints.append(entry)
+        body = cast(Callable[[], object], kwargs["body"])
+        previous = checkpoint_state["inside"]
+        checkpoint_state["inside"] = True
+        try:
+            result = body()
+            entry["body_result"] = result
+            return result
+        finally:
+            checkpoint_state["inside"] = previous
+
+    def fake_run_sandbox_command(
+        command: str,
+        *,
+        cwd: str | None = None,
+        env: object = None,
+        max_chars: int,
+        cleanup: str,
+    ) -> SandboxCommandResult:
+        return SandboxCommandResult(
+            command=command,
+            cwd=cwd,
+            stdout="hello\n",
+            stderr="",
+            exit_code=0,
+            stdout_truncated=False,
+            stderr_truncated=False,
+            stack_id="stack-1",
+            stack_name="sandbox-stack",
+            sandbox_id="sandbox-1",
+            sandbox_name="local",
+            session_id="session-1",
+            cleanup="destroy",
+            cleanup_succeeded=True,
+            cleanup_error=None,
+        )
+
+    monkeypatch.setattr(middleware_module, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(
+        middleware_module,
+        "is_inside_checkpoint",
+        lambda: checkpoint_state["inside"],
+    )
+    monkeypatch.setattr(
+        middleware_module,
+        "get_current_checkpoint_id",
+        lambda: "checkpoint-from-body",
+    )
+    monkeypatch.setattr(
+        middleware_module,
+        "get_current_checkpoint_name",
+        lambda: "checkpoint_name_from_body",
+    )
+    monkeypatch.setattr(
+        middleware_module,
+        "run_sync_in_checkpoint",
+        fake_run_sync_in_checkpoint,
+    )
+    monkeypatch.setattr(
+        sandbox_tool_module.kitaru,
+        "run_sandbox_command",
+        fake_run_sandbox_command,
+    )
+    agent_module, logged = _patch_runner_summary_runtime(monkeypatch)
+    runner_checkpoints: list[str] = []
+
+    def fake_runner_checkpoint(**kwargs: object) -> object:
+        runner_checkpoints.append(cast(str, kwargs["step_name"]))
+        body = cast(Callable[[], object], kwargs["body"])
+        return body()
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_runner_checkpoint)
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: False)
+
+    model = BindableFakeMessagesListChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "run_sandbox_command",
+                        "args": {"command": "echo hello"},
+                        "id": "sandbox-call-1",
+                    }
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    graph = create_agent(
+        model,
+        tools=[create_sandbox_command_tool()],
+        middleware=[KitaruLangGraphMiddleware()],
+        checkpointer=InMemorySaver(),
+        name="sandbox_langchain_agent",
+    )
+    runner = KitaruGraphRunner(
+        graph,
+        name="sandbox_langchain_agent",
+        checkpoint_strategy="calls",
+        capture=LangGraphCapturePolicy(save_state_snapshot=False),
+    )
+
+    result = runner.invoke(
+        {"messages": [{"role": "user", "content": "run the sandbox command"}]},
+        thread_id="sandbox-thread",
+    )
+
+    all_step_names = [
+        *runner_checkpoints,
+        *[cast(str, checkpoint["step_name"]) for checkpoint in checkpoints],
+    ]
+    tool_checkpoints = [
+        checkpoint
+        for checkpoint in checkpoints
+        if cast(str, checkpoint["step_name"]).startswith(
+            "tool_call__run_sandbox_command_sandbox_call_1_"
+        )
+    ]
+    assert result.status == "completed"
+    assert not any(name.endswith("_langgraph_call") for name in all_step_names)
+    assert tool_checkpoints
+    assert any(
+        name.startswith("langgraph_summary__sandbox_langchain_agent_")
+        for name in all_step_names
+    )
+
+    tool_output = tool_checkpoints[0]["body_result"]
+    tool_content = getattr(tool_output, "content", tool_output)
+    assert json.loads(cast(str, tool_content))["stdout"] == "hello\n"
+    assert json.loads(cast(str, tool_content))["exit_code"] == 0
+
+    events = _logged_events(logged)
+    tool_events = [event for event in events if event["kind"] == "tool_call"]
+    assert len(tool_events) == 1
+    assert tool_events[0]["tool_name"] == "run_sandbox_command"
+    assert tool_events[0]["checkpoint_mode"] == "true"
 
 
 def test_model_checkpoint_input_omits_raw_prompt_and_system_text(
@@ -571,14 +927,12 @@ def test_calls_mode_run_summary_omits_message_free_text(monkeypatch) -> None:
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
     runner.invoke(
-        LangGraphRunRequest.start(
-            {
-                "messages": [{"role": "user", "content": "user secret sk-run-summary"}],
-                "system_message": {"content": "system secret run summary"},
-                "ticket_id": "TICKET-1",
-            },
-            thread_id="thread-1",
-        )
+        {
+            "messages": [{"role": "user", "content": "user secret sk-run-summary"}],
+            "system_message": {"content": "system secret run summary"},
+            "ticket_id": "TICKET-1",
+        },
+        thread_id="thread-1",
     )
 
     constants = importlib.import_module("kitaru.adapters.langgraph._constants")
@@ -626,7 +980,7 @@ def test_calls_mode_run_summary_handles_cyclic_payloads(monkeypatch) -> None:
     monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_summary_checkpoint)
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    runner.invoke(LangGraphRunRequest.start(payload, thread_id="thread-cycle"))
+    runner.invoke(payload, thread_id="thread-cycle")
 
     constants = importlib.import_module("kitaru.adapters.langgraph._constants")
     summaries = cast(
@@ -638,6 +992,34 @@ def test_calls_mode_run_summary_handles_cyclic_payloads(monkeypatch) -> None:
     assert cast(dict[str, object], summary["input"])["self"] == {
         "serialization_error": "cycle_detected"
     }
+
+
+def test_non_sandbox_tool_cache_identity_ignores_tool_object_identity(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    with tracking.tracker_scope(
+        "plain_tool_cache_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(save_tool_args=False),
+    ):
+        first_result = middleware.wrap_tool_call(
+            _tool_request(name="plain-tool", call_id="same-call", args={"value": 2}),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            _tool_request(name="plain-tool", call_id="same-call", args={"value": 2}),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    assert checkpoints[0]["checkpoint_inputs"] is None
+    assert checkpoints[1]["checkpoint_inputs"] is None
+    assert checkpoints[0]["cache_key"] == checkpoints[1]["cache_key"]
 
 
 def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct(
@@ -704,6 +1086,157 @@ def test_tool_checkpoint_inputs_redact_secrets_but_cache_identity_stays_distinct
     ]
     assert "SECRET-" not in repr(persisted_inputs)
     assert "PASSWORD-" not in repr(persisted_inputs)
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_sandbox_tool_checkpoint_inputs_redact_command_text_but_cache_stays_distinct(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    secret_command = (
+        "curl -H 'Authorization: Bearer sk-secret-command' https://example.com"
+    )
+    second_command = "python -c 'print(123)'"
+
+    def sandbox_request(command: str, call_id: str) -> SimpleNamespace:
+        request = _tool_request(
+            name="custom_sandbox_command",
+            call_id=call_id,
+            args={"command": command, "cwd": "/workspace"},
+        )
+        request.tool = SimpleNamespace(
+            name="custom_sandbox_command",
+            args_schema=SandboxCommandToolArgs,
+        )
+        return request
+
+    with tracking.tracker_scope(
+        "sandbox_command_privacy_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(),
+    ):
+        first_result = middleware.wrap_tool_call(
+            sandbox_request(secret_command, "sandbox-call-1"),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            sandbox_request(second_command, "sandbox-call-2"),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    persisted_inputs = [checkpoint["checkpoint_inputs"] for checkpoint in checkpoints]
+    assert persisted_inputs == [
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "sandbox-call-1",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "sandbox-call-1",
+                },
+            }
+        },
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "sandbox-call-2",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "sandbox-call-2",
+                },
+            }
+        },
+    ]
+    assert "sk-secret-command" not in repr(persisted_inputs)
+    assert "Authorization" not in repr(persisted_inputs)
+    assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
+
+
+def test_sandbox_tool_private_factory_settings_affect_cache_identity_only(
+    monkeypatch,
+) -> None:
+    _, tracking, checkpoints = _patch_runtime(monkeypatch, inside_flow=True)
+    middleware = KitaruLangGraphMiddleware()
+    policy = LangGraphCallCheckpointPolicy(tool_checkpoint_config={"cache": True})
+
+    first_tool = create_sandbox_command_tool(
+        name="custom_sandbox_command",
+        default_cwd="/workspace-a",
+        env={"API_TOKEN": "SECRET-STATIC-A"},
+        max_chars=123,
+        cleanup="close",
+    )
+    second_tool = create_sandbox_command_tool(
+        name="custom_sandbox_command",
+        default_cwd="/workspace-b",
+        env={"API_TOKEN": "SECRET-STATIC-B"},
+        max_chars=456,
+        cleanup="destroy",
+    )
+
+    def sandbox_request(tool: Any) -> SimpleNamespace:
+        request = _tool_request(
+            name="custom_sandbox_command",
+            call_id="same-sandbox-call",
+            args={"command": "python -c 'print(123)'", "cwd": "/workspace"},
+        )
+        request.tool = tool
+        return request
+
+    with tracking.tracker_scope(
+        "sandbox_private_cache_identity_graph",
+        call_checkpoint_policy=policy,
+        capture=LangGraphCapturePolicy(),
+    ):
+        first_result = middleware.wrap_tool_call(
+            sandbox_request(first_tool),
+            lambda _request: "first",
+        )
+        second_result = middleware.wrap_tool_call(
+            sandbox_request(second_tool),
+            lambda _request: "second",
+        )
+
+    assert first_result == "first"
+    assert second_result == "second"
+    persisted_inputs = [checkpoint["checkpoint_inputs"] for checkpoint in checkpoints]
+    assert persisted_inputs == [
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "same-sandbox-call",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "same-sandbox-call",
+                },
+            }
+        },
+        {
+            "tool_args": {
+                "tool_name": "custom_sandbox_command",
+                "tool_call_id": "same-sandbox-call",
+                "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                "tool_call": {
+                    "name": "custom_sandbox_command",
+                    "args": {"command": "[REDACTED]", "cwd": "/workspace"},
+                    "id": "same-sandbox-call",
+                },
+            }
+        },
+    ]
+    assert "SECRET-STATIC" not in repr(persisted_inputs)
+    assert "python -c" not in repr(persisted_inputs)
     assert checkpoints[0]["cache_key"] != checkpoints[1]["cache_key"]
 
 
@@ -846,9 +1379,7 @@ def test_calls_mode_can_disable_run_artifact_persistence(monkeypatch) -> None:
             persist_run_artifacts=False,
         ),
     )
-    result = runner.invoke(
-        LangGraphRunRequest.start({"input": "value"}, thread_id="thread-1")
-    )
+    result = runner.invoke({"input": "value"}, thread_id="thread-1")
 
     assert result.status == "completed"
     assert result.event_log_artifact_name is None
@@ -879,9 +1410,7 @@ def test_calls_mode_summary_checkpoint_failure_falls_back_to_logged_metadata(
     )
 
     runner = KitaruGraphRunner(FakeGraph(), checkpoint_strategy="calls")
-    result = runner.invoke(
-        LangGraphRunRequest.start({"input": "value"}, thread_id="thread-1")
-    )
+    result = runner.invoke({"input": "value"}, thread_id="thread-1")
 
     assert result.status == "completed"
     events = _logged_events(logged)
