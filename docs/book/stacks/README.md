@@ -259,6 +259,21 @@ If the stack you are deleting is currently active, Kitaru protects you by defaul
 kitaru stack delete dev --recursive --force
 ```
 
+## Use the active stack sandbox from Python
+
+`kitaru.run_sandbox_command(...)` runs a command in the sandbox attached to your active stack, rather than choosing one by type. It finds the stack's one sandbox component, runs the command in a temporary session, and returns the output.
+
+```python
+import kitaru
+
+result = kitaru.run_sandbox_command("python --version")
+print(result.stdout)
+```
+
+If the active stack's sandbox is `local`, the command runs as a local subprocess, so treat it like running on your own machine, not a locked-down container. When a model chooses the command, use an isolated sandbox and minimal credentials. Kitaru raises an error instead of guessing if the active stack has no sandbox, or more than one.
+
+For a runnable version inside a tracked flow, see `features/sandbox/active_stack_sandbox_command.py` in the [examples guide](../getting-started/examples.md).
+
 ## Use the Python SDK
 
 ```python
