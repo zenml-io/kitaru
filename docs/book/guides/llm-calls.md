@@ -144,6 +144,13 @@ reply = kitaru.llm(
 )
 ```
 
+`max_tokens` is Kitaru's provider-neutral output limit. For newer OpenAI
+reasoning and GPT-5-style models, Kitaru sends that value to OpenAI as
+`max_completion_tokens`. For OpenAI reasoning models, that limit can include
+internal reasoning tokens, so the visible response can be shorter than the
+requested limit. For older OpenAI models, OpenRouter, and Ollama, Kitaru keeps
+using the OpenAI-compatible `max_tokens` request field.
+
 ### Chat-style message lists
 
 Instead of a plain string, you can pass a chat-style message list:
