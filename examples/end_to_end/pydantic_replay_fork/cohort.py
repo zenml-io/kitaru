@@ -30,7 +30,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 
-from support_agent import CUT, support_copilot_flow, wait_for_completion
+from support_agent import CUT, support_copilot_flow
 from utils import (
     MetricDelta,
     ReplayRun,
@@ -303,7 +303,7 @@ def _replay_run(
         edits["model"] = model
         edits["prompt_profile"] = prompt_profile
     handle = support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
-    wait_for_completion(handle)
+    handle.wait()
     return ReplayRun(
         exec_id=handle.exec_id,
         decision=load_support_decision_from_execution(client, handle.exec_id),

@@ -37,7 +37,6 @@ from support_agent import (
     SupportDecision,
     recent_exec_ids,
     support_copilot_flow,
-    wait_for_completion,
 )
 from utils import (
     cost,
@@ -154,10 +153,10 @@ def run() -> str:
 
     section("Run the PydanticAI agent as a durable Kitaru flow")
 
-    # The one SDK call that starts a durable execution; wait_for_completion
-    # blocks until terminal while the adapter records model/tool checkpoints.
+    # The one SDK call that starts a durable execution; .wait() blocks until the
+    # flow reaches a terminal state (the final `publish_support_decision` step).
     handle = support_copilot_flow.run(SCENARIO, CUSTOMER, BASELINE_MODEL, "baseline")
-    wait_for_completion(handle)
+    handle.wait()
 
     client = KitaruClient()
     require_replay_anchor(client, handle.exec_id)
@@ -191,7 +190,7 @@ def replay(exec_id: str) -> None:
     )
 
     reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
-    wait_for_completion(reproduced)
+    reproduced.wait()
 
     reproduced_decision = load_support_decision_from_execution(
         client, reproduced.exec_id
@@ -215,7 +214,7 @@ def replay(exec_id: str) -> None:
         model=FORK_MODEL,
         prompt_profile=FORK_PROMPT_PROFILE,
     )
-    wait_for_completion(edited)
+    edited.wait()
 
     edited_decision = load_support_decision_from_execution(client, edited.exec_id)
 

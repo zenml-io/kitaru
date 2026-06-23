@@ -17,8 +17,6 @@ interpretation cached, then reruns the policy lookup plus the final model
 request under the replayed model/prompt profile.
 """
 
-import contextlib
-import time
 from typing import Annotated
 
 from pydantic import BaseModel
@@ -26,7 +24,6 @@ from pydantic_ai import Agent
 
 from kitaru import (
     ImageSettings,
-    KitaruAmbiguousFlowResultError,
     KitaruClient,
     checkpoint,
     flow,
@@ -256,37 +253,6 @@ def support_copilot_flow(
     )
     result = agent.run_sync(user_prompt)
     return publish_support_decision(result.output)
-
-
-# ---------------------------------------------------------------------------
-# Waiting on a run — calls strategy can produce several terminal adapter
-# checkpoints, so the demo waits for terminal status and ignores ambiguous flow
-# result extraction. The decision is read later from artifacts.
-# ---------------------------------------------------------------------------
-
-
-def wait_for_completion(handle, *, timeout_seconds: float = 300.0) -> str:
-    """Block until the flow finishes; return its exec_id."""
-    client = KitaruClient()
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        run = client.executions.get(handle.exec_id)
-        last_status = run.status
-        if last_status.is_finished:
-            break
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Timed out waiting for execution {handle.exec_id} after "
-                f"{timeout_seconds:g}s. Last status: {last_status.value}."
-            )
-        time.sleep(1.0)
-
-    # Surface failed executions through the normal handle path. Successful
-    # calls-strategy runs may still be ambiguous because several adapter-created
-    # checkpoints can be terminal result candidates, so suppress only that case.
-    with contextlib.suppress(KitaruAmbiguousFlowResultError):
-        handle.wait()
-    return handle.exec_id
 
 
 # ---------------------------------------------------------------------------

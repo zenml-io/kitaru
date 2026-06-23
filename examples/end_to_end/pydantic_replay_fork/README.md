@@ -29,16 +29,16 @@ Add `--output json` if you want to capture the new execution id programmatically
 `demo.py` narrates the same operations with SDK calls, prints the decisions, writes a three-way HTML report, and can run a small cohort experiment.
 
 ```python
-from support_agent import CUT, support_copilot_flow, wait_for_completion
+from support_agent import CUT, support_copilot_flow
 
 # Original recorded run.
 handle = support_copilot_flow.run(prompt, customer, "openai:gpt-5-mini", "baseline")
-wait_for_completion(handle)   # see note below
+handle.wait()
 exec_id = handle.exec_id
 
 # Unchanged replay / reproduction. CUT == "lookup_policy_tool".
 reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
-wait_for_completion(reproduced)
+reproduced.wait()
 
 # Edited replay with new flow-input values.
 edited = support_copilot_flow.replay(
@@ -48,16 +48,12 @@ edited = support_copilot_flow.replay(
     model="openai:gpt-5-nano",
     prompt_profile="trimmed_permissions",
 )
-wait_for_completion(edited)
+edited.wait()
 ```
 
-> **Why `wait_for_completion`, not `handle.wait()`?** The adapter's
-> `"calls"` strategy creates model-request and tool-call checkpoints such as
-> `support_copilot_model_request`, `gather_context_tool`, and
-> `lookup_policy_tool`. In that shape a single run can have several terminal
-> checkpoints, so `handle.wait()` may not be able to auto-pick one return value.
-> The helper waits for the execution to finish; the demo then reads the decision
-> from the explicit `publish_support_decision` checkpoint artifact.
+`handle.wait()` returns cleanly because the flow ends in an explicit
+`publish_support_decision` checkpoint — a single result step — even though the
+adapter also recorded the per-call model/tool checkpoints along the way.
 
 The important safety check is sequential:
 
@@ -145,7 +141,7 @@ Three metrics are provided in `utils.py`:
 
 | file | purpose |
 |---|---|
-| `support_agent.py` | The PydanticAI support agent, its tools, the `KitaruAgent` wrapper, the durable `@flow`, and `recent_exec_ids()`. |
+| `support_agent.py` | The PydanticAI support agent, its tools, the `KitaruAgent` wrapper, the durable `@flow`, `CUT`, and `recent_exec_ids()`. |
 | `demo.py` | The walkthrough: `run`, `replay`, and `cohort` as plain functions over SDK primitives. |
 | `cohort.py` | `run_cohort(...) -> Report` with `summary()`, `regressions()`, and per-case accessors. |
 | `utils.py` | Analysis helpers: metrics, quality judge, decision extraction, and `ReplayRun`. |
