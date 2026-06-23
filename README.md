@@ -224,15 +224,26 @@ print(result)  # SOME DATA
 python agent.py
 ```
 
-Every checkpoint's output is persisted automatically. You can inspect what
-happened, replay from any checkpoint, or resume a waiting flow:
+Every step is recorded automatically. Inspect any run, then replay it from a
+checkpoint — a faithful rerun, or a fork with one input changed (a different
+model or parameter) so you can see what *would* have happened before you ship
+the change:
 
 ```bash
 kitaru executions list
 kitaru executions get <EXECUTION_ID>
 kitaru executions logs <EXECUTION_ID>
+
+# Reproduce a run faithfully from a checkpoint
 kitaru executions replay <EXECUTION_ID> --from process_data
+
+# Fork the same run with one input changed
+kitaru executions replay <EXECUTION_ID> --from fetch_data \
+  --args '{"url": "https://other.example.com"}'
 ```
+
+See [Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides)
+for the full reproduce → fork → diff loop.
 
 ### Deploy it
 
@@ -265,7 +276,7 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://docs.zenml.io/kitaru) | Complete reference and guides |
-| [Agent Harness Platform](https://docs.zenml.io/user-guides/agents-guide) | Build a durable agent harness platform stage by stage |
+| [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
