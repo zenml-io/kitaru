@@ -128,7 +128,7 @@ def test_finalize_run_result_keeps_successful_run_when_cost_calculator_fails(
     assert genai_calls == []
 
 
-@pytest.mark.parametrize("invalid_cost", [None, True, -1, float("nan"), "bad"])
+@pytest.mark.parametrize("invalid_cost", [True, -1, float("nan"), "bad"])
 def test_finalize_run_result_ignores_invalid_cost_calculator_return(
     invalid_cost: object,
     monkeypatch: pytest.MonkeyPatch,

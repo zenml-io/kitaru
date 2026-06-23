@@ -330,6 +330,42 @@ def test_run_sync_records_calculated_gemini_cost(
     assert cost["source_label"] == "gemini.cost_calculator"
 
 
+def test_gemini_cost_calculator_none_records_clean_no_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.99)
+    usage = SimpleNamespace(
+        prompt_token_count=3,
+        candidates_token_count=4,
+        total_token_count=7,
+    )
+    client = FakeClient([_completed_interaction(usage=usage)])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        cost_calculator=lambda _usage: None,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.estimated_cost_usd is None
+    assert genai_calls == []
+    assert not any("invalid estimated cost" in warning for warning in result.warnings)
+    assert records[0]["usage"]["input_tokens"] == 3
+    assert records[0]["usage"]["output_tokens"] == 4
+    assert records[0]["cost"]["actual_cost_usd"] is None
+    assert records[0]["cost"]["estimated_cost_usd"] is None
+    assert records[0]["cost"]["source"] == "none"
+    assert records[0]["cost"]["source_label"] is None
+    assert records[0]["warnings"] == result.warnings
+
+
 def test_gemini_invalid_cost_calculator_return_records_warning(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,

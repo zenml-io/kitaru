@@ -247,6 +247,13 @@ def calculated_cost_metadata(
             cost_source="calculator_error",
             cost_source_label=source_label,
         )
+    if raw_cost is None:
+        return CalculatedCostMetadata(
+            estimated_cost_usd=None,
+            cost_source="none",
+            cost_source_label=None,
+        )
+
     cost = coerce_cost_usd(raw_cost)
     if cost is None:
         warnings.append(

@@ -216,6 +216,33 @@ def test_genai_prices_helper_unknown_provider_records_tokens_only(
     assert calls == []
 
 
+def test_calculated_or_genai_cost_metadata_treats_calculator_none_as_no_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.99)
+    warnings: list[str] = []
+
+    def decline_cost(_usage: object) -> float | None:
+        return None
+
+    metadata = calculated_or_genai_cost_metadata(
+        calculator=decline_cost,
+        calculator_usage={"input_tokens": 10, "output_tokens": 5},
+        genai_provider="openai",
+        genai_model="gpt-4o-mini",
+        genai_usage={"input_tokens": 10, "output_tokens": 5},
+        warnings=warnings,
+        adapter_name="OpenAI Agents",
+        calculator_source_label="openai_agents.cost_calculator",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "none"
+    assert metadata.cost_source_label is None
+    assert genai_calls == []
+    assert warnings == []
+
+
 def test_calculated_or_genai_cost_metadata_does_not_fallback_after_calculator_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

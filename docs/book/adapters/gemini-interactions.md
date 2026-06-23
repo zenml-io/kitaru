@@ -96,8 +96,9 @@ The adapter gives existing Gemini Interactions users:
 - one durable Kitaru checkpoint around each stable Gemini interaction response
 - replay-skip for completed Gemini turns inside larger Kitaru flows
 - a typed `GeminiInteractionResult` with status, interaction IDs, output text,
-  model/agent, environment ID when reported, usage, estimated cost when a
-  calculator is configured, timing, and warnings
+  model/agent, environment ID when reported, usage, estimated cost when Kitaru
+  can estimate one automatically or a configured calculator returns one, timing,
+  and warnings
 - safe step summaries from `interaction.steps` so your flow can respond to
   handoff points without storing raw provider payloads by default. Step
   summaries keep metadata such as type, status, and call IDs; `text_preview` is
@@ -157,7 +158,9 @@ those counts include thoughts.
 If you know the pricing you want to use, pass `cost_calculator=` to
 `KitaruGeminiInteractionsRunner`. Kitaru calls it with a `GeminiUsageSummary`
 containing the requested/resolved model fields and normalized token counts, then
-records the returned non-negative number as `estimated_cost_usd`.
+records the returned non-negative number as `estimated_cost_usd`. Return `None`
+when your calculator cannot estimate the call; Kitaru leaves the cost empty and
+records the usage as a no-estimate token record.
 
 ```python
 from kitaru.adapters.gemini import GeminiUsageSummary, KitaruGeminiInteractionsRunner
@@ -786,7 +789,8 @@ live client object or anything whose `repr()` can change between processes.
 - `steps`, a list of `GeminiInteractionStepSummary` records derived primarily
   from `interaction.steps`
 - `usage` when reported by the SDK
-- `estimated_cost_usd` when a configured calculator returns one
+- `estimated_cost_usd` when Kitaru can estimate one automatically or a configured
+  calculator returns one
 - `poll_count`, `duration_ms`, `sdk_version`, and non-sensitive `metadata`
 - artifact names for captured request manifest, output, usage, event log, and
   run summary
