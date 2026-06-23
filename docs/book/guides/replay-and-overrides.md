@@ -117,9 +117,9 @@ fork = client.executions.get(forked.exec_id)
 
 {% hint style="info" %}
 Cohort experiments — applying the same override across many recent runs and
-ranking the results by cost, latency, or a quality judge — are an SDK pattern
-built on top of replay (`cohort(...).experiment(...)`, `Recipe(...)`), not a
-separate core API.
+ranking the results by cost, latency, or a quality judge — are a pattern you
+build on top of replay, not a separate API: list recent executions, replay each
+with the same override, and aggregate the metrics yourself.
 {% endhint %}
 
 ## Selector rules
