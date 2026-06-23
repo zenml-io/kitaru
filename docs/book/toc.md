@@ -20,6 +20,16 @@
 * [Wait, Input, and Resume](concepts/wait-and-input.md)
 * [Logging and Metadata](concepts/logging.md)
 
+## Adapters
+
+* [Overview](adapters/README.md)
+* [Choose an Adapter](guides/choose-an-adapter.md)
+* [Pydantic AI](adapters/pydantic-ai.md)
+* [OpenAI Agents](adapters/openai-agents.md)
+* [Claude Agent SDK](adapters/claude-agent-sdk.md)
+* [Gemini Interactions](adapters/gemini-interactions.md)
+* [LangGraph](adapters/langgraph.md)
+
 ## Guides
 
 * [Replay and Overrides](guides/replay-and-overrides.md)
@@ -36,16 +46,6 @@
 * [Tracked LLM Calls](guides/llm-calls.md)
 * [Secrets and Model Registration](guides/secrets-and-model-registration.md)
 * [Secrets](guides/secrets.md)
-* [Choose an Adapter](guides/choose-an-adapter.md)
-
-## Adapters
-
-* [Overview](adapters/README.md)
-* [Pydantic AI](adapters/pydantic-ai.md)
-* [OpenAI Agents](adapters/openai-agents.md)
-* [Claude Agent SDK](adapters/claude-agent-sdk.md)
-* [Gemini Interactions](adapters/gemini-interactions.md)
-* [LangGraph](adapters/langgraph.md)
 
 ## Server Deployment
 
