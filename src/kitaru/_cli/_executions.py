@@ -53,6 +53,7 @@ from ._helpers import (
     _format_timestamp,
     _is_input_interactive,
     _is_interactive,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
     _validate_pagination,
@@ -753,11 +754,27 @@ def statistics(
         int,
         Parameter(help="Maximum number of public statistics groups to return."),
     ] = 1000,
+    page: Annotated[
+        int | None, Parameter(help="1-based page number to return.")
+    ] = None,
+    size: Annotated[
+        int | None, Parameter(help="Number of groups to return per page.")
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Show grouped execution statistics."""
     command = "executions.statistics"
     output_format = _resolve_output_format(output)
+    pagination_requested = page is not None or size is not None
+    resolved_page = DEFAULT_LIST_PAGE if page is None else page
+    resolved_size = DEFAULT_LIST_SIZE if size is None else size
+    if pagination_requested:
+        resolved_page, resolved_size = _validate_pagination(
+            page=resolved_page,
+            size=resolved_size,
+            command=command,
+            output=output_format,
+        )
     try:
         validate_statistics_max_groups(max_groups, label="--max-groups")
     except KitaruUsageError as exc:
@@ -782,10 +799,21 @@ def statistics(
         exit_with_error=_exit_with_error,
     )
 
+    display_statistics = statistics_result
+    if pagination_requested:
+        display_statistics = ExecutionStatistics(
+            groups=_paginate_items(
+                statistics_result.groups,
+                page=resolved_page,
+                size=resolved_size,
+            ),
+            truncated=statistics_result.truncated,
+        )
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            serialize_execution_statistics(statistics_result),
+            serialize_execution_statistics(display_statistics),
             output=output_format,
         )
         return
@@ -794,11 +822,19 @@ def statistics(
         metric.name for metric in normalize_execution_statistics_metrics(metric or [])
     ]
     columns, rows = _execution_statistics_table(
-        statistics_result,
+        display_statistics,
         requested_metric_names=requested_metric_names,
     )
     _emit_table("Kitaru execution statistics", columns, rows)
-    if statistics_result.truncated:
+    if pagination_requested:
+        _emit_pagination_note(
+            page=resolved_page,
+            size=resolved_size,
+            returned_count=len(display_statistics.groups),
+            total_count=len(statistics_result.groups),
+            output=output_format,
+        )
+    if display_statistics.truncated:
         print(
             f"Results truncated at --max-groups {max_groups}. "
             "Narrow filters or increase --max-groups."
