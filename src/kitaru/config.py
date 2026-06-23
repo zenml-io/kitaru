@@ -15,6 +15,7 @@ import logging
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
@@ -70,6 +71,7 @@ KITARU_STACK_ENV = _config_env.KITARU_STACK_ENV
 KITARU_CACHE_ENV = _config_env.KITARU_CACHE_ENV
 KITARU_RETRIES_ENV = _config_env.KITARU_RETRIES_ENV
 KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
+KITARU_LLM_ESTIMATED_COSTS_ENV = _config_env.KITARU_LLM_ESTIMATED_COSTS_ENV
 KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
 KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
 KITARU_MODEL_REGISTRY_ENV = _kitaru_env.KITARU_MODEL_REGISTRY_ENV
@@ -87,6 +89,7 @@ _UNSET = object()
 ImageSettings = _config_images.ImageSettings
 ImageInput = _config_images.ImageInput
 KitaruConfig = _config_core.KitaruConfig
+LLMEstimatedCostsPolicy = _config_core.LLMEstimatedCostsPolicy
 ResolvedExecutionConfig = _config_core.ResolvedExecutionConfig
 ResolvedConnectionConfig = _config_core.ResolvedConnectionConfig
 ActiveEnvironmentVariable = _config_core.ActiveEnvironmentVariable
@@ -232,6 +235,56 @@ def resolve_execution_config(
         read_execution_env_config=_read_execution_env_config,
         read_runtime_execution_config=_read_runtime_execution_config,
     )
+
+
+@lru_cache(maxsize=32)
+def _cached_project_llm_estimated_costs(
+    start_dir: str | None,
+    pyproject_path: str | None,
+    pyproject_mtime_ns: int | None,
+) -> LLMEstimatedCostsPolicy | None:
+    """Return the project-level LLM estimated-cost policy.
+
+    ``pyproject_path`` and ``pyproject_mtime_ns`` are cache-key inputs so a
+    changed project config file naturally invalidates this read.
+    """
+    del pyproject_path, pyproject_mtime_ns
+    return _read_project_config(
+        Path(start_dir) if start_dir is not None else None
+    ).llm_estimated_costs
+
+
+def resolve_llm_estimated_cost_policy(
+    *,
+    start_dir: Path | None = None,
+) -> LLMEstimatedCostsPolicy:
+    """Resolve direct ``kitaru.llm()`` estimated-cost policy.
+
+    Direct LLM calls use the execution-config precedence chain entries that can
+    exist at call time: project config, environment variables, then runtime
+    ``kitaru.configure(...)`` overrides. The default is ``"auto"``.
+    """
+    runtime_policy = _read_runtime_execution_config().llm_estimated_costs
+    if runtime_policy is not None:
+        return runtime_policy
+
+    env_policy = _read_execution_env_config().llm_estimated_costs
+    if env_policy is not None:
+        return env_policy
+
+    pyproject_path = _find_pyproject(start_dir)
+    pyproject_mtime_ns = (
+        pyproject_path.stat().st_mtime_ns if pyproject_path is not None else None
+    )
+    project_policy = _cached_project_llm_estimated_costs(
+        str(start_dir) if start_dir is not None else None,
+        str(pyproject_path) if pyproject_path is not None else None,
+        pyproject_mtime_ns,
+    )
+    if project_policy is not None:
+        return project_policy
+
+    return "auto"
 
 
 def resolve_connection_config(
@@ -840,13 +893,15 @@ def configure(
     image: ImageInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
+    llm_estimated_costs: str | None | object = _UNSET,
     project: str | None | object = _UNSET,
 ) -> KitaruConfig:
     """Set process-local runtime defaults.
 
-    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
-    update the execution precedence chain. The ``project`` field updates
-    the connection precedence chain and is intended as an internal /
+    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``,
+    ``llm_estimated_costs``) update the execution precedence chain. The
+    ``project`` field updates the connection precedence chain and is intended
+    as an internal /
     testing escape hatch — it is not a normal user-facing setting.
 
     Args:
@@ -854,6 +909,9 @@ def configure(
         image: Default image settings override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
+        llm_estimated_costs: Estimated-cost policy for direct ``kitaru.llm()``
+            calls. Use ``"auto"`` to calculate estimates when possible, ``"off"``
+            to disable calculation, or ``None`` to clear the runtime override.
         project: Project override (internal/testing). Set to ``None``
             to clear.
 
@@ -865,6 +923,7 @@ def configure(
         image=image,
         cache=cache,
         retries=retries,
+        llm_estimated_costs=llm_estimated_costs,
         project=project,
         unset_sentinel=_UNSET,
     )

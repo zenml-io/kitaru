@@ -139,6 +139,9 @@ class ImageSettings(BaseModel):
 ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
 
 
+LLMEstimatedCostsPolicy = Literal["auto", "off"]
+
+
 class KitaruConfig(BaseModel):
     """Unified Kitaru configuration model."""
 
@@ -146,6 +149,7 @@ class KitaruConfig(BaseModel):
     image: ImageSettings | None = None
     cache: bool | None = None
     retries: int | None = None
+    llm_estimated_costs: LLMEstimatedCostsPolicy | None = None
     server_url: str | None = None
     auth_token: str | None = None
     project: str | None = None
@@ -178,6 +182,20 @@ class KitaruConfig(BaseModel):
             raise KitaruUsageError("Flow retries must be >= 0.")
         return value
 
+    @field_validator("llm_estimated_costs", mode="before")
+    @classmethod
+    def _normalize_llm_estimated_costs(
+        cls, value: str | None
+    ) -> LLMEstimatedCostsPolicy | None:
+        if value is None:
+            return None
+        normalized_value = str(value).strip().lower()
+        if normalized_value in {"auto", "on", "true", "1", "yes"}:
+            return "auto"
+        if normalized_value in {"off", "false", "0", "no"}:
+            return "off"
+        raise KitaruUsageError("llm_estimated_costs must be 'auto' or 'off'.")
+
     @field_validator("image", mode="before")
     @classmethod
     def _coerce_image_input(cls, value: Any) -> Any:
@@ -192,6 +210,7 @@ class ResolvedExecutionConfig(BaseModel):
     image: ImageSettings | None = None
     cache: bool | None = None
     retries: int
+    llm_estimated_costs: LLMEstimatedCostsPolicy = "auto"
 
     @field_validator("stack")
     @classmethod
@@ -724,6 +743,7 @@ def configure_impl(
     image: ImageInput | None | object,
     cache: bool | None | object,
     retries: int | None | object,
+    llm_estimated_costs: LLMEstimatedCostsPolicy | None | object,
     project: str | None | object,
     unset_sentinel: object,
 ) -> KitaruConfig:
@@ -753,6 +773,12 @@ def configure_impl(
             candidate_execution.pop("retries", None)
         else:
             candidate_execution["retries"] = retries
+
+    if llm_estimated_costs is not unset_sentinel:
+        if llm_estimated_costs is None:
+            candidate_execution.pop("llm_estimated_costs", None)
+        else:
+            candidate_execution["llm_estimated_costs"] = llm_estimated_costs
 
     validated_execution = KitaruConfig.model_validate(candidate_execution)
     _RUNTIME_EXECUTION_OVERRIDES.clear()

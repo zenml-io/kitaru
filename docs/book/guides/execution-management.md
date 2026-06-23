@@ -230,14 +230,55 @@ Cost fields are intentionally split:
 
 - `actual_cost_usd` means the provider reported a cost. Claude Agent SDK exposes
   this via `total_cost_usd`.
-- `estimated_cost_usd` means Kitaru used an adapter cost calculator. OpenAI
-  Agents and LangGraph can report this when you configure their calculator hook.
+- `estimated_cost_usd` means Kitaru calculated a cost from token counts and a
+  pricing table or calculator. Direct OpenAI and Anthropic `kitaru.llm()` calls
+  write this field automatically when the model can be priced.
 - `display_cost_usd` uses actual cost for a record when present, otherwise
   estimated cost. Treat it as observability, not as a billing invoice.
 
-Direct `kitaru.llm()` records token counts and latency, but it does not invent a
-cost number. If the provider call does not return a real cost source, cost stays
-empty and the execution summary increments `records_without_cost_count`.
+Direct `kitaru.llm()` cost estimates are on by default for OpenAI and Anthropic
+models. After the provider call succeeds, Kitaru sends the model name and token
+usage to [`genai-prices`](https://github.com/pydantic/genai-prices), stores the
+returned value as `estimated_cost_usd`, and records provenance like this:
+
+```text
+cost.source = "calculator"
+cost.source_label = "genai-prices"
+cost.pricing_version = "genai-prices:<installed package version>"
+actual_cost_usd = null
+estimated_cost_usd = <calculated USD estimate>
+```
+
+The provider call always comes first. If `genai-prices` is missing, cannot price
+the model, returns an invalid value, or cannot read its price data, Kitaru still
+returns the model response and records the token counts. The `llm_usage_v1`
+record gets a warning and no estimated cost, so the execution summary increments
+`records_without_cost_count` for that record.
+
+To disable direct LLM cost estimates for a process, set:
+
+```bash
+export KITARU_LLM_ESTIMATED_COSTS=off
+```
+
+You can also set the runtime policy from Python:
+
+```python
+import kitaru
+
+kitaru.configure(llm_estimated_costs="off")  # or "auto" to enable again
+```
+
+Use `[tool.kitaru] llm_estimated_costs = "off"` in `pyproject.toml` when you want
+a repository default. The environment variable and `kitaru.configure(...)` are
+useful for temporary opt-out without editing the project file.
+
+{% hint style="warning" %}
+`estimated_cost_usd` is not an invoice. It depends on the installed
+`genai-prices` package and its price data. Providers can change prices, apply
+account-specific discounts, or round bills differently. Use the estimate for
+observability and trend analysis, not financial reconciliation.
+{% endhint %}
 
 Useful statistics queries:
 

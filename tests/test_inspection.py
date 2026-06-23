@@ -632,6 +632,7 @@ def test_serialize_execution_contract() -> None:
         "image": None,
         "cache": False,
         "retries": 0,
+        "llm_estimated_costs": "auto",
     }
     assert spec["flow_defaults"] == {
         "stack": None,
@@ -651,6 +652,7 @@ def test_serialize_execution_contract() -> None:
         },
         "cache": None,
         "retries": None,
+        "llm_estimated_costs": None,
         "server_url": None,
         "auth_token": None,
         "project": None,
