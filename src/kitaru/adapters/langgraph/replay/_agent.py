@@ -174,9 +174,9 @@ class KitaruReplayAgent:
         replay_exec: _ReplayResult,
         fork_exec: _ReplayResult,
     ) -> DriftReport:
-        trace_decision = _decision_of_observed(case)
-        replay_decision = _decision_of_result(replay_exec)
-        fork_decision = _decision_of_result(fork_exec)
+        trace_decision = _recorded_decision_from_case(case)
+        replay_decision = _decision_from_replay_result(replay_exec)
+        fork_decision = _decision_from_replay_result(fork_exec)
         return DriftReport(
             reproduction=compare_decisions(trace_decision, replay_decision),
             fork=compare_decisions(replay_decision, fork_decision),
@@ -211,7 +211,7 @@ def _node_outputs_from_case(
     decision node additionally carries the observed decision.
     """
     observed = case.observed_output if isinstance(case.observed_output, Mapping) else {}
-    decision = _decision_of_observed(case)
+    decision = _recorded_decision_from_case(case)
     stashed = _stashed_node_outputs(case)
     outputs: dict[str, Any] = {n: dict(stashed.get(n, {})) for n in nodes}
     for node in nodes:
@@ -243,7 +243,7 @@ def _stashed_node_outputs(case: ImportedReplayCase) -> dict[str, Any]:
     }
 
 
-def _decision_of_observed(case: ImportedReplayCase) -> dict[str, Any]:
+def _recorded_decision_from_case(case: ImportedReplayCase) -> dict[str, Any]:
     observed = case.observed_output
     if not isinstance(observed, Mapping):
         return {}
@@ -256,7 +256,7 @@ def _decision_of_observed(case: ImportedReplayCase) -> dict[str, Any]:
     return {}
 
 
-def _decision_of_result(result: _ReplayResult) -> dict[str, Any]:
+def _decision_from_replay_result(result: _ReplayResult) -> dict[str, Any]:
     """Read the decision dict out of a replay/fork node-output map.
 
     Raises RuntimeError if node_outputs is empty or contains none of the known

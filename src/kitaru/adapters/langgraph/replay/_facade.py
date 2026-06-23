@@ -24,9 +24,10 @@ from typing import Any
 
 from kitaru.adapters.langgraph.replay._agent import (
     KitaruReplayAgent,
-    _decision_of_result,
+    _decision_from_replay_result,
+    _recorded_decision_from_case,
 )
-from kitaru.adapters.langgraph.replay._drift import DriftReport
+from kitaru.adapters.langgraph.replay._drift import DriftReport, compare_decisions
 from kitaru.adapters.langgraph.replay._importer import import_trace
 
 RehydrateHook = Callable[[Any], "tuple[dict | None, dict | None]"]
@@ -97,7 +98,12 @@ class _RunResult:
     @property
     def decision(self) -> dict:
         """The decision this run produced."""
-        return _decision_of_result(self.result)
+        return _decision_from_replay_result(self.result)
+
+    @property
+    def original_decision(self) -> dict:
+        """The decision recorded in the imported trace."""
+        return _recorded_decision_from_case(self._case)
 
     def diff(self, other: _RunResult) -> DriftReport:
         # self is the fork, `other` is the unchanged replay (PRD: fork.diff(replay)).
@@ -105,7 +111,10 @@ class _RunResult:
 
     def vs_trace(self) -> DriftReport:
         """Compare this run against the original recorded trace (reproduction)."""
-        return self._adapter._agent.diff(self._case, self.result, self.result)
+        return DriftReport(
+            reproduction=compare_decisions(self.original_decision, self.decision),
+            fork=[],
+        )
 
 
 class _Fork:

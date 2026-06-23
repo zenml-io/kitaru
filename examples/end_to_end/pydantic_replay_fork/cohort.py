@@ -4,15 +4,17 @@ Public surface
 --------------
 run_cohort(exec_ids, *, baseline_model, variant_model, variant_prompt_profile,
            metrics, repeats=1) -> Report
-    For each exec_id: replay with NO edits (baseline) and replay WITH the variant
-    config (averaged over ``repeats``). Both legs call the real SDK primitive
+    For each exec_id: load the original recorded decision, replay with NO edits
+    (unchanged reproduction), and replay WITH the variant config (averaged over
+    ``repeats``). Both replay legs call the real SDK primitive
     ``support_copilot_flow.replay(...)`` directly — there is no wrapper. Apply
-    each metric, track decision changes, and skip cases without the ``decide``
-    checkpoint.
+    each metric, track original→reproduction and reproduction→edited decision
+    changes, and skip cases without the ``decide`` checkpoint.
 
 Report.summary()
-    Print/return aggregate deltas per metric (mean baseline vs variant),
-    decision-change count, and an ``improvement`` verdict.
+    Print/return aggregate deltas per metric (mean unchanged replay vs edited
+    replay), reproduction drift count, edited decision-change count, and an
+    ``improvement`` verdict.
 
 Report.regressions() -> list[MetricDelta | str]
     Items that got WORSE (direction-aware per metric; decision changes flagged
@@ -29,7 +31,12 @@ import logging
 from collections.abc import Callable
 
 from support_copilot import CUT, support_copilot_flow
-from utils import MetricDelta, ReplayRun, decision_of, diff_decisions
+from utils import (
+    MetricDelta,
+    ReplayRun,
+    diff_decisions,
+    load_support_decision_from_execution,
+)
 
 from kitaru import KitaruClient
 
@@ -46,9 +53,11 @@ class _CohortRow:
     """Internal per-case row."""
 
     base_exec_id: str
-    baseline_run: ReplayRun | None = None
-    variant_run: ReplayRun | None = None
+    original_decision: dict | None = None
+    baseline_run: ReplayRun | None = None  # unchanged replay / reproduction
+    variant_run: ReplayRun | None = None  # edited replay
     deltas: list[MetricDelta] = dataclasses.field(default_factory=list)
+    reproduction_changed: bool | None = None
     decision_changed: bool | None = None
     skipped: bool = False
     skip_reason: str | None = None
@@ -73,8 +82,13 @@ class Report:
 
     @property
     def decision_change_count(self) -> int:
-        """Number of non-skipped rows where the decision changed."""
+        """Rows where the edited replay changed the unchanged replay decision."""
         return sum(1 for r in self.rows if r.decision_changed is True)
+
+    @property
+    def reproduction_drift_count(self) -> int:
+        """Rows where the unchanged replay did not match the original decision."""
+        return sum(1 for r in self.rows if r.reproduction_changed is True)
 
     def _mean_baseline(self, metric_name: str) -> float | None:
         vals = [
@@ -137,12 +151,12 @@ class Report:
     def regressions(self) -> list:
         """Return per-metric aggregates that got WORSE, as MetricDelta objects.
 
-        A regression is a MetricDelta where the mean variant value is worse
-        than the mean baseline value (direction-aware).  Also includes a
-        ``"decision_changed"`` string entry when any decision changed.
+        A regression is a MetricDelta where the mean edited replay value is worse
+        than the mean unchanged replay value (direction-aware). Also includes
+        string entries when reproduction drift or edited decision drift occurs.
 
         Returns:
-            List of MetricDelta (aggregate) objects and/or ``"decision_changed"``.
+            List of MetricDelta aggregate objects and/or string drift labels.
         """
         result = []
         for name in self._metric_names():
@@ -165,8 +179,10 @@ class Report:
             )
             if agg.is_worse:
                 result.append(agg)
+        if self.reproduction_drift_count > 0:
+            result.append("reproduction_drift")
         if self.decision_change_count > 0:
-            result.append("decision_changed")
+            result.append("edited_decision_changed")
         return result
 
     def summary(self) -> str:
@@ -174,7 +190,8 @@ class Report:
         lines = [
             f"cohort experiment — {len(self.rows)} runs",
             f"  rows: {len(self.rows)} | skipped: {self.skipped}"
-            f" | decision_changed: {self.decision_change_count}",
+            f" | original→reproduction drift: {self.reproduction_drift_count}"
+            f" | reproduction→edited drift: {self.decision_change_count}",
         ]
         for name in self._metric_names():
             b = self._mean_baseline(name)
@@ -219,20 +236,21 @@ def _replay_run(
 ) -> ReplayRun:
     """Replay *exec_id* from the ``decide`` checkpoint and collect the result.
 
-    ``prompt_profile=None`` replays with no config edit (the baseline leg) — the
-    flow reuses the recorded inputs. Passing a profile overrides the decide +
-    finalize config (the variant leg). Either way this is just the SDK call:
+    ``prompt_profile=None`` replays with no config edit — the flow reuses the
+    recorded inputs. Passing a profile overrides the decide + finalize config
+    with ``model`` and ``prompt_profile``. Either way this is just the SDK call:
 
         support_copilot_flow.replay(exec_id, from_="decide", cache=False, **edits)
     """
-    edits: dict = {"model": model}
+    edits: dict = {}
     if prompt_profile is not None:
+        edits["model"] = model
         edits["prompt_profile"] = prompt_profile
     handle = support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
     handle.wait()
     return ReplayRun(
         exec_id=handle.exec_id,
-        decision=decision_of(client, handle.exec_id),
+        decision=load_support_decision_from_execution(client, handle.exec_id),
         model=model,
     )
 
@@ -250,12 +268,13 @@ def run_cohort(
 
     For each exec_id:
 
-    1. Replay with NO edits -> baseline ``ReplayRun`` (run once).
-    2. Replay with the variant config -> variant ``ReplayRun``, repeated
+    1. Load the original recorded decision from checkpoint artifacts.
+    2. Replay with NO edits -> unchanged reproduction ``ReplayRun`` (run once).
+    3. Replay with the variant config -> edited ``ReplayRun``, repeated
        ``repeats`` times; metric variant_values are averaged.
-    3. Apply each metric callable to (baseline, variant).
-    4. Track whether the decision changed.
-    5. Skip cases without the ``decide`` checkpoint.
+    4. Apply each metric callable to (unchanged replay, edited replay).
+    5. Track original→reproduction and reproduction→edited decision drift.
+    6. Skip cases without the ``decide`` checkpoint.
 
     Args:
         exec_ids: Baseline (original) execution IDs to experiment on.
@@ -286,6 +305,7 @@ def run_cohort(
             continue
 
         try:
+            original_decision = load_support_decision_from_execution(client, base_id)
             baseline = _replay_run(
                 client, base_id, model=baseline_model, prompt_profile=None
             )
@@ -307,11 +327,15 @@ def run_cohort(
             continue
 
         first_variant = variants[0]
+        row.original_decision = original_decision
         row.baseline_run = baseline
         row.variant_run = first_variant
+        row.reproduction_changed = diff_decisions(
+            original_decision, baseline.decision
+        ).has_drift
         row.decision_changed = diff_decisions(
             baseline.decision, first_variant.decision
-        ).has_fork_drift
+        ).has_drift
 
         for metric_fn in metrics:
             try:

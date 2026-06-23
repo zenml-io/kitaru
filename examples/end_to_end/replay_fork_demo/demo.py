@@ -139,9 +139,11 @@ def import_trace_cmd(ref: str, trace_id: str | None) -> None:
 @click.argument("ref")
 @click.option("--trace-id", default=None, help="Trace ID to select from a JSONL file.")
 def replay(ref: str, trace_id: str | None) -> None:
-    """Reproduce the run from the cut (cached head, live tail)."""
+    """Compare original trace → unchanged replay from the cut."""
     report = _agent().replay(_load_demo_case(ref, trace_id=trace_id)).vs_trace()
-    click.echo(f"reproduction drift: {report.has_reproduction_drift}")
+    click.echo(
+        f"original trace → unchanged replay drift: {report.has_reproduction_drift}"
+    )
 
 
 @cli.command()
@@ -161,12 +163,16 @@ def replay(ref: str, trace_id: str | None) -> None:
 def fork(
     ref: str, trace_id: str | None, model: str, prompt_profile: str, html_path: str
 ) -> None:
-    """Fork the run (model/prompt edit) and compare to the unchanged replay."""
+    """Compare original trace → unchanged replay → edited fork."""
     agent, case = _agent(), _load_demo_case(ref, trace_id=trace_id)
     replay_run = agent.replay(case)
     edits = {"model": model, "prompt_profile": prompt_profile}
     fork_run = agent.fork(case, **edits).run()
     report = fork_run.diff(replay_run)
+    click.echo(
+        f"original trace → unchanged replay drift: {report.has_reproduction_drift}"
+    )
+    click.echo(f"unchanged replay → edited fork drift: {report.has_fork_drift}")
     click.echo(str(report))
     path = utils.write_report(
         html_path,
@@ -196,7 +202,10 @@ def run_all(ref: str | None, scenario: str, variant: str, trace_id: str | None) 
     replay_run = agent.replay(case)
     fork_run = agent.fork(case, **FORK_EDITS).run()
     report = fork_run.diff(replay_run)
-    click.echo(f"reproduction drift: {replay_run.vs_trace().has_reproduction_drift}")
+    click.echo(
+        f"original trace → unchanged replay drift: {report.has_reproduction_drift}"
+    )
+    click.echo(f"unchanged replay → edited fork drift: {report.has_fork_drift}")
     click.echo(str(report))
     path = utils.write_report(
         "replay_vs_fork.html",

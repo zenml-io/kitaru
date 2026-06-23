@@ -1,13 +1,12 @@
-"""Render a comparison of two replays as a self-contained HTML report.
+"""Render a three-way replay comparison as a self-contained HTML report.
 
-Both legs are replays from the ``decide`` checkpoint; the shared trunk (cached
-gather_context head) splits there into two branches:
-  - reproduce: replay with NO edits — decide+finalize re-run under the same config.
-  - replay:    replay WITH edits — a different model/prompt_profile re-runs
-    decide+finalize.
-
-Three sections — Settings (what the edited replay changed), Execution (cached
-head vs live tail), and Outcomes (the decision fields, reproduce vs edited).
+The report shows three concrete executions next to each other:
+  - original recorded run: the durable execution that already happened.
+  - unchanged replay: Kitaru reuses checkpoints before ``decide`` and re-runs
+    ``decide`` plus ``finalize`` with the recorded config.
+  - edited replay: Kitaru starts from the same recorded execution, reuses the
+    same earlier checkpoints, then re-runs ``decide`` plus ``finalize`` with the
+    edited model/prompt settings.
 
 Single public function: ``write(path, ...) -> path``.
 """
@@ -24,9 +23,10 @@ _CSS = """
 * { box-sizing: border-box; }
 body { margin: 0; background: #f6f7f9; color: #1c2024;
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-.wrap { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
 .banner { border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-weight: 600; }
 .banner.drift { background: #fdecec; color: #8a1c1c; border: 1px solid #f3c0c0; }
+.banner.warn { background: #fff8e6; color: #8a5a00; border: 1px solid #f2d184; }
 .banner.clean { background: #e9f7ec; color: #1e6b34; border: 1px solid #bfe6c8; }
 h1 { font-size: 22px; margin: 0 0 4px; }
 .sub { color: #6b7280; margin: 0 0 28px; font-size: 13px; }
@@ -37,9 +37,9 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 table { width: 100%; border-collapse: collapse; }
 td, th { padding: 8px 10px; text-align: left; vertical-align: top; }
 tr + tr td { border-top: 1px solid #f0f1f3; }
-.field { color: #6b7280; width: 200px; font-variant-numeric: tabular-nums; }
+.field { color: #6b7280; width: 180px; font-variant-numeric: tabular-nums; }
 .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-.arrow { color: #b0b6bd; padding: 0 4px; }
+.arrow { color: #b0b6bd; font-family: ui-monospace, monospace; white-space: nowrap; }
 tr.changed td.val.to { color: #b42318; font-weight: 600; }
 tr.changed { background: #fdf3f3; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
@@ -51,13 +51,16 @@ tr.changed { background: #fdf3f3; }
   border-radius: 8px; border: 1px solid #e6e8eb; background: #fff; white-space: nowrap; }
 .node.cached { background: #f1f2f4; color: #6b7280; border-style: dashed; }
 .node.live { background: #eef4ff; color: #1d4ed8; border-color: #cfe0ff; }
+.node.recorded { background: #fff; color: #374151; }
 .branch { border: 1px solid #e6e8eb; border-radius: 10px; padding: 12px; margin-top: 10px; }
 .branch h3 { margin: 0 0 8px; font-size: 13px; }
+.branch.original h3 { color: #374151; }
 .branch.repro h3 { color: #1e6b34; }
 .branch.edited h3 { color: #b42318; }
 .legend { color: #8a9099; font-size: 12px; margin-top: 10px; }
-.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.answers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .answers .col h3 { margin: 0 0 6px; font-size: 13px; }
+.answers .col.original h3 { color: #374151; }
 .answers .col.repro h3 { color: #1e6b34; }
 .answers .col.edited h3 { color: #b42318; }
 .answers pre { white-space: pre-wrap; font: 12px/1.5 ui-monospace, monospace;
@@ -75,6 +78,14 @@ def _nodes_row(nodes: Sequence[str], cls: str) -> str:
     return "".join(f'<span class="node {cls}">{html.escape(n)}</span>' for n in nodes)
 
 
+def _match_tag(matches: bool) -> str:
+    return (
+        '<span class="tag ok">match</span>'
+        if matches
+        else '<span class="tag chg">changed</span>'
+    )
+
+
 def render(
     *,
     exec_id: str,
@@ -82,40 +93,32 @@ def render(
     cut: str,
     nodes: Sequence[str],
     settings_changes: Sequence[tuple[str, Any, Any]],
-    outcomes: Sequence[tuple[str, Any, Any, bool]],
-    has_drift: bool,
+    outcomes: Sequence[tuple[str, Any, Any, Any, bool, bool]],
+    has_reproduction_drift: bool,
+    has_edited_drift: bool,
+    original_summary: str,
     reproduced_summary: str,
     edited_summary: str,
 ) -> str:
-    """Render the full HTML string.
-
-    Args:
-        exec_id:          Source execution ID (used as the report title).
-        scenario:         Human-readable scenario label.
-        cut:              Checkpoint name where branches split (``"decide"``).
-        nodes:            All checkpoint names in order.
-        settings_changes: ``(key, reproduced_value, edited_value)`` tuples
-                          describing what the edited replay changed.
-        outcomes:         ``(field, reproduced_value, edited_value, matches)``
-                          tuples for the decision-field drift table.
-        has_drift:        True if the edited replay's decision differs from the
-                          faithful reproduction.
-        reproduced_summary: Short summary of the no-edit reproduction's decision.
-        edited_summary:     Short summary of the edited replay's decision.
-
-    Returns:
-        A self-contained HTML string.
-    """
+    """Render the full HTML string."""
     cut_idx = list(nodes).index(cut) if cut in nodes else 0
     cached_nodes, live_nodes = nodes[:cut_idx], nodes[cut_idx:]
 
-    banner = (
-        '<div class="banner drift">Replay drift detected — '
-        "the reconfigured agent changed the decision.</div>"
-        if has_drift
-        else '<div class="banner clean">No replay drift — '
-        "the replay reproduced the same decision.</div>"
-    )
+    if has_reproduction_drift:
+        banner = (
+            '<div class="banner drift">Reproduction drift detected — the '
+            "unchanged replay did not match the original recorded run.</div>"
+        )
+    elif has_edited_drift:
+        banner = (
+            '<div class="banner warn">Edited replay drift detected — the config '
+            "edit changed the decision after reproduction succeeded.</div>"
+        )
+    else:
+        banner = (
+            '<div class="banner clean">No decision drift — unchanged replay '
+            "matched the original, and edited replay kept the same decision.</div>"
+        )
 
     settings_rows = "".join(
         f'<tr class="changed"><td class="field">{html.escape(k)}</td>'
@@ -128,50 +131,49 @@ def render(
     )
 
     outcome_rows = ""
-    for field, reproduced_val, edited_val, matches in outcomes:
-        tag = (
-            '<span class="tag ok">unchanged</span>'
-            if matches
-            else '<span class="tag chg">changed</span>'
-        )
-        cls = "" if matches else "changed"
-        to_cls = "val" if matches else "val to"
+    for field, original_val, reproduced_val, edited_val, orig_ok, edited_ok in outcomes:
+        cls = "" if orig_ok and edited_ok else "changed"
+        edited_cls = "val" if edited_ok else "val to"
         outcome_rows += (
-            f'<tr class="{cls}"><td class="field">{html.escape(field)}{tag}</td>'
-            f'<td class="val from">{_fmt(reproduced_val)}</td>'
-            f'<td class="arrow">{"=" if matches else "→"}</td>'
-            f'<td class="{to_cls}">{_fmt(edited_val)}</td></tr>'
+            f'<tr class="{cls}"><td class="field">{html.escape(field)}</td>'
+            f'<td class="val">{_fmt(original_val)}</td>'
+            f'<td class="val">{_fmt(reproduced_val)}</td>'
+            f'<td class="{edited_cls}">{_fmt(edited_val)}</td>'
+            f'<td class="arrow">{_match_tag(orig_ok)}</td>'
+            f'<td class="arrow">{_match_tag(edited_ok)}</td></tr>'
         )
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Replay comparison — {html.escape(exec_id)}</title>
+<title>Replay three-way comparison — {html.escape(exec_id)}</title>
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 {banner}
-<h1>Replay comparison — reproduce vs edited</h1>
+<h1>Replay comparison — original vs unchanged replay vs edited replay</h1>
 <p class="sub">{html.escape(exec_id)} &middot; scenario <code>{html.escape(scenario)}</code> \
 &middot; cut <code>{html.escape(cut)}</code></p>
 
 <div class="card"><h2>Settings — what the edited replay changed</h2>
 <table>{settings_rows}</table></div>
 
-<div class="card"><h2>Execution — cached head, live tail</h2>
-<div class="flow">\
-{_nodes_row(cached_nodes, "cached") or '<span class="legend">(no cached head)</span>'}\
-</div>
-<div class="branch repro"><h3>reproduce (no edits)</h3>\
-<div class="flow">{_nodes_row(live_nodes, "live")}</div></div>
-<div class="branch edited"><h3>replay (edited config)</h3>\
-<div class="flow">{_nodes_row(live_nodes, "live")}</div></div>
-<p class="legend">Dashed = served from checkpoint cache (no model calls). \
-Blue = re-executed live from the cut point.</p>
+<div class="card"><h2>Execution — original run, cached checkpoints, live replay tail</h2>
+<div class="branch original"><h3>original recorded run</h3>\
+<div class="flow">{_nodes_row(nodes, "recorded")}</div></div>
+<div class="branch repro"><h3>unchanged replay / reproduction</h3>\
+<div class="flow">{_nodes_row(cached_nodes, "cached") or '<span class="legend">(no cached head)</span>'}{_nodes_row(live_nodes, "live")}</div></div>
+<div class="branch edited"><h3>edited replay</h3>\
+<div class="flow">{_nodes_row(cached_nodes, "cached") or '<span class="legend">(no cached head)</span>'}{_nodes_row(live_nodes, "live")}</div></div>
+<p class="legend">Dashed = served from checkpoint cache. Blue = re-executed live from the cut point.</p>
 </div>
 
-<div class="card"><h2>Outcomes — reproduce vs edited</h2>
-<table>{outcome_rows}</table>
+<div class="card"><h2>Outcomes — original → unchanged replay → edited replay</h2>
+<table>
+<thead><tr><th>Field</th><th>Original recorded run</th><th>Unchanged replay</th><th>Edited replay</th><th>Original→Replay</th><th>Replay→Edited</th></tr></thead>
+<tbody>{outcome_rows}</tbody></table>
 <div class="answers" style="margin-top:16px">
-  <div class="col repro"><h3>reproduced answer</h3>\
+  <div class="col original"><h3>original answer</h3>\
+<pre>{html.escape(original_summary or "—")}</pre></div>
+  <div class="col repro"><h3>unchanged replay answer</h3>\
 <pre>{html.escape(reproduced_summary or "—")}</pre></div>
   <div class="col edited"><h3>edited answer</h3>\
 <pre>{html.escape(edited_summary or "—")}</pre></div>
@@ -188,8 +190,10 @@ def write(
     cut: str,
     nodes: Sequence[str],
     settings_changes: Sequence[tuple[str, Any, Any]],
-    outcomes: Sequence[tuple[str, Any, Any, bool]],
-    has_drift: bool,
+    outcomes: Sequence[tuple[str, Any, Any, Any, bool, bool]],
+    has_reproduction_drift: bool,
+    has_edited_drift: bool,
+    original_summary: str,
     reproduced_summary: str,
     edited_summary: str,
 ) -> str:
@@ -203,7 +207,9 @@ def write(
         nodes=nodes,
         settings_changes=settings_changes,
         outcomes=outcomes,
-        has_drift=has_drift,
+        has_reproduction_drift=has_reproduction_drift,
+        has_edited_drift=has_edited_drift,
+        original_summary=original_summary,
         reproduced_summary=reproduced_summary,
         edited_summary=edited_summary,
     )

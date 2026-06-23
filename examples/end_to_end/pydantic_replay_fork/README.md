@@ -1,52 +1,64 @@
 # PydanticAI replay demo — debug a production run, then prove the fix across a cohort
 
-You built a support agent with **PydanticAI** and made each run a durable Kitaru flow, so every run is
-a durable execution made of checkpoints. Something looks wrong in a production run. This example shows
-the whole loop, in code — using **plain Kitaru SDK primitives**, no wrapper:
+You built a support agent with **PydanticAI** and made each run a durable Kitaru flow. Every run is a durable execution made of checkpoints. Something looks wrong in a production run. This example shows the loop:
 
-1. **run** — your agent runs in production (durable, checkpointed).
-2. **reproduce** — replay that run from an intermediate checkpoint with *no* edits (cached head, live
-   tail) to confirm you can faithfully reproduce it.
-3. **edited replay** — replay from the same checkpoint *with* a config change (cheaper model + looser
-   prompt) and see whether the decision moved.
-4. **cohort** — apply that *same* change across your last N production runs and measure whether it's an
-   improvement: cheaper, faster, and quality-no-worse — or what regressed.
+1. **Original recorded run** — the agent already ran in production.
+2. **Unchanged replay / reproduction** — replay from `decide` with no edits. Kitaru reuses `gather_context` from checkpoints, then re-runs `decide` and `finalize` live with the recorded config.
+3. **Edited replay** — replay from the same checkpoint with a cheaper model and looser prompt profile.
+4. **Cohort** — apply that same edit across recent production runs and measure what improved or regressed.
 
-There is only one replay concept here — the SDK's `flow.replay(...)`. "Reproduce" and "edited replay"
-are the **same call**: with no overrides it reproduces faithfully; with overrides it re-runs the tail
-under new config.
+## Fast path: replay with the Kitaru CLI
 
-## The story, in one screen
+The replay operation is already a first-class Kitaru CLI command. There is no demo-specific replay command to learn.
+
+```bash
+# Unchanged reproduction: original recorded run → unchanged replay
+kitaru executions replay <EXEC-ID> --from decide
+
+# Edited replay: unchanged replay → edited replay with new flow-input values
+kitaru executions replay <EXEC-ID> --from decide \
+  --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
+```
+
+The first command asks, “If we run the live tail again with the same recorded config, do we get the same decision?” The second command asks, “After reproduction works, does this model/prompt edit change the decision?”
+
+Add `--output json` if you want to capture the new execution id programmatically.
+
+## What the demo script adds
+
+`demo.py` narrates the same operations with SDK calls, prints the decisions, writes a three-way HTML report, and can run a small cohort experiment.
 
 ```python
 from support_copilot import support_copilot_flow
 
-# A production run — the one SDK call that starts a durable execution.
+# Original recorded run.
 handle = support_copilot_flow.run(prompt, customer, "openai:gpt-5-mini", "baseline")
-handle.wait()                 # block until the flow reaches a terminal state
-exec_id = handle.exec_id      # its execution id
+handle.wait()
+exec_id = handle.exec_id
 
-# Reproduce from the `decide` checkpoint — NO edits. gather_context is served
-# from cache; decide + finalize re-run live.
+# Unchanged replay / reproduction.
 reproduced = support_copilot_flow.replay(exec_id, from_="decide", cache=False)
 reproduced.wait()
 
-# The SAME call, now WITH edits — a cheaper model + looser prompt override the
-# flow inputs, so decide + finalize re-run under the new config.
+# Edited replay with new flow-input values.
 edited = support_copilot_flow.replay(
-    exec_id, from_="decide", cache=False,
-    model="openai:gpt-5-nano", prompt_profile="trimmed_permissions",
+    exec_id,
+    from_="decide",
+    cache=False,
+    model="openai:gpt-5-nano",
+    prompt_profile="trimmed_permissions",
 )
 edited.wait()
 ```
 
-Read `demo.py` top to bottom for the full arc — it reads almost like a notebook, with each step in its
-own function so you can run just one. The cohort runner (`cohort.py`) loops the same
-`support_copilot_flow.replay(...)` over recent runs and applies bring-your-own metrics.
+The important safety check is sequential:
+
+- If **original recorded run → unchanged replay** changes, reproduction failed. Do not trust the edited comparison yet.
+- If **unchanged replay → edited replay** changes, the edit changed the decision.
 
 ## Run it
 
-The agent calls OpenAI through PydanticAI, so set your key (the demo does not load `.env` for you):
+The agent calls OpenAI through PydanticAI, so set your key. The demo does not load `.env` for you.
 
 ```bash
 cd examples/end_to_end/pydantic_replay_fork
@@ -55,23 +67,19 @@ export OPENAI_API_KEY=sk-...        # or: set -a && source .env && set +a
 uv run python demo.py run-all       # the full narrated arc
 ```
 
-Individual commands (each maps to a function in `demo.py` you can read on its own):
+Individual commands:
 
 | command | what it does |
 |---|---|
-| `uv run python demo.py run` | run the agent once; print the exec id + decision |
-| `uv run python demo.py replay <EXEC-ID>` | reproduce from `decide` (no edits), then replay it edited under `gpt-5-nano` + looser prompt; write `replay_vs_rerun.html` |
-| `uv run python demo.py cohort` | apply the change to the last N runs; print metric deltas + regressions |
+| `uv run python demo.py run` | Run the agent once; print the original execution id, decision, and CLI replay commands. |
+| `uv run python demo.py replay <EXEC-ID>` | Load the original decision, run an unchanged replay, run an edited replay, then write `replay_three_way.html`. |
+| `uv run python demo.py cohort` | For recent runs, first check original→unchanged replay, then measure unchanged replay→edited replay. |
 
 ## Running on a remote stack (Kubernetes)
 
-The same demo runs unchanged on a containerized stack — the flow declares its image
-needs (`@flow(image=ImageSettings(...))` in `support_copilot.py`): it installs
-`pydantic-ai` into the image and pulls `OPENAI_API_KEY` into the pod from a Kitaru
-secret named `openai-creds`.
+The same demo runs unchanged on a containerized stack. The flow declares its image needs in `support_copilot.py`, installs `pydantic-ai`, and pulls `OPENAI_API_KEY` from a Kitaru secret named `openai-creds`.
 
-Create that secret once (the key must be named `OPENAI_API_KEY` so pydantic-ai picks
-it up automatically):
+Create that secret once. The key must be named `OPENAI_API_KEY` so PydanticAI picks it up automatically:
 
 ```bash
 kitaru secrets set openai-creds --private --OPENAI_API_KEY=sk-...
@@ -84,81 +92,57 @@ kitaru stack use <your-k8s-stack>
 uv run python demo.py run-all
 ```
 
-> **Troubleshooting:** if you hit `ApiClient.call_api() got an unexpected keyword
-> argument 'response_type'` when submitting to Kubernetes, your local `kubernetes`
-> client is too new for the stack's connector — pin it: `uv pip install "kubernetes<26"`.
-
-## The same operation from the CLI
-
-`demo.py` tells the SDK story. The exact same replay is a first-class Kitaru CLI command — the SDK's
-`flow.replay(...)` and the CLI are two surfaces over one concept:
-
-```bash
-# reproduce (no edits): replay from the decide checkpoint — cached head, live tail
-kitaru executions replay --from decide <EXEC-ID>
-
-# edited replay: re-run decide + finalize under a new config
-kitaru executions replay --from decide <EXEC-ID> \
-    --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
-```
-
-Kitaru serves every checkpoint before `decide` from cache and re-runs `decide` onward live; `--args`
-overrides the flow inputs so the re-run steps pick up the new config. Add `--output json` to capture
-the new execution id programmatically.
+> **Troubleshooting:** if you hit `ApiClient.call_api() got an unexpected keyword argument 'response_type'` when submitting to Kubernetes, your local `kubernetes` client is too new for the stack's connector. Pin it with `uv pip install "kubernetes<26"`.
 
 ## The agent
 
-A three-step flow, each step a plain `pydantic_ai.Agent`; the `@checkpoint` boundaries make the steps
-durable and addressable for replay:
+The flow has three checkpointed steps:
 
-```
+```text
 gather_context  →  decide  →  finalize
-                   ↑ the CUT
+                   ↑ replay starts here
 ```
 
-- `decide` is the intermediate step you replay from (`CUT = "decide"`). Its prompt is what changes
-  between the `baseline` profile (permission/SSO/admin changes are `needs_review`) and the
-  `trimmed_permissions` profile (answer directly). Reconfiguring this step is what flips the decision.
-- Output is a typed `SupportDecision` (policy label, risk status, required action, summary).
-- "Did the decision move?" is judged on the decision fields (`risk_status`, `required_action`); the
-  free-text `policy_label`/`summary` are reworded by the model each call, so they don't count as drift.
+- `decide` is the intermediate step you replay from (`CUT = "decide"`).
+- The `baseline` prompt profile treats permission, SSO, and admin changes as `needs_review`.
+- The `trimmed_permissions` profile is looser and more likely to answer directly.
+- Output is a typed `SupportDecision`: policy label, risk status, required action, and summary.
+- “Did the decision move?” is judged on `risk_status` and `required_action`. The model may reword `policy_label` or `summary`, so those do not count as decision drift.
 
-Config (`model` + `prompt_profile`) travels as flow inputs, so the steps rebuild their agents in any
-process — that's why the SDK *and* the `kitaru executions replay` CLI both reproduce a run from a fresh
-process with no in-memory state.
+Config (`model` + `prompt_profile`) travels as flow inputs. That is why both the SDK and `kitaru executions replay` can rebuild the agents from a fresh process.
 
 ## Cohort metrics
 
-`run_cohort(exec_ids, baseline_model=..., variant_model=..., variant_prompt_profile=..., metrics=[...],
-repeats=N)` replays each case twice — once with no edits (baseline) and once with the variant config —
-skipping any case without the `decide` checkpoint, and compares them with **bring-your-own metrics** —
-a metric is just a callable `metric(baseline, variant) -> MetricDelta` where `baseline`/`variant` are
-plain `ReplayRun` records (`exec_id`, `decision`, `model`). Three are provided in `utils`:
+`run_cohort(...)` handles many original execution ids. For each original execution, it:
+
+1. Loads the original recorded decision from artifacts.
+2. Runs an unchanged replay and checks original→unchanged replay drift.
+3. Runs the edited replay and checks unchanged replay→edited replay drift.
+4. Applies bring-your-own metrics to the unchanged replay and edited replay.
+
+Three metrics are provided in `utils.py`:
 
 - `cost` — `display_cost_usd` from Kitaru's usage tracking (lower is better)
 - `latency` — wall-clock seconds (lower is better)
 - `quality_judge` — an LLM judge scoring the answer 1–5 (higher is better)
 
-`report.summary()` prints per-metric baseline-vs-variant means and an `improvement` verdict (every
-metric no-worse). `report.regressions()` returns just the metrics (and decision changes) that got
-worse. `repeats` averages the variant over N runs to smooth out nondeterminism.
+`report.summary()` prints metric means, original→reproduction drift count, reproduction→edited drift count, and an improvement verdict. `report.regressions()` returns the metrics and decision checks that got worse.
 
 ## Files
 
 | file | purpose |
 |---|---|
-| `agent.py` | the PydanticAI support agent: typed outputs + per-step prompt profiles |
-| `support_copilot.py` | the durable flow: the three `@checkpoint` steps + `@flow`, plus `recent_exec_ids()` |
-| `demo.py` | the walkthrough: `run` / `replay` / `cohort` as plain functions over SDK primitives |
-| `cohort.py` | `run_cohort(...) -> Report` with `summary()` / `regressions()` |
-| `utils.py` | analysis helpers: cost/latency/quality metrics, the judge, decision extraction, `ReplayRun` |
-| `comparison_html.py` | the reproduce-vs-edited HTML report |
+| `agent.py` | The PydanticAI support agent: typed outputs and per-step prompt profiles. |
+| `support_copilot.py` | The durable flow: three `@checkpoint` steps plus `@flow`, and `recent_exec_ids()`. |
+| `demo.py` | The walkthrough: `run`, `replay`, and `cohort` as plain functions over SDK primitives. |
+| `cohort.py` | `run_cohort(...) -> Report` with `summary()` and `regressions()`. |
+| `utils.py` | Analysis helpers: metrics, quality judge, decision extraction, and `ReplayRun`. |
+| `comparison_html.py` | Three-way original/reproduction/edited HTML report. |
 
 ## Validating
 
-This example is validated by **real runs** — a real model and the real Kitaru backend, not mocks.
-Set `OPENAI_API_KEY` (and your Kitaru connection), then:
+This example is validated by real runs: a real model and the real Kitaru backend, not mocks.
 
 ```bash
-uv run python demo.py run-all     # exercises run → replay → compare → cohort end to end
+uv run python demo.py run-all
 ```

@@ -213,10 +213,47 @@ def format_summary(summary: DemoTraceSummary) -> str:
     )
 
 
+def _three_way_outcomes(report: Any) -> list[tuple[str, Any, Any, Any, bool, bool]]:
+    """Build original→replay→fork outcome rows from a DriftReport."""
+    reproduction_by_field = {c.field: c for c in report.reproduction}
+    fork_by_field = {c.field: c for c in report.fork}
+    fields: list[str] = []
+    for comparison in [*report.reproduction, *report.fork]:
+        if comparison.field not in fields:
+            fields.append(comparison.field)
+
+    outcomes = []
+    for field in fields:
+        reproduction = reproduction_by_field.get(field)
+        fork = fork_by_field.get(field)
+        original_value = reproduction.baseline_value if reproduction else None
+        replay_value = (
+            reproduction.comparison_value
+            if reproduction
+            else fork.baseline_value
+            if fork
+            else None
+        )
+        fork_value = fork.comparison_value if fork else None
+        reproduction_matches = reproduction.matches if reproduction else True
+        fork_matches = fork.matches if fork else True
+        outcomes.append(
+            (
+                field,
+                original_value,
+                replay_value,
+                fork_value,
+                reproduction_matches,
+                fork_matches,
+            )
+        )
+    return outcomes
+
+
 def write_report(
     path: str, *, case: Any, replay_run: Any, fork_run: Any, report: Any, edits: dict
 ) -> str:
-    """Write the replay-vs-fork comparison HTML (PRD 'compare' view)."""
+    """Write the original/replay/fork comparison HTML."""
     import comparison_html
 
     root_state, _ = rehydrate(case)
@@ -233,11 +270,10 @@ def write_report(
         cut=CUT,
         nodes=NODES,
         settings_changes=settings,
-        outcomes=[
-            (c.field, c.baseline_value, c.comparison_value, c.matches)
-            for c in report.fork
-        ],
+        outcomes=_three_way_outcomes(report),
+        has_reproduction_drift=report.has_reproduction_drift,
         has_fork_drift=report.has_fork_drift,
+        original_summary=replay_run.original_decision.get("summary", ""),
         replay_summary=replay_run.decision.get("summary", ""),
         fork_summary=fork_run.decision.get("summary", ""),
     )

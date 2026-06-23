@@ -1,8 +1,8 @@
 """Unit tests for _agent.py hardening guards (no flow execution, no primed_zenml).
 
 Tests:
-* _decision_of_result raises RuntimeError on empty node_outputs.
-* _decision_of_result raises RuntimeError when nodes are present but none carry
+* _decision_from_replay_result raises RuntimeError on empty node_outputs.
+* _decision_from_replay_result raises RuntimeError when nodes are present but none carry
   a recognized decision key.
 * _variant_proxy emits warnings when raw_config is missing model/prompt_profile/
   variant_name.
@@ -15,7 +15,7 @@ import warnings
 import pytest
 
 from kitaru.adapters.langgraph.replay._agent import (
-    _decision_of_result,
+    _decision_from_replay_result,
     _ReplayResult,
     _variant_proxy,
 )
@@ -25,14 +25,14 @@ from kitaru.adapters.langgraph.replay._agent import (
 # --------------------------------------------------------------------------- #
 
 
-def test_decision_of_result_raises_on_empty_node_outputs() -> None:
+def test_decision_from_replay_result_raises_on_empty_node_outputs() -> None:
     """Empty node_outputs must raise RuntimeError, not silently return {}."""
     result = _ReplayResult(exec_id="fake-exec-id", node_outputs={})
     with pytest.raises(RuntimeError, match="empty"):
-        _decision_of_result(result)
+        _decision_from_replay_result(result)
 
 
-def test_decision_of_result_raises_when_no_decision_node_present() -> None:
+def test_decision_from_replay_result_raises_when_no_decision_node_present() -> None:
     """Non-empty node_outputs that lack any decision node must also raise."""
     result = _ReplayResult(
         exec_id="fake-exec-id-2",
@@ -43,10 +43,10 @@ def test_decision_of_result_raises_when_no_decision_node_present() -> None:
         },
     )
     with pytest.raises(RuntimeError, match="decision nodes"):
-        _decision_of_result(result)
+        _decision_from_replay_result(result)
 
 
-def test_decision_of_result_raises_when_decision_key_empty() -> None:
+def test_decision_from_replay_result_raises_when_decision_key_empty() -> None:
     """Decision nodes present but with empty/None decision must raise."""
     result = _ReplayResult(
         exec_id="fake-exec-id-3",
@@ -56,10 +56,10 @@ def test_decision_of_result_raises_when_decision_key_empty() -> None:
         },
     )
     with pytest.raises(RuntimeError, match="decide_action"):
-        _decision_of_result(result)
+        _decision_from_replay_result(result)
 
 
-def test_decision_of_result_happy_path_does_not_raise() -> None:
+def test_decision_from_replay_result_happy_path_does_not_raise() -> None:
     """Sanity: a result with a valid decision must NOT raise."""
     result = _ReplayResult(
         exec_id="fake-exec-id-ok",
@@ -72,7 +72,7 @@ def test_decision_of_result_happy_path_does_not_raise() -> None:
             }
         },
     )
-    decision = _decision_of_result(result)
+    decision = _decision_from_replay_result(result)
     assert decision["risk_status"] == "safe"
 
 

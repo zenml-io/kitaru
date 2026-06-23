@@ -10,8 +10,9 @@ build_judge   Build a raw pydantic_ai.Agent that scores an answer 1-5.
 quality_judge BYO metric: score baseline and variant with the judge.
 cost          BYO metric (lower_is_better=True): display_cost_usd delta.
 latency       BYO metric (lower_is_better=True): wall-clock latency delta.
-decision_of   Read the SupportDecision dict from an execution's artifacts.
-DriftReport   Decision-field drift report (.has_fork_drift).
+load_support_decision_from_execution
+              Read the SupportDecision dict from checkpoint artifacts.
+DriftReport   Decision-field drift report (.has_drift).
 diff_decisions Compare two SupportDecision dicts and return a DriftReport.
 """
 
@@ -60,9 +61,14 @@ class DriftReport:
     changes: list[FieldChange]
 
     @property
-    def has_fork_drift(self) -> bool:
+    def has_drift(self) -> bool:
         """True when any decision field differs."""
         return any(not c.matches for c in self.changes)
+
+    @property
+    def has_fork_drift(self) -> bool:
+        """Compatibility alias for older demo code."""
+        return self.has_drift
 
     def __str__(self) -> str:
         diffs = [
@@ -78,8 +84,8 @@ class DriftReport:
 def diff_decisions(baseline: dict, other: dict) -> DriftReport:
     """Compare two SupportDecision dicts on the decision fields.
 
-    Scoped to ``DECISION_FIELDS`` so ``has_fork_drift`` means the decision changed,
-    not that the model reworded a label or summary.
+    Scoped to ``DECISION_FIELDS`` so drift means the decision changed, not that
+    the model reworded a label or summary.
     """
     return DriftReport(
         [FieldChange(f, baseline.get(f), other.get(f)) for f in DECISION_FIELDS]
@@ -221,7 +227,7 @@ def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
         return None
 
 
-def decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
+def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> dict:
     """Read the SupportDecision dict from the execution artifact store.
 
     Searches checkpoints in priority order: ``decide`` first, then
@@ -270,19 +276,6 @@ def decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
         "Ensure the flow completed successfully and the 'decide' checkpoint "
         "produced a serializable SupportDecision dict as its artifact."
     )
-
-
-def decision_of(client: KitaruClient, exec_id: str) -> dict:
-    """Return the SupportDecision dict recorded for *exec_id*.
-
-    Reads it back from the execution's checkpoint artifacts — ``decide``
-    (preferred; the CUT step) then ``finalize`` (fallback). Always reads from the
-    durable record, never from in-memory state, so it works from a fresh process.
-
-    Raises:
-        RuntimeError: If the decision cannot be found.
-    """
-    return decision_from_artifacts(client, exec_id)
 
 
 # ---------------------------------------------------------------------------
