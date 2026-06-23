@@ -55,7 +55,7 @@ A platform engineer's starter kit for building their org's internal agent harnes
 
 Use it as the first thing you read end-to-end, and as the thing you fork for your team.
 
-→ [Agent Harness Platform tour](../agent-harness-platform/README.md) — read the stage-by-stage docs, then [grab the code on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_harness_platform).
+→ [Agents guide](https://docs.zenml.io/user-guides/agents-guide) — read the stage-by-stage docs, then [grab the code on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_harness_platform).
 
 ```bash
 git clone https://github.com/zenml-io/kitaru.git
@@ -160,4 +160,4 @@ Agent Harness Platform is the recommended starting point for most readers — it
 20. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
 21. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
 22. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
-23. **[Agent Harness Platform](../agent-harness-platform/README.md)** — the same primitives, woven into one runnable agent harness platform.
+23. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.
