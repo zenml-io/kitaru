@@ -5,29 +5,29 @@ icon: diagram-project
 
 # LangGraph Adapter
 
-The [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) framework gives you a graph-based agent runtime: nodes execute, state flows between them, the graph can pause for human input through `interrupt(...)`, and LangGraph checkpointers persist that paused state so the same conversation can be resumed later. LangChain agents built with `create_agent(...)` are LangGraph runnables underneath. Kitaru does **not** replace any of that.
+Run your [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) graphs and LangChain agents inside Kitaru flows so each graph call becomes a durable checkpoint you can record, replay, and improve. The adapter wraps the graph invocation; LangGraph keeps owning graph-internal state, persistence, and interrupts.
 
-Kitaru adds an outer durable execution boundary around the graph invocation:
+By default, one completed graph call is one Kitaru checkpoint:
 
 ```text
 one completed graph.invoke(...) = one Kitaru checkpoint
 ```
 
-That boundary is useful when a LangGraph call is one part of a larger workflow. Imagine this flow:
+That boundary makes the graph result durable when the graph is one part of a larger flow:
 
 ```text
 load ticket → run LangGraph triage agent → write report → notify customer
 ```
 
-If the agent finishes its work and the later `write report` checkpoint fails, Kitaru can replay the flow and reuse the completed graph result instead of running the agent again. The graph might have called paid model APIs and sent a real Slack message; replaying the whole thing from scratch would burn money and risk a duplicate notification. The Kitaru boundary lets you say "that graph already finished, here is its output, move on."
+If `write report` fails, Kitaru replays the flow and reuses the recorded graph result instead of rerunning the agent — no repeated paid model calls, no duplicate Slack message. The same recorded boundary is what lets you replay a real run later with one input changed (a different model, a different prompt) and diff the result against a faithful baseline. See [Replay and overrides](../guides/replay-and-overrides.md).
 
-The adapter focuses on the completed graph invocation as the durable unit: an input enters the graph, the graph finishes or interrupts for human input, and Kitaru stores what came out plus a small capture envelope describing the call.
+LangGraph agents built with `create_agent(...)` are LangGraph runnables underneath, so they work the same way. Kitaru does **not** replace LangGraph persistence — it adds a durable, replayable boundary around the graph call.
 
 ## The mental model
 
-Think of LangGraph as the **graph engine** and Kitaru as the **trip recorder and checkpoint gate around the whole graph call**.
+LangGraph is the graph engine. Kitaru is the recorder and checkpoint gate around the whole graph call.
 
-By default, Kitaru puts one shipping label on the whole LangGraph box:
+By default, Kitaru puts one durable boundary around the whole LangGraph call:
 
 ```text
 Kitaru flow
@@ -56,9 +56,9 @@ Kitaru flow
        └─ Kitaru checkpoint: langgraph_summary__...
 ```
 
-That second picture is the key. Kitaru is not magically seeing through LangGraph. The `calls` strategy works because `KitaruLangGraphMiddleware` is physically wrapped around the real LangChain model/tool handler call, so Kitaru can open a true checkpoint at that exact seam.
+The `calls` strategy works because `KitaruLangGraphMiddleware` is physically wrapped around the real LangChain model/tool handler, so Kitaru can open a true checkpoint at that exact seam. Kitaru is not seeing through LangGraph; it stands where it can actually wrap a call.
 
-This boundary discipline avoids a dangerous double-replay problem. Imagine a graph node sends a Slack message, the process crashes, LangGraph resumes from its last checkpoint, and Kitaru also retries the same node. The message might be sent twice. The default `graph_call` strategy avoids that by using one Kitaru boundary around the whole graph call. The `calls` strategy is narrower: it only checkpoints calls where Kitaru middleware is actually wrapped around the model/tool handler. Outside those middleware-wrapped calls, LangGraph's own replay logic remains the source of truth.
+This boundary discipline avoids double-replay. If a graph node sends a Slack message, the process crashes, and both LangGraph and Kitaru retry the node, the message could go out twice. The default `graph_call` strategy avoids that with one boundary around the whole call. The `calls` strategy only checkpoints calls where Kitaru middleware wraps the handler; outside those, LangGraph's own replay logic stays the source of truth.
 
 So the high-level rule is:
 

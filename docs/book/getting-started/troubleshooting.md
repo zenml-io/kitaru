@@ -5,10 +5,11 @@ icon: wrench
 
 # Troubleshooting
 
+When a flow won't run, a replay misbehaves, or your local state is stale, start with diagnostics, then reset state if needed. Most problems are environment or stale-state issues this page covers.
+
 ## Gathering diagnostics
 
-When something isn't working, start with `kitaru info` to see your current
-environment at a glance:
+Start with `kitaru info` to see your current environment at a glance:
 
 ```bash
 kitaru info
@@ -50,8 +51,8 @@ kitaru info --all -o json
 
 ## Resetting Kitaru state
 
-If your local database is in a weird state, connections are stale, or you
-just want a fresh start, `kitaru clean` will get you out of trouble.
+If your local database is in a bad state, connections are stale, or you
+want a fresh start, `kitaru clean` resets local and global state.
 
 ### Preview before deleting
 

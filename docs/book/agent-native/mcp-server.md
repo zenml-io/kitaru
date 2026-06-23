@@ -5,9 +5,16 @@ icon: plug
 
 # MCP Server
 
-Kitaru ships an MCP server so assistants can query and manage executions,
-deployments, artifacts, stacks, and project context with structured tool calls
-instead of parsing CLI text output.
+Kitaru ships an MCP server so a coding agent (Claude Code, Codex, Cursor) can
+drive the run/replay/improve loop directly: run a flow, replay it from a
+checkpoint with one input changed, diff the two, and hill-climb on cost,
+latency, and quality. The agent calls structured tools instead of parsing CLI
+text, so it can read execution state, change one variable, and measure the
+result without a human in the loop.
+
+The same tools also cover the supporting surface: querying executions,
+publishing and invoking deployments, inspecting artifacts, and managing stacks
+and secrets.
 
 ## Install MCP support
 
@@ -201,6 +208,12 @@ Plan and run a replay:
 
 ```text
 Replay the latest failed execution from the checkpoint before the failing one. Explain the replay plan before running it.
+```
+
+Replay with one change and diff against a baseline (the hill-climb loop):
+
+```text
+Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_inputs setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
 ```
 
 Inspect results from a completed execution:
@@ -442,6 +455,12 @@ workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 
 ## Replay behavior
 
+Replay is the tool an agent uses to test a change. A replay re-executes a real
+recorded run from a checkpoint. Rerun it with no overrides and you get a
+faithful baseline; rerun it again with one input changed (a different model, a
+different prompt profile) and the diff between the two is your change, not replay
+noise. This is the loop the agent hill-climbs.
+
 `kitaru_executions_replay` starts a new execution and returns:
 
 - `available: true`
@@ -449,7 +468,8 @@ workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 - the serialized replayed execution payload
 
 Use `from_` for checkpoint selection, optional `flow_inputs` for flow
-parameter overrides, and optional `overrides` for `checkpoint.*` overrides.
+parameter overrides (this is where you change the model or prompt profile), and
+optional `overrides` for `checkpoint.*` overrides.
 
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.

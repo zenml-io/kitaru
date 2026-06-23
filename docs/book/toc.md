@@ -33,14 +33,14 @@
 
 ## Guides
 
+* [Replay and Overrides](guides/replay-and-overrides.md)
+* [Execution Management](guides/execution-management.md)
 * [Configuration](guides/configuration.md)
 * [Authentication](guides/authentication.md)
 * [Deploy and Invoke Flows](guides/deployments.md)
 * [Containerization](guides/containerization.md)
-* [Execution Management](guides/execution-management.md)
 * [View Execution Runtime Logs](guides/execution-logs.md)
 * [Checkpoint Live Events](guides/checkpoint-streaming.md)
-* [Replay and Overrides](guides/replay-and-overrides.md)
 * [Wait, Input, and Resume](guides/wait-and-resume.md)
 * [Artifacts](guides/artifacts.md)
 * [Error Handling](guides/error-handling.md)
@@ -75,7 +75,7 @@
 ## Agent Native
 
 * [MCP Server](agent-native/mcp-server.md)
-* [Claude Code Skill](agent-native/claude-code-skill.md)
+* [Agent Skills](agent-native/claude-code-skill.md)
 
 ## Project
 

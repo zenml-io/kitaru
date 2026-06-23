@@ -5,19 +5,22 @@ icon: gem
 
 # Gemini Interactions Adapter
 
-The [Google Gemini Interactions API](https://ai.google.dev/) gives you a hosted
-interaction runtime: you send a request to Gemini or a Google-managed agent,
-Google runs the interaction, and you receive an interaction response.
+This adapter makes Gemini Interactions API turns replayable inside a Kitaru
+flow: each stable Gemini interaction response becomes one durable checkpoint, so
+you can replay the surrounding flow without re-running Gemini for turns that
+already finished. Use it when a Gemini call is one step in a larger durable
+workflow.
 
-Kitaru does **not** replace that runtime. It adds an outer durable workflow
-boundary around it:
+The [Google Gemini Interactions API](https://ai.google.dev/) is a hosted
+interaction runtime: you send a request to Gemini or a Google-managed agent,
+Google runs the interaction, and you receive a response. Kitaru does **not**
+replace that runtime. It wraps an outer durable boundary around it:
 
 ```text
 one stable Gemini interaction response = one Kitaru checkpoint
 ```
 
-That boundary is useful when a Gemini interaction is one step in a larger flow.
-Imagine this workflow:
+A Gemini checkpoint behaves like any other checkpoint in a flow. Consider:
 
 ```text
 collect input → ask Gemini to analyze it → write report → wait for approval → publish

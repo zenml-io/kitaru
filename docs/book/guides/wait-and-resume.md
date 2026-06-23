@@ -5,16 +5,23 @@ icon: hourglass-half
 
 # Wait, Input, and Resume
 
-`kitaru.wait(...)` is the durable suspension primitive for human-in-the-loop
-and external-input workflows.
+`kitaru.wait(...)` durably suspends a flow until external input arrives — a human
+approval, a webhook, an event. The flow's state is checkpointed, so the worker is
+free to exit; nothing has to sit in memory holding a thread open while you wait
+minutes, hours, or days. When the input arrives, Kitaru rehydrates the execution
+from its last checkpoint and continues the *same* run.
+
+This is the same durability that makes runs replayable: a paused flow is just a
+flow whose next checkpoint hasn't resolved yet.
 
 When your flow reaches `wait(...)`, what happens next depends on the environment:
 
 - **Local interactive runs** (terminal with stdin/stdout): the runtime prompts
   for input directly in the same terminal and the flow continues in-process.
 - **Non-interactive runs** (remote orchestrators, CI, piped output, MCP): the
-  execution moves to `waiting` status and input must be supplied later via the
-  client, CLI, or MCP.
+  execution moves to `waiting` status, the worker is released, and input is
+  supplied later via the client, CLI, or MCP. The flow rehydrates from its
+  checkpoint to continue.
 
 ## Basic pattern
 

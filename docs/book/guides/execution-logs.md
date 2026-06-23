@@ -5,14 +5,17 @@ icon: file-lines
 
 # View Execution Runtime Logs
 
-Kitaru now ships a runtime-log retrieval lane that is separate from
-`kitaru.log(...)` metadata.
+Runtime logs are the line-by-line stdout/stderr of an execution, retrieved after
+the fact from the server. When a run replays differently than its baseline, the
+logs are where you read what actually happened across each checkpoint. This lane
+is separate from `kitaru.log(...)` metadata: metadata is structured values you
+record, runtime logs are the raw output stream.
 
-You can fetch runtime logs through:
+Fetch runtime logs through:
 
 - Python SDK: `KitaruClient().executions.logs(...)`
 - CLI: `kitaru executions logs ...`
-- MCP: `get_execution_logs`
+- MCP: `get_execution_logs` (so a coding agent can read logs while driving the loop)
 
 ## CLI quick start
 

@@ -6,8 +6,10 @@ icon: box
 # Containerization
 
 When you run a flow on a remote stack (Kubernetes, Vertex AI, SageMaker, Azure ML),
-Kitaru packages your code into a container image automatically. The `image`
-parameter on `@flow` controls how that image is built.
+Kitaru packages your code into a container image automatically. This is what lets a
+flow run and replay the same way remotely as it does locally: the more pinned and
+explicit the image, the more reproducible your runs. The `image` parameter on `@flow`
+controls how that image is built.
 
 ## Default behavior
 

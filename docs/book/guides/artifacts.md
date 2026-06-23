@@ -5,7 +5,7 @@ icon: box-archive
 
 # Save and Load Artifacts
 
-Kitaru offers two ways to work with artifacts, depending on where your code runs.
+Artifacts are the named values Kitaru persists in checkpoints — prompts, responses, context, and intermediate state. They are the durable record that lets you reproduce a run faithfully and replay it with one input changed. Kitaru offers two ways to work with them, depending on where your code runs.
 
 {% hint style="info" %}
 Use artifacts when you want values tied to a specific execution or checkpoint.

@@ -5,32 +5,29 @@ icon: comments
 
 # Claude Agent SDK Adapter
 
-The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) gives you
-Claude Code as a library: Claude can read files, edit files, run commands, use
-MCP servers, call tools, follow permissions, and keep a session transcript.
-Kitaru does **not** replace that agent loop.
-
-Kitaru adds an outer durable execution boundary around it:
+Run a [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) invocation
+as a Kitaru checkpoint so each completed Claude call becomes a durable unit you
+can replay, skip, and audit inside a larger flow. The Claude SDK gives you
+Claude Code as a library (read/edit files, run commands, use MCP servers, call
+tools, follow permissions, keep a session transcript); Kitaru does **not**
+replace that agent loop, it records the boundary around it:
 
 ```text
 one completed Claude Agent SDK invocation = one Kitaru checkpoint
 ```
 
-That boundary is useful when a Claude call is one part of a larger workflow.
-Imagine this flow:
+That boundary matters when a Claude call is one step of a multi-step workflow:
 
 ```text
 collect inputs → ask Claude to analyze them → write report → notify reviewer
 ```
 
 If Claude finishes the analysis and the later `write report` checkpoint fails,
-Kitaru can replay the flow and reuse the completed Claude result instead of
-calling Claude again. You keep the Claude session ID, final text, usage/cost
-metadata, message records, and Kitaru artifacts that explain what happened.
-
-The adapter focuses on the completed Claude SDK invocation as the durable unit:
-one prompt enters the SDK, Claude finishes, and Kitaru stores the completed
-result and capture envelope.
+replaying the flow reuses the completed Claude result instead of calling Claude
+again. You keep the Claude session ID, final text, usage/cost metadata, message
+records, and Kitaru artifacts that explain what happened. One prompt enters the
+SDK, Claude finishes, and Kitaru stores the completed result and capture
+envelope as the durable unit.
 
 ## The mental model
 

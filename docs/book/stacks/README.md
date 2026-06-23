@@ -5,8 +5,10 @@ icon: layer-group
 
 # Stacks
 
-A **stack** is where the runner places work and where artifacts live. It
-bundles three concerns:
+A **stack** is where your flows run and where their checkpoints persist. It is the
+durable substrate replay depends on: checkpoints written to a stack's artifact
+store are what a later `flow.replay(...)` reads back to reproduce a run faithfully.
+A stack bundles three concerns:
 
 - **Execution placement** — the compute backend the runner uses for the run
   itself and for any `runtime="isolated"` checkpoints (local, Kubernetes, AWS,
@@ -16,10 +18,10 @@ bundles three concerns:
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
 
-The active stack is the default; per-flow and per-run overrides can bind a
+The active stack is the default. Per-flow and per-run overrides can bind a
 different stack for a single execution. See
-[How It Works](../concepts/how-it-works.md) for how execution
-placement interacts with the runner.
+[How It Works](../concepts/how-it-works.md) for how execution placement interacts
+with the runner.
 
 ## The default stack
 
@@ -114,7 +116,8 @@ These remote stack commands assume you are already connected to the Kitaru
 server that should own the stack. If you already have a deployed server,
 connect first with `kitaru login ...` and verify with `kitaru status`.
 
-In story form: Kitaru can assemble the stack definition and cloud connector for you, but it still expects the bucket, registry, and any cluster you point at to already exist.
+Kitaru assembles the stack definition and cloud connector for you, but it expects
+the bucket, registry, and any cluster you point at to already exist.
 
 ### Kubernetes example
 
@@ -180,16 +183,11 @@ CLI flags still override YAML values when both are provided.
 
 ## Advanced stack defaults with `--extra` and `--async`
 
-The named stack flags cover the common story: where artifacts live, which registry to use, which cluster or cloud region to target.
+The named stack flags cover the common case: where artifacts live, which registry
+to use, which cluster or cloud region to target. When you need to set a field on
+an underlying stack component directly, use `--extra`.
 
-Sometimes you need one layer deeper. That is what `--extra` is for.
-
-Think of it like this:
-
-- the named flags are the front desk
-- `--extra` is the side door into the underlying stack component defaults
-
-You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
+Pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 
 - `orchestrator`
 - `artifact_store`
@@ -237,7 +235,7 @@ extra:
     default_repository: agents
 ```
 
-CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.
+CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object.
 
 Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, see the ZenML component reference for your orchestrator type: [Kubernetes](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes), [Vertex](https://docs.zenml.io/stacks/stack-components/orchestrators/vertex), [SageMaker](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker), [AzureML](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
@@ -282,7 +280,7 @@ One important scope note: the public Python SDK `kitaru.create_stack(...)` curre
 
 ## Precedence with flow-level stack overrides
 
-The active stack is only one layer in the execution precedence chain. Higher layers can override it:
+The active stack is only one layer in the execution precedence chain. Higher layers override it (highest first):
 
 1. `my_flow.run(..., stack="gpu-cluster")`
 2. `@flow(stack="gpu-cluster")`
@@ -291,7 +289,7 @@ The active stack is only one layer in the execution precedence chain. Higher lay
 5. `pyproject.toml` (`[tool.kitaru].stack`)
 6. currently active stack
 
-In story form:
+What each layer does:
 
 - `kitaru stack use prod` changes your persisted default stack
 - `kitaru.configure(stack="gpu-cluster")` changes the default only for the current Python process

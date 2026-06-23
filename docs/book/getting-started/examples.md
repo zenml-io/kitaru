@@ -5,11 +5,11 @@ icon: code
 
 # Examples
 
-The Kitaru repo includes a set of runnable examples grouped by purpose:
+Every example here is real, runnable code that shows the Kitaru loop in practice: **run** an agent so every model and tool call lands as a durable checkpoint, **replay** a real run from a checkpoint with one input changed (a different model, a different prompt), and **diff** the result against a faithful baseline. The repo groups them by purpose:
 
 - **Agent Harness Platform** — a stage-by-stage tour through building a durable agent harness platform on Kitaru + PydanticAI. Read this first if you're new.
 - **Other end-to-end examples** — production-shaped, self-contained scenarios that exercise multiple primitives at once. No required reading order.
-- **Feature-focused examples** — small examples that demo one Kitaru primitive in isolation.
+- **Feature-focused examples** — small examples that demo one Kitaru primitive in isolation. Start with `features/replay/` to see the differentiator in isolation.
 
 Every example is a standalone project — clone the repo, `cd` into the example you want, and run it directly.
 
@@ -92,13 +92,13 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `features/basic_flow/flow_with_checkpoint_runtime.py` | `@checkpoint(runtime="isolated")` for work that should run outside the runner process | [Checkpoints](../concepts/checkpoints.md) |
 | `features/basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](../guides/configuration.md) |
 
-### Execution lifecycle and recovery
+### Replay, lifecycle, and recovery
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
 | `features/execution_management/client_execution_management.py` | `KitaruClient` for listing runs, reading details, and loading data | [Execution Management](../guides/execution-management.md) |
 | `features/execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait, Input, and Resume](../guides/wait-and-resume.md) |
-| `features/replay/replay_with_overrides.py` | Replay from a checkpoint with overridden inputs | [Replay and Overrides](../guides/replay-and-overrides.md) |
+| `features/replay/replay_with_overrides.py` | Re-execute a real run from a checkpoint with one input overridden (model, prompt), then diff against a faithful baseline | [Replay and Overrides](../guides/replay-and-overrides.md) |
 
 ### LLMs and agent integrations
 

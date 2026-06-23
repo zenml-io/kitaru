@@ -5,8 +5,11 @@ icon: robot
 
 # OpenAI Agents Adapter
 
-Kitaru's OpenAI Agents adapter lets you keep your existing OpenAI Agents SDK
-agent logic while adding Kitaru durability around it.
+`KitaruRunner` wraps an existing OpenAI Agents SDK `Agent` so every model and
+tool call runs as a durable checkpoint inside a Kitaru flow. You keep your agent
+logic unchanged; you gain durable execution, and with it the ability to
+[replay a real run with one input changed](../guides/replay-and-overrides.md)
+and diff the result.
 
 ```python
 from agents import Agent
@@ -168,8 +171,8 @@ whenever you want a clean Python value back from `.wait()`.
 Kitaru catches supported model/tool calls individually as separate peer
 checkpoints under the flow.
 
-Use this when you want finer replay units (for example: if call 6 fails, calls
-1–5 can come from cache).
+Use this when you want finer replay units: if call 6 fails, calls 1–5 can come
+from cache, and you can replay from any individual call's checkpoint.
 
 Because the per-call checkpoints are siblings under the flow with no single
 sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises

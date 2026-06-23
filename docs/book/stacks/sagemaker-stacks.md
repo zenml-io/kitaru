@@ -5,9 +5,9 @@ icon: aws
 
 # AWS (SageMaker)
 
-A SageMaker stack runs each Kitaru execution as a managed SageMaker job and stores checkpoint outputs in S3.
+A SageMaker stack runs each Kitaru execution as a managed SageMaker job and stores checkpoint outputs in S3. Use it when you want AWS to manage job execution instead of running an execution cluster yourself.
 
-Use this page when your team wants AWS-managed job execution instead of running an execution cluster yourself. If you want the broader stack model first, start with [Stacks](README.md).
+The stack is where runs, replays, and cohort experiments all execute, so checkpoints recorded on SageMaker can be replayed and diffed on the same infrastructure. For the broader stack model, precedence rules, and shared flags, start with [Stacks](README.md).
 
 ## Prerequisites
 
