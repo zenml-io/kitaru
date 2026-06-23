@@ -2487,6 +2487,20 @@ def test_executions_list_accepts_page_and_size() -> None:
     )
 
 
+def _statistics_with_status_groups(
+    *groups: tuple[str, int],
+    truncated: bool = False,
+) -> ExecutionStatistics:
+    """Build execution statistics grouped by status for CLI tests."""
+    return ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": status}, execution_count=count)
+            for status, count in groups
+        ],
+        truncated=truncated,
+    )
+
+
 def test_executions_statistics_forwards_filters_and_repeatable_options() -> None:
     """`kitaru executions statistics` should delegate to the SDK surface."""
     fake_client = Mock()
@@ -2540,6 +2554,80 @@ def test_executions_statistics_forwards_filters_and_repeatable_options() -> None
         tags=["nightly", "customer-facing"],
         max_groups=25,
     )
+
+
+def test_executions_statistics_accepts_pagination_without_forwarding_it() -> None:
+    """Statistics pagination should page CLI output, not SDK queries."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["status"],
+        metrics=[],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+
+
+def test_executions_statistics_pages_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Statistics text output should contain only the requested group page."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "completed" not in output
+    assert "failed" in output
+    assert "running" not in output
+    assert "Page 2 (size 1, showing 1 of 3)" in output
 
 
 def test_executions_statistics_renders_grouped_text(
@@ -2650,8 +2738,13 @@ def test_executions_statistics_renders_global_text(
     assert "18" in output
 
 
+@pytest.mark.parametrize(
+    "output_args",
+    (["-o", "json"], ["--output", "json"]),
+)
 def test_executions_statistics_emits_json(
     capsys: pytest.CaptureFixture[str],
+    output_args: list[str],
 ) -> None:
     """JSON statistics output should use the standard single-item envelope."""
     fake_client = Mock()
@@ -2661,7 +2754,12 @@ def test_executions_statistics_emits_json(
                 keys={"status": "completed", "day": "2026-05-30"},
                 execution_count=7,
                 metrics={"duration_avg": 9.5},
-            )
+            ),
+            ExecutionStatisticsGroup(
+                keys={"status": "failed", "day": "2026-05-30"},
+                execution_count=2,
+                metrics={"duration_avg": 3.0},
+            ),
         ],
         truncated=True,
     )
@@ -2678,8 +2776,7 @@ def test_executions_statistics_emits_json(
                 "time:day",
                 "--group-by",
                 "status",
-                "-o",
-                "json",
+                *output_args,
             ]
         )
 
@@ -2693,12 +2790,168 @@ def test_executions_statistics_emits_json(
                     "keys": {"status": "completed", "day": "2026-05-30"},
                     "execution_count": 7,
                     "metrics": {"duration_avg": 9.5},
-                }
+                },
+                {
+                    "keys": {"status": "failed", "day": "2026-05-30"},
+                    "execution_count": 2,
+                    "metrics": {"duration_avg": 3.0},
+                },
             ],
             "truncated": True,
-            "group_count": 1,
+            "group_count": 2,
         },
     }
+
+
+def test_executions_statistics_pages_json_without_pagination_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Paged JSON statistics should keep the single-item command envelope."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"command", "item"}
+    assert "items" not in payload
+    item = payload["item"]
+    assert "page" not in item
+    assert "size" not in item
+    assert "total_count" not in item
+    assert item == {
+        "groups": [
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {},
+            }
+        ],
+        "truncated": True,
+        "group_count": 1,
+    }
+
+
+def test_executions_statistics_uses_default_size_for_partial_pagination(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Providing only --page should use the shared default page size."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": f"status-{i}"}, execution_count=i)
+            for i in range(25)
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--page", "2"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "status-19" not in output
+    assert "status-20" in output
+    assert "status-24" in output
+    assert "Page 2 (size 20, showing 5 of 25)" in output
+
+
+def test_executions_statistics_uses_default_page_for_partial_pagination(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Providing only --size should use the first page."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--size", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "completed" in output
+    assert "failed" not in output
+    assert "Page 1 (size 1, showing 1 of 2)" in output
+
+
+@pytest.mark.parametrize(
+    ("pagination_args", "expected_message"),
+    [
+        (["--page", "0"], "`--page` must be >= 1."),
+        (["--size", "0"], "`--size` must be >= 1."),
+    ],
+)
+def test_executions_statistics_pagination_validation_json_error(
+    capsys: pytest.CaptureFixture[str],
+    pagination_args: list[str],
+    expected_message: str,
+) -> None:
+    """Invalid statistics pagination should respect JSON error output."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", *pagination_args, "--output", "json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload == {
+        "command": "executions.statistics",
+        "error": {"message": expected_message},
+    }
+
+
+def test_executions_statistics_out_of_range_page_is_empty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Out-of-range statistics pages should be successful empty responses."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--page", "99", "--size", "20"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "none found" in output
+    assert "Page 99 (size 20, showing 0 of 3)" in output
 
 
 def test_executions_statistics_rejects_invalid_max_groups(
