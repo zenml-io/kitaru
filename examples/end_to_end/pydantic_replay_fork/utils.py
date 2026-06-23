@@ -1,17 +1,16 @@
-"""Shared utilities for the PydanticAI support-copilot demo.
+"""Analysis helpers for the PydanticAI support-copilot demo.
 
-Public surface
---------------
-CUT           The fixed checkpoint name for the intermediate decide step.
-Recipe        Captured edit-set (model / prompt_profile / at).
+This module holds the demo's *analysis* code — the stuff that is genuinely the
+example's own logic, not Kitaru's. None of it pretends to be the SDK:
+
+ReplayRun     A plain record of one replayed execution (exec_id + decision + model).
 MetricDelta   Named metric comparison: baseline vs variant value.
 QualityScore  Typed output for the LLM quality judge (score 1-5).
 build_judge   Build a raw pydantic_ai.Agent that scores an answer 1-5.
 quality_judge BYO metric: score baseline and variant with the judge.
 cost          BYO metric (lower_is_better=True): display_cost_usd delta.
 latency       BYO metric (lower_is_better=True): wall-clock latency delta.
-decision_from_artifacts  Read SupportDecision dict from artifact store.
-decision_of   Read the SupportDecision dict from an execution (unified).
+decision_of   Read the SupportDecision dict from an execution's artifacts.
 DriftReport   Decision-field drift report (.has_fork_drift).
 diff_decisions Compare two SupportDecision dicts and return a DriftReport.
 """
@@ -20,25 +19,15 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
+from support_copilot import CUT
 
 from kitaru import KitaruClient
 
-if TYPE_CHECKING:
-    from support_copilot import RunHandle
-
 _log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# CUT constant
-# ---------------------------------------------------------------------------
-
-#: The fixed checkpoint name for the intermediate decide step.
-CUT: str = "decide"
 
 
 # ---------------------------------------------------------------------------
@@ -98,34 +87,23 @@ def diff_decisions(baseline: dict, other: dict) -> DriftReport:
 
 
 # ---------------------------------------------------------------------------
-# Recipe — the captured edit-set for a replay
+# ReplayRun — a passive record of one replayed execution
 # ---------------------------------------------------------------------------
 
 
 @dataclasses.dataclass
-class Recipe:
-    """Captured edit-set for a replay.
+class ReplayRun:
+    """The three things the demo's metrics and diff need about a finished replay.
 
-    For ``rerun`` (no-edit): model=None, prompt_profile=None, at=CUT.
-    For ``replay`` (with-edit): model and/or prompt_profile are set.
+    This is a plain data record, not a Kitaru type and not a wrapper: the demo
+    code does the actual ``support_copilot_flow.replay(...)`` itself, then stashes
+    the result here so ``cost``/``latency``/``quality_judge`` have something to
+    compare. ``model`` is recorded so the quality judge can score with it.
     """
 
-    model: Any = None
-    prompt_profile: str | None = None
-    at: str = CUT
-
-    def is_identity(self) -> bool:
-        """True when no config changes are applied (rerun recipe)."""
-        return self.model is None and self.prompt_profile is None
-
-    def as_kwargs(self) -> dict:
-        """Return kwargs suitable for ``agent.replay(..., **recipe.as_kwargs())``."""
-        kw: dict = {"at": self.at}
-        if self.model is not None:
-            kw["model"] = self.model
-        if self.prompt_profile is not None:
-            kw["prompt_profile"] = self.prompt_profile
-        return kw
+    exec_id: str
+    decision: dict
+    model: str
 
 
 # ---------------------------------------------------------------------------
@@ -294,26 +272,16 @@ def decision_from_artifacts(client: KitaruClient, exec_id: str) -> dict:
     )
 
 
-def decision_of(client: KitaruClient, exec_id: str, cache: dict | None = None) -> dict:
-    """Return the SupportDecision dict for *exec_id*.
+def decision_of(client: KitaruClient, exec_id: str) -> dict:
+    """Return the SupportDecision dict recorded for *exec_id*.
 
-    Lookup order:
-    1. In-memory cache (populated at run() time) — if ``cache`` is provided.
-    2. ``decide`` checkpoint artifact (preferred; produced by the CUT step).
-    3. ``finalize`` checkpoint artifact (fallback; contains propagated fields).
-
-    Args:
-        client: A KitaruClient instance.
-        exec_id: The execution ID to look up.
-        cache: Optional dict mapping exec_id -> decision dict for fast lookup.
+    Reads it back from the execution's checkpoint artifacts — ``decide``
+    (preferred; the CUT step) then ``finalize`` (fallback). Always reads from the
+    durable record, never from in-memory state, so it works from a fresh process.
 
     Raises:
-        RuntimeError: If the decision cannot be found via any path.
+        RuntimeError: If the decision cannot be found.
     """
-    if cache is not None:
-        cached = cache.get(exec_id)
-        if cached is not None:
-            return cached
     return decision_from_artifacts(client, exec_id)
 
 
@@ -322,7 +290,7 @@ def decision_of(client: KitaruClient, exec_id: str, cache: dict | None = None) -
 # ---------------------------------------------------------------------------
 
 
-def cost(baseline: RunHandle, variant: RunHandle) -> MetricDelta:
+def cost(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta:
     """BYO metric: display_cost_usd (lower_is_better=True)."""
     client = KitaruClient()
     b = _extract_cost(client, baseline.exec_id)
@@ -332,7 +300,7 @@ def cost(baseline: RunHandle, variant: RunHandle) -> MetricDelta:
     )
 
 
-def latency(baseline: RunHandle, variant: RunHandle) -> MetricDelta:
+def latency(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta:
     """BYO metric: wall-clock latency in seconds (lower_is_better=True)."""
     client = KitaruClient()
     b = _extract_latency_s(client, baseline.exec_id)
@@ -342,13 +310,13 @@ def latency(baseline: RunHandle, variant: RunHandle) -> MetricDelta:
     )
 
 
-def quality_judge(baseline: RunHandle, variant: RunHandle) -> MetricDelta:
+def quality_judge(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta:
     """BYO metric: LLM judge quality score (lower_is_better=False).
 
-    Reads ``baseline.model`` — the model stored on the RunHandle at creation
-    time.  Returns an empty (None) delta when no model is available.
+    Reads ``baseline.model`` — the model recorded on the ReplayRun. Returns an
+    empty (None) delta when no model is available.
     """
-    model = getattr(baseline, "model", None)
+    model = baseline.model
     if model is None:
         return MetricDelta(
             name="quality",

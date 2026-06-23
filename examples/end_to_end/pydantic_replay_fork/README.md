@@ -1,44 +1,48 @@
 # PydanticAI replay demo — debug a production run, then prove the fix across a cohort
 
-You built a support agent with **PydanticAI** and wrapped it with **Kitaru**, so every run is a
-durable execution made of checkpoints. Something looks wrong in a production run. This example shows
-the whole loop, in code:
+You built a support agent with **PydanticAI** and made each run a durable Kitaru flow, so every run is
+a durable execution made of checkpoints. Something looks wrong in a production run. This example shows
+the whole loop, in code — using **plain Kitaru SDK primitives**, no wrapper:
 
 1. **run** — your agent runs in production (durable, checkpointed).
-2. **rerun** — reproduce that run from an intermediate step with *no* changes (cached head, live tail)
-   to confirm you can faithfully reproduce it.
-3. **replay** — re-run from the same step *with* a config change (cheaper model + looser prompt) and
-   see whether the decision moved.
+2. **reproduce** — replay that run from an intermediate checkpoint with *no* edits (cached head, live
+   tail) to confirm you can faithfully reproduce it.
+3. **edited replay** — replay from the same checkpoint *with* a config change (cheaper model + looser
+   prompt) and see whether the decision moved.
 4. **cohort** — apply that *same* change across your last N production runs and measure whether it's an
    improvement: cheaper, faster, and quality-no-worse — or what regressed.
 
-The agent is a normal PydanticAI agent. Everything around it is a thin Kitaru wrapper.
+There is only one replay concept here — the SDK's `flow.replay(...)`. "Reproduce" and "edited replay"
+are the **same call**: with no overrides it reproduces faithfully; with overrides it re-runs the tail
+under new config.
 
 ## The story, in one screen
 
 ```python
-from support_copilot import KitaruAdapterPA
-from utils import cost, latency, quality_judge
-from cohort import cohort
+from support_copilot import support_copilot_flow
 
-agent   = KitaruAdapterPA(model="openai:gpt-5-mini")     # wrap your agent — no rewrite
-exec_id = agent.run(prompt, customer)                     # a production run
+# A production run — the one SDK call that starts a durable execution.
+handle = support_copilot_flow.run(prompt, customer, "openai:gpt-5-mini", "baseline")
+handle.wait()                 # block until the flow reaches a terminal state
+exec_id = handle.exec_id      # its execution id
 
-rerun   = agent.rerun(exec_id)                            # reproduce: cached head, live tail, no edits
-replay  = agent.replay(exec_id, at="decide",              # re-run the decision step under a new config
-                       model="openai:gpt-5-nano",
-                       prompt_profile="trimmed_permissions")
-replay.diff(rerun)                                        # did the change move the decision?
+# Reproduce from the `decide` checkpoint — NO edits. gather_context is served
+# from cache; decide + finalize re-run live.
+reproduced = support_copilot_flow.replay(exec_id, from_="decide", cache=False)
+reproduced.wait()
 
-report = cohort(agent.last_executions(10)).experiment(    # apply the SAME change across recent runs
-    agent, variant=replay.recipe,
-    metrics=[cost, latency, quality_judge], repeats=1)
-report.summary()        # aggregate deltas + "is it an improvement?"
-report.regressions()    # the ship-blocker: what got worse
+# The SAME call, now WITH edits — a cheaper model + looser prompt override the
+# flow inputs, so decide + finalize re-run under the new config.
+edited = support_copilot_flow.replay(
+    exec_id, from_="decide", cache=False,
+    model="openai:gpt-5-nano", prompt_profile="trimmed_permissions",
+)
+edited.wait()
 ```
 
-`rerun` reproduces (no edits); `replay` is the same operation **with** edits. `replay.recipe` captures
-the change so the cohort applies exactly that change to every run.
+Read `demo.py` top to bottom for the full arc — it reads almost like a notebook, with each step in its
+own function so you can run just one. The cohort runner (`cohort.py`) loops the same
+`support_copilot_flow.replay(...)` over recent runs and applies bring-your-own metrics.
 
 ## Run it
 
@@ -51,13 +55,12 @@ export OPENAI_API_KEY=sk-...        # or: set -a && source .env && set +a
 uv run python demo.py run-all       # the full narrated arc
 ```
 
-Individual commands:
+Individual commands (each maps to a function in `demo.py` you can read on its own):
 
 | command | what it does |
 |---|---|
 | `uv run python demo.py run` | run the agent once; print the exec id + decision |
-| `uv run python demo.py rerun <EXEC-ID>` | reproduce from the `decide` step; show drift (should be none) |
-| `uv run python demo.py replay <EXEC-ID>` | re-run `decide` under `gpt-5-nano` + looser prompt; write `replay_vs_rerun.html` |
+| `uv run python demo.py replay <EXEC-ID>` | reproduce from `decide` (no edits), then replay it edited under `gpt-5-nano` + looser prompt; write `replay_vs_rerun.html` |
 | `uv run python demo.py cohort` | apply the change to the last N runs; print metric deltas + regressions |
 
 ## Running on a remote stack (Kubernetes)
@@ -85,16 +88,16 @@ uv run python demo.py run-all
 > argument 'response_type'` when submitting to Kubernetes, your local `kubernetes`
 > client is too new for the stack's connector — pin it: `uv pip install "kubernetes<26"`.
 
-## The same operations from the CLI
+## The same operation from the CLI
 
-`demo.py` is the SDK story. Both rerun and replay are also first-class Kitaru CLI commands — the SDK
-methods are thin wrappers over them:
+`demo.py` tells the SDK story. The exact same replay is a first-class Kitaru CLI command — the SDK's
+`flow.replay(...)` and the CLI are two surfaces over one concept:
 
 ```bash
-# rerun (no edits): reproduce from the decide checkpoint — cached head, live tail
+# reproduce (no edits): replay from the decide checkpoint — cached head, live tail
 kitaru executions replay --from decide <EXEC-ID>
 
-# replay (with edits): re-run decide + finalize under a new config
+# edited replay: re-run decide + finalize under a new config
 kitaru executions replay --from decide <EXEC-ID> \
     --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
 ```
@@ -126,10 +129,11 @@ process with no in-memory state.
 
 ## Cohort metrics
 
-`cohort(cases).experiment(agent, variant=recipe, metrics=[...], repeats=N)` reruns (baseline) and
-replays (variant) each case from the cut, skipping any case without the cut, and compares them with
-**bring-your-own metrics** — a metric is just a callable
-`metric(baseline, variant) -> MetricDelta`. Three are provided in `utils`:
+`run_cohort(exec_ids, baseline_model=..., variant_model=..., variant_prompt_profile=..., metrics=[...],
+repeats=N)` replays each case twice — once with no edits (baseline) and once with the variant config —
+skipping any case without the `decide` checkpoint, and compares them with **bring-your-own metrics** —
+a metric is just a callable `metric(baseline, variant) -> MetricDelta` where `baseline`/`variant` are
+plain `ReplayRun` records (`exec_id`, `decision`, `model`). Three are provided in `utils`:
 
 - `cost` — `display_cost_usd` from Kitaru's usage tracking (lower is better)
 - `latency` — wall-clock seconds (lower is better)
@@ -144,11 +148,11 @@ worse. `repeats` averages the variant over N runs to smooth out nondeterminism.
 | file | purpose |
 |---|---|
 | `agent.py` | the PydanticAI support agent: typed outputs + per-step prompt profiles |
-| `support_copilot.py` | the story surface: `KitaruAdapterPA` (`run`/`rerun`/`replay`/`last_executions`) + the checkpoint flow |
-| `cohort.py` | `cohort(cases).experiment(...) -> Report` with `summary()` / `regressions()` |
-| `utils.py` | boilerplate: cost/latency/quality metrics, the judge, decision extraction, `Recipe` |
-| `demo.py` | the `click` CLI |
-| `comparison_html.py` | the rerun-vs-replay HTML report |
+| `support_copilot.py` | the durable flow: the three `@checkpoint` steps + `@flow`, plus `recent_exec_ids()` |
+| `demo.py` | the walkthrough: `run` / `replay` / `cohort` as plain functions over SDK primitives |
+| `cohort.py` | `run_cohort(...) -> Report` with `summary()` / `regressions()` |
+| `utils.py` | analysis helpers: cost/latency/quality metrics, the judge, decision extraction, `ReplayRun` |
+| `comparison_html.py` | the reproduce-vs-edited HTML report |
 
 ## Validating
 
@@ -156,5 +160,5 @@ This example is validated by **real runs** — a real model and the real Kitaru 
 Set `OPENAI_API_KEY` (and your Kitaru connection), then:
 
 ```bash
-uv run python demo.py run-all     # exercises run → rerun → replay → compare → cohort end to end
+uv run python demo.py run-all     # exercises run → replay → compare → cohort end to end
 ```

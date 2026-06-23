@@ -2,13 +2,13 @@
 
 Public surface
 --------------
-cohort(cases) -> Cohort
-    Wrap a list of exec_ids in a Cohort ready to run an experiment.
-
-Cohort.experiment(agent, *, variant: Recipe, metrics: list, repeats: int = 1) -> Report
-    For each case: rerun (baseline) and replay (variant, averaged over repeats).
-    Apply each metric. Track decision changes.  Skip cases whose CUT cannot be
-    resolved.
+run_cohort(exec_ids, *, baseline_model, variant_model, variant_prompt_profile,
+           metrics, repeats=1) -> Report
+    For each exec_id: replay with NO edits (baseline) and replay WITH the variant
+    config (averaged over ``repeats``). Both legs call the real SDK primitive
+    ``support_copilot_flow.replay(...)`` directly — there is no wrapper. Apply
+    each metric, track decision changes, and skip cases without the ``decide``
+    checkpoint.
 
 Report.summary()
     Print/return aggregate deltas per metric (mean baseline vs variant),
@@ -27,12 +27,11 @@ from __future__ import annotations
 import dataclasses
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
-from utils import MetricDelta, Recipe
+from support_copilot import CUT, support_copilot_flow
+from utils import MetricDelta, ReplayRun, decision_of, diff_decisions
 
-if TYPE_CHECKING:
-    from support_copilot import KitaruAdapterPA, RunHandle
+from kitaru import KitaruClient
 
 _log = logging.getLogger(__name__)
 
@@ -47,8 +46,8 @@ class _CohortRow:
     """Internal per-case row."""
 
     base_exec_id: str
-    baseline_handle: RunHandle | None = None
-    variant_handle: RunHandle | None = None
+    baseline_run: ReplayRun | None = None
+    variant_run: ReplayRun | None = None
     deltas: list[MetricDelta] = dataclasses.field(default_factory=list)
     decision_changed: bool | None = None
     skipped: bool = False
@@ -201,150 +200,149 @@ class Report:
 
 
 # ---------------------------------------------------------------------------
-# Cohort
+# The experiment — replay each case twice (baseline vs variant), measure deltas
 # ---------------------------------------------------------------------------
 
 
-class Cohort:
-    """A set of exec_ids ready for a controlled experiment."""
-
-    def __init__(self, cases: list[str]) -> None:
-        self._cases = cases
-
-    def experiment(
-        self,
-        agent: KitaruAdapterPA,
-        *,
-        variant: Recipe,
-        metrics: list[Callable],
-        repeats: int = 1,
-    ) -> Report:
-        """Apply a config change across all cases and measure the delta.
-
-        For each case:
-        1. ``agent.rerun(case)`` -> baseline RunHandle (run once).
-        2. ``agent.replay(case, **variant.as_kwargs())`` -> variant RunHandle,
-           repeated ``repeats`` times; metric variant_values are averaged.
-        3. Apply each metric callable to (baseline, variant).
-        4. Track decision changes from the first repeat.
-        5. Skip cases where CUT cannot be resolved (record in skipped count).
-
-        Args:
-            agent:   The KitaruAdapterPA to use for rerun and replay.
-            variant: The Recipe describing the config change.
-            metrics: List of BYO metric callables
-                     ``metric(baseline: RunHandle, variant: RunHandle) -> MetricDelta``.
-            repeats: Number of variant replays per case (default 1).
-                     Metric variant_values are averaged across repeats.
-
-        Returns:
-            A Report with per-case rows and aggregate metrics.
-        """
-        all_rows: list[_CohortRow] = []
-        skipped_count = 0
-
-        for base_id in self._cases:
-            row = _CohortRow(base_exec_id=base_id)
-
-            try:
-                agent.cut_of(base_id)
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = str(exc)
-                all_rows.append(row)
-                skipped_count += 1
-                _log.warning("Skipping exec %s (CUT not resolvable): %s", base_id, exc)
-                continue
-
-            try:
-                baseline_handle = agent.rerun(base_id)
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = f"rerun failed: {exc}"
-                all_rows.append(row)
-                skipped_count += 1
-                _log.warning("Skipping exec %s (rerun failed): %s", base_id, exc)
-                continue
-
-            variant_handles: list[RunHandle] = []
-            try:
-                for _ in range(max(1, repeats)):
-                    variant_handles.append(agent.replay(base_id, **variant.as_kwargs()))
-            except Exception as exc:
-                row.skipped = True
-                row.skip_reason = f"replay failed: {exc}"
-                all_rows.append(row)
-                skipped_count += 1
-                _log.warning("Skipping exec %s (replay failed): %s", base_id, exc)
-                continue
-
-            first_variant = variant_handles[0]
-            row.baseline_handle = baseline_handle
-            row.variant_handle = first_variant
-
-            try:
-                dr = baseline_handle.diff(first_variant)
-                row.decision_changed = dr.has_fork_drift
-            except Exception as exc:
-                _log.warning(
-                    "diff failed for %s vs %s: %s",
-                    baseline_handle.exec_id,
-                    first_variant.exec_id,
-                    exc,
-                )
-                row.decision_changed = None
-
-            for metric_fn in metrics:
-                try:
-                    per_repeat = [
-                        metric_fn(baseline_handle, vh) for vh in variant_handles
-                    ]
-                    first = per_repeat[0]
-                    if len(per_repeat) == 1:
-                        row.deltas.append(first)
-                    else:
-                        variant_vals = [
-                            d.variant_value
-                            for d in per_repeat
-                            if d.variant_value is not None
-                        ]
-                        avg_variant = (
-                            sum(variant_vals) / len(variant_vals)
-                            if variant_vals
-                            else None
-                        )
-                        row.deltas.append(
-                            MetricDelta(
-                                name=first.name,
-                                baseline_value=first.baseline_value,
-                                variant_value=avg_variant,
-                                lower_is_better=first.lower_is_better,
-                            )
-                        )
-                except Exception as exc:
-                    _log.warning(
-                        "Metric %s failed: %s",
-                        getattr(metric_fn, "__name__", metric_fn),
-                        exc,
-                    )
-
-            all_rows.append(row)
-
-        return Report(rows=all_rows, skipped_count=skipped_count)
+def _has_cut(client: KitaruClient, exec_id: str) -> bool:
+    """True if *exec_id* has the ``decide`` checkpoint we replay from."""
+    run = client.executions.get(exec_id)
+    return CUT in [c.name for c in run.checkpoints]
 
 
-# ---------------------------------------------------------------------------
-# Public factory
-# ---------------------------------------------------------------------------
+def _replay_run(
+    client: KitaruClient,
+    exec_id: str,
+    *,
+    model: str,
+    prompt_profile: str | None,
+) -> ReplayRun:
+    """Replay *exec_id* from the ``decide`` checkpoint and collect the result.
+
+    ``prompt_profile=None`` replays with no config edit (the baseline leg) — the
+    flow reuses the recorded inputs. Passing a profile overrides the decide +
+    finalize config (the variant leg). Either way this is just the SDK call:
+
+        support_copilot_flow.replay(exec_id, from_="decide", cache=False, **edits)
+    """
+    edits: dict = {"model": model}
+    if prompt_profile is not None:
+        edits["prompt_profile"] = prompt_profile
+    handle = support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
+    handle.wait()
+    return ReplayRun(
+        exec_id=handle.exec_id,
+        decision=decision_of(client, handle.exec_id),
+        model=model,
+    )
 
 
-def cohort(cases: list[str]) -> Cohort:
-    """Wrap a list of exec_ids in a Cohort ready for an experiment.
+def run_cohort(
+    exec_ids: list[str],
+    *,
+    baseline_model: str,
+    variant_model: str,
+    variant_prompt_profile: str,
+    metrics: list[Callable],
+    repeats: int = 1,
+) -> Report:
+    """Apply one config change across many production runs and measure the delta.
+
+    For each exec_id:
+
+    1. Replay with NO edits -> baseline ``ReplayRun`` (run once).
+    2. Replay with the variant config -> variant ``ReplayRun``, repeated
+       ``repeats`` times; metric variant_values are averaged.
+    3. Apply each metric callable to (baseline, variant).
+    4. Track whether the decision changed.
+    5. Skip cases without the ``decide`` checkpoint.
 
     Args:
-        cases: List of baseline execution IDs.
+        exec_ids: Baseline (original) execution IDs to experiment on.
+        baseline_model: The model the originals ran under (recorded on the
+            baseline ReplayRun so the quality judge can score with it).
+        variant_model: The model to replay the variant leg under.
+        variant_prompt_profile: The prompt profile for the variant leg.
+        metrics: BYO metric callables
+            ``metric(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta``.
+        repeats: Variant replays per case (default 1); variant_values averaged.
 
     Returns:
-        A Cohort instance.
+        A Report with per-case rows and aggregate metrics.
     """
-    return Cohort(cases)
+    client = KitaruClient()
+    all_rows: list[_CohortRow] = []
+    skipped_count = 0
+
+    for base_id in exec_ids:
+        row = _CohortRow(base_exec_id=base_id)
+
+        if not _has_cut(client, base_id):
+            row.skipped = True
+            row.skip_reason = f"no {CUT!r} checkpoint"
+            all_rows.append(row)
+            skipped_count += 1
+            _log.warning("Skipping exec %s (no %s checkpoint)", base_id, CUT)
+            continue
+
+        try:
+            baseline = _replay_run(
+                client, base_id, model=baseline_model, prompt_profile=None
+            )
+            variants = [
+                _replay_run(
+                    client,
+                    base_id,
+                    model=variant_model,
+                    prompt_profile=variant_prompt_profile,
+                )
+                for _ in range(max(1, repeats))
+            ]
+        except Exception as exc:
+            row.skipped = True
+            row.skip_reason = f"replay failed: {exc}"
+            all_rows.append(row)
+            skipped_count += 1
+            _log.warning("Skipping exec %s (replay failed): %s", base_id, exc)
+            continue
+
+        first_variant = variants[0]
+        row.baseline_run = baseline
+        row.variant_run = first_variant
+        row.decision_changed = diff_decisions(
+            baseline.decision, first_variant.decision
+        ).has_fork_drift
+
+        for metric_fn in metrics:
+            try:
+                per_repeat = [metric_fn(baseline, v) for v in variants]
+                first = per_repeat[0]
+                if len(per_repeat) == 1:
+                    row.deltas.append(first)
+                else:
+                    variant_vals = [
+                        d.variant_value
+                        for d in per_repeat
+                        if d.variant_value is not None
+                    ]
+                    avg_variant = (
+                        sum(variant_vals) / len(variant_vals) if variant_vals else None
+                    )
+                    row.deltas.append(
+                        MetricDelta(
+                            name=first.name,
+                            baseline_value=first.baseline_value,
+                            variant_value=avg_variant,
+                            lower_is_better=first.lower_is_better,
+                        )
+                    )
+            except Exception as exc:
+                _log.warning(
+                    "Metric %s failed: %s",
+                    getattr(metric_fn, "__name__", metric_fn),
+                    exc,
+                )
+
+        all_rows.append(row)
+
+    return Report(rows=all_rows, skipped_count=skipped_count)

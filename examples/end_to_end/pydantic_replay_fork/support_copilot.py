@@ -1,40 +1,37 @@
-"""PydanticAI support-copilot wrapped as a durable Kitaru flow.
+"""The durable flow: a PydanticAI support-copilot, step by step.
 
-    from support_copilot import KitaruAdapterPA
-    from utils import cost, latency, quality_judge
-    from cohort import cohort
+This module defines *only* the flow — three ``@checkpoint`` steps wired together
+under a ``@flow``. There is no demo wrapper here. The run/replay story is told
+with plain Kitaru SDK primitives in ``demo.py``; this file is just the agent.
 
-    agent   = KitaruAdapterPA(model="openai:gpt-5-mini")
-    exec_id = agent.run(prompt, customer)
+The two SDK calls the demo uses against this flow are:
 
-    rerun  = agent.rerun(exec_id)        # reproduce: cached head, live tail
-    replay = agent.replay(exec_id, model="openai:gpt-5-nano",
-                          prompt_profile="trimmed_permissions")
-    replay.diff(rerun)                   # did the change move the decision?
+    handle = support_copilot_flow.run(prompt, customer, model, prompt_profile)
+    handle = support_copilot_flow.replay(
+        exec_id, from_="decide", cache=False,
+        model="openai:gpt-5-nano", prompt_profile="trimmed_permissions",
+    )
 
-    report = cohort(agent.last_executions(10)).experiment(
-        agent, variant=replay.recipe,
-        metrics=[cost, latency, quality_judge], repeats=1)
-    report.summary(); report.regressions()
-
-The flow carries its config (``model`` spec + ``prompt_profile``) as ordinary
-flow inputs.  Each ``@checkpoint`` step builds its own ``pydantic_ai.Agent`` from
-those inputs, so *any* process — the SDK or the ``kitaru executions replay`` CLI —
-can rebuild the agents from the recorded execution.  ``decide`` is the CUT: the
-step you replay from.  Replaying with a new ``model``/``prompt_profile`` re-runs
-``decide`` + ``finalize`` under the new config while the ``gather_context`` head
-is served from cache.
+The flow carries its config (``model`` + ``prompt_profile``) as ordinary flow
+inputs. Each ``@checkpoint`` step builds its own ``pydantic_ai.Agent`` from those
+inputs, so *any* process — the SDK or the ``kitaru executions replay`` CLI — can
+rebuild the agents from the recorded execution. ``decide`` is the checkpoint you
+replay from: replaying with a new ``model``/``prompt_profile`` re-runs ``decide``
++ ``finalize`` under the new config while the ``gather_context`` head is served
+from cache.
 """
 
-from __future__ import annotations
-
-from typing import Any
-
 from agent import build_decide_agent, build_finalize_agent, build_gather_agent
-from utils import CUT, Recipe, decision_from_artifacts, decision_of, diff_decisions
 
 from kitaru import ImageSettings, KitaruClient, flow
 from kitaru.checkpoint import checkpoint
+
+#: The flow's registered name (the normalized function name). Used to filter
+#: executions with ``client.executions.list(flow=FLOW_NAME)``.
+FLOW_NAME = "support_copilot_flow"
+
+#: The checkpoint we replay from — the intermediate "decide" step.
+CUT = "decide"
 
 # ---------------------------------------------------------------------------
 # The three-step flow: gather_context -> decide -> finalize.
@@ -101,116 +98,16 @@ def support_copilot_flow(
 
 
 # ---------------------------------------------------------------------------
-# RunHandle — the small result of rerun()/replay()
+# Listing prior runs — a plain helper over the SDK client, no wrapper.
 # ---------------------------------------------------------------------------
 
 
-class RunHandle:
-    """Result of a rerun or replay: the new exec_id, its decision, and the recipe."""
+def recent_exec_ids(client: KitaruClient, n: int) -> list[str]:
+    """Return the ``n`` most recent ORIGINAL (non-replay) exec_ids, newest first.
 
-    def __init__(
-        self, exec_id: str, decision: dict, recipe: Recipe, model: Any = None
-    ) -> None:
-        self.exec_id = exec_id
-        self.decision = decision
-        self.recipe = recipe
-        self.model = model
-
-    def diff(self, other: RunHandle):
-        """Compare this run's decision against ``other`` (the baseline)."""
-        return diff_decisions(other.decision, self.decision)
-
-
-# ---------------------------------------------------------------------------
-# KitaruAdapterPA — wrap the flow; run, rerun (no edit), replay (with edit)
-# ---------------------------------------------------------------------------
-
-
-class KitaruAdapterPA:
-    """Run the support-copilot flow durably, and rerun/replay recorded executions."""
-
-    def __init__(self, *, model: str, prompt_profile: str = "baseline") -> None:
-        self._model = model
-        self._prompt_profile = prompt_profile
-        self._client = KitaruClient()
-
-    def run(self, prompt: str, customer: str) -> str:
-        """Run the three-step flow and return the exec_id."""
-        handle = support_copilot_flow.run(
-            prompt, customer, self._model, self._prompt_profile
-        )
-        handle.wait()
-        return handle.exec_id
-
-    def cut_of(self, exec_id: str) -> str:
-        """Return the CUT checkpoint name for ``exec_id`` (raises if absent)."""
-        run = self._client.executions.get(exec_id)
-        names = [c.name for c in run.checkpoints]
-        if CUT not in names:
-            raise RuntimeError(
-                f"CUT {CUT!r} not found in {exec_id}; checkpoints: {names}."
-            )
-        return CUT
-
-    def decision_of(self, exec_id: str) -> dict:
-        """Return the SupportDecision dict recorded for ``exec_id``."""
-        return decision_of(self._client, exec_id)
-
-    def rerun(self, exec_id: str) -> RunHandle:
-        """Re-execute from the CUT with NO config change (cached head, live tail)."""
-        handle = support_copilot_flow.replay(
-            exec_id, from_=self.cut_of(exec_id), cache=False
-        )
-        handle.wait()
-        return RunHandle(
-            exec_id=handle.exec_id,
-            decision=decision_from_artifacts(self._client, handle.exec_id),
-            recipe=Recipe(at=CUT),
-            model=self._model,
-        )
-
-    def replay(
-        self,
-        exec_id: str,
-        *,
-        at: str = CUT,
-        model: str | None = None,
-        prompt_profile: str | None = None,
-    ) -> RunHandle:
-        """Re-execute from ``at`` WITH a config change (new model and/or prompt).
-
-        The new config is passed as flow-input overrides, so ``decide`` + ``finalize``
-        re-run under it while the ``gather_context`` head is served from cache.
-        """
-        new_model = model if model is not None else self._model
-        new_profile = (
-            prompt_profile if prompt_profile is not None else self._prompt_profile
-        )
-        handle = support_copilot_flow.replay(
-            exec_id,
-            from_=at,
-            cache=False,
-            model=new_model,
-            prompt_profile=new_profile,
-        )
-        handle.wait()
-        return RunHandle(
-            exec_id=handle.exec_id,
-            decision=decision_from_artifacts(self._client, handle.exec_id),
-            recipe=Recipe(model=model, prompt_profile=prompt_profile, at=at),
-            model=new_model,
-        )
-
-    def last_executions(self, n: int) -> list[str]:
-        """Return the ``n`` most recent original (non-replay) exec_ids, newest first."""
-        from kitaru._source_aliases import (
-            build_pipeline_registration_name,
-            callable_name,
-        )
-
-        flow_name = build_pipeline_registration_name(
-            callable_name(support_copilot_flow._func)
-        )
-        runs = self._client.executions.list(flow=flow_name, limit=n * 5)
-        originals = [e for e in runs if e.original_exec_id is None]
-        return [e.exec_id for e in originals[:n]]
+    Replays show up in the list too; we keep only the originals (those with no
+    ``original_exec_id``) so the cohort experiments against real production runs.
+    """
+    runs = client.executions.list(flow=FLOW_NAME, limit=n * 5)
+    originals = [e for e in runs if e.original_exec_id is None]
+    return [e.exec_id for e in originals[:n]]
