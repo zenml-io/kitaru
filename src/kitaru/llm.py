@@ -61,6 +61,7 @@ _CREDENTIAL_KEY_PARTS = {
 }
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
+_OpenAITokenLimitParam = Literal["max_tokens", "max_completion_tokens"]
 
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
@@ -181,6 +182,16 @@ def _provider_credential_keys(model: str) -> tuple[str, ...] | None:
     if provider is None:
         return None
     return _MODEL_PROVIDER_HINTS.get(provider)
+
+
+def _openai_token_limit_param(model: str) -> _OpenAITokenLimitParam:
+    """Return the Chat Completions output-limit field for an OpenAI model."""
+    normalized_model = model.strip().lower()
+    if normalized_model.startswith("gpt-5"):
+        return "max_completion_tokens"
+    if re.match(r"o[134](?:$|[-_.])", normalized_model):
+        return "max_completion_tokens"
+    return "max_tokens"
 
 
 def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
@@ -380,6 +391,7 @@ def _call_openai(
     base_url: str | None = None,
     api_key: str | None = None,
     provider_label: str = "openai",
+    token_limit_param: _OpenAITokenLimitParam = "max_tokens",
 ) -> _ProviderCallResult:
     """Execute one OpenAI-compatible Chat Completions call.
 
@@ -398,7 +410,7 @@ def _call_openai(
     if temperature is not None:
         kwargs["temperature"] = temperature
     if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+        kwargs[token_limit_param] = max_tokens
 
     client_kwargs: dict[str, Any] = {}
     if base_url is not None:
@@ -853,6 +865,7 @@ def _dispatch_provider_call(
             temperature=temperature,
             max_tokens=max_tokens,
             env_overlay=env_overlay,
+            token_limit_param=_openai_token_limit_param(target.provider_model),
         )
     if target.provider == "anthropic":
         return _call_anthropic(
@@ -880,6 +893,7 @@ def _dispatch_provider_call(
             base_url=compat_base_url,
             api_key=compat_api_key,
             provider_label=target.provider,
+            token_limit_param="max_tokens",
         )
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
 
