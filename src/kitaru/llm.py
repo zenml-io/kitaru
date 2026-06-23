@@ -601,9 +601,12 @@ def _read_usage_value(usage_payload: Any, key: str) -> Any:
     """Read one field from a usage payload (Mapping or object)."""
     if usage_payload is None:
         return None
-    if isinstance(usage_payload, Mapping):
-        return usage_payload.get(key)
-    return getattr(usage_payload, key, None)
+    try:
+        if isinstance(usage_payload, Mapping):
+            return usage_payload.get(key)
+        return getattr(usage_payload, key, None)
+    except Exception:
+        return None
 
 
 def _read_usage_int(usage_payload: Any, key: str) -> int | None:
@@ -626,23 +629,30 @@ def _jsonable_usage_payload(
     """Convert known provider usage fields into a JSON-safe mapping."""
     if usage_payload is None:
         return None
-    if isinstance(usage_payload, Mapping):
-        jsonable = to_jsonable_python(dict(usage_payload), serialize_unknown=True)
-        if isinstance(jsonable, Mapping):
-            return {str(key): value for key, value in jsonable.items()}
-        return {"value": jsonable}
-    if hasattr(usage_payload, "model_dump"):
-        dumped = usage_payload.model_dump(mode="python")
-        if isinstance(dumped, Mapping):
-            jsonable = to_jsonable_python(dumped, serialize_unknown=True)
+    try:
+        if isinstance(usage_payload, Mapping):
+            jsonable = to_jsonable_python(dict(usage_payload), serialize_unknown=True)
             if isinstance(jsonable, Mapping):
                 return {str(key): value for key, value in jsonable.items()}
+            return {"value": jsonable}
+        model_dump = getattr(usage_payload, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump(mode="python")
+            if isinstance(dumped, Mapping):
+                jsonable = to_jsonable_python(dumped, serialize_unknown=True)
+                if isinstance(jsonable, Mapping):
+                    return {str(key): value for key, value in jsonable.items()}
+    except Exception:
+        pass
 
     raw: dict[str, Any] = {}
     for key in keys:
         value = _read_usage_value(usage_payload, key)
         if value is not None:
-            raw[key] = to_jsonable_python(value, serialize_unknown=True)
+            try:
+                raw[key] = to_jsonable_python(value, serialize_unknown=True)
+            except Exception:
+                continue
     for key, nested_keys in (detail_keys or {}).items():
         nested = _read_usage_value(usage_payload, key)
         if nested_mapping := _jsonable_usage_payload(nested, keys=nested_keys):

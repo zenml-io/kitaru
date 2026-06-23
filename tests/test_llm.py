@@ -23,6 +23,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import flow
 from kitaru.llm import (
+    _estimate_direct_llm_cost,
     _extract_usage_anthropic,
     _extract_usage_openai,
     _LLMRequest,
@@ -603,6 +604,7 @@ def test_llm_preserves_zero_openai_usage_tokens() -> None:
     assert logged_payload["tokens_input"] == 0
     assert logged_payload["tokens_output"] == 0
     assert logged_payload["total_tokens"] == 0
+    assert logged_payload["estimated_cost_usd"] == 0.0
     usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
     usage_key, usage_record = next(iter(usage_records.items()))
     assert usage_key.startswith("zero_call:")
@@ -611,6 +613,44 @@ def test_llm_preserves_zero_openai_usage_tokens() -> None:
     assert usage_record["usage"]["input_tokens"] == 0
     assert usage_record["usage"]["output_tokens"] == 0
     assert usage_record["usage"]["total_tokens"] == 0
+    assert usage_record["cost"]["source"] == "calculator"
+    assert usage_record["cost"]["estimated_cost_usd"] == 0.0
+    assert usage_record["cost"]["source_label"] == "genai-prices"
+    assert usage_record["cost"]["pricing_version"].startswith("genai-prices:")
+    assert usage_record["warnings"] == []
+
+
+def test_openai_usage_extraction_omits_raw_usage_when_serialization_fails() -> None:
+    """Provider success should survive unusual SDK usage objects."""
+
+    class BadUsage:
+        prompt_tokens = 3
+        completion_tokens = 4
+        total_tokens = 7
+
+        def model_dump(self, *, mode: str) -> dict[str, Any]:
+            raise TypeError(f"cannot dump as {mode}")
+
+        @property
+        def prompt_tokens_details(self) -> Any:
+            raise RuntimeError("details unavailable")
+
+        @property
+        def completion_tokens_details(self) -> Any:
+            raise RuntimeError("details unavailable")
+
+    usage = _extract_usage_openai(SimpleNamespace(usage=BadUsage()))
+
+    assert usage.prompt_tokens == 3
+    assert usage.completion_tokens == 4
+    assert usage.total_tokens == 7
+    assert usage.cached_input_tokens is None
+    assert usage.reasoning_tokens is None
+    assert usage.raw_usage == {
+        "prompt_tokens": 3,
+        "completion_tokens": 4,
+        "total_tokens": 7,
+    }
 
 
 def test_repeated_named_llm_calls_get_distinct_usage_record_ids() -> None:
@@ -753,6 +793,60 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking(
 # ---------------------------------------------------------------------------
 # Direct estimated-cost policy and failure behavior
 # ---------------------------------------------------------------------------
+
+
+def test_direct_openai_cost_uses_installed_genai_prices() -> None:
+    """Direct OpenAI cost estimates should work with the real installed library."""
+    warnings: list[str] = []
+
+    estimate = _estimate_direct_llm_cost(
+        resolved_model="openai/gpt-4o-mini",
+        usage=_LLMUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
+        warnings=warnings,
+    )
+
+    assert estimate.estimated_cost_usd is not None
+    assert estimate.estimated_cost_usd > 0
+    assert estimate.cost_source_label == "genai-prices"
+    assert estimate.pricing_version is not None
+    assert estimate.pricing_version.startswith("genai-prices:")
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    ("resolved_model", "usage"),
+    [
+        (
+            "openai/gpt-4o-mini",
+            _LLMUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        ),
+        (
+            "anthropic/claude-3-5-haiku-latest",
+            _LLMUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
+        ),
+    ],
+)
+def test_direct_cost_uses_installed_genai_prices_for_zero_and_anthropic_usage(
+    resolved_model: str,
+    usage: _LLMUsage,
+) -> None:
+    """The real pricing helper should handle zero-token and Anthropic usage."""
+    warnings: list[str] = []
+
+    estimate = _estimate_direct_llm_cost(
+        resolved_model=resolved_model,
+        usage=usage,
+        warnings=warnings,
+    )
+
+    assert estimate.estimated_cost_usd is not None
+    assert estimate.estimated_cost_usd >= 0
+    assert estimate.cost_source_label == "genai-prices"
+    assert estimate.pricing_version is not None
+    assert estimate.pricing_version.startswith("genai-prices:")
+    assert warnings == []
+    if usage.total_tokens == 0:
+        assert estimate.estimated_cost_usd == 0.0
 
 
 def test_llm_estimated_cost_policy_defaults_to_auto() -> None:
