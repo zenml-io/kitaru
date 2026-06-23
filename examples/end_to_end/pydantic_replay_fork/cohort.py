@@ -30,7 +30,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 
-from support_copilot import CUT, support_copilot_flow
+from support_agent import CUT, support_copilot_flow, wait_for_completion
 from utils import (
     MetricDelta,
     ReplayRun,
@@ -240,14 +240,17 @@ def _replay_run(
     recorded inputs. Passing a profile overrides the decide + finalize config
     with ``model`` and ``prompt_profile``. Either way this is just the SDK call:
 
-        support_copilot_flow.replay(exec_id, from_="decide", cache=False, **edits)
+        support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
+
+    where ``CUT == "support_decide_model_request"`` (the adapter's "calls"-mode
+    checkpoint for the decide step).
     """
     edits: dict = {}
     if prompt_profile is not None:
         edits["model"] = model
         edits["prompt_profile"] = prompt_profile
     handle = support_copilot_flow.replay(exec_id, from_=CUT, cache=False, **edits)
-    handle.wait()
+    wait_for_completion(handle)
     return ReplayRun(
         exec_id=handle.exec_id,
         decision=load_support_decision_from_execution(client, handle.exec_id),

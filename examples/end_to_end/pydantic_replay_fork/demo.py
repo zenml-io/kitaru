@@ -1,16 +1,19 @@
 """PydanticAI support-copilot demo — run / replay / cohort with Kitaru.
 
-Read this top to bottom: it is the replay story in plain code. The existing CLI
+This isthe replay story in plain code. The existing CLI
 command is the fastest way to replay a recorded execution:
 
-    kitaru executions replay <EXEC-ID> --from decide
-    kitaru executions replay <EXEC-ID> --from decide \
+    kitaru executions replay <EXEC-ID> --from support_decide_model_request
+    kitaru executions replay <EXEC-ID> --from support_decide_model_request \
       --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
+
+(The decide step runs as a KitaruAgent "calls" checkpoint named
+``support_decide_model_request`` — that is the replay anchor, the constant CUT.)
 
 The script below narrates the same operations with SDK calls:
 
     support_copilot_flow.run(prompt, customer, model, prompt_profile)
-    support_copilot_flow.replay(exec_id, from_="decide", cache=False, ...)
+    support_copilot_flow.replay(exec_id, from_=CUT, cache=False, ...)
     KitaruClient().executions.get(...) / .list(...)
 
 Pick which step to run via the command line:
@@ -24,10 +27,16 @@ Pick which step to run via the command line:
 
 import sys
 
-from agent import SupportDecision
 from cohort import run_cohort
 from comparison_html import write as write_html
-from support_copilot import CUT, recent_exec_ids, support_copilot_flow
+from dotenv import load_dotenv
+from support_agent import (
+    CUT,
+    SupportDecision,
+    recent_exec_ids,
+    support_copilot_flow,
+    wait_for_completion,
+)
 from utils import (
     cost,
     diff_decisions,
@@ -97,7 +106,9 @@ def write_comparison_html(
         HTML_PATH,
         exec_id=exec_id,
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
-        cut=CUT,
+        # The HTML diagram labels steps with friendly names (_FLOW_NODES); the
+        # replay anchor CUT is the adapter's "<agent>_model_request" checkpoint.
+        cut="decide",
         nodes=_FLOW_NODES,
         settings_changes=[
             ("model", BASELINE_MODEL, FORK_MODEL),
@@ -117,12 +128,13 @@ def write_comparison_html(
 
 def run() -> str:
     """Run the three-step flow once (a 'production' run); return its exec_id."""
+
     section("Run the PydanticAI agent as a durable Kitaru flow")
 
-    # The one SDK call that starts a durable execution. .wait() blocks until the
-    # flow reaches a terminal state; .exec_id is its execution id.
+    # The one SDK call that starts a durable execution; wait_for_completion
+    # blocks until terminal (each agent step is its own "calls" checkpoint).
     handle = support_copilot_flow.run(SCENARIO, CUSTOMER, BASELINE_MODEL, "baseline")
-    handle.wait()
+    wait_for_completion(handle)
 
     client = KitaruClient()
     decision = load_support_decision_from_execution(client, handle.exec_id)
@@ -141,29 +153,29 @@ def run() -> str:
 
 def replay(exec_id: str) -> None:
     """Replay exec_id from `decide` twice — faithfully, then edited — and compare."""
+
     client = KitaruClient()
 
     # The decision the original run produced — the baseline we compare against.
-    original = load_support_decision_from_execution(client, exec_id)
+    original_decision = load_support_decision_from_execution(client, exec_id)
 
     # (1) Replay from `decide` with NO edits — a faithful reproduction.
-    #     gather_context (before the cut) is served from cache; decide + finalize
-    #     re-run live. No overrides are passed, so the recorded config is reused.
     section("Replay #1 — reproduce from `decide`, no edits (cached head, live tail)")
+
     reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
-    reproduced.wait()
+    wait_for_completion(reproduced)
+
     reproduced_decision = load_support_decision_from_execution(
         client, reproduced.exec_id
     )
+
     print(f"   unchanged replay exec_id={reproduced.exec_id}")
     print(
         "   original recorded run → unchanged replay: "
-        f"{diff_decisions(original, reproduced_decision)}"
+        f"{diff_decisions(original_decision, reproduced_decision)}"
     )
 
     # (2) The SAME SDK call, now WITH edits — a cheaper model + looser prompt.
-    #     The extra kwargs override the flow inputs, so decide + finalize re-run
-    #     under the new config while gather_context is still served from cache.
     section(f"Replay #2 — re-run `decide` under {FORK_MODEL} + {FORK_PROMPT_PROFILE}")
     edited = support_copilot_flow.replay(
         exec_id,
@@ -172,8 +184,10 @@ def replay(exec_id: str) -> None:
         model=FORK_MODEL,
         prompt_profile=FORK_PROMPT_PROFILE,
     )
-    edited.wait()
+    wait_for_completion(edited)
+
     edited_decision = load_support_decision_from_execution(client, edited.exec_id)
+
     print(f"   edited replay exec_id={edited.exec_id}")
     print(
         "   unchanged replay → edited replay: "
@@ -181,14 +195,14 @@ def replay(exec_id: str) -> None:
     )
 
     path = write_comparison_html(
-        exec_id, original, reproduced_decision, edited_decision
+        exec_id, original_decision, reproduced_decision, edited_decision
     )
     print(f"   html: {path}")
 
 
 def cohort() -> None:
     """Apply the same edit across the last N production runs and measure the delta."""
-    section("Cohort — apply the edit across recent production runs")
+    section("Cohort — apply the edit across recent 10 production runs")
 
     client = KitaruClient()
     cases = recent_exec_ids(client, 10)
@@ -219,6 +233,9 @@ def run_all() -> None:
 
 
 def main(argv: list[str]) -> None:
+    # Load OPENAI_API_KEY (etc.) from a local .env so the in-process quality
+    # judge has credentials. Existing environment variables take precedence.
+    load_dotenv()
     command = argv[0] if argv else "run-all"
 
     if command == "run":

@@ -141,6 +141,7 @@ dev = [
     "claude-agent-sdk>=0.1.58,<0.2",
     "google-genai>=2.8.0,<3",
     "pip-audit>=2.9.0",
+    "python-dotenv>=1.0,<2",
 ]
 
 [tool.ruff]

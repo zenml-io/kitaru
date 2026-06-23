@@ -19,12 +19,13 @@ diff_decisions Compare two SupportDecision dicts and return a DriftReport.
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from support_copilot import CUT
+from support_agent import CUT, FINALIZE_CHECKPOINT
 
 from kitaru import KitaruClient
 
@@ -230,13 +231,16 @@ def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
 def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> dict:
     """Read the SupportDecision dict from the execution artifact store.
 
-    Searches checkpoints in priority order: ``decide`` first, then
-    ``finalize``.  Always reads from artifacts — never from an in-memory cache.
+    Searches checkpoints in priority order: ``support_decide_model_request``
+    (the CUT) first, then ``support_finalize_model_request``. Each is a
+    KitaruAgent "calls" checkpoint whose artifact is a PydanticAI ModelResponse;
+    the decision is its ``final_result`` tool-call args. Always reads from
+    artifacts — never from an in-memory cache.
 
     Raises:
         RuntimeError: If the decision cannot be found via artifact lookup.
     """
-    from agent import SupportDecision
+    from support_agent import SupportDecision
 
     run = client.executions.get(exec_id)
 
@@ -245,6 +249,29 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
             return val
         if isinstance(val, SupportDecision):
             return val.model_dump()
+        # The KitaruAgent turn checkpoint persists the PydanticAI AgentRunResult;
+        # the SupportDecision / FinalAnswer lives on its `.output`.
+        output = getattr(val, "output", None)
+        if output is not None and output is not val:
+            extracted = _extract(output)
+            if extracted is not None:
+                return extracted
+        # In the adapter's default "calls" strategy, each model-call checkpoint
+        # persists a PydanticAI ModelResponse. The structured decision is the
+        # `final_result` tool call's args (a JSON string of the output model).
+        for part in getattr(val, "parts", None) or ():
+            if getattr(part, "tool_name", None) != "final_result":
+                continue
+            args = getattr(part, "args", None)
+            parsed = (
+                json.loads(args)
+                if isinstance(args, str)
+                else args
+                if isinstance(args, dict)
+                else None
+            )
+            if isinstance(parsed, dict) and "risk_status" in parsed:
+                return parsed
         model_dump = getattr(val, "model_dump", None)
         if callable(model_dump):
             dumped = model_dump()
@@ -252,7 +279,7 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
                 return dumped
         return None
 
-    priority = [CUT, "finalize"]
+    priority = [CUT, FINALIZE_CHECKPOINT]
     cp_by_name = {c.name: c for c in run.checkpoints}
     for cp_name in priority:
         cp = cp_by_name.get(cp_name)
@@ -273,8 +300,8 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
         f"Could not extract a SupportDecision from execution {exec_id!r}. "
         f"Searched checkpoints: {priority}. "
         f"Checkpoints present: {[c.name for c in run.checkpoints]}. "
-        "Ensure the flow completed successfully and the 'decide' checkpoint "
-        "produced a serializable SupportDecision dict as its artifact."
+        "Ensure the flow completed successfully and the "
+        "'support_decide_model_request' checkpoint produced a SupportDecision."
     )
 
 
