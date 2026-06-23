@@ -53,6 +53,7 @@ kitaru.configure(
     stack="local",
     cache=False,
     retries=1,
+    llm_estimated_costs="auto",
     image=kitaru.ImageSettings(
         base_image="python:3.12-slim",
         environment={"LOG_LEVEL": "INFO"},
@@ -187,6 +188,9 @@ saved deployment snapshot.
 
 - `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
   explicit `model=` argument is provided.
+- `KITARU_LLM_ESTIMATED_COSTS` controls automatic estimated-cost tracking for
+  direct OpenAI and Anthropic `kitaru.llm()` calls. Use `auto` (default) or
+  `off`.
 - `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
 - `OLLAMA_HOST` sets the Ollama server address for `ollama/*` models
   (default: `http://localhost:11434`).
@@ -195,6 +199,12 @@ saved deployment snapshot.
 registered alias, Kitaru passes it straight through as a raw provider/model
 string. This lookup happens before Kitaru falls back to the locally configured
 default alias.
+
+Direct `kitaru.llm()` estimated costs are calculated with
+[`genai-prices`](https://github.com/pydantic/genai-prices) after the provider
+call succeeds. If pricing fails, the LLM response and token counts are still
+recorded. See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata)
+for the actual-vs-estimated cost fields.
 
 If you want the full secret-backed setup path for `kitaru.llm()`, see
 [Secrets + Model Registration](secrets-and-model-registration.md).
@@ -238,6 +248,7 @@ For connection-specific resolution, Kitaru uses this lower-to-higher order:
 stack = "prod"
 cache = false
 retries = 2
+llm_estimated_costs = "auto"
 
 [tool.kitaru.image]
 base_image = "python:3.12-slim"

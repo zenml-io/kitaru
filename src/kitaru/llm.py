@@ -6,18 +6,21 @@ and ``openrouter/*`` models. Ollama and OpenRouter use the OpenAI-compatible
 API and require the ``openai`` package (``pip install kitaru[openai]``).
 """
 
+import importlib.metadata
 import os
 import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic_core import to_jsonable_python
 
 from kitaru._env import _temporary_env
-from kitaru._llm_usage import build_usage_record, usage_record_metadata
+from kitaru._llm_usage import build_usage_record, coerce_cost_usd, usage_record_metadata
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import (
@@ -25,7 +28,11 @@ from kitaru.checkpoint import (
     _raise_if_checkpoint_output_handle_in_value,
     checkpoint,
 )
-from kitaru.config import ResolvedModelSelection, resolve_model_selection
+from kitaru.config import (
+    ResolvedModelSelection,
+    resolve_llm_estimated_cost_policy,
+    resolve_model_selection,
+)
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -69,6 +76,11 @@ class _LLMUsage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    raw_usage: dict[str, Any] | None = None
 
 
 class _LLMRequest(BaseModel):
@@ -119,6 +131,15 @@ class _ProviderCallResult:
 
     response_text: str
     usage: _LLMUsage
+
+
+@dataclass(frozen=True)
+class _DirectCostEstimate:
+    """Estimated cost result for one direct LLM call."""
+
+    estimated_cost_usd: float | None = None
+    cost_source_label: str | None = None
+    pricing_version: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -564,15 +585,18 @@ def _extract_response_text_anthropic(raw_response: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_usage_int(usage_payload: Any, key: str) -> int | None:
-    """Read an integer field from a usage payload (Mapping or object)."""
+def _read_usage_value(usage_payload: Any, key: str) -> Any:
+    """Read one field from a usage payload (Mapping or object)."""
     if usage_payload is None:
         return None
-    raw_value: Any
     if isinstance(usage_payload, Mapping):
-        raw_value = usage_payload.get(key)
-    else:
-        raw_value = getattr(usage_payload, key, None)
+        return usage_payload.get(key)
+    return getattr(usage_payload, key, None)
+
+
+def _read_usage_int(usage_payload: Any, key: str) -> int | None:
+    """Read an integer field from a usage payload (Mapping or object)."""
+    raw_value = _read_usage_value(usage_payload, key)
     if raw_value is None:
         return None
     try:
@@ -581,19 +605,64 @@ def _read_usage_int(usage_payload: Any, key: str) -> int | None:
         return None
 
 
+def _jsonable_usage_payload(
+    usage_payload: Any,
+    *,
+    keys: Sequence[str],
+    detail_keys: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any] | None:
+    """Convert known provider usage fields into a JSON-safe mapping."""
+    if usage_payload is None:
+        return None
+    if isinstance(usage_payload, Mapping):
+        jsonable = to_jsonable_python(dict(usage_payload), serialize_unknown=True)
+        if isinstance(jsonable, Mapping):
+            return {str(key): value for key, value in jsonable.items()}
+        return {"value": jsonable}
+    if hasattr(usage_payload, "model_dump"):
+        dumped = usage_payload.model_dump(mode="python")
+        if isinstance(dumped, Mapping):
+            jsonable = to_jsonable_python(dumped, serialize_unknown=True)
+            if isinstance(jsonable, Mapping):
+                return {str(key): value for key, value in jsonable.items()}
+
+    raw: dict[str, Any] = {}
+    for key in keys:
+        value = _read_usage_value(usage_payload, key)
+        if value is not None:
+            raw[key] = to_jsonable_python(value, serialize_unknown=True)
+    for key, nested_keys in (detail_keys or {}).items():
+        nested = _read_usage_value(usage_payload, key)
+        if nested_mapping := _jsonable_usage_payload(nested, keys=nested_keys):
+            raw[key] = nested_mapping
+    return raw or None
+
+
 def _extract_usage_openai(raw_response: Any) -> _LLMUsage:
     """Extract usage from an OpenAI Chat Completions response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_usage_value(raw_response, "usage")
+    prompt_details = _read_usage_value(usage, "prompt_tokens_details")
+    completion_details = _read_usage_value(usage, "completion_tokens_details")
     return _LLMUsage(
         prompt_tokens=_read_usage_int(usage, "prompt_tokens"),
         completion_tokens=_read_usage_int(usage, "completion_tokens"),
         total_tokens=_read_usage_int(usage, "total_tokens"),
+        cached_input_tokens=_read_usage_int(prompt_details, "cached_tokens"),
+        reasoning_tokens=_read_usage_int(completion_details, "reasoning_tokens"),
+        raw_usage=_jsonable_usage_payload(
+            usage,
+            keys=("prompt_tokens", "completion_tokens", "total_tokens"),
+            detail_keys={
+                "prompt_tokens_details": ("cached_tokens",),
+                "completion_tokens_details": ("reasoning_tokens",),
+            },
+        ),
     )
 
 
 def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
     """Extract usage from an Anthropic Messages response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_usage_value(raw_response, "usage")
     input_tokens = _read_usage_int(usage, "input_tokens")
     output_tokens = _read_usage_int(usage, "output_tokens")
     total = None
@@ -603,6 +672,155 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=total,
+        cache_creation_input_tokens=_read_usage_int(
+            usage, "cache_creation_input_tokens"
+        ),
+        cache_read_input_tokens=_read_usage_int(usage, "cache_read_input_tokens"),
+        raw_usage=_jsonable_usage_payload(
+            usage,
+            keys=(
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct estimated cost calculation
+# ---------------------------------------------------------------------------
+
+
+def _resolve_llm_estimated_cost_policy() -> str:
+    """Resolve the direct LLM estimated-cost policy for the current process."""
+    return resolve_llm_estimated_cost_policy()
+
+
+def _usage_has_pricing_tokens(usage: _LLMUsage) -> bool:
+    """Return whether there is enough usage information to try pricing."""
+    return any(
+        value is not None
+        for value in (
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
+        )
+    )
+
+
+def _direct_pricing_usage_payload(provider: str, usage: _LLMUsage) -> dict[str, Any]:
+    """Build the provider usage mapping expected by genai-prices."""
+    if provider == "openai":
+        payload: dict[str, Any] = {}
+        if usage.prompt_tokens is not None:
+            payload["prompt_tokens"] = usage.prompt_tokens
+        if usage.completion_tokens is not None:
+            payload["completion_tokens"] = usage.completion_tokens
+        if usage.total_tokens is not None:
+            payload["total_tokens"] = usage.total_tokens
+        if usage.cached_input_tokens is not None:
+            payload["prompt_tokens_details"] = {
+                "cached_tokens": usage.cached_input_tokens
+            }
+        if usage.reasoning_tokens is not None:
+            payload["completion_tokens_details"] = {
+                "reasoning_tokens": usage.reasoning_tokens
+            }
+        return payload
+
+    payload = {}
+    if usage.prompt_tokens is not None:
+        payload["input_tokens"] = usage.prompt_tokens
+    if usage.completion_tokens is not None:
+        payload["output_tokens"] = usage.completion_tokens
+    if usage.cache_creation_input_tokens is not None:
+        payload["cache_creation_input_tokens"] = usage.cache_creation_input_tokens
+    if usage.cache_read_input_tokens is not None:
+        payload["cache_read_input_tokens"] = usage.cache_read_input_tokens
+    return payload
+
+
+@lru_cache(maxsize=1)
+def _genai_prices_version() -> str:
+    """Return the installed genai-prices package version for provenance."""
+    try:
+        return importlib.metadata.version("genai-prices")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _estimate_direct_llm_cost(
+    *,
+    resolved_model: str,
+    usage: _LLMUsage,
+    warnings: list[str],
+) -> _DirectCostEstimate:
+    """Estimate direct OpenAI/Anthropic call cost with genai-prices."""
+    try:
+        policy = _resolve_llm_estimated_cost_policy()
+    except Exception as exc:
+        warnings.append(
+            "Kitaru could not resolve the direct LLM estimated-cost policy; "
+            "tokens were recorded without an estimated cost: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return _DirectCostEstimate()
+    if policy == "off":
+        return _DirectCostEstimate()
+
+    provider = _provider_name(resolved_model)
+    if provider not in {"openai", "anthropic"}:
+        return _DirectCostEstimate()
+    _, _, provider_model = resolved_model.partition("/")
+    if not provider_model or not _usage_has_pricing_tokens(usage):
+        return _DirectCostEstimate()
+
+    try:
+        from genai_prices import extract_usage
+    except ImportError:
+        warnings.append(
+            "genai-prices is not installed; direct LLM tokens were recorded "
+            "without an estimated cost."
+        )
+        return _DirectCostEstimate()
+
+    response_data = {
+        "model": provider_model,
+        "usage": _direct_pricing_usage_payload(provider, usage),
+    }
+    extract_kwargs: dict[str, Any] = {"provider_id": provider}
+    if provider == "openai":
+        extract_kwargs["api_flavor"] = "chat"
+
+    try:
+        extracted_usage = extract_usage(response_data, **extract_kwargs)
+        price = extracted_usage.calc_price()
+    except Exception as exc:
+        warnings.append(
+            "genai-prices could not estimate direct LLM cost for "
+            f"{resolved_model!r}; tokens were recorded without an estimated "
+            f"cost: {type(exc).__name__}: {exc}"
+        )
+        return _DirectCostEstimate()
+
+    estimated_cost = coerce_cost_usd(getattr(price, "total_price", None))
+    if estimated_cost is None:
+        warnings.append(
+            "genai-prices returned an invalid direct LLM estimated cost for "
+            f"{resolved_model!r}; tokens were recorded without an estimated cost."
+        )
+        return _DirectCostEstimate()
+
+    version = _genai_prices_version()
+    return _DirectCostEstimate(
+        estimated_cost_usd=estimated_cost,
+        cost_source_label="genai-prices",
+        pricing_version=f"genai-prices:{version}",
     )
 
 
@@ -716,6 +934,12 @@ def _execute_llm_call(request: _LLMRequest) -> str:
 
     response_text = result.response_text
     usage = result.usage
+    usage_warnings: list[str] = []
+    cost_estimate = _estimate_direct_llm_cost(
+        resolved_model=model_selection.resolved_model,
+        usage=usage,
+        warnings=usage_warnings,
+    )
 
     _safe_save(
         f"{request.call_name}_prompt",
@@ -739,6 +963,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         "tokens_input": usage.prompt_tokens,
         "tokens_output": usage.completion_tokens,
         "total_tokens": usage.total_tokens,
+        "estimated_cost_usd": cost_estimate.estimated_cost_usd,
     }
     filtered_metadata = {
         key: value for key, value in llm_metadata.items() if value is not None
@@ -751,15 +976,20 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         requested_model=model_selection.requested_model,
         resolved_model=model_selection.resolved_model,
         model=model_selection.resolved_model,
-        provider=model_selection.resolved_model.split("/", 1)[0]
-        if "/" in model_selection.resolved_model
-        else None,
+        provider=_provider_name(model_selection.resolved_model),
         input_tokens=usage.prompt_tokens,
         output_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        raw_usage=usage.raw_usage,
+        estimated_cost_usd=cost_estimate.estimated_cost_usd,
+        cost_source_label=cost_estimate.cost_source_label,
+        pricing_version=cost_estimate.pricing_version,
         latency_ms=latency_ms,
         billing_effect="unknown" if is_mocked else "incurred",
         cache_status="unknown" if is_mocked else "executed",
+        warnings=usage_warnings,
     )
     log(
         llm_calls={request.call_name: filtered_metadata},

@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
 from kitaru.analytics import AnalyticsEvent
-from kitaru.config import ResolvedModelSelection, register_model_alias
+from kitaru.config import ResolvedModelSelection, configure, register_model_alias
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -23,11 +23,14 @@ from kitaru.errors import (
 )
 from kitaru.flow import flow
 from kitaru.llm import (
+    _extract_usage_anthropic,
+    _extract_usage_openai,
     _LLMRequest,
     _LLMUsage,
     _parse_provider_target,
     _ProviderCallResult,
     _resolve_credential_overlay,
+    _resolve_llm_estimated_cost_policy,
     llm,
 )
 from kitaru.runtime import _checkpoint_scope, _flow_scope
@@ -61,6 +64,42 @@ def _tracked_llm_metadata(track_mock: MagicMock) -> dict[str, object]:
     assert event == AnalyticsEvent.LLM_CALLED
     assert isinstance(metadata, dict)
     return metadata
+
+
+def _install_fake_genai_prices(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    total_price: float = 0.00123,
+    extract_error: Exception | None = None,
+    calc_error: Exception | None = None,
+) -> MagicMock:
+    """Install a fake genai_prices module for deterministic pricing tests."""
+
+    class _FakeExtractedUsage:
+        def calc_price(self) -> SimpleNamespace:
+            if calc_error is not None:
+                raise calc_error
+            return SimpleNamespace(total_price=total_price)
+
+    def _extract_usage(*_args: Any, **_kwargs: Any) -> _FakeExtractedUsage:
+        if extract_error is not None:
+            raise extract_error
+        return _FakeExtractedUsage()
+
+    extract_usage = MagicMock(side_effect=_extract_usage)
+    monkeypatch.setitem(
+        sys.modules,
+        "genai_prices",
+        SimpleNamespace(extract_usage=extract_usage),
+    )
+    return extract_usage
+
+
+def _single_usage_record(mock_log: MagicMock) -> dict[str, Any]:
+    """Return the only canonical usage record from one mocked log call."""
+    usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
+    assert len(usage_records) == 1
+    return next(iter(usage_records.values()))
 
 
 @contextmanager
@@ -313,12 +352,22 @@ class TestParseProviderTarget:
 # ---------------------------------------------------------------------------
 
 
-def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
+def test_llm_executes_openai_with_normalized_messages_and_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """OpenAI path: normalized prompts, artifacts, and metadata persisted."""
+    extract_usage = _install_fake_genai_prices(monkeypatch, total_price=0.00123)
     execution_id, checkpoint_id = _flow_checkpoint_scope()
     fake_result = _ProviderCallResult(
         response_text="hello world",
-        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        usage=_LLMUsage(
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            cached_input_tokens=3,
+            reasoning_tokens=4,
+            raw_usage={"prompt_tokens": 10, "completion_tokens": 20},
+        ),
     )
 
     with (
@@ -377,7 +426,7 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert logged_payload["tokens_input"] == 10
     assert logged_payload["tokens_output"] == 20
     assert logged_payload["total_tokens"] == 30
-    # cost_usd should be absent (not provided by direct SDK calls)
+    assert logged_payload["estimated_cost_usd"] == 0.00123
     assert "cost_usd" not in logged_payload
     usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
     usage_key, usage_record = next(iter(usage_records.items()))
@@ -388,7 +437,32 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert usage_record["usage"]["input_tokens"] == 10
     assert usage_record["usage"]["output_tokens"] == 20
     assert usage_record["usage"]["total_tokens"] == 30
-    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["usage"]["cached_input_tokens"] == 3
+    assert usage_record["usage"]["reasoning_tokens"] == 4
+    assert usage_record["usage"]["raw"] == {
+        "prompt_tokens": 10,
+        "completion_tokens": 20,
+    }
+    assert usage_record["cost"]["source"] == "calculator"
+    assert usage_record["cost"]["estimated_cost_usd"] == 0.00123
+    assert usage_record["cost"]["actual_cost_usd"] is None
+    assert usage_record["cost"]["source_label"] == "genai-prices"
+    assert usage_record["cost"]["pricing_version"].startswith("genai-prices:")
+    assert usage_record["warnings"] == []
+    extract_usage.assert_called_once_with(
+        {
+            "model": "gpt-4o-mini",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+                "prompt_tokens_details": {"cached_tokens": 3},
+                "completion_tokens_details": {"reasoning_tokens": 4},
+            },
+        },
+        provider_id="openai",
+        api_flavor="chat",
+    )
 
 
 def test_llm_preserves_zero_openai_usage_tokens() -> None:
@@ -465,12 +539,22 @@ def test_repeated_named_llm_calls_get_distinct_usage_record_ids() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
+def test_llm_executes_anthropic_with_system_separation_and_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Anthropic path: system separated, usage mapped, artifacts persisted."""
+    extract_usage = _install_fake_genai_prices(monkeypatch, total_price=0.00456)
     execution_id, checkpoint_id = _flow_checkpoint_scope()
     fake_result = _ProviderCallResult(
         response_text="bonjour",
-        usage=_LLMUsage(prompt_tokens=5, completion_tokens=15, total_tokens=20),
+        usage=_LLMUsage(
+            prompt_tokens=5,
+            completion_tokens=15,
+            total_tokens=20,
+            cache_creation_input_tokens=2,
+            cache_read_input_tokens=3,
+            raw_usage={"input_tokens": 5, "output_tokens": 15},
+        ),
     )
 
     with (
@@ -517,6 +601,7 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     assert logged_payload["tokens_input"] == 5
     assert logged_payload["tokens_output"] == 15
     assert logged_payload["total_tokens"] == 20
+    assert logged_payload["estimated_cost_usd"] == 0.00456
     assert "cost_usd" not in logged_payload
     usage_records = mock_log.call_args.kwargs[LLM_USAGE_METADATA_KEY]
     usage_key, usage_record = next(iter(usage_records.items()))
@@ -526,7 +611,259 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     assert usage_record["provider"] == "anthropic"
     assert usage_record["usage"]["input_tokens"] == 5
     assert usage_record["usage"]["output_tokens"] == 15
+    assert usage_record["usage"]["raw"] == {"input_tokens": 5, "output_tokens": 15}
+    assert usage_record["cost"]["source"] == "calculator"
+    assert usage_record["cost"]["estimated_cost_usd"] == 0.00456
+    assert usage_record["cost"]["actual_cost_usd"] is None
+    assert usage_record["cost"]["source_label"] == "genai-prices"
+    assert usage_record["cost"]["pricing_version"].startswith("genai-prices:")
+    assert usage_record["warnings"] == []
+    extract_usage.assert_called_once_with(
+        {
+            "model": "claude-sonnet-4-20250514",
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 15,
+                "cache_creation_input_tokens": 2,
+                "cache_read_input_tokens": 3,
+            },
+        },
+        provider_id="anthropic",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct estimated-cost policy and failure behavior
+# ---------------------------------------------------------------------------
+
+
+def test_llm_estimated_cost_policy_defaults_to_auto() -> None:
+    assert _resolve_llm_estimated_cost_policy() == "auto"
+
+
+def test_llm_estimated_cost_policy_honors_env_opt_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "off")
+
+    assert _resolve_llm_estimated_cost_policy() == "off"
+
+
+def test_llm_estimated_cost_runtime_setting_beats_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "off")
+    configure(llm_estimated_costs="auto")
+
+    assert _resolve_llm_estimated_cost_policy() == "auto"
+
+
+def test_llm_estimated_cost_invalid_env_is_non_fatal_after_provider_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "banana")
+    extract_usage = _install_fake_genai_prices(monkeypatch, total_price=0.01)
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+    ):
+        assert llm("hello", name="invalid_cost_policy") == "ok"
+
+    extract_usage.assert_not_called()
+    usage_record = _single_usage_record(mock_log)
     assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert len(usage_record["warnings"]) == 1
+    warning = usage_record["warnings"][0]
+    assert "could not resolve the direct LLM estimated-cost policy" in warning
+    assert "llm_estimated_costs must be 'auto' or 'off'" in warning
+
+
+def test_llm_estimated_cost_env_off_skips_genai_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "off")
+    extract_usage = _install_fake_genai_prices(monkeypatch, total_price=0.01)
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+    ):
+        assert llm("hello", name="env_off") == "ok"
+
+    extract_usage.assert_not_called()
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert usage_record["warnings"] == []
+
+
+def test_llm_estimated_cost_missing_genai_prices_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "genai_prices", None)
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+    ):
+        assert llm("hello", name="missing_prices") == "ok"
+
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert usage_record["warnings"] == [
+        "genai-prices is not installed; direct LLM tokens were recorded "
+        "without an estimated cost."
+    ]
+
+
+def test_llm_estimated_cost_extract_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_genai_prices(
+        monkeypatch,
+        extract_error=LookupError("no price for model"),
+    )
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/not-a-real-priced-model")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+    ):
+        assert llm("hello", name="unknown_model") == "ok"
+
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert len(usage_record["warnings"]) == 1
+    warning = usage_record["warnings"][0]
+    assert "genai-prices could not estimate direct LLM cost" in warning
+    assert "openai/not-a-real-priced-model" in warning
+    assert "LookupError: no price for model" in warning
+
+
+def test_llm_estimated_cost_calc_price_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_genai_prices(
+        monkeypatch,
+        calc_error=RuntimeError("GitHub price data unavailable"),
+    )
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=5, completion_tokens=7, total_tokens=12),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("anthropic/claude-sonnet-4-20250514")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_anthropic", return_value=fake_result),
+    ):
+        assert llm("hello", name="calc_failure") == "ok"
+
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert len(usage_record["warnings"]) == 1
+    assert "RuntimeError: GitHub price data unavailable" in usage_record["warnings"][0]
+
+
+def test_llm_estimated_cost_invalid_price_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_genai_prices(monkeypatch, total_price=-1.0)
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(prompt_tokens=5, completion_tokens=7, total_tokens=12),
+    )
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+    ):
+        assert llm("hello", name="invalid_price") == "ok"
+
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["cost"]["source"] == "none"
+    assert usage_record["cost"]["estimated_cost_usd"] is None
+    assert usage_record["warnings"] == [
+        "genai-prices returned an invalid direct LLM estimated cost for "
+        "'openai/gpt-4o-mini'; tokens were recorded without an estimated cost."
+    ]
+
+
+def test_extract_usage_openai_preserves_cached_and_reasoning_tokens() -> None:
+    raw_response = {
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 20,
+            "total_tokens": 30,
+            "prompt_tokens_details": {"cached_tokens": 4},
+            "completion_tokens_details": {"reasoning_tokens": 6},
+        }
+    }
+
+    usage = _extract_usage_openai(raw_response)
+
+    assert usage.prompt_tokens == 10
+    assert usage.completion_tokens == 20
+    assert usage.total_tokens == 30
+    assert usage.cached_input_tokens == 4
+    assert usage.reasoning_tokens == 6
+    assert usage.raw_usage == raw_response["usage"]
+
+
+def test_extract_usage_anthropic_preserves_cache_token_fields() -> None:
+    raw_response = SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=5,
+            output_tokens=7,
+            cache_creation_input_tokens=2,
+            cache_read_input_tokens=3,
+        )
+    )
+
+    usage = _extract_usage_anthropic(raw_response)
+
+    assert usage.prompt_tokens == 5
+    assert usage.completion_tokens == 7
+    assert usage.total_tokens == 12
+    assert usage.cache_creation_input_tokens == 2
+    assert usage.cache_read_input_tokens == 3
+    assert usage.raw_usage == {
+        "input_tokens": 5,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 2,
+        "cache_read_input_tokens": 3,
+    }
 
 
 # ---------------------------------------------------------------------------

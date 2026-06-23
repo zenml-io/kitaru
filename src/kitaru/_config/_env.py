@@ -36,6 +36,7 @@ KITARU_STACK_ENV = "KITARU_STACK"
 KITARU_CACHE_ENV = "KITARU_CACHE"
 KITARU_RETRIES_ENV = "KITARU_RETRIES"
 KITARU_IMAGE_ENV = "KITARU_IMAGE"
+KITARU_LLM_ESTIMATED_COSTS_ENV = "KITARU_LLM_ESTIMATED_COSTS"
 KITARU_DEFAULT_MODEL_ENV = "KITARU_DEFAULT_MODEL"
 KITARU_CONFIG_PATH_ENV = "KITARU_CONFIG_PATH"
 
@@ -144,6 +145,10 @@ def _read_execution_env_config() -> KitaruConfig:
             parsed_image = stripped_image
         values["image"] = parsed_image
 
+    raw_llm_estimated_costs = os.environ.get(KITARU_LLM_ESTIMATED_COSTS_ENV)
+    if raw_llm_estimated_costs is not None:
+        values["llm_estimated_costs"] = raw_llm_estimated_costs
+
     return KitaruConfig.model_validate(values)
 
 
@@ -219,6 +224,11 @@ def _merge_execution_layer(
         image=merged_image,
         cache=layer.cache if layer.cache is not None else resolved.cache,
         retries=layer.retries if layer.retries is not None else resolved.retries,
+        llm_estimated_costs=(
+            layer.llm_estimated_costs
+            if layer.llm_estimated_costs is not None
+            else resolved.llm_estimated_costs
+        ),
     )
 
 
