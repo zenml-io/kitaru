@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 import weakref
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -14,6 +14,8 @@ from kitaru._llm_usage import (
     LLMBillingEffect,
     LLMCacheStatus,
     build_usage_record,
+    calculated_cost_metadata,
+    token_usage_from_mapping,
     usage_records_metadata,
 )
 
@@ -28,6 +30,7 @@ from ._events import (
     EventStatus,
     EventStreamHandlerSummary,
     ModelEvent,
+    PydanticAIUsageSummary,
     RunSummary,
     StreamEvent,
     ToolEvent,
@@ -257,6 +260,7 @@ class EventTracker:
     _event_sequence_by_id: dict[str, int] = field(
         default_factory=dict, init=False, repr=False
     )
+    cost_calculator: Callable[[PydanticAIUsageSummary], float | None] | None = None
 
     def __post_init__(self) -> None:
         self.agent_name = normalize_agent_name(self.agent_name)
@@ -368,6 +372,7 @@ class EventTracker:
         duration_ms: float,
         artifacts: dict[str, str],
         model_name: str | None = None,
+        provider_name: str | None = None,
         usage: RequestUsage | None = None,
         stream_event_count: int | None = None,
         error: BaseException | None = None,
@@ -398,6 +403,7 @@ class EventTracker:
                     duration_ms=duration_ms,
                     artifacts=artifacts,
                     model_name=model_name,
+                    provider_name=provider_name,
                     usage=usage,
                     billing_effect=billing_effect,
                     cache_status=cache_status,
@@ -598,6 +604,18 @@ class EventTracker:
             usage_payload = (
                 _request_usage_payload(event.usage) if event.usage is not None else None
             )
+            warnings: list[str] = []
+            usage_summary = _pydantic_ai_usage_summary(
+                event=event,
+                usage_payload=usage_payload,
+            )
+            cost_metadata = calculated_cost_metadata(
+                calculator=self.cost_calculator,
+                usage=usage_summary,
+                warnings=warnings,
+                adapter_name="Pydantic AI",
+                source_label="pydantic_ai.cost_calculator",
+            )
             usage_records.append(
                 build_usage_record(
                     adapter="pydantic_ai",
@@ -608,11 +626,16 @@ class EventTracker:
                     checkpoint_id=event.checkpoint_id,
                     checkpoint_name=event.checkpoint_name,
                     model=event.model_name,
+                    provider=event.provider_name,
                     usage=usage_payload,
+                    estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                    cost_source=cost_metadata.cost_source,
+                    cost_source_label=cost_metadata.cost_source_label,
                     latency_ms=event.duration_ms,
                     status=event.status,
                     billing_effect=event.billing_effect,
                     cache_status=event.cache_status,
+                    warnings=warnings,
                 )
             )
         kitaru.log(
@@ -628,9 +651,36 @@ _CURRENT_TRACKER: ContextVar[EventTracker | None] = ContextVar(
 )
 
 
+def _pydantic_ai_usage_summary(
+    *,
+    event: ModelEvent,
+    usage_payload: dict[str, Any] | None,
+) -> PydanticAIUsageSummary | None:
+    if usage_payload is None:
+        return None
+    token_usage = token_usage_from_mapping(usage_payload)
+    return PydanticAIUsageSummary(
+        provider=event.provider_name,
+        model_name=event.model_name,
+        input_tokens=token_usage["input_tokens"],
+        output_tokens=token_usage["output_tokens"],
+        total_tokens=token_usage["total_tokens"],
+        cached_input_tokens=token_usage["cached_input_tokens"],
+        reasoning_tokens=token_usage["reasoning_tokens"],
+        raw_usage=token_usage["raw"],
+    )
+
+
 @contextmanager
-def tracker_scope(agent_name: str | None) -> Iterator[EventTracker]:
-    tracker = EventTracker(agent_name=agent_name or "agent")
+def tracker_scope(
+    agent_name: str | None,
+    *,
+    cost_calculator: Callable[[PydanticAIUsageSummary], float | None] | None = None,
+) -> Iterator[EventTracker]:
+    tracker = EventTracker(
+        agent_name=agent_name or "agent",
+        cost_calculator=cost_calculator,
+    )
     token = _CURRENT_TRACKER.set(tracker)
     try:
         yield tracker

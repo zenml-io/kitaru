@@ -10,7 +10,7 @@ from typing import Any, Literal, cast, overload
 from kitaru._llm_usage import (
     add_optional_token_count,
     build_usage_record,
-    estimate_calculated_cost_usd,
+    calculated_cost_metadata,
     log_usage_record,
     token_usage_from_mapping,
 )
@@ -1005,15 +1005,12 @@ class KitaruGraphRunner:
         )
         if usage is None and self._capture.save_usage:
             usage = self._usage_from_output(output)
-        estimated_cost = (
-            estimate_calculated_cost_usd(
-                calculator=self._cost_calculator,
-                usage=usage,
-                warnings=warnings,
-                adapter_name="LangGraph",
-            )
-            if self._capture.save_usage
-            else None
+        cost_metadata = calculated_cost_metadata(
+            calculator=self._cost_calculator,
+            usage=usage,
+            warnings=warnings,
+            adapter_name="LangGraph",
+            source_label="langgraph.cost_calculator",
         )
         if self._capture.save_usage:
             usage_record = build_usage_record(
@@ -1024,9 +1021,9 @@ class KitaruGraphRunner:
                 record_id=tracker.run_label,
                 usage=usage.model_dump(mode="json") if usage is not None else None,
                 model=usage.model_name if usage is not None else None,
-                estimated_cost_usd=estimated_cost,
-                cost_source="calculator" if estimated_cost is not None else "none",
-                cost_source_label="langgraph.cost_calculator",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
                 status=status,
                 billing_effect="incurred" if status == "completed" else "unknown",
                 cache_status="executed",
@@ -1055,7 +1052,7 @@ class KitaruGraphRunner:
                 else None
             ),
             usage=usage,
-            estimated_cost_usd=estimated_cost,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             warnings=warnings,
         )
         return result

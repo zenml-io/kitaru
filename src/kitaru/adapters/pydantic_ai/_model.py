@@ -521,6 +521,7 @@ class KitaruModel(WrapperModel):
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,
+            provider_name=getattr(response, "provider_name", None),
             usage=response.usage,
             checkpoint_name=checkpoint_name,
             billing_effect="reused_not_incurred",
@@ -682,6 +683,7 @@ class KitaruModel(WrapperModel):
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,
+            provider_name=getattr(response, "provider_name", None),
             usage=response.usage,
         )
         self._reserve_tool_call_order(
@@ -815,6 +817,7 @@ class KitaruModel(WrapperModel):
                 duration_ms=duration_ms,
                 artifacts=artifacts,
                 model_name=response.model_name,
+                provider_name=getattr(response, "provider_name", None),
                 usage=response.usage,
                 stream_event_count=stream_event_count,
             )

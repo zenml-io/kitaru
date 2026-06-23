@@ -54,6 +54,7 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert claude_adapter.KitaruClaudeRunner
     assert claude_adapter.ClaudeRunRequest
     assert claude_adapter.ClaudeRunResult
+    assert claude_adapter.ClaudeUsageSummary
     assert claude_adapter.ClaudeCapturePolicy
     assert claude_adapter.ClaudeRunEvent
     assert claude_adapter.KitaruClaudeRunner.run_stream
@@ -88,11 +89,13 @@ def test_public_import_surface_uses_invocation_vocabulary(
     assert "runner_call" not in public_names
     assert "durability_mode" not in public_names
     assert "allowed_tool_name" in public_names
+    assert "ClaudeUsageSummary" in public_names
 
     signature = inspect.signature(claude_adapter.KitaruClaudeRunner)
     assert "checkpoint_strategy" in signature.parameters
     assert "options_factory" in signature.parameters
     assert "allow_direct_execution_inside_checkpoint" in signature.parameters
+    assert "cost_calculator" in signature.parameters
     assert "durability_mode" not in signature.parameters
 
 

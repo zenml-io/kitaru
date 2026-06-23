@@ -45,6 +45,7 @@ def test_public_import_surface_uses_interaction_vocabulary(
     assert gemini_adapter.GeminiInteractionRequest
     assert gemini_adapter.GeminiInteractionResult
     assert gemini_adapter.GeminiInteractionStepSummary
+    assert gemini_adapter.GeminiUsageSummary
     assert gemini_adapter.GeminiInteractionFunctionCall
     assert gemini_adapter.GeminiSandboxFunctionSpec
     assert gemini_adapter.GeminiSandboxFunctionExecution
@@ -60,12 +61,14 @@ def test_public_import_surface_uses_interaction_vocabulary(
     assert "calls" not in public_names
     assert "runner_call" not in public_names
     assert "durability_mode" not in public_names
+    assert "GeminiUsageSummary" in public_names
 
     signature = inspect.signature(gemini_adapter.KitaruGeminiInteractionsRunner)
     assert "checkpoint_strategy" in signature.parameters
     assert "client_factory" in signature.parameters
     assert "cache_identity" in signature.parameters
     assert "allow_direct_execution_inside_checkpoint" in signature.parameters
+    assert "cost_calculator" in signature.parameters
 
 
 def test_import_without_google_genai_raises_feature_not_available(

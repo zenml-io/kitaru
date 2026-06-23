@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added adapter-owned cost calculator inputs for Claude Agent SDK, Gemini Interactions, and Pydantic AI, so adapter users can record estimated LLM costs without Kitaru maintaining separate adapter pricing tables.
+
+### Changed
+- Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators as the fallback when the SDK does not report a cost.
+
 ### Fixed
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
 

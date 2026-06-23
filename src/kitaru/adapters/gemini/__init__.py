@@ -91,6 +91,7 @@ from ._types import (  # noqa: E402
     GeminiInteractionRequest,
     GeminiInteractionResult,
     GeminiInteractionStepSummary,
+    GeminiUsageSummary,
 )
 from ._utils import (  # noqa: E402
     CheckpointConfig,
@@ -117,6 +118,7 @@ __all__ = [
     "GeminiInteractionStepSummary",
     "GeminiSandboxFunctionExecution",
     "GeminiSandboxFunctionSpec",
+    "GeminiUsageSummary",
     "KitaruGeminiInteractionsRunner",
     "execute_gemini_sandbox_function_call",
     "validate_checkpoint_strategy",

@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from kitaru._llm_usage import (
     build_usage_record,
-    estimate_calculated_cost_usd,
+    calculated_cost_metadata,
     log_usage_record,
 )
 from kitaru.adapters._result_identity import canonicalize_result_model
@@ -1097,14 +1097,15 @@ class KitaruRunner:
             if result.usage is not None
             else None
         )
-        estimated_cost = estimate_calculated_cost_usd(
+        cost_metadata = calculated_cost_metadata(
             calculator=self._cost_calculator,
             usage=usage_summary,
             warnings=warnings,
             adapter_name="OpenAI Agents",
+            source_label="openai_agents.cost_calculator",
         )
         updates["warnings"] = warnings
-        updates["estimated_cost_usd"] = estimated_cost
+        updates["estimated_cost_usd"] = cost_metadata.estimated_cost_usd
         finalized = result.model_copy(update=updates)
         if self._capture.save_usage:
             usage_record = build_usage_record(
@@ -1115,11 +1116,9 @@ class KitaruRunner:
                 record_id=tracker.run_label,
                 usage=finalized.usage,
                 model=usage_summary.model_name if usage_summary is not None else None,
-                estimated_cost_usd=finalized.estimated_cost_usd,
-                cost_source=(
-                    "calculator" if finalized.estimated_cost_usd is not None else "none"
-                ),
-                cost_source_label="openai_agents.cost_calculator",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
                 status=finalized.status,
                 billing_effect="incurred"
                 if finalized.status == "completed"

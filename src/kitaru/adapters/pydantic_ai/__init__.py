@@ -18,6 +18,7 @@ except ImportError as exc:  # pragma: no cover - import-time guard only
     ) from exc
 
 from ._agent import KitaruAgent
+from ._events import PydanticAIUsageSummary
 from ._function_toolset import KitaruFunctionToolset
 from ._hitl import hitl_tool
 from ._mcp_server import KitaruMCPServer, kitaruify_mcp_server
@@ -135,6 +136,7 @@ __all__ = [
     "KitaruMCPServer",
     "KitaruModel",
     "KitaruToolset",
+    "PydanticAIUsageSummary",
     "SandboxCommandToolResult",
     "hitl_tool",
     "kitaruify_mcp_server",

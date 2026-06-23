@@ -1439,6 +1439,8 @@ def test_graph_call_keeps_successful_run_when_cost_calculator_fails(
     assert result.estimated_cost_usd is None
     assert any("cost calculator failed" in warning for warning in result.warnings)
     assert len(logged) == 1
+    assert logged[0]["cost"]["source"] == "calculator_error"
+    assert logged[0]["cost"]["source_label"] == "langgraph.cost_calculator"
     assert logged[0]["cost"]["estimated_cost_usd"] is None
     assert logged[0]["warnings"] == result.warnings
 
@@ -1470,6 +1472,8 @@ def test_graph_call_logs_one_record_without_usage(
     assert result.usage is None
     assert len(logged) == 1
     assert logged[0]["usage"]["total_tokens"] is None
+    assert logged[0]["cost"]["source"] == "none"
+    assert logged[0]["cost"]["source_label"] is None
 
 
 def test_failed_graph_call_saves_event_artifacts_in_checkpoint_scope(

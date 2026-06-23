@@ -12,6 +12,7 @@ import logging
 import math
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from pydantic_core import to_jsonable_python
@@ -207,6 +208,60 @@ def coerce_cost_usd(value: Any) -> float | None:
     return cost
 
 
+@dataclass(frozen=True)
+class CalculatedCostMetadata:
+    """Canonical cost fields produced by an adapter cost calculator."""
+
+    estimated_cost_usd: float | None
+    cost_source: LLMCostSource
+    cost_source_label: str | None
+
+
+def calculated_cost_metadata(
+    *,
+    calculator: Callable[[Any], Any] | None,
+    usage: Any | None,
+    warnings: list[str],
+    adapter_name: str,
+    source_label: str,
+) -> CalculatedCostMetadata:
+    """Run an adapter cost calculator and return canonical record fields."""
+    if calculator is None or usage is None:
+        return CalculatedCostMetadata(
+            estimated_cost_usd=None,
+            cost_source="none",
+            cost_source_label=None,
+        )
+    try:
+        raw_cost = calculator(usage)
+    except Exception as exc:
+        warnings.append(
+            f"{adapter_name} cost calculator failed; estimated cost was not "
+            f"recorded: {type(exc).__name__}: {exc}"
+        )
+        return CalculatedCostMetadata(
+            estimated_cost_usd=None,
+            cost_source="calculator_error",
+            cost_source_label=source_label,
+        )
+    cost = coerce_cost_usd(raw_cost)
+    if cost is None:
+        warnings.append(
+            f"{adapter_name} cost calculator returned an invalid estimated cost; "
+            "estimated cost was not recorded."
+        )
+        return CalculatedCostMetadata(
+            estimated_cost_usd=None,
+            cost_source="calculator_error",
+            cost_source_label=source_label,
+        )
+    return CalculatedCostMetadata(
+        estimated_cost_usd=cost,
+        cost_source="calculator",
+        cost_source_label=source_label,
+    )
+
+
 def estimate_calculated_cost_usd(
     *,
     calculator: Callable[[Any], Any] | None,
@@ -215,23 +270,13 @@ def estimate_calculated_cost_usd(
     adapter_name: str,
 ) -> float | None:
     """Run and validate an adapter cost calculator without failing the LLM call."""
-    if calculator is None or usage is None:
-        return None
-    try:
-        raw_cost = calculator(usage)
-    except Exception as exc:
-        warnings.append(
-            f"{adapter_name} cost calculator failed; estimated cost was not "
-            f"recorded: {type(exc).__name__}: {exc}"
-        )
-        return None
-    cost = coerce_cost_usd(raw_cost)
-    if cost is None:
-        warnings.append(
-            f"{adapter_name} cost calculator returned an invalid estimated cost; "
-            "estimated cost was not recorded."
-        )
-    return cost
+    return calculated_cost_metadata(
+        calculator=calculator,
+        usage=usage,
+        warnings=warnings,
+        adapter_name=adapter_name,
+        source_label="cost_calculator",
+    ).estimated_cost_usd
 
 
 def strip_usage_record_bookkeeping(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -317,6 +362,8 @@ def token_usage_from_mapping(value: Any) -> dict[str, Any]:
         mapping,
         "cached_input_tokens",
         "cached_prompt_tokens",
+        "cache_read_tokens",
+        "cache_read_input_tokens",
         "cached_content_token_count",
         "cachedContentTokenCount",
     )

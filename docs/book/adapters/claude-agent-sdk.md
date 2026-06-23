@@ -457,12 +457,35 @@ inspection and audits:
 - best-effort local transcript JSONL payload
 - redacted options manifest
 - final output
-- usage and cost information when the SDK reports it
+- usage and estimated cost information when the SDK reports it or your calculator provides it
 - one invocation event and one run summary
 
 ## Usage and cost statistics
 
-Each successful Claude invocation logs one canonical `llm_usage_v1` record. The record uses the adapter run label as its stable identity, includes the SDK `usage` payload when Claude reports one, and stores `cost_usd` as provider-reported `actual_cost_usd` when the Claude SDK provides it. Kitaru does not run a separate Claude cost estimator in this adapter path.
+Each successful Claude invocation logs one canonical `llm_usage_v1` record. The record uses the adapter run label as its stable identity and includes the SDK `usage` payload when Claude reports one.
+
+When the Claude SDK reports `total_cost_usd`, Kitaru records it as `estimated_cost_usd`, not `actual_cost_usd`. The SDK value is useful for spend dashboards, but it is still a calculated SDK value rather than a provider invoice line. If the SDK does not report a cost, you can pass `cost_calculator=` to `KitaruClaudeRunner`; Kitaru calls it with a `ClaudeUsageSummary` and records the returned non-negative number as an estimated USD cost.
+
+```python
+from kitaru.adapters.claude_agent_sdk import ClaudeUsageSummary, KitaruClaudeRunner
+
+
+def calculate_claude_cost(usage: ClaudeUsageSummary) -> float | None:
+    if usage.input_tokens is None or usage.output_tokens is None:
+        return None
+    # Replace these example rates with your own contract or billing source.
+    return (usage.input_tokens / 1_000_000 * 3.0) + (
+        usage.output_tokens / 1_000_000 * 15.0
+    )
+
+
+runner = KitaruClaudeRunner(
+    name="claude_summary",
+    cost_calculator=calculate_claude_cost,
+)
+```
+
+Kitaru does not run a built-in Claude adapter pricing table here. Direct `kitaru.llm()` calls have their own genai-prices path; adapter runners either use a value reported by the SDK or a calculator you provide.
 
 Some Claude SDK results expose `model_usage` instead of the top-level `usage` payload. In that case, Kitaru uses `model_usage` as a fallback for the canonical usage record. If both are present, Kitaru uses `usage` and does not add `model_usage` on top; otherwise the same tokens could be counted twice.
 

@@ -228,11 +228,13 @@ writes two execution-level views:
 
 Cost fields are intentionally split:
 
-- `actual_cost_usd` means the provider reported a cost. Claude Agent SDK exposes
-  this via `total_cost_usd`.
-- `estimated_cost_usd` means Kitaru calculated a cost from token counts and a
-  pricing table or calculator. Direct OpenAI and Anthropic `kitaru.llm()` calls
-  write this field automatically when the model can be priced.
+- `actual_cost_usd` means the provider reported a final cost for this exact
+  call. Treat this as observability, not as a billing invoice.
+- `estimated_cost_usd` means Kitaru or an SDK calculated a cost from token counts
+  and pricing data. Direct OpenAI and Anthropic `kitaru.llm()` calls write this
+  field automatically when the model can be priced. Claude Agent SDK
+  `total_cost_usd` is also recorded here because it is an SDK-side estimate, not
+  a provider invoice line. Adapter-level user calculators also write this field.
 - `display_cost_usd` uses actual cost for a record when present, otherwise
   estimated cost. Treat it as observability, not as a billing invoice.
 

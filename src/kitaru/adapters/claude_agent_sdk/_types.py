@@ -118,6 +118,23 @@ class ClaudeRunRequest(BaseModel):
         return self
 
 
+class ClaudeUsageSummary(BaseModel):
+    """Kitaru-owned usage input for Claude Agent SDK cost calculators."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter_name: Literal["claude_agent_sdk"] = "claude_agent_sdk"
+    provider: str | None = "anthropic"
+    model_name: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    raw_usage: dict[str, Any] | None = None
+    raw_model_usage: dict[str, Any] | None = None
+
+
 class ClaudeRunResult(BaseModel):
     """Serializable output from one Claude Agent SDK invocation."""
 
