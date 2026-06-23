@@ -130,19 +130,19 @@ overrides the original `model` input. `from_="research"` re-executes from the
 `research` checkpoint forward. Everything upstream of that checkpoint is reused
 from the recorded run, so you don't pay for or re-run work you aren't changing.
 
-**Now compare the two runs.** Open both executions in the dashboard, or inspect
-their captured outputs and metadata from the SDK:
+**Now compare the two runs.** Both replay handles already hold their final
+reports, so you can diff them directly:
 
 ```python
-client = kitaru.KitaruClient()
-for exec_id in (EXEC_ID, "<candidate exec_id>"):
-    info = client.executions.get(exec_id)
-    print(exec_id, info.status)
+print("baseline:\n", baseline)
+print("candidate:\n", candidate)
 ```
 
-Because the baseline reproduced, the difference between the two runs is your
-change — the new model — not replay noise. This is the core loop: reproduce a
-real run, change exactly one thing, and trust the diff.
+Each `kitaru.llm()` call also recorded its prompt, response, token usage, and
+latency, so you can compare cost and quality per run in the dashboard or from
+`kitaru.KitaruClient()`. Because the baseline reproduced, the difference between
+the two runs is your change — the new model — not replay noise. This is the core
+loop: reproduce a real run, change exactly one thing, and trust the diff.
 
 {% hint style="info" %}
 This is not re-scoring stored outputs like an offline eval. Replay
@@ -179,13 +179,17 @@ The recorded output of `research` is reused; only `draft_report` re-executes.
 The more checkpoints your flow has, the less work you repeat. This works the
 same whether you use `kitaru.llm()` or bring your own client.
 
-## Deploy to a remote stack
+## Take it to production
 
-Everything above runs where you launch it. The same flow moves into production
-unchanged. To run on remote infrastructure (Kubernetes, Vertex AI, SageMaker,
-or AzureML), point the flow at a remote stack; Kitaru builds a container image
-with your code and dependencies. Control the base image, packages, and
-environment through the `image` parameter:
+Everything above runs where you launch it. Two steps move it to production: run
+on remote infrastructure, and deploy a versioned snapshot.
+
+### Run on a remote stack
+
+To execute on remote infrastructure (Kubernetes, Vertex AI, SageMaker, or
+AzureML), point the flow at a remote stack; Kitaru builds a container image with
+your code and dependencies. Control the base image, packages, and environment
+through the `image` parameter:
 
 ```python
 @flow(
@@ -200,15 +204,47 @@ def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
     ...
 ```
 
-Agents run on the same stacks, server, and dashboard as ZenML pipelines.
+`research_agent.run(...)` now executes on that stack. Agents run on the same
+stacks, server, and dashboard as ZenML pipelines.
 
-This example includes `kitaru[pydantic-ai,openai]` explicitly because setting
-`base_image` means you control the image contents. Kitaru can auto-add plain
-`kitaru` when it builds the requirements list for you, but it does not guess
-optional extras such as the PydanticAI/OpenAI adapter dependencies.
+This example lists `kitaru[pydantic-ai,openai]` explicitly because setting
+`base_image` means you control the image contents — Kitaru auto-adds plain
+`kitaru` but does not guess optional extras such as the PydanticAI/OpenAI
+adapter dependencies. See the [Containerization guide](../guides/containerization.md)
+for image options, custom Dockerfiles, and how Kitaru packages your source.
 
-See the [Containerization guide](../guides/containerization.md) for the full set of
-image options, custom Dockerfiles, and how Kitaru packages your source.
+### Deploy a versioned snapshot
+
+`run()` executes the flow as it is on disk. `deploy()` freezes the current code
+and dependencies as an immutable, versioned snapshot that consumers invoke by
+name — so whatever *calls* your agent doesn't redeploy when you ship a new
+version:
+
+```python
+# Freeze a version and attach a routing tag.
+research_agent.deploy(
+    topic="durable execution for AI agents",  # representative deployment-time inputs
+    tags={"prod": True},
+)
+```
+
+```bash
+# Or from the CLI, deploying a flow target with one routing tag:
+kitaru deploy agent.py:research_agent --tag prod
+```
+
+Consumers then invoke the deployed flow by name — from Python, CLI, MCP, or HTTP
+— and override inputs at call time:
+
+```python
+kitaru.KitaruClient().deployments.invoke(
+    flow="research_agent",
+    inputs={"topic": "vector databases"},
+)
+```
+
+See [Deploy and Invoke Flows](../guides/deployments.md) for versioning, moving
+tags with `kitaru flow tag`, rollbacks, and invocation in depth.
 
 {% hint style="info" %}
 Flows always run where you execute them — a Kitaru server does not run your
@@ -220,4 +256,4 @@ running your flow.
 
 ## What's next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Replay and Overrides</strong></td><td>Flow and checkpoint overrides, selector rules, and divergence handling</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Agents Guide</strong></td><td>The recommended end-to-end tour: build a durable agent harness platform stage by stage on Kitaru + PydanticAI, in the ZenML Learn section</td><td><a href="https://docs.zenml.io/user-guides/agents-guide">https://docs.zenml.io/user-guides/agents-guide</a></td></tr><tr><td><strong>Core Concepts</strong></td><td>Understand flows, checkpoints, and the execution model</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr><tr><td><strong>Execution Management</strong></td><td>Inspect runs, fetch logs, replay, retry, and resume</td><td><a href="../guides/execution-management.md">../guides/execution-management.md</a></td></tr><tr><td><strong>Configuration</strong></td><td>Configure runtime defaults and precedence</td><td><a href="../guides/configuration.md">../guides/configuration.md</a></td></tr><tr><td><strong>Examples</strong></td><td>Browse runnable Kitaru workflows grouped by goal</td><td><a href="examples.md">examples.md</a></td></tr><tr><td><strong>Containerization</strong></td><td>Control base images, dependencies, and Dockerfiles for remote execution</td><td><a href="../guides/containerization.md">../guides/containerization.md</a></td></tr><tr><td><strong>Wait, Input, and Resume</strong></td><td>Pause flows for external input and continue later</td><td><a href="../guides/wait-and-resume.md">../guides/wait-and-resume.md</a></td></tr><tr><td><strong>Tracked LLM Calls</strong></td><td>Use kitaru.llm() with captured prompt/response artifacts</td><td><a href="../guides/llm-calls.md">../guides/llm-calls.md</a></td></tr><tr><td><strong>Secrets + Model Setup</strong></td><td>Store provider credentials, register an alias, and use kitaru.llm()</td><td><a href="../guides/secrets-and-model-registration.md">../guides/secrets-and-model-registration.md</a></td></tr><tr><td><strong>MCP Server</strong></td><td>Drive replay and diff from a coding agent through tool calls</td><td><a href="../agent-native/mcp-server.md">../agent-native/mcp-server.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Replay and Overrides</strong></td><td>Flow and checkpoint overrides, selector rules, and divergence handling</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Agents Guide</strong></td><td>The recommended end-to-end tour: run, replay, and improve a production agent on Kitaru + PydanticAI, in the ZenML Learn section</td><td><a href="https://docs.zenml.io/user-guides/agents-guide">https://docs.zenml.io/user-guides/agents-guide</a></td></tr><tr><td><strong>Core Concepts</strong></td><td>Understand flows, checkpoints, and the execution model</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr><tr><td><strong>Execution Management</strong></td><td>Inspect runs, fetch logs, replay, retry, and resume</td><td><a href="../guides/execution-management.md">../guides/execution-management.md</a></td></tr><tr><td><strong>Configuration</strong></td><td>Configure runtime defaults and precedence</td><td><a href="../guides/configuration.md">../guides/configuration.md</a></td></tr><tr><td><strong>Examples</strong></td><td>Browse runnable Kitaru workflows grouped by goal</td><td><a href="examples.md">examples.md</a></td></tr><tr><td><strong>Containerization</strong></td><td>Control base images, dependencies, and Dockerfiles for remote execution</td><td><a href="../guides/containerization.md">../guides/containerization.md</a></td></tr><tr><td><strong>Wait, Input, and Resume</strong></td><td>Pause flows for external input and continue later</td><td><a href="../guides/wait-and-resume.md">../guides/wait-and-resume.md</a></td></tr><tr><td><strong>Tracked LLM Calls</strong></td><td>Use kitaru.llm() with captured prompt/response artifacts</td><td><a href="../guides/llm-calls.md">../guides/llm-calls.md</a></td></tr><tr><td><strong>Secrets + Model Setup</strong></td><td>Store provider credentials, register an alias, and use kitaru.llm()</td><td><a href="../guides/secrets-and-model-registration.md">../guides/secrets-and-model-registration.md</a></td></tr><tr><td><strong>MCP Server</strong></td><td>Drive replay and diff from a coding agent through tool calls</td><td><a href="../agent-native/mcp-server.md">../agent-native/mcp-server.md</a></td></tr></tbody></table>
