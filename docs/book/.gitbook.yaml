@@ -22,14 +22,4 @@ redirects:
   concepts: concepts/README.md
   adapters: adapters/README.md
   stacks: stacks/README.md
-  agent-harness-platform: agent-harness-platform/README.md
 
-  # The Agent Harness Platform tour moved to the ZenML Learn section as the
-  # Agents guide; the remaining README points readers there.
-  agent-harness-platform/01-durable-agent: agent-harness-platform/README.md
-  agent-harness-platform/02-sandbox: agent-harness-platform/README.md
-  agent-harness-platform/03-skills: agent-harness-platform/README.md
-  agent-harness-platform/04-credential-proxy: agent-harness-platform/README.md
-  agent-harness-platform/05-typed-services: agent-harness-platform/README.md
-  agent-harness-platform/06-hitl: agent-harness-platform/README.md
-  agent-harness-platform/production-notes: agent-harness-platform/README.md

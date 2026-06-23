@@ -9,10 +9,6 @@
 * [Examples](getting-started/examples.md)
 * [Troubleshooting](getting-started/troubleshooting.md)
 
-## Agent Harness Platform
-
-* [Overview](agent-harness-platform/README.md)
-
 ## Core Concepts
 
 * [Overview](concepts/README.md)

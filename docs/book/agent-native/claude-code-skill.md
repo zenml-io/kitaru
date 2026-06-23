@@ -17,7 +17,7 @@ procedures that Claude Code and other skill-aware agent hosts read so they know
 the current Kitaru patterns: where to put checkpoints, where waits are safe,
 which adapter boundary is honest, and which side effects need extra care. The
 MCP server gives the agent the tools to execute and replay; the skills give it
-the judgement to author correctly.
+the judgment to author correctly.
 
 ## Skill inventory
 
