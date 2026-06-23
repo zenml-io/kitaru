@@ -25,6 +25,7 @@ from kitaru.flow import flow
 from kitaru.llm import (
     _LLMRequest,
     _LLMUsage,
+    _openai_token_limit_param,
     _parse_provider_target,
     _ProviderCallResult,
     _resolve_credential_overlay,
@@ -52,6 +53,20 @@ def _simple_selection(
         resolved_model=model,
         secret=secret,
     )
+
+
+def _mock_openai_chat_client(
+    *, response_text: str = "ok"
+) -> tuple[MagicMock, MagicMock]:
+    """Return a fake OpenAI chat client and OpenAI constructor."""
+    mock_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai_cls = MagicMock(return_value=mock_client)
+    return mock_client, mock_openai_cls
 
 
 def _tracked_llm_metadata(track_mock: MagicMock) -> dict[str, object]:
@@ -308,6 +323,16 @@ class TestParseProviderTarget:
             _parse_provider_target("openai/")
 
 
+def test_openai_token_limit_param_only_matches_known_o_series_prefixes() -> None:
+    """OpenAI names starting with plain `o` should not all use the newer field."""
+    assert _openai_token_limit_param("gpt-5-nano") == "max_completion_tokens"
+    assert _openai_token_limit_param("o1-preview") == "max_completion_tokens"
+    assert _openai_token_limit_param("o3-mini") == "max_completion_tokens"
+    assert _openai_token_limit_param("o4-mini") == "max_completion_tokens"
+    assert _openai_token_limit_param("omni-moderation-latest") == "max_tokens"
+    assert _openai_token_limit_param("gpt-4o-mini") == "max_tokens"
+
+
 # ---------------------------------------------------------------------------
 # OpenAI call path
 # ---------------------------------------------------------------------------
@@ -361,6 +386,7 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert call_kwargs["model"] == "gpt-4o-mini"
     assert call_kwargs["temperature"] == 0.1
     assert call_kwargs["max_tokens"] == 200
+    assert call_kwargs["token_limit_param"] == "max_tokens"
 
     mock_save.assert_any_call(
         "summary_call_prompt",
@@ -389,6 +415,98 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     assert usage_record["usage"]["output_tokens"] == 20
     assert usage_record["usage"]["total_tokens"] == 30
     assert usage_record["cost"]["source"] == "none"
+
+
+def test_llm_routes_gpt5_alias_limit_to_max_completion_tokens() -> None:
+    """Resolved GPT-5-family OpenAI models should use the newer limit field."""
+    fake_result = _ProviderCallResult(response_text="ok", usage=_LLMUsage())
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-5-nano",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+    ):
+        output = llm("hello", model="fast", max_tokens=64, name="gpt5_call")
+
+    assert output == "ok"
+    mock_call.assert_called_once()
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs["model"] == "gpt-5-nano"
+    assert call_kwargs["max_tokens"] == 64
+    assert call_kwargs["token_limit_param"] == "max_completion_tokens"
+
+
+def test_llm_routes_o_series_alias_limit_to_max_completion_tokens() -> None:
+    """Resolved OpenAI o-series models should use max_completion_tokens."""
+    fake_result = _ProviderCallResult(response_text="ok", usage=_LLMUsage())
+    model_selection = ResolvedModelSelection(
+        requested_model="reasoner",
+        alias="reasoner",
+        resolved_model="openai/o4-mini",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+    ):
+        output = llm("hello", model="reasoner", max_tokens=64, name="o_call")
+
+    assert output == "ok"
+    mock_call.assert_called_once()
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs["model"] == "o4-mini"
+    assert call_kwargs["max_tokens"] == 64
+    assert call_kwargs["token_limit_param"] == "max_completion_tokens"
+
+
+def test_openai_gpt5_alias_request_uses_max_completion_tokens() -> None:
+    """Alias-resolved GPT-5 OpenAI requests should send the newer field only."""
+    mock_client, mock_openai_cls = _mock_openai_chat_client()
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-5-nano",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+    ):
+        output = llm("hello", model="fast", max_tokens=77, name="gpt5_tokens")
+
+    assert output == "ok"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert request_kwargs["max_completion_tokens"] == 77
+    assert "max_tokens" not in request_kwargs
+
+
+def test_openai_default_o_series_request_uses_max_completion_tokens() -> None:
+    """Default-model resolution should also affect the OpenAI request field."""
+    mock_client, mock_openai_cls = _mock_openai_chat_client()
+    model_selection = ResolvedModelSelection(
+        requested_model="reasoner",
+        alias="reasoner",
+        resolved_model="openai/o3-mini",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+    ):
+        output = llm("hello", max_tokens=33, name="default_o_tokens")
+
+    assert output == "ok"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert request_kwargs["max_completion_tokens"] == 33
+    assert "max_tokens" not in request_kwargs
 
 
 def test_llm_preserves_zero_openai_usage_tokens() -> None:
@@ -553,6 +671,7 @@ def test_llm_executes_ollama_via_openai_compatible_path() -> None:
     assert call_kwargs["api_key"] == "ollama"
     assert call_kwargs["provider_label"] == "ollama"
     assert call_kwargs["model"] == "qwen3.5"
+    assert call_kwargs["token_limit_param"] == "max_tokens"
 
 
 def test_ollama_respects_custom_host_env(
@@ -568,6 +687,27 @@ def test_ollama_respects_custom_host_env(
         llm("hello", model="ollama/qwen3.5", name="test")
 
     assert mock_call.call_args.kwargs["base_url"] == "http://remote-gpu:11434/v1"
+
+
+def test_ollama_openai_compatible_request_uses_max_tokens() -> None:
+    """Ollama's OpenAI-compatible endpoint should keep max_tokens."""
+    mock_client, mock_openai_cls = _mock_openai_chat_client()
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("ollama/qwen3.5")),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+    ):
+        output = llm(
+            "hello",
+            model="ollama/qwen3.5",
+            max_tokens=77,
+            name="ollama_tokens",
+        )
+
+    assert output == "ok"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert request_kwargs["max_tokens"] == 77
+    assert "max_completion_tokens" not in request_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +745,7 @@ def test_llm_executes_openrouter_via_openai_compatible_path(
     assert call_kwargs["api_key"] == "or-test-key"
     assert call_kwargs["provider_label"] == "openrouter"
     assert call_kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
+    assert call_kwargs["token_limit_param"] == "max_tokens"
 
 
 def test_openrouter_uses_api_key_from_secret_overlay(
@@ -624,6 +765,31 @@ def test_openrouter_uses_api_key_from_secret_overlay(
         llm("hello", model="openrouter/openai/gpt-4o", name="test")
 
     assert mock_call.call_args.kwargs["api_key"] == "secret-or-key"
+
+
+def test_openrouter_openai_compatible_request_uses_max_tokens() -> None:
+    """OpenRouter should keep max_tokens even for a nested GPT-5 model string."""
+    mock_client, mock_openai_cls = _mock_openai_chat_client()
+    overlay = {"OPENROUTER_API_KEY": "secret-or-key"}
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openrouter/openai/gpt-5-nano"),
+            credential_overlay=(overlay, "secret"),
+        ),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+    ):
+        output = llm(
+            "hello",
+            model="openrouter/openai/gpt-5-nano",
+            max_tokens=77,
+            name="openrouter_tokens",
+        )
+
+    assert output == "ok"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert request_kwargs["max_tokens"] == 77
+    assert "max_completion_tokens" not in request_kwargs
 
 
 def test_llm_redacts_openrouter_key_through_dispatch(
@@ -1503,7 +1669,7 @@ def test_call_openai_redacts_message_but_preserves_original_cause() -> None:
 
 
 def test_call_openai_passes_correct_parameters() -> None:
-    """_call_openai should invoke OpenAI chat completions with correct args."""
+    """_call_openai should use max_tokens by default."""
     from kitaru.llm import _call_openai
 
     mock_response = SimpleNamespace(
@@ -1532,6 +1698,62 @@ def test_call_openai_passes_correct_parameters() -> None:
         temperature=0.5,
         max_tokens=100,
     )
+
+
+def test_call_openai_can_send_max_completion_tokens() -> None:
+    """_call_openai should send only max_completion_tokens when requested."""
+    from kitaru.llm import _call_openai
+
+    mock_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}):
+        result = _call_openai(
+            model="gpt-5-nano",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.5,
+            max_tokens=100,
+            env_overlay={},
+            token_limit_param="max_completion_tokens",
+        )
+
+    assert result.response_text == "hi"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert request_kwargs["max_completion_tokens"] == 100
+    assert "max_tokens" not in request_kwargs
+
+
+def test_call_openai_omits_token_limit_when_unset() -> None:
+    """_call_openai should not send either limit field when max_tokens is None."""
+    from kitaru.llm import _call_openai
+
+    mock_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}):
+        result = _call_openai(
+            model="gpt-5-nano",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.5,
+            max_tokens=None,
+            env_overlay={},
+            token_limit_param="max_completion_tokens",
+        )
+
+    assert result.response_text == "hi"
+    request_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert "max_completion_tokens" not in request_kwargs
+    assert "max_tokens" not in request_kwargs
 
 
 def test_call_anthropic_separates_system_and_maps_usage() -> None:

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
+
 ## [0.17.1] - 2026-06-22
 
 ### Added
