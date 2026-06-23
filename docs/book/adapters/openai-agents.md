@@ -184,6 +184,114 @@ call in your own `@checkpoint` is **not** a workaround here — the adapter
 guards against it and will raise, because per-call checkpoints cannot be
 nested inside another Kitaru checkpoint.
 
+## Sandbox command tool
+
+Use `sandbox_command_tool(...)` when you want an OpenAI agent to run a command
+through the sandbox on your current Kitaru stack:
+
+```python
+from agents import Agent
+
+from kitaru.adapters.openai_agents import KitaruRunner, sandbox_command_tool
+
+agent = Agent(
+    name="diagnostic_agent",
+    instructions=(
+        "Use kitaru_sandbox_command for shell inspection tasks. The tool returns "
+        "JSON. Check exit_code before trusting stdout."
+    ),
+    model="gpt-5-nano",
+    tools=[
+        sandbox_command_tool(
+            max_chars=20_000,
+            timeout_seconds=30,
+            cleanup="destroy",
+        )
+    ],
+)
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+```
+
+Here is what happens, step by step:
+
+```text
+OpenAI model emits a local function-tool call
+→ OpenAI Agents SDK invokes the Kitaru tool callback
+→ the callback parses {"command": "...", "cwd": "..."}
+→ Kitaru calls run_sandbox_command(...)
+→ your current stack's sandbox runs the command
+→ the callback returns compact JSON to the model
+```
+
+The model can provide only:
+
+- `command` — required, non-empty string
+- `cwd` — optional working directory inside the sandbox
+
+The application keeps control of `max_chars`, `timeout_seconds`, and `cleanup`
+when it creates the tool. The model cannot set `env`, `max_chars`, the runtime
+limit, or cleanup behavior. `sandbox_command_tool(...)` uses a finite default
+`timeout_seconds=30.0`; pass a different finite value when your app needs a
+shorter or longer command budget.
+
+{% hint style="warning" %}
+This is not a secret-protection boundary. The model cannot pass a custom `env`
+object to the tool, but it still chooses the command. If the sandbox can
+read `/workspace/.env`, cloud credentials, SSH keys, internal network endpoints,
+or inherited environment variables, then a model-chosen command can try to read
+or exfiltrate them. In concrete terms: `sandbox_command_tool(...)` blocks "run
+this command with these extra environment variables", but it does not block
+"print the environment that is already there" or "read this file that the
+sandbox user can already read".
+
+Use the least-privileged sandbox you can: no unnecessary secrets, no broad cloud
+credentials, and only the network access the task truly needs. For prompts or
+users you do not fully trust, wrap the tool in your own allowlist or validator so
+only approved commands and working directories reach `run_sandbox_command(...)`.
+{% endhint %}
+
+The compact JSON returned to the model contains:
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "timed_out": false,
+  "cleanup_succeeded": true,
+  "cleanup_error": null
+}
+```
+
+The tool deliberately omits stack, sandbox, and session IDs from the model-visible
+result. Those are operational details for Kitaru, not facts the model needs in
+order to answer the user. Tell the model to inspect `exit_code` first: a command
+can write to `stdout` and still fail. If `timed_out` is `true`, Kitaru stopped
+waiting for the command after the app-owned timeout and returns `exit_code: -1`.
+
+Your current Kitaru stack must have exactly one sandbox component. If there is no sandbox,
+Kitaru raises an error and does not run the command. If there is more than one
+sandbox, Kitaru raises instead of guessing. The bad version would be: you
+expected a cheap local sandbox, Kitaru silently picked a different one, and the
+model ran a command somewhere you did not intend.
+
+Strategy behavior is the same as other local `FunctionTool` work:
+
+- With `checkpoint_strategy="runner_call"`, Kitaru saves one outer checkpoint for
+  the whole OpenAI runner call. The sandbox command runs during that SDK run.
+- With `checkpoint_strategy="calls"`, Kitaru also saves the sandbox command as a
+  separate `tool_call` checkpoint. Replaying the same command with the same tool
+  settings can reuse that checkpoint instead of calling the sandbox again.
+
+This helper does **not** redirect OpenAI-hosted tools into Kitaru's sandbox.
+`CodeInterpreterTool`, hosted shell containers, hosted MCP, and other
+provider-hosted tools run on OpenAI's side. Kitaru can still wrap the outer
+runner call around them, but their execution environment is not the sandbox on
+your current Kitaru stack.
+
 ## Streaming with Kitaru durability
 
 Use `run_stream(...)` / `run_stream_sync(...)` when you want OpenAI Agents SDK
@@ -453,15 +561,25 @@ This example uses the real OpenAI API (not a stub model), so set your key:
 
 ```bash
 uv sync --extra local --extra openai-agents
+uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # default model in the example is gpt-5-nano
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
 uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
 
+# sandbox command tool example
+uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+
 # streaming runner-call example
 uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 ```
+
+`uv run kitaru stack create dev` creates and activates the local stack whose
+sandbox is used by the sandbox command tool example. If you switch stacks,
+make sure your current stack has exactly one sandbox component before running
+that example.
 
 ## End-to-end research bot example
 

@@ -61,6 +61,55 @@ keeps the durable data flow between checkpoints intact. See
 [In flow bodies](../guides/artifacts.md#in-flow-bodies) for more on when to
 materialize checkpoint outputs in orchestration code.
 
+## Where wait() can be called
+
+`kitaru.wait()` must be called at flow scope. In practice, that means inside the
+`@flow` function body, before or after checkpoint calls, not inside a
+`@checkpoint` function.
+
+A wait pauses the whole run. If `wait()` pauses from inside a checkpoint, the
+run can stop before that checkpoint call has completed cleanly. That can leave
+things in a confusing state where the run is waiting for input, but the
+checkpoint call is marked failed. To avoid that state, Kitaru raises this error
+immediately:
+
+```text
+wait() cannot run inside a @checkpoint. Move the wait to flow scope, before or after checkpoint calls.
+```
+
+The companion rule is that `wait()` needs a running flow. If you call it outside
+a `@flow`, Kitaru raises `wait() can only run inside a @flow.`
+
+If you need input halfway through a larger operation, split the operation into
+two checkpoints and put the wait between them:
+
+```python
+@checkpoint
+def draft_report(topic: str) -> str:
+    return kitaru.llm(f"Draft a report about {topic}.")
+
+@checkpoint
+def revise_report(draft: str, reviewer_note: str) -> str:
+    return kitaru.llm(f"Revise this report using {reviewer_note}:\n\n{draft}")
+
+@flow
+def reviewed_report(topic: str) -> str:
+    draft = draft_report(topic)
+    draft_text = draft.load()
+
+    reviewer_note = kitaru.wait(
+        name="review_draft",
+        question=f"Review this draft:\n\n{draft_text}",
+        schema=str,
+    )
+
+    return revise_report(draft, reviewer_note)
+```
+
+The `draft.load()` call is only there so the reviewer can see the draft text in
+the wait question. The original `draft` checkpoint output still flows into the
+next checkpoint.
+
 When execution reaches `kitaru.wait()`:
 
 1. The flow suspends and the execution moves to `waiting` status

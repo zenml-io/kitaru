@@ -2,15 +2,20 @@
 
 The `graph_call` strategy is local and needs no provider API key. The `calls`
 strategy uses a real OpenAI-backed LangChain agent with deterministic local
-Python tools so Kitaru can checkpoint actual model/tool handler calls.
+Python tools so Kitaru can checkpoint actual model/tool handler calls. The
+`sandbox` strategy uses the same calls-mode path with Kitaru's active-stack
+sandbox command tool.
 """
 
 import argparse
+import json
 import os
 import time
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, cast
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -19,18 +24,28 @@ from typing_extensions import TypedDict
 import kitaru
 from kitaru import checkpoint, flow
 from kitaru.adapters.langgraph import (
+    DEFAULT_SANDBOX_COMMAND_TOOL_NAME,
     KitaruGraphRunner,
-    LangGraphRunRequest,
+    LangGraphCallCheckpointPolicy,
     build_resume_request,
+    create_sandbox_command_tool,
 )
 from kitaru.adapters.langgraph.langchain import KitaruLangGraphMiddleware
 
-Strategy = Literal["graph_call", "calls"]
+Strategy = Literal["graph_call", "calls", "sandbox"]
 THREAD_ID = "langgraph-local-demo-thread"
 SUMMARY_ARTIFACT = "summary__langgraph_demo"
 GRAPH_CALL_RUNNER_NAME = "langgraph_local_interrupt_demo"
 CALLS_RUNNER_NAME = "langgraph_local_calls_demo"
+SANDBOX_RUNNER_NAME = "langgraph_sandbox_command_demo"
+SANDBOX_COMMAND_TOOL_NAME = DEFAULT_SANDBOX_COMMAND_TOOL_NAME
+SANDBOX_DEMO_TOOL_CALL_ID = "sandbox-demo-command"
 DEFAULT_LANGGRAPH_AGENT_MODEL = "gpt-5-nano"
+DEFAULT_SANDBOX_AGENT_MODEL = "gpt-5-nano"
+SANDBOX_DEMO_COMMAND = (
+    'python -c "import json, os, sys; '
+    "print(json.dumps({'cwd': os.getcwd(), 'python': sys.version.split()[0]}))\""
+)
 
 TICKETS: dict[str, dict[str, str]] = {
     "ticket-42": {
@@ -52,6 +67,169 @@ class ReviewState(TypedDict, total=False):
     ticket: str
     decision: dict[str, Any]
     status: str
+
+
+class ForceSandboxToolChoiceMiddleware(AgentMiddleware):
+    """Force the demo model to call the sandbox command tool once.
+
+    The provider call is still real. This middleware only makes the example's
+    side effect deterministic by replacing the sandbox tool call arguments after
+    the model has chosen the forced tool and before LangChain runs the tool.
+    """
+
+    def wrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        if _message_history_has_tool_result(getattr(request, "messages", [])):
+            response = handler(request)
+            _reject_followup_sandbox_tool_calls(response)
+            return response
+
+        forced_request = request.override(
+            tool_choice={
+                "type": "function",
+                "function": {"name": SANDBOX_COMMAND_TOOL_NAME},
+            },
+            model_settings=_model_settings_with_single_tool_call(request),
+        )
+        response = handler(forced_request)
+        _force_sandbox_tool_arguments(response)
+        return response
+
+
+def _model_settings_with_single_tool_call(request: Any) -> dict[str, Any]:
+    """Return model settings that prevent duplicate forced tool calls."""
+    existing = getattr(request, "model_settings", None)
+    settings = dict(existing) if isinstance(existing, Mapping) else {}
+    settings["parallel_tool_calls"] = False
+    return settings
+
+
+def _force_sandbox_tool_arguments(response: Any) -> None:
+    """Pin the single sandbox tool-call identity and args for replay."""
+    matching_tool_calls: list[Any] = []
+    for message in _response_messages(response):
+        matching_tool_calls.extend(
+            tool_call
+            for tool_call in _message_tool_calls(message)
+            if _tool_call_name(tool_call) == SANDBOX_COMMAND_TOOL_NAME
+        )
+
+    if len(matching_tool_calls) != 1:
+        raise RuntimeError(
+            f"Sandbox demo expected exactly one {SANDBOX_COMMAND_TOOL_NAME} "
+            f"tool call from the real model, got {len(matching_tool_calls)}. "
+            "The demo stops before running any sandbox command so its summary "
+            "cannot report a different number of commands than actually ran."
+        )
+
+    _pin_sandbox_tool_call(matching_tool_calls[0])
+
+
+def _pin_sandbox_tool_call(tool_call: Any) -> None:
+    if isinstance(tool_call, dict):
+        tool_call["args"] = {"command": SANDBOX_DEMO_COMMAND}
+        tool_call["id"] = SANDBOX_DEMO_TOOL_CALL_ID
+        if "tool_call_id" in tool_call:
+            tool_call["tool_call_id"] = SANDBOX_DEMO_TOOL_CALL_ID
+        if "call_id" in tool_call:
+            tool_call["call_id"] = SANDBOX_DEMO_TOOL_CALL_ID
+        return
+
+    try:
+        tool_call.args = {"command": SANDBOX_DEMO_COMMAND}
+        _pin_tool_call_id_attribute(tool_call)
+    except Exception as exc:
+        raise RuntimeError(
+            "Sandbox demo could not pin the "
+            f"{SANDBOX_COMMAND_TOOL_NAME} identity and arguments before "
+            "LangChain tool execution."
+        ) from exc
+
+
+def _pin_tool_call_id_attribute(tool_call: Any) -> None:
+    for attr in ("id", "tool_call_id", "call_id"):
+        if hasattr(tool_call, attr):
+            setattr(tool_call, attr, SANDBOX_DEMO_TOOL_CALL_ID)
+            return
+    tool_call.id = SANDBOX_DEMO_TOOL_CALL_ID
+
+
+def _reject_followup_sandbox_tool_calls(response: Any) -> None:
+    """Reject a second sandbox command request after the first tool result."""
+    matching_tool_calls: list[Any] = []
+    for message in _response_messages(response):
+        matching_tool_calls.extend(
+            tool_call
+            for tool_call in _message_tool_calls(message)
+            if _tool_call_name(tool_call) == SANDBOX_COMMAND_TOOL_NAME
+        )
+
+    if matching_tool_calls:
+        raise RuntimeError(
+            f"Sandbox demo expected no additional {SANDBOX_COMMAND_TOOL_NAME} "
+            "tool calls after the first sandbox tool result, got "
+            f"{len(matching_tool_calls)}. The demo stops before running a "
+            "second sandbox command."
+        )
+
+
+def _response_messages(response: Any) -> list[Any]:
+    """Return message-like objects from LangChain's model response shapes."""
+    inner = getattr(response, "model_response", response)
+    result = getattr(inner, "result", None)
+    if isinstance(result, list | tuple):
+        return list(result)
+    if result is not None:
+        return [result]
+    if isinstance(inner, list | tuple):
+        return list(inner)
+    return [inner]
+
+
+def _message_tool_calls(message: Any) -> list[Any]:
+    """Return normalized LangChain tool-call payloads from one message."""
+    if isinstance(message, dict):
+        value = message.get("tool_calls") or message.get("tool_call_chunks")
+    else:
+        value = getattr(message, "tool_calls", None) or getattr(
+            message, "tool_call_chunks", None
+        )
+    if isinstance(value, list | tuple):
+        return list(value)
+    return []
+
+
+def _tool_call_name(tool_call: Any) -> str | None:
+    if isinstance(tool_call, dict):
+        name = tool_call.get("name")
+    else:
+        name = getattr(tool_call, "name", None)
+    return name if isinstance(name, str) else None
+
+
+def _message_history_has_tool_result(messages: Any) -> bool:
+    """Return whether LangChain has already appended a tool result message."""
+    if messages is None:
+        return False
+    try:
+        message_iter = reversed(messages)
+    except TypeError:
+        message_iter = iter(messages)
+    for message in message_iter:
+        if isinstance(message, dict):
+            if message.get("role") == "tool" or message.get("type") == "tool":
+                return True
+            continue
+        if getattr(message, "type", None) == "tool":
+            return True
+        if getattr(message, "role", None) == "tool":
+            return True
+        if getattr(message, "tool_call_id", None) is not None:
+            return True
+    return False
 
 
 def build_interrupt_graph() -> Any:
@@ -118,8 +296,15 @@ def _langgraph_agent_model_name() -> str:
     return os.getenv("LANGGRAPH_AGENT_MODEL", DEFAULT_LANGGRAPH_AGENT_MODEL)
 
 
-def build_calls_agent(ticket: str) -> Any:
-    """Build an OpenAI-backed LangChain agent with local ticket tools."""
+def _sandbox_agent_model_name() -> str:
+    return os.getenv(
+        "LANGGRAPH_SANDBOX_AGENT_MODEL",
+        os.getenv("LANGGRAPH_AGENT_MODEL", DEFAULT_SANDBOX_AGENT_MODEL),
+    )
+
+
+def _openai_chat_model(model_name: str | None = None) -> Any:
+    """Build the OpenAI chat model used by provider-backed examples."""
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as error:
@@ -129,9 +314,13 @@ def build_calls_agent(ticket: str) -> Any:
             "  uv sync --extra local --extra langgraph-openai"
         ) from error
 
-    model = ChatOpenAI(model=_langgraph_agent_model_name())
+    return ChatOpenAI(model=model_name or _langgraph_agent_model_name())
+
+
+def build_calls_agent(ticket: str) -> Any:
+    """Build an OpenAI-backed LangChain agent with local ticket tools."""
     return create_agent(
-        model=model,
+        model=_openai_chat_model(),
         tools=[lookup_ticket, approve_ticket],
         middleware=[KitaruLangGraphMiddleware(graph_name=CALLS_RUNNER_NAME)],
         checkpointer=InMemorySaver(),
@@ -143,6 +332,27 @@ def build_calls_agent(ticket: str) -> Any:
             "If the ticket status is needs_escalation, call approve_ticket. "
             "In the final response, include the ticket id, status, approval result, "
             "and next step."
+        ),
+    )
+
+
+def build_sandbox_agent() -> Any:
+    """Build an OpenAI-backed LangChain agent with Kitaru's sandbox command tool."""
+    return create_agent(
+        model=_openai_chat_model(_sandbox_agent_model_name()),
+        tools=[create_sandbox_command_tool()],
+        middleware=[
+            ForceSandboxToolChoiceMiddleware(),
+            KitaruLangGraphMiddleware(graph_name=SANDBOX_RUNNER_NAME),
+        ],
+        checkpointer=InMemorySaver(),
+        name="openai_sandbox_agent",
+        system_prompt=(
+            "You are demonstrating Kitaru's LangChain sandbox command tool. "
+            f"Call {SANDBOX_COMMAND_TOOL_NAME} exactly once with the command "
+            "provided by the user. After the tool returns JSON, summarize the "
+            "stdout, stderr, "
+            "and exit code. Do not claim to manage Deep Agents files."
         ),
     )
 
@@ -166,16 +376,16 @@ def run_demo_flow(strategy: Strategy, ticket: str) -> None:
     """Run one LangGraph adapter demo and persist a readable summary artifact."""
     if strategy == "graph_call":
         summary = _run_graph_call_demo(ticket)
-    else:
+    elif strategy == "calls":
         summary = _run_calls_demo(ticket)
+    else:
+        summary = _run_sandbox_demo()
     _ = persist_summary(summary)
 
 
 def _run_graph_call_demo(ticket: str) -> dict[str, Any]:
     """Run the coarse graph-call checkpoint demo."""
-    started = GRAPH_CALL_RUNNER.invoke(
-        LangGraphRunRequest.start({"ticket": ticket}, thread_id=THREAD_ID)
-    )
+    started = GRAPH_CALL_RUNNER.invoke({"ticket": ticket}, thread_id=THREAD_ID)
     if started.status != "interrupted":
         raise RuntimeError(f"Expected interrupted status, got: {started.status}")
 
@@ -226,21 +436,19 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
         checkpoint_strategy="calls",
     )
     result = runner.invoke(
-        LangGraphRunRequest.start(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Please handle support ticket {ticket}. Look up the "
-                            "ticket first, approve it if escalation is needed, and "
-                            "then give me the status, approval result, and next step."
-                        ),
-                    }
-                ]
-            },
-            thread_id=THREAD_ID,
-        )
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Please handle support ticket {ticket}. Look up the "
+                        "ticket first, approve it if escalation is needed, and "
+                        "then give me the status, approval result, and next step."
+                    ),
+                }
+            ]
+        },
+        thread_id=THREAD_ID,
     )
     if result.status != "completed":
         raise RuntimeError(f"Expected completed status, got: {result.status}")
@@ -269,6 +477,175 @@ def _run_calls_demo(ticket: str) -> dict[str, Any]:
     }
 
 
+def _run_sandbox_demo() -> dict[str, Any]:
+    """Run the LangChain sandbox command tool through calls-mode checkpointing."""
+    _require_openai_api_key()
+    model_name = _sandbox_agent_model_name()
+    runner = KitaruGraphRunner(
+        build_sandbox_agent(),
+        name=SANDBOX_RUNNER_NAME,
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=LangGraphCallCheckpointPolicy(
+            model_checkpoint_config=False,
+        ),
+    )
+    result = runner.invoke(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Use {SANDBOX_COMMAND_TOOL_NAME} to run this exact "
+                        f"command: {SANDBOX_DEMO_COMMAND}"
+                    ),
+                }
+            ]
+        },
+        thread_id=THREAD_ID,
+    )
+    if result.status != "completed":
+        raise RuntimeError(f"Expected completed status, got: {result.status}")
+
+    output = cast(dict[str, Any], result.output)
+    raw_messages = output.get("messages", [])
+    sandbox_result = _validated_sandbox_demo_result(raw_messages)
+    messages = _message_summaries(raw_messages)
+    return {
+        "strategy": "sandbox",
+        "thread_id": THREAD_ID,
+        "model": model_name,
+        "status": result.status,
+        "sandbox_command": SANDBOX_DEMO_COMMAND,
+        "sandbox_exit_code": sandbox_result["exit_code"],
+        "sandbox_result": sandbox_result,
+        "message_count": len(messages),
+        "messages": messages,
+        "final_message": messages[-1]["content"] if messages else None,
+        "latest_checkpoint_id": result.latest_checkpoint_id,
+        "event_artifact": result.event_log_artifact_name,
+        "run_summary_artifact": result.run_summary_artifact_name,
+        "kitaru_behavior": (
+            "The command ran through the active Kitaru stack sandbox via "
+            "run_sandbox_command, and calls mode checkpoints the synchronous "
+            "LangChain tool handler."
+        ),
+        "expected_kitaru_call_checkpoint_prefixes": [
+            f"tool_call__{SANDBOX_COMMAND_TOOL_NAME}_...",
+            "langgraph_summary__...",
+        ],
+        "deep_agents_boundary": "This is not a Deep Agents backend.",
+    }
+
+
+def _validated_sandbox_demo_result(messages: Any) -> dict[str, Any]:
+    """Return the parsed sandbox result or fail the example loudly."""
+    content = _sandbox_tool_result_content(messages)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Sandbox demo tool result was not valid JSON, so the example cannot "
+            "prove the command succeeded."
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Sandbox demo tool result JSON was not an object.")
+
+    exit_code = result.get("exit_code")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise RuntimeError(
+            "Sandbox demo tool result did not contain an integer exit_code."
+        )
+    if exit_code != 0:
+        stderr = result.get("stderr")
+        raise RuntimeError(
+            f"Sandbox demo command failed with exit_code={exit_code}. stderr={stderr!r}"
+        )
+
+    stdout = result.get("stdout")
+    if not isinstance(stdout, str):
+        raise RuntimeError("Sandbox demo tool result did not contain string stdout.")
+    try:
+        stdout_json = json.loads(stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Sandbox demo stdout did not contain the expected JSON with cwd and "
+            "python keys."
+        ) from exc
+    if not isinstance(stdout_json, Mapping):
+        raise RuntimeError("Sandbox demo stdout JSON was not an object.")
+    for key in ("cwd", "python"):
+        value = stdout_json.get(key)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(
+                "Sandbox demo stdout JSON did not contain the expected non-empty "
+                f"{key!r} string."
+            )
+
+    return {
+        "exit_code": exit_code,
+        "stdout": {"cwd": stdout_json["cwd"], "python": stdout_json["python"]},
+        "stderr": result.get("stderr"),
+        "stdout_truncated": result.get("stdout_truncated"),
+        "stderr_truncated": result.get("stderr_truncated"),
+        "cleanup_succeeded": result.get("cleanup_succeeded"),
+        "sandbox_name": result.get("sandbox_name"),
+        "stack_name": result.get("stack_name"),
+    }
+
+
+def _sandbox_tool_result_content(messages: Any) -> str:
+    matching_contents: list[Any] = []
+    for message in list(messages or []):
+        if _message_tool_result_call_id(message) == SANDBOX_DEMO_TOOL_CALL_ID:
+            matching_contents.append(_message_content(message))
+
+    if not matching_contents:
+        raise RuntimeError(
+            f"Sandbox demo did not find the {SANDBOX_COMMAND_TOOL_NAME} tool "
+            f"result for call id {SANDBOX_DEMO_TOOL_CALL_ID!r}."
+        )
+    if len(matching_contents) != 1:
+        raise RuntimeError(
+            f"Sandbox demo expected exactly one {SANDBOX_COMMAND_TOOL_NAME} "
+            f"tool result for call id {SANDBOX_DEMO_TOOL_CALL_ID!r}, got "
+            f"{len(matching_contents)}."
+        )
+
+    content = matching_contents[0]
+    if not isinstance(content, str):
+        raise RuntimeError("Sandbox demo tool result content was not a string.")
+    return content
+
+
+def _message_tool_result_call_id(message: Any) -> str | None:
+    if isinstance(message, dict):
+        role_or_type = message.get("role") or message.get("type")
+        if role_or_type == "tool" or "tool_call_id" in message or "call_id" in message:
+            value = (
+                message.get("tool_call_id")
+                or message.get("call_id")
+                or message.get("id")
+            )
+            return value if isinstance(value, str) else None
+        return None
+
+    role_or_type = getattr(message, "role", None) or getattr(message, "type", None)
+    if role_or_type == "tool" or getattr(message, "tool_call_id", None) is not None:
+        value = (
+            getattr(message, "tool_call_id", None)
+            or getattr(message, "call_id", None)
+            or getattr(message, "id", None)
+        )
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", None)
+
+
 def _message_summaries(messages: Any) -> list[dict[str, Any]]:
     """Return JSON-safe summaries for LangChain message objects."""
     summaries: list[dict[str, Any]] = []
@@ -294,7 +671,7 @@ def run_workflow(
     ticket: str = "ticket-42",
 ) -> tuple[str, dict[str, Any]]:
     """Run the flow and load the saved summary artifact."""
-    if strategy == "calls":
+    if strategy in {"calls", "sandbox"}:
         _require_openai_api_key()
 
     handle = run_demo_flow.run(strategy, ticket)
@@ -317,11 +694,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--strategy",
-        choices=["graph_call", "calls"],
+        choices=["graph_call", "calls", "sandbox"],
         default="graph_call",
         help=(
             "graph_call runs the local interrupt/resume demo; calls runs a real "
-            "OpenAI-backed LangChain agent with local ticket tools and requires "
+            "OpenAI-backed LangChain agent with local ticket tools; sandbox runs "
+            "a real OpenAI-backed LangChain agent with Kitaru's active-stack "
+            "sandbox command tool. Provider-backed strategies require "
             "OPENAI_API_KEY."
         ),
     )

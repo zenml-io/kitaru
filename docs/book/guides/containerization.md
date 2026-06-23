@@ -33,7 +33,7 @@ import kitaru
 @flow(
     image=kitaru.ImageSettings(
         base_image="python:3.12-slim",
-        requirements=["httpx", "pydantic-ai"],
+        requirements=["kitaru[pydantic-ai,openai]", "httpx"],
         apt_packages=["git"],
         environment={"MY_VAR": "value"},
     ),
@@ -48,7 +48,7 @@ Or as a dictionary:
 @flow(
     image={
         "base_image": "python:3.12-slim",
-        "requirements": ["httpx", "pydantic-ai"],
+        "requirements": ["kitaru[pydantic-ai,openai]", "httpx"],
     },
 )
 def my_agent(topic: str) -> str:
@@ -74,12 +74,13 @@ def my_agent(topic: str) -> str:
 
 ## Automatic Kitaru injection
 
-Kitaru automatically adds itself to the container requirements so your flow code
-can import and run `kitaru` at execution time. You do not need to add `kitaru` to
-your `requirements` list manually.
+Kitaru can automatically add plain `kitaru` to image requirements when it builds
+the requirements list for you. It does not infer optional extras from packages
+like `pydantic-ai`. If your code imports a Kitaru adapter, include the matching
+Kitaru extra explicitly, for example `kitaru[pydantic-ai,openai]`.
 
-If you already include `kitaru` (with or without a version pin), it is not
-duplicated:
+If you already include `kitaru` (with or without a version pin or extras), it is
+not duplicated:
 
 ```python
 @flow(
@@ -93,8 +94,10 @@ def my_agent(topic: str) -> str:
 ```
 
 {% hint style="warning" %}
-If you provide a custom `base_image` or `dockerfile`, Kitaru does **not**
-auto-inject the SDK. Your image must already include `kitaru`.
+If you provide a custom `base_image` or `dockerfile`, Kitaru assumes you control
+the image and does **not** auto-inject the SDK. Your image must already include
+`kitaru`, or a Kitaru extra such as `kitaru[pydantic-ai,openai]` if your code
+imports an adapter.
 {% endhint %}
 
 ## Replicating your local environment

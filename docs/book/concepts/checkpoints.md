@@ -174,6 +174,47 @@ If the active orchestrator does not support isolated steps, the runtime is
 silently downgraded to inline with a warning. Local stacks always run inline.
 {% endhint %}
 
+### Running a command in the active sandbox
+
+If your active stack has a sandbox component, checkpoint code can ask Kitaru to
+run one command inside that sandbox:
+
+```python
+from kitaru import checkpoint, flow, run_sandbox_command
+
+@checkpoint
+def inspect_python() -> str:
+    result = run_sandbox_command(
+        ["python", "-c", "import sys; print(sys.version)"],
+        max_chars=20_000,
+    )
+    if result.exit_code != 0:
+        raise RuntimeError(result.stderr)
+    return result.stdout
+
+@flow
+def sandbox_probe() -> str:
+    return inspect_python()
+```
+
+The helper creates a fresh sandbox session, runs the command, collects stdout and
+stderr, then cleans up the session. Non-zero exit codes do **not** raise by
+themselves. The story is: the command runs, the process exits with `2`, Kitaru
+still returns the captured output, and your code decides whether `2` means
+"expected tool result" or "stop the flow".
+
+`SandboxCommandResult` includes:
+
+- `stdout`, `stderr`, and `exit_code`
+- `stdout_truncated` and `stderr_truncated`, so you can tell when output hit the
+  `max_chars` limit
+- `cleanup_succeeded` and `cleanup_error`, so providers that cannot destroy a
+  session can still return the command result while telling you cleanup was only
+  partially completed
+
+This is a direct SDK helper. Agent adapters do not automatically route their tool
+calls through it unless that adapter documents such behavior.
+
 When retries are enabled, Kitaru records each failed attempt before the final
 checkpoint outcome. You can inspect this history through
 `KitaruClient().executions.get(exec_id).checkpoints[*].attempts`.

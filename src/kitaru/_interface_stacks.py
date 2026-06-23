@@ -12,6 +12,7 @@ import yaml
 from zenml.utils import yaml_utils
 
 from kitaru._config import _stacks as stack_ops
+from kitaru._config._sandbox_stack_components import LOCAL_SANDBOX_FLAVOR
 from kitaru._config._stacks import (
     AzureMLStackSpec,
     CloudProvider,
@@ -49,6 +50,7 @@ _FIELD_ORDER = (
     "execution_role",
     "namespace",
     "credentials",
+    "sandbox",
     "verify",
 )
 _REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
@@ -88,6 +90,7 @@ _FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
     "execution_role": frozenset({StackType.SAGEMAKER}),
     "namespace": frozenset({StackType.KUBERNETES}),
     "credentials": frozenset(_REMOTE_STACK_TYPES),
+    "sandbox": frozenset(_CREATE_ALLOWED_STACK_TYPES),
     "verify": frozenset(_REMOTE_STACK_TYPES),
 }
 _FIXED_PROVIDER_BY_STACK_TYPE = {
@@ -130,6 +133,7 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "--namespace",
         "credentials": "--credentials",
         "verify": "--no-verify",
+        "sandbox": "--sandbox",
         "extra": "--extra",
         "async": "--async",
     },
@@ -155,6 +159,7 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "`namespace`",
         "credentials": "`credentials`",
         "verify": "`verify`",
+        "sandbox": "`sandbox`",
         "extra": "`extra`",
         "async": "`async_mode`",
         "stack_type": "`stack_type`",
@@ -170,6 +175,7 @@ class ManageStackCreateRequest:
     activate: bool
     stack_type: StackType
     remote_spec: RemoteStackSpec | None = None
+    sandbox_flavor: str | None = None
     component_overrides: StackComponentConfigOverrides = field(
         default_factory=StackComponentConfigOverrides
     )
@@ -201,6 +207,7 @@ class _StackCreateInputs:
     execution_role: str | None = None
     namespace: str | None = None
     credentials: str | None = None
+    sandbox: str | None = None
     verify: bool | None = None
     component_overrides: StackComponentConfigOverrides | None = None
     async_mode: bool | None = None
@@ -220,6 +227,7 @@ class _CreateStackOperation(Protocol):
         activate: bool,
         remote_spec: RemoteStackSpec | None,
         component_overrides: StackComponentConfigOverrides | None = None,
+        sandbox_flavor: str | None = None,
     ) -> stack_ops._StackCreateResult: ...
 
 
@@ -263,6 +271,7 @@ _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "execution-role",
     "namespace",
     "credentials",
+    "sandbox",
     "verify",
     "extra",
     "async",
@@ -280,6 +289,7 @@ _STACK_CREATE_FILE_STRING_KEYS = {
     "execution_role",
     "namespace",
     "credentials",
+    "sandbox",
 }
 _STACK_CREATE_FILE_BOOLEAN_KEYS = {
     "activate",
@@ -428,7 +438,11 @@ def _validate_explicit_field_usage(
 
 
 _LOCAL_COMPONENT_OVERRIDE_TARGETS = frozenset(
-    {StackComponentTarget.ORCHESTRATOR, StackComponentTarget.ARTIFACT_STORE}
+    {
+        StackComponentTarget.ORCHESTRATOR,
+        StackComponentTarget.ARTIFACT_STORE,
+        StackComponentTarget.SANDBOX,
+    }
 )
 _REMOTE_COMPONENT_OVERRIDE_TARGETS = frozenset(StackComponentTarget)
 
@@ -473,6 +487,7 @@ def merge_component_overrides(
             base.container_registry,
             override.container_registry,
         ),
+        sandbox=_merge_nested_mapping(base.sandbox, override.sandbox),
     )
 
 
@@ -785,6 +800,7 @@ def build_remote_stack_spec(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     labels: StackOptionLabels,
 ) -> RemoteStackSpec | None:
@@ -800,6 +816,7 @@ def build_remote_stack_spec(
         "execution_role": execution_role is not None,
         "namespace": namespace is not None,
         "credentials": credentials is not None,
+        "sandbox": sandbox is not None,
         "verify": not verify,
     }
     _validate_explicit_field_usage(
@@ -936,6 +953,7 @@ def build_stack_create_request(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     component_overrides: StackComponentConfigOverrides | None = None,
     async_enabled: bool = False,
@@ -958,6 +976,19 @@ def build_stack_create_request(
         component_overrides,
         labels=labels,
     )
+    normalized_sandbox = normalize_optional_stack_string(sandbox)
+    if sandbox is not None and normalized_sandbox is None:
+        raise ValueError(f"{labels.field_labels['sandbox']} cannot be empty.")
+    if normalized_sandbox is None and normalized_stack_type == StackType.LOCAL:
+        normalized_sandbox = LOCAL_SANDBOX_FLAVOR
+    overrides = component_overrides or StackComponentConfigOverrides()
+    if normalized_sandbox is None and overrides.sandbox:
+        raise ValueError(
+            f"{_target_field_label(StackComponentTarget.SANDBOX, labels=labels)} "
+            f"requires {labels.field_labels['sandbox']} because sandbox overrides "
+            "only apply when the created stack has a sandbox."
+        )
+
     return ManageStackCreateRequest(
         name=name,
         activate=activate,
@@ -974,9 +1005,11 @@ def build_stack_create_request(
             execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
+            sandbox=sandbox,
             verify=verify,
             labels=labels,
         ),
+        sandbox_flavor=normalized_sandbox,
         component_overrides=apply_async_override(
             component_overrides,
             async_enabled=async_enabled,
@@ -1012,6 +1045,7 @@ def build_stack_create_request_from_inputs(
         execution_role=inputs.execution_role,
         namespace=inputs.namespace,
         credentials=inputs.credentials,
+        sandbox=inputs.sandbox,
         verify=inputs.verify if inputs.verify is not None else default_verify,
         component_overrides=inputs.component_overrides,
         async_enabled=inputs.async_mode is True,
@@ -1038,6 +1072,7 @@ def build_manage_stack_request(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     extra: Mapping[str, Any] | None = None,
     async_mode: bool = False,
@@ -1064,6 +1099,7 @@ def build_manage_stack_request(
             execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
+            sandbox=sandbox,
             verify=verify,
             component_overrides=(
                 normalize_component_overrides_mapping(
@@ -1098,6 +1134,7 @@ def build_manage_stack_request(
                 ("execution_role", execution_role is not None),
                 ("namespace", namespace is not None),
                 ("credentials", credentials is not None),
+                ("sandbox", sandbox is not None),
                 ("verify", not verify),
                 ("extra", extra is not None),
                 ("async", async_mode),
@@ -1134,6 +1171,8 @@ def execute_stack_create_request(
         "activate": request.activate,
         "remote_spec": request.remote_spec,
     }
+    if request.sandbox_flavor is not None:
+        create_kwargs["sandbox_flavor"] = request.sandbox_flavor
     if not request.component_overrides.is_empty():
         create_kwargs["component_overrides"] = request.component_overrides
     return operation(request.name, **create_kwargs)

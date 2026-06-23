@@ -17,12 +17,14 @@ from ._stream_accumulator import _StreamAccumulator
 from ._stream_shapes import (
     CALL_ID_TYPE_FRAGMENTS,
     coerce_string,
-    dict_or_none,
     environment_id,
     extract,
+    function_name_from_step,
     has_unsafe_role_or_type_marker,
     normalize_token,
+    normalized_token_contains_any,
     sequence_or_empty,
+    usage_from,
 )
 from ._types import GeminiInteractionRequest, GeminiInteractionStepSummary
 from ._utils import elapsed_ms
@@ -652,7 +654,7 @@ def normalize_interaction(
             raw_steps,
             safe_index=safe_text_preview_index,
         )
-    usage = dict_or_none(extract(interaction, "usage"))
+    usage = usage_from(interaction)
     return GeminiInteractionPayload(
         status=str(extract(interaction, "status") or "unknown"),
         interaction_id=coerce_string(extract(interaction, "id")),
@@ -807,7 +809,7 @@ def _summarize_step(
         type=type_value,
         status=coerce_string(extract(value, "status")),
         call_id=call_id,
-        tool_name=coerce_string(extract(value, "name")),
+        tool_name=function_name_from_step(value),
         text_preview=_text_preview(_extract_safe_text(value))
         if text_preview_allowed
         else None,
@@ -820,8 +822,8 @@ def _extract_step_call_id(value: Any) -> str | None:
     if explicit_call_id is not None:
         return explicit_call_id
     step_type = _normalized_step_type(value)
-    if step_type is not None and any(
-        fragment in step_type for fragment in CALL_ID_TYPE_FRAGMENTS
+    if step_type is not None and normalized_token_contains_any(
+        step_type, CALL_ID_TYPE_FRAGMENTS
     ):
         return coerce_string(extract(value, "id"))
     return None

@@ -669,6 +669,133 @@ def report_flow(prompt: str) -> str:
 
 That way the durable file write is visible to Kitaru as its own checkpoint.
 
+## Kitaru-owned sandbox command tool
+
+Sometimes you do want Claude to run a command, but you want that command to go
+through the sandbox on your current Kitaru stack instead of through Claude's
+built-in `Bash` tool. Use Kitaru's Claude Agent SDK MCP helper for that
+case.
+
+The concrete path is:
+
+```text
+Claude prompt
+  -> Claude Agent SDK invocation
+  -> Claude calls mcp__kitaru__run_command
+  -> Kitaru runs kitaru.run_sandbox_command(...) in your current stack's sandbox
+  -> Claude receives stdout, stderr, exit_code, and cleanup metadata
+  -> Kitaru stores one completed ClaudeRunResult for the whole invocation
+```
+
+Here is the supported registration shape:
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions
+from kitaru.adapters.claude_agent_sdk import (
+    KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME,
+    KitaruClaudeRunner,
+    create_kitaru_sandbox_mcp_server,
+)
+
+sandbox_server = create_kitaru_sandbox_mcp_server()
+
+runner = KitaruClaudeRunner(
+    name="claude_sandboxed",
+    options_factory=lambda request: ClaudeAgentOptions(
+        cwd=request.cwd,
+        resume=request.resume_session_id,
+        max_turns=request.max_turns,
+        mcp_servers={"kitaru": sandbox_server},
+        strict_mcp_config=True,
+        tools=[],
+        permission_mode="dontAsk",
+        disallowed_tools=["Bash"],
+        allowed_tools=[KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME],
+    ),
+)
+```
+
+Do not pass the Kitaru MCP tool through `ClaudeAgentOptions(tools=[...])`.
+Claude Agent SDK uses `tools=` for built-in tool names and presets. Custom tools
+created with `tool(...)` are registered through `create_sdk_mcp_server(...)` and
+`ClaudeAgentOptions(mcp_servers=...)`, which is what
+`create_kitaru_sandbox_mcp_server()` builds for you.
+
+If you customize the server or tool name, build the matching allowed-tools entry
+with `allowed_tool_name(server_name, tool_name)` instead of hand-writing the
+`mcp__...` string:
+
+```python
+from kitaru.adapters.claude_agent_sdk import allowed_tool_name
+```
+
+This helper does **not** transparently redirect Claude's built-in `Bash`. If you
+want command execution to be Kitaru-owned, disable Claude's built-in tools with
+`tools=[]`, pre-approve the Kitaru MCP tool with `allowed_tools=[...]`, and use
+`permission_mode="dontAsk"` so any non-approved tool request is denied instead of
+prompting. Claude's own `ClaudeAgentOptions(sandbox=...)` is also separate: it
+configures Claude-owned Bash sandboxing, not Kitaru stack sandbox execution.
+
+The MCP tool accepts these inputs from Claude:
+
+- `command`: a shell command string or argv-style list; Kitaru bounds command length before sending it to the sandbox
+- `cwd`: optional working directory inside the sandbox; Kitaru bounds its length before sending it to the sandbox
+- `env`: optional command environment; Kitaru bounds the number and size of variables so one MCP call cannot send an enormous env payload
+- `max_chars`: optional per-stream output collection limit; Claude may lower the per-call limit but cannot raise it above the helper's configured `default_max_chars`
+- `cleanup`: optional session cleanup policy, either `"destroy"` or `"close"`
+
+The tool output is JSON text. A successful sandbox call returns
+`status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
+flags, stack identity, sandbox identity, session ID, and cleanup status. The MCP
+tool advertises Claude's `maxResultSizeChars` annotation so Claude can receive
+large sandbox outputs without applying its smaller default MCP truncation path.
+Claude Code still caps that annotation at 500,000 characters, so Kitaru's Claude
+MCP helper uses a lower `default_max_chars` than raw
+`kitaru.run_sandbox_command(...)`: stdout, stderr, and the surrounding JSON fields
+must all fit inside Claude's result-size ceiling. Kitaru checks the exact JSON
+text that will be returned to Claude; if JSON escaping makes the result too large,
+it trims stdout and/or stderr and flips the corresponding truncation flag before
+Claude receives it. If you configure a larger `default_max_chars` than the helper
+can safely advertise, Kitaru raises at setup time instead of returning output that
+says `stdout_truncated=false` while Claude only received part of the JSON. A
+non-zero `exit_code` is still `status="completed"`; the sandbox ran the command
+and returned process data, so Claude can decide what to do next.
+
+If Kitaru cannot run the command, the tool returns `status="failed"` with an
+error object containing the exception type, a category such as `usage`, `state`,
+`feature_not_available`, `backend`, or `runtime`, and a message.
+
+Your current Kitaru stack must have exactly one sandbox component. If it has none,
+Kitaru refuses to run the command. If it has more than one, Kitaru refuses to guess.
+That avoids the bad outcome where Claude asks for a simple inspection command
+and Kitaru silently runs it in the wrong sandbox.
+
+{% hint style="warning" %}
+Kitaru redacts non-trivial `env` values, plus values from secret-like keys such
+as `TOKEN`, `API_KEY`, or `PASSWORD`, from the returned tool output. Claude may
+still record the tool **input** in its own messages or transcript. Avoid passing
+secrets through `env` unless you are comfortable with those values appearing in
+Claude-side records.
+{% endhint %}
+
+This still uses the adapter's invocation checkpoint model. If the whole Claude
+invocation is re-run before Kitaru has a completed checkpoint to reuse, Claude
+may call `mcp__kitaru__run_command` again. Treat commands with side effects the
+same way you would treat any command that might be retried: make them safe to
+repeat, or move the side effect into a separate Kitaru checkpoint after Claude
+returns.
+
+A runnable showcase lives in the repository at
+`examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`.
+By default, that showcase passes a small temporary directory as Claude's own
+working directory, uses Claude Code's `--bare` mode, selects the tool-capable
+`sonnet` model alias, and sets a small Claude SDK budget cap. The sandbox command
+still runs through your current stack's sandbox. This default avoids the bad
+surprise where a tiny `python --version` demo causes Claude Code to load a large
+repository context. Pass `--claude-cwd /path/to/project` only when you actually
+want Claude to see that project, and pass `--model <model>` when you want a
+different Claude model.
+
 ## Claude file checkpointing is different
 
 Claude Agent SDK has its own

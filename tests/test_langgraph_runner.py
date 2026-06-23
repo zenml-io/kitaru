@@ -66,9 +66,7 @@ def test_invoke_runs_deterministic_local_graph_with_thread_id() -> None:
     graph = _count_graph()
     runner = KitaruGraphRunner(graph, name="counter")
 
-    result = runner.invoke(
-        LangGraphRunRequest.start({"count": 1}, thread_id="counter-thread")
-    )
+    result = runner.invoke({"count": 1}, thread_id="counter-thread")
 
     assert result.status == "completed"
     assert result.output == {"count": 2}
@@ -118,9 +116,7 @@ def test_invoke_inside_flow_creates_one_outer_graph_call_checkpoint(
 
     @flow
     def langgraph_flow(count: int, thread_id: str) -> int:
-        result = runner.invoke(
-            LangGraphRunRequest.start({"count": count}, thread_id=thread_id)
-        )
+        result = runner.invoke({"count": count}, thread_id=thread_id)
         output = cast(dict[str, Any], result.output)
         return cast(int, output["count"])
 
@@ -136,9 +132,7 @@ def test_ainvoke_runs_when_graph_supports_async() -> None:
     runner = KitaruGraphRunner(_count_graph(), name="counter")
 
     async def run() -> LangGraphRunResult:
-        return await runner.ainvoke(
-            LangGraphRunRequest.start({"count": 2}, thread_id="async-thread")
-        )
+        return await runner.ainvoke({"count": 2}, thread_id="async-thread")
 
     result = asyncio.run(run())
 

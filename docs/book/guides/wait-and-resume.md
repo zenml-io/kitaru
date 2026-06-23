@@ -56,6 +56,11 @@ This is useful when a flow needs to print follow-up CLI commands, name
 per-execution side resources, or attach the execution ID to application logs.
 Outside a running Kitaru flow or checkpoint, it returns `None`.
 
+`kitaru.wait()` itself must run at flow scope, before or after checkpoint calls,
+not inside a `@checkpoint`. For why this rule exists and how to split work
+around a wait, see
+[Where wait() can be called](../concepts/wait-and-input.md#where-wait-can-be-called).
+
 ## Timeout behavior
 
 By default, `kitaru.wait(...)` gives the runner up to 600 seconds to receive

@@ -45,6 +45,10 @@ def test_public_import_surface_uses_interaction_vocabulary(
     assert gemini_adapter.GeminiInteractionRequest
     assert gemini_adapter.GeminiInteractionResult
     assert gemini_adapter.GeminiInteractionStepSummary
+    assert gemini_adapter.GeminiInteractionFunctionCall
+    assert gemini_adapter.GeminiSandboxFunctionSpec
+    assert gemini_adapter.GeminiSandboxFunctionExecution
+    assert gemini_adapter.execute_gemini_sandbox_function_call
     assert gemini_adapter.GeminiInteractionCapturePolicy
     assert gemini_adapter.GeminiInteractionRunEvent
     assert gemini_adapter.GEMINI_STREAM_STARTED
@@ -122,7 +126,18 @@ def test_import_without_interaction_types_raises_clear_contract_error(
 
     message = str(exc_info.value)
     assert "Interactions preview API" in message
-    assert "FunctionCallContent/FunctionResultContent" in message
+    assert "FunctionCallStep/FunctionResultStep" in message
+
+
+def test_import_accepts_google_genai_2_9_interaction_type_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(monkeypatch, interaction_type_module="gaos")
+
+    gemini_adapter = importlib.import_module("kitaru.adapters.gemini")
+
+    assert gemini_adapter.KitaruGeminiInteractionsRunner
 
 
 def test_import_with_incomplete_interaction_type_annotations_raises(
@@ -132,6 +147,19 @@ def test_import_with_incomplete_interaction_type_annotations_raises(
     install_fake_google_genai(
         monkeypatch,
         function_call_annotations={},
+        function_result_annotations={"call_id": str},
+    )
+
+    with pytest.raises(KitaruFeatureNotAvailableError, match="preview API"):
+        importlib.import_module("kitaru.adapters.gemini")
+
+
+def test_import_requires_complete_function_result_content_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_gemini_adapter_modules(monkeypatch)
+    install_fake_google_genai(
+        monkeypatch,
         function_result_annotations={"call_id": str},
     )
 
@@ -161,34 +189,99 @@ def test_installed_google_genai_interactions_contract(
         monkeypatch.delitem(sys.modules, "google", raising=False)
 
     genai = pytest.importorskip("google.genai")
-    interaction_types = pytest.importorskip("google.genai._interactions.types")
+    interaction_types = None
+    for module_path in (
+        "google.genai._interactions.types",
+        "google.genai._gaos.types.interactions.step",
+    ):
+        try:
+            interaction_types = importlib.import_module(module_path)
+            break
+        except ModuleNotFoundError as exc:
+            if exc.name is not None and (
+                module_path == exc.name or module_path.startswith(f"{exc.name}.")
+            ):
+                continue
+            raise
+    if interaction_types is None:
+        pytest.fail("google-genai does not expose Interactions step types")
 
     client = genai.Client(api_key="test-key")
     create_signature = inspect.signature(client.interactions.create)
     get_signature = inspect.signature(client.interactions.get)
 
+    create_accepts_body_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in create_signature.parameters.values()
+    )
     for field in {
         "input",
         "model",
         "agent",
         "agent_config",
-        "extra_body",
-        "timeout",
         "previous_interaction_id",
         "store",
         "stream",
     }:
-        assert field in create_signature.parameters
+        assert create_accepts_body_kwargs or field in create_signature.parameters
+    assert "extra_body" in create_signature.parameters
+    assert "timeout" in create_signature.parameters
     assert "id" in get_signature.parameters
-    assert "extra_body" in get_signature.parameters
     assert "timeout" in get_signature.parameters
     assert "stream" in get_signature.parameters
     assert "last_event_id" in get_signature.parameters
 
-    function_call_fields = interaction_types.FunctionCallContent.__annotations__
-    function_result_fields = interaction_types.FunctionResultContent.__annotations__
+    function_call_fields = interaction_types.FunctionCallStep.__annotations__
+    function_result_fields = interaction_types.FunctionResultStep.__annotations__
     assert "id" in function_call_fields
+    assert "name" in function_call_fields
+    assert "arguments" in function_call_fields
+    assert "type" in function_call_fields
     assert "call_id" in function_result_fields
+    assert "name" in function_result_fields
+    assert "result" in function_result_fields
+    assert "type" in function_result_fields
+
+    function_result = interaction_types.FunctionResultStep(
+        call_id="call-1",
+        name="lookup",
+        result={"ok": True},
+        type="function_result",
+    )
+    dumped_result = function_result.model_dump(mode="json")
+    assert dumped_result["call_id"] == "call-1"
+    assert dumped_result["name"] == "lookup"
+    assert dumped_result["result"] == {"ok": True}
+    assert dumped_result["type"] == "function_result"
+
+
+@pytest.mark.parametrize(
+    ("function_name_field", "function_name"),
+    [("tool_name", "lookup_tool"), ("function_name", "lookup_function")],
+)
+def test_normalize_interaction_uses_function_name_fallback_fields(
+    gemini_adapter: types.ModuleType,
+    function_name_field: str,
+    function_name: str,
+) -> None:
+    runner_module = importlib.import_module(f"{gemini_adapter.__name__}._runner")
+    step_data = {
+        "id": "step-1",
+        "type": "function_call",
+        "call_id": "call-1",
+        function_name_field: function_name,
+    }
+    interaction = types.SimpleNamespace(
+        status="requires_action",
+        id="interaction-1",
+        model="gemini-test",
+        steps=[types.SimpleNamespace(**step_data)],
+    )
+
+    payload = runner_module.normalize_interaction(interaction, duration_ms=0.0)
+
+    assert payload.steps[0].call_id == "call-1"
+    assert payload.steps[0].tool_name == function_name
 
 
 def test_runner_accepts_interaction_strategy(gemini_adapter: types.ModuleType) -> None:
@@ -353,6 +446,7 @@ def test_gemini_request_constructors_and_validation(
     null_result = gemini_adapter.GeminiInteractionRequest.function_result(
         previous_interaction_id="interaction-1",
         function_call_id="call-null",
+        function_name="lookup",
         function_result=None,
         model="gemini-test",
     )
@@ -363,7 +457,12 @@ def test_gemini_request_constructors_and_validation(
     "request_data, error",
     [
         (
-            {"kind": "start", "input": "hello", "model": "m", "function_result": None},
+            {
+                "kind": "start",
+                "input": "hello",
+                "model": "m",
+                "function_result": {"ok": True},
+            },
             "kind='start'.*function-result fields",
         ),
         (
@@ -371,12 +470,17 @@ def test_gemini_request_constructors_and_validation(
                 "kind": "start",
                 "input": "hello",
                 "model": "m",
-                "function_result_payload": None,
+                "function_result_payload": {"ok": True},
             },
             "kind='start'.*function-result fields",
         ),
         (
-            {"kind": "start", "input": "hello", "model": "m", "function_call_id": None},
+            {
+                "kind": "start",
+                "input": "hello",
+                "model": "m",
+                "function_call_id": "call-1",
+            },
             "kind='start'.*function-result fields",
         ),
         (
@@ -385,7 +489,7 @@ def test_gemini_request_constructors_and_validation(
                 "input": "hello",
                 "previous_interaction_id": "interaction-1",
                 "model": "m",
-                "function_result": None,
+                "function_result": {"ok": True},
             },
             "kind='resume'.*function-result fields",
         ),
@@ -395,7 +499,7 @@ def test_gemini_request_constructors_and_validation(
                 "input": "hello",
                 "previous_interaction_id": "interaction-1",
                 "model": "m",
-                "function_call_id": None,
+                "function_call_id": "call-1",
             },
             "kind='resume'.*function-result fields",
         ),
@@ -403,7 +507,7 @@ def test_gemini_request_constructors_and_validation(
             {
                 "kind": "poll",
                 "interaction_id": "interaction-1",
-                "function_call_id": None,
+                "function_call_id": "call-1",
             },
             "kind='poll'.*function-result fields",
         ),
@@ -418,6 +522,27 @@ def test_direct_gemini_request_rejects_function_result_fields_for_non_result_kin
         gemini_adapter.GeminiInteractionRequest(**request_data)
 
 
+def test_direct_gemini_request_allows_null_function_result_fields_after_reload(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+    reloaded = gemini_adapter.GeminiInteractionRequest.model_validate(
+        {
+            **request.model_dump(mode="json", by_alias=True),
+            "function_call_id": None,
+            "function_name": None,
+            "function_result": None,
+        }
+    )
+
+    assert reloaded.kind == "start"
+    assert reloaded.has_function_result_payload is True
+    assert reloaded.has_function_result_only_fields is False
+
+
 def test_direct_function_result_request_accepts_explicit_json_null_result(
     gemini_adapter: types.ModuleType,
 ) -> None:
@@ -427,17 +552,233 @@ def test_direct_function_result_request_accepts_explicit_json_null_result(
             {
                 "type": "function_result",
                 "call_id": "call-null",
+                "name": "lookup",
                 "result": None,
             }
         ],
         previous_interaction_id="interaction-1",
         function_call_id="call-null",
+        function_name="lookup",
         function_result=None,
         model="gemini-test",
     )
 
     assert request.has_function_result_payload is True
     assert request.function_result_payload is None
+
+
+def test_function_result_constructor_requires_function_name(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(TypeError, match="function_name"):
+        gemini_adapter.GeminiInteractionRequest.function_result(
+            previous_interaction_id="interaction-1",
+            function_call_id="call-1",
+            function_result={"ok": True},
+            model="gemini-test",
+        )
+    with pytest.raises(ValidationError, match="requires function_name"):
+        gemini_adapter.GeminiInteractionRequest.function_result(
+            previous_interaction_id="interaction-1",
+            function_call_id="call-1",
+            function_name=None,
+            function_result={"ok": True},
+            model="gemini-test",
+        )
+
+
+@pytest.mark.parametrize(
+    ("request_data", "error"),
+    [
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                        "result": {"ok": True},
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            "requires function_name",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "result": {"ok": True},
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            r"input\[0\]\.name to match function_name",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "other-call",
+                        "name": "lookup",
+                        "result": {"ok": True},
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            r"input\[0\]\.call_id to match function_call_id",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "message",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                        "result": {"ok": True},
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            r"input\[0\]\.type='function_result'",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            "one function_result input item",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                        "result": {"ok": True},
+                    },
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                        "result": {"ok": True},
+                    },
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            "one function_result input item",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            r"input\[0\]\.result",
+        ),
+        (
+            {
+                "kind": "function_result",
+                "input": [
+                    {
+                        "type": "function_result",
+                        "call_id": "call-1",
+                        "name": "lookup",
+                        "result": {"ok": False},
+                    }
+                ],
+                "previous_interaction_id": "interaction-1",
+                "function_call_id": "call-1",
+                "function_name": "lookup",
+                "function_result": {"ok": True},
+                "model": "gemini-test",
+            },
+            r"input\[0\]\.result to match function_result",
+        ),
+    ],
+)
+def test_direct_function_result_request_validates_input_shape(
+    gemini_adapter: types.ModuleType,
+    request_data: dict[str, Any],
+    error: str,
+) -> None:
+    with pytest.raises(ValidationError, match=error):
+        gemini_adapter.GeminiInteractionRequest(**request_data)
+
+
+@pytest.mark.parametrize(
+    ("usage_field", "usage_value", "expected"),
+    [
+        ("usage", {"total_tokens": 1}, {"total_tokens": 1}),
+        (
+            "usage_metadata",
+            types.SimpleNamespace(total_tokens=2),
+            {"total_tokens": 2},
+        ),
+        ("usageMetadata", {"totalTokens": 3}, {"totalTokens": 3}),
+    ],
+)
+def test_normalize_interaction_reads_usage_aliases(
+    gemini_adapter: types.ModuleType,
+    usage_field: str,
+    usage_value: Any,
+    expected: dict[str, Any],
+) -> None:
+    runner_module = importlib.import_module(f"{gemini_adapter.__name__}._runner")
+    interaction = types.SimpleNamespace(
+        status="completed",
+        id="interaction-usage",
+        model="gemini-test",
+        steps=[],
+        **{usage_field: usage_value},
+    )
+
+    payload = runner_module.normalize_interaction(interaction, duration_ms=0.0)
+
+    assert payload.usage == expected
 
 
 def test_antigravity_preset_is_preview_labeled(

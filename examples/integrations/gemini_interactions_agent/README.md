@@ -3,10 +3,12 @@
 This example shows the public `kitaru.adapters.gemini` API on a Gemini
 Interactions API call.
 
-Story in one line: a Kitaru flow sends one Gemini interaction request, and
-`KitaruGeminiInteractionsRunner` records the stable response as one checkpoint.
+Story in one line: for the normal model and Antigravity modes, a Kitaru flow
+sends one Gemini interaction request, and `KitaruGeminiInteractionsRunner`
+records the stable response as one checkpoint. The sandbox-function mode adds a
+second Gemini turn around a Kitaru-owned sandbox command.
 
-The mental model is deliberately simple:
+The mental model for a normal interaction is deliberately simple:
 
 ```text
 flow body calls KitaruGeminiInteractionsRunner
@@ -31,6 +33,10 @@ cd examples/integrations/gemini_interactions_agent
 uv sync --extra local --extra gemini
 uv run kitaru init
 ```
+
+The `gemini` extra installs Google GenAI SDK 2.x. That matters because Google's
+Interactions API now serves the current `steps` schema; older 1.x SDKs send the
+removed legacy schema and are rejected by the API.
 
 Then pick **one** of the two ways to authenticate with Google.
 
@@ -84,13 +90,18 @@ The help path is safe for smoke tests:
 uv run python gemini_interactions_adapter.py --help
 ```
 
-The dry-run path also avoids credentials, network calls, and Kitaru flow
-execution:
+The dry-run path also avoids credentials, network calls, sandbox commands, and
+Kitaru flow execution:
 
 ```bash
 uv run python gemini_interactions_adapter.py --dry-run --mode antigravity
 uv run python gemini_interactions_adapter.py --dry-run --stream
+uv run python gemini_interactions_adapter.py --dry-run --mode sandbox-function
 ```
+
+The `sandbox-function` dry run prints three concrete objects: a fake Gemini
+`requires_action` result, a fake Kitaru sandbox command result, and the matching
+fake `function_result` request that would be sent back to Gemini.
 
 ## Run a cheap model interaction
 
@@ -116,6 +127,69 @@ uv run python gemini_interactions_adapter.py \
   --mode model \
   --prompt "Explain Kitaru checkpoints using a simple train-station metaphor."
 ```
+
+## Run the caller-owned sandbox function showcase
+
+This mode demonstrates the supported custom-function path. Gemini asks for a
+function named `sandbox_python_version`. Your application has explicitly
+registered that name as a Kitaru sandbox command. Kitaru then runs
+`python --version` in the active stack's sandbox from a Kitaru checkpoint and
+sends the command output back to Gemini as a `function_result`. Keep that
+function body in a checkpoint when it is part of a flow: if the flow later
+replays, Kitaru can reuse the recorded sandbox command result instead of running
+the command twice.
+
+The default payload sent back to Gemini includes stdout and stderr. Kitaru
+redacts exact `GeminiSandboxFunctionSpec.env` values, common secret-like
+key/value patterns, and bearer or authorization tokens before sending that
+payload, and adds warning fields when it changes the text. This is best-effort,
+not a promise that every possible secret shape will be found. Do not design
+sandbox commands that print secrets, and redact your own output if you provide a
+custom `result_payload_builder`.
+
+```text
+Gemini model interaction
+  -> returns requires_action for sandbox_python_version
+Kitaru checkpoint
+  -> runs python --version in the active Kitaru sandbox
+Gemini model interaction
+  -> receives the function_result JSON as a text content block
+  -> writes the final answer
+```
+
+Real runs need both pieces:
+
+1. Gemini Developer API credentials (`GEMINI_API_KEY` or `GOOGLE_API_KEY`).
+2. An active Kitaru stack with exactly one sandbox component. For a local stack:
+
+```bash
+uv run kitaru stack create sandbox-demo
+uv run kitaru stack current
+```
+
+The local sandbox is useful for learning, but it is not isolated from your
+machine. It runs commands with local filesystem and network access.
+
+Then run:
+
+```bash
+uv run python gemini_interactions_adapter.py --mode sandbox-function
+```
+
+The release smoke script creates a temporary local stack for this mode and points
+`KITARU_STACK` at it for the one smoke invocation. If you run the example by
+hand, create or activate the sandbox stack yourself first.
+
+V1 is deliberately static-command based, model-targeted, and `store=True` only.
+It does **not** parse model-supplied function arguments, continue
+provider-agent/Antigravity results, or build stateless `store=False` histories.
+If Gemini asks for the registered function, the example runs the command your
+code registered for that function name.
+
+This does not redirect Antigravity internals, built-in Gemini code execution,
+hosted MCP, web execution, or any Google-owned tool body into Kitaru. It only
+covers the custom function body your Python application owns and explicitly
+registered.
 
 ## Run the Antigravity managed-agent demo
 
@@ -170,11 +244,12 @@ plan. Change the prompt if you want a different managed-agent task.
 
 ## What to look for in Kitaru UI
 
-The flow contains one adapter-created checkpoint named like
+For `--mode model` and `--mode antigravity`, the flow contains one
+adapter-created checkpoint named like
 `gemini_interactions_example_gemini_interaction`. That checkpoint is the replay
 boundary for the Gemini interaction.
 
-A good way to read the run is:
+A good way to read a normal model or Antigravity run is:
 
 1. The flow body creates a `GeminiInteractionRequest`.
 2. `KitaruGeminiInteractionsRunner.run_sync(...)` turns that request into one
@@ -183,6 +258,15 @@ A good way to read the run is:
 4. The printed artifact names point to the captured redacted request manifest,
    output, usage, event log, and run summary. Raw input, raw interaction, and
    raw step artifacts are disabled by default unless you opt in.
+
+For `--mode sandbox-function`, the flow shows three visible checkpoints instead:
+
+1. `request_sandbox_python_version_function_call` asks Gemini for a custom
+   function call.
+2. `run_sandbox_python_version_function` runs `python --version` in Kitaru's
+   active sandbox.
+3. `finish_sandbox_python_version_function` sends the sandbox result back to
+   Gemini and stores the final `GeminiInteractionResult`.
 
 One local-orchestrator wrinkle: the script submits the flow first, then starts a
 watcher thread. On a very fast local run, some stream events may print only after

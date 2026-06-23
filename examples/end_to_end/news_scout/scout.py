@@ -73,33 +73,46 @@ def _collect_non_secret_env() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Agent — calls strategy: every model/tool call is its own checkpoint
+# Agent — built by a factory, not at module scope.
+#
+# Constructing ``Agent("anthropic:...")`` eagerly builds the provider client,
+# which reads ``ANTHROPIC_API_KEY`` at that moment. On a remote stack the runner
+# pod imports this module before the run's secret is applied to the environment,
+# so a module-scope agent would crash at import with a missing-key error.
+# Building the agent inside the flow body defers that to run time, once the
+# secret is present. (Same pattern as the openai_research_bot example.)
+#
+# The "calls" strategy makes every model/tool call its own Kitaru checkpoint.
 # ---------------------------------------------------------------------------
 
-scout_agent = KitaruAgent(
-    Agent(
-        MODEL,
-        name="news_scout",
-        tools=[search_news, search_twitter, investigate, fetch_url],
-        system_prompt=SYSTEM_PROMPT,
-    ),
-    checkpoint_strategy="calls",
-    model_checkpoint_config={"retries": 2},
-    tool_checkpoint_config={"retries": 1},
-    capture=CapturePolicy(tool_capture="full"),
-)
+
+def new_scout_agent() -> KitaruAgent:
+    """Build the news-scout agent with per-call checkpointing."""
+    return KitaruAgent(
+        Agent(
+            MODEL,
+            name="news_scout",
+            tools=[search_news, search_twitter, investigate, fetch_url],
+            system_prompt=SYSTEM_PROMPT,
+        ),
+        checkpoint_strategy="calls",
+        model_checkpoint_config={"retries": 2},
+        tool_checkpoint_config={"retries": 1},
+        capture=CapturePolicy(tool_capture="full"),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Image — declares container requirements + env vars for remote stacks
 # ---------------------------------------------------------------------------
 
-# Pydantic-AI is pinned to <1.80 because 1.80+ bumped its opentelemetry-sdk
-# floor to >=1.39, but ZenML (Kitaru's backend) hard-pins opentelemetry-sdk
-# to 1.38.0. Using the `-slim` variant with explicit provider extras keeps
-# the image small and avoids pulling unused provider clients.
+# The remote image is built fresh, so it needs PydanticAI installed with the
+# Anthropic + OpenAI provider extras. The range must overlap Kitaru's own
+# pydantic-ai pin (>=1.89,<1.104) so the bundled adapter's imports resolve
+# inside the container; the `-slim` variant keeps the image small.
 SCOUT_IMAGE = ImageSettings(
     requirements=[
-        "pydantic-ai-slim[anthropic,openai]>=1.75,<1.80",
+        "pydantic-ai-slim[anthropic,openai]>=1.89,<1.104",
     ],
     environment=_collect_non_secret_env(),
 )
@@ -140,7 +153,7 @@ def news_scout(interests: list[str]) -> str:
     """Agentic news scout. Each tool call is its own Kitaru checkpoint; the
     final report is saved as the ``final_report`` artifact on this flow."""
     user_prompt = build_user_prompt(interests)
-    result = scout_agent.run_sync(
+    result = new_scout_agent().run_sync(
         user_prompt,
         usage_limits=UsageLimits(request_limit=MAX_REQUESTS),
     )
