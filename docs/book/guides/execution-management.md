@@ -133,7 +133,11 @@ kitaru executions statistics --group-by status
 kitaru executions statistics --group-by status --metric duration_avg:duration:avg
 
 # Daily execution health, script-friendly JSON
-kitaru executions statistics --group-by time:day --group-by status -o json
+kitaru executions statistics --group-by time:day --group-by status --output json
+kitaru executions statistics --group-by status -o json
+
+# Second page of grouped status results
+kitaru executions statistics --group-by status --page 2 --size 20
 
 # Sum a numeric execution metadata key by flow
 kitaru executions statistics \
@@ -167,6 +171,12 @@ completed   12           43.2
 failed      2            18.7
 running     1
 ```
+
+Statistics JSON output uses the shared `--output json` / `-o json` option.
+When `--page` or `--size` is used, `group_count` is the number of groups in the
+current response page. Like other Kitaru CLI JSON outputs, statistics JSON does
+not include separate pagination metadata. `--max-groups` limits the total groups
+returned by the statistics query before CLI pagination is applied.
 
 Supported groupings are:
 

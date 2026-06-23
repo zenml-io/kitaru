@@ -296,7 +296,8 @@ def _paginate_items(items: Sequence[_T], *, page: int, size: int) -> list[_T]:
     """Return one 1-based page from an already materialized item sequence."""
     start = (page - 1) * size
     end = start + size
-    return list(items[start:end])
+    page_items = items[start:end]
+    return page_items if isinstance(page_items, list) else list(page_items)
 
 
 def _emit_pagination_note(
