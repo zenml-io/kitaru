@@ -148,6 +148,59 @@ class Report:
 
     # ---- public API --------------------------------------------------------
 
+    def metric_aggregates(self) -> list[MetricDelta]:
+        """Per-metric aggregate: mean unchanged-replay vs mean edited-replay."""
+        aggregates = []
+        for name in self._metric_names():
+            lower_is_better = next(
+                (
+                    d.lower_is_better
+                    for r in self.rows
+                    for d in r.deltas
+                    if d.name == name
+                ),
+                True,
+            )
+            aggregates.append(
+                MetricDelta(
+                    name=name,
+                    baseline_value=self._mean_baseline(name),
+                    variant_value=self._mean_variant(name),
+                    lower_is_better=lower_is_better,
+                )
+            )
+        return aggregates
+
+    def per_case(self) -> list[dict]:
+        """Each non-skipped case as a plain dict, for reporting."""
+        cases = []
+        for r in self.rows:
+            cases.append(
+                {
+                    "exec_id": r.base_exec_id,
+                    "reproduction_faithful": r.reproduction_changed is False,
+                    "decision_changed": bool(r.decision_changed),
+                    "metrics": {
+                        d.name: {
+                            "baseline": d.baseline_value,
+                            "variant": d.variant_value,
+                            "lower_is_better": d.lower_is_better,
+                            "worse": d.is_worse,
+                        }
+                        for d in r.deltas
+                    },
+                }
+            )
+        return cases
+
+    def skipped_cases(self) -> list[dict]:
+        """Each skipped case as ``{exec_id, reason}``."""
+        return [
+            {"exec_id": r.base_exec_id, "reason": r.skip_reason or "skipped"}
+            for r in self._all_rows
+            if r.skipped
+        ]
+
     def regressions(self) -> list:
         """Return per-metric aggregates that got WORSE, as MetricDelta objects.
 

@@ -173,6 +173,7 @@ select = [
 # Demo HTML/CSS report builders: long inline style and markup string literals
 # that read more clearly unwrapped than broken across lines.
 "examples/end_to_end/*/comparison_html.py" = ["E501"]
+"examples/end_to_end/*/cohort_html.py" = ["E501"]
 
 [tool.ruff.format]
 exclude = ["src/kitaru/adapters/pydantic_ai/**"]

@@ -28,6 +28,7 @@ Pick which step to run via the command line:
 import sys
 
 from cohort import run_cohort
+from cohort_html import write as write_cohort_html
 from comparison_html import write as write_html
 from dotenv import load_dotenv
 from support_agent import (
@@ -61,6 +62,7 @@ FORK_MODEL = "openai:gpt-5-nano"  # the cheaper model we replay under
 FORK_PROMPT_PROFILE = "trimmed_permissions"  # the looser prompt we replay under
 
 HTML_PATH = "replay_three_way.html"
+COHORT_HTML_PATH = "cohort_report.html"
 _FLOW_NODES = ("gather_context", "decide", "finalize")
 
 
@@ -220,6 +222,8 @@ def cohort() -> None:
         "   regressions:",
         [getattr(r, "name", r) for r in regs] if regs else "none",
     )
+    path = write_cohort_html(COHORT_HTML_PATH, report)
+    print(f"   html: {path}")
 
 
 def run_all() -> None:

@@ -48,6 +48,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     _FLOW_RESULT_ARTIFACT_NAME,
+    _FLOW_RESULT_REF_METADATA_KEY,
     _FLOW_RESULT_ROLE_METADATA_KEY,
     _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
     _FLOW_RESULT_TUPLE_METADATA_MARKER,
@@ -2818,6 +2819,58 @@ def test_flow_handle_get_returns_none_when_no_outputs() -> None:
         result = handle.get()
 
     assert result is None
+
+
+def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
+    """Ambiguous non-result terminals -> recover the value via the linked artifact.
+
+    An adapter can create several non-result model/tool checkpoints, so terminal
+    inference is ambiguous. The flow's real return value is recovered from the
+    ``kitaru_flow_result`` artifact linked in execution metadata.
+    """
+    non_candidate = {"kitaru": {"flow_result_candidate": False}}
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput("model_a", "output", "resp-a", config_extra=non_candidate),
+            _DummyOutput("model_b", "output", "resp-b", config_extra=non_candidate),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = SimpleNamespace(
+        load=lambda: {"answer": "the real return value"}
+    )
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == {"answer": "the real return value"}
+    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+
+
+def test_flow_result_ambiguous_terminals_still_raise_without_reference() -> None:
+    """With no linked result, ambiguous terminals raise as before (no regression)."""
+    non_candidate = {"kitaru": {"flow_result_candidate": False}}
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput("model_a", "output", "resp-a", config_extra=non_candidate),
+            _DummyOutput("model_b", "output", "resp-b", config_extra=non_candidate),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {}
+
+    with (
+        patch("kitaru.flow.Client", return_value=MagicMock()),
+        pytest.raises(KitaruRuntimeError) as exc_info,
+    ):
+        _extract_flow_result(_as_pipeline_run(run))
+
+    assert _is_multiple_terminal_steps_output_error(exc_info.value)
 
 
 def test_flow_handle_get_falls_back_to_terminal_step_outputs() -> None:

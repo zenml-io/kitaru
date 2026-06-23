@@ -252,6 +252,12 @@ def _register_pipeline_source_alias(
 
 
 _FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
+#: Execution-metadata key linking a saved plain-value flow result back to its run.
+#: ZenML dynamic pipelines discard the pipeline function's return value, so the
+#: ``kitaru_flow_result`` artifact is otherwise orphaned (no producer run). The
+#: link lets `.wait()` recover the value when terminal-step inference is ambiguous
+#: (e.g. an adapter created several non-result model/tool checkpoints).
+_FLOW_RESULT_REF_METADATA_KEY = "kitaru_flow_result_ref_v1"
 _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
 _FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
@@ -373,7 +379,27 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
         )
         return (*coerced_items, metadata)
 
-    return _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
+    saved = _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
+    _record_flow_result_reference(saved)
+    return saved
+
+
+def _record_flow_result_reference(artifact: ArtifactVersionResponse) -> None:
+    """Link a saved plain-value flow result to the running execution.
+
+    Best-effort: the value was already saved and returned to ZenML, so a failed
+    metadata write must not break the flow. Recording the artifact id in
+    execution metadata is what lets `.wait()` recover the value when terminal-step
+    inference is ambiguous.
+    """
+    try:
+        from kitaru.logging import log as _log_flow_metadata
+
+        _log_flow_metadata(**{_FLOW_RESULT_REF_METADATA_KEY: str(artifact.id)})
+    except Exception:
+        logger.debug(
+            "Could not record flow result reference metadata.", exc_info=True
+        )
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -957,6 +983,27 @@ def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
     return cast(int, output.value["length"])
 
 
+_FLOW_RESULT_NOT_FOUND = object()
+
+
+def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
+    """Load the flow result linked via execution metadata, if present.
+
+    Returns ``_FLOW_RESULT_NOT_FOUND`` when the run has no linked result (e.g. it
+    predates this linkage, or returned a checkpoint handle handled elsewhere).
+    """
+    metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    artifact_id = metadata.get(_FLOW_RESULT_REF_METADATA_KEY)
+    if not isinstance(artifact_id, str) or not artifact_id:
+        return _FLOW_RESULT_NOT_FOUND
+    try:
+        return Client().get_artifact_version(artifact_id).load()
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            f"Could not load the linked flow result artifact {artifact_id!r}: {exc}"
+        ) from exc
+
+
 def _extract_flow_result(run: PipelineRunResponse) -> Any:
     """Extract user-facing flow return value from a finished pipeline run.
 
@@ -971,7 +1018,16 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     """
     outputs = _extract_outputs_from_output_specs(run)
     if not outputs:
-        outputs = _extract_outputs_from_terminal_steps(run)
+        try:
+            outputs = _extract_outputs_from_terminal_steps(run)
+        except KitaruAmbiguousFlowResultError:
+            # No single result-candidate terminal step (e.g. an adapter created
+            # several non-result model/tool checkpoints). Recover the value the
+            # flow actually returned from the linked `kitaru_flow_result` artifact.
+            referenced = _load_referenced_flow_result(run)
+            if referenced is not _FLOW_RESULT_NOT_FOUND:
+                return referenced
+            raise
 
     if not outputs:
         return None

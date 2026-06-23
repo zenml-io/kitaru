@@ -193,22 +193,20 @@ def build_judge(model: Any) -> Agent:
 # ---------------------------------------------------------------------------
 
 
-def _extract_cost(client: KitaruClient, exec_id: str) -> float:
+def _extract_cost(client: KitaruClient, exec_id: str) -> float | None:
     """Return ``display_cost_usd`` from the execution's LLM usage summary.
 
-    Falls back to 0.0 when the usage summary is absent (e.g. TestModel).
+    The PydanticAI adapter prices each model call (via genai-prices) into
+    ``estimated_cost_usd``, which Kitaru rolls into ``display_cost_usd``. Returns
+    None when no usage was recorded (e.g. TestModel) — None means "no data".
     """
     try:
-        run = client.executions.get(exec_id)
-        summary = run.llm_usage_summary
-        if summary is None:
-            return 0.0
-        cost = summary.get("display_cost_usd")
-        if cost is None:
-            return 0.0
-        return float(cost)
+        summary = client.executions.get(exec_id).llm_usage_summary
     except Exception:
-        return 0.0
+        return None
+    if not summary:
+        return None
+    return summary.get("display_cost_usd")
 
 
 def _extract_latency_s(client: KitaruClient, exec_id: str) -> float | None:
@@ -311,7 +309,7 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
 
 
 def cost(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta:
-    """BYO metric: display_cost_usd (lower_is_better=True)."""
+    """BYO metric: estimated USD cost (lower_is_better=True)."""
     client = KitaruClient()
     b = _extract_cost(client, baseline.exec_id)
     v = _extract_cost(client, variant.exec_id)

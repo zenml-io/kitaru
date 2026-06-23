@@ -118,8 +118,7 @@ gather_context  →  decide  →  finalize
 - The replay anchor is the `decide` step's checkpoint,
   `support_decide_model_request` (the constant `CUT`).
 - Because the adapter checkpoints the model calls, the cohort metrics have real
-  LLM **token** usage to read (running the raw agents directly would record
-  none). Note the PydanticAI adapter records tokens, not provider dollar cost.
+  LLM token usage to read; running the raw agents directly would record none.
 - The `baseline` prompt profile treats permission, SSO, and admin changes as `needs_review`.
 - The `trimmed_permissions` profile is looser and more likely to answer directly.
 - Output is a typed `SupportDecision`: policy label, risk status, required action, and summary.
@@ -142,18 +141,18 @@ Three metrics are provided in `utils.py`:
 - `latency` — wall-clock seconds (lower is better)
 - `quality_judge` — an LLM judge scoring the answer 1–5 (higher is better)
 
-`report.summary()` prints metric means, original→reproduction drift count, reproduction→edited drift count, and an improvement verdict. `report.regressions()` returns the metrics and decision checks that got worse.
+`report.summary()` prints metric means, original→reproduction drift count, reproduction→edited drift count, and an improvement verdict. `report.regressions()` returns the metrics and decision checks that got worse. `demo.py cohort` also writes **`cohort_report.html`** — a per-case table (each run's reproduction/decision drift and metric values) plus a numeric summary screen (cohort means, drift counts, improvement verdict).
 
 ## Files
 
 | file | purpose |
 |---|---|
-| `agent.py` | The PydanticAI support agent: typed outputs and per-step prompt profiles. |
-| `support_copilot.py` | The durable `@flow`: three `KitaruAgent` "turn" steps (gather/decide/finalize) + `recent_exec_ids()`. |
+| `support_agent.py` | The PydanticAI agent (typed outputs + prompt profiles) wrapped in `KitaruAgent`, the durable `@flow`, `CUT`, `wait_for_completion`, and `recent_exec_ids()`. |
 | `demo.py` | The walkthrough: `run`, `replay`, and `cohort` as plain functions over SDK primitives. |
-| `cohort.py` | `run_cohort(...) -> Report` with `summary()` and `regressions()`. |
+| `cohort.py` | `run_cohort(...) -> Report` with `summary()`, `regressions()`, and per-case accessors. |
 | `utils.py` | Analysis helpers: metrics, quality judge, decision extraction, and `ReplayRun`. |
-| `comparison_html.py` | Three-way original/reproduction/edited HTML report. |
+| `comparison_html.py` | Single-run reproduce-vs-edited HTML report. |
+| `cohort_html.py` | Cohort HTML report: per-case table + numeric summary. |
 
 ## Validating
 

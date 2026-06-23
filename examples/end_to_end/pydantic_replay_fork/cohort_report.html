@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cohort experiment</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1c2024;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: #6b7280; margin: 0 0 24px; font-size: 13px; }
+.verdict { border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-weight: 600; }
+.verdict.good { background: #e9f7ec; color: #1e6b34; border: 1px solid #bfe6c8; }
+.verdict.bad { background: #fdecec; color: #8a1c1c; border: 1px solid #f3c0c0; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.stat { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px; padding: 14px 16px; }
+.stat .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .l { color: #8a9099; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.card { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px;
+  padding: 18px 20px; margin-bottom: 20px; }
+.card h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: #8a9099; margin: 0 0 14px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 8px 10px; text-align: left; vertical-align: top; font-size: 13px; }
+th { color: #6b7280; font-weight: 600; border-bottom: 1px solid #e6e8eb; }
+tr + tr td { border-top: 1px solid #f0f1f3; }
+.num { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #4b5563; }
+.arrow { color: #b0b6bd; padding: 0 4px; }
+.tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.tag.ok { background: #e9f7ec; color: #1e6b34; }
+.tag.bad { background: #fdecec; color: #8a1c1c; }
+.tag.warn { background: #fef3c7; color: #92590a; }
+.tag.muted { background: #f1f2f4; color: #6b7280; }
+</style></head>
+<body><div class="wrap">
+<h1>Cohort experiment</h1>
+<p class="sub">The same edit applied across 5 recent production runs — unchanged replay (baseline) vs edited replay (variant).</p>
+
+<div class="verdict good">Improvement — no metric regressed across the cohort.</div>
+
+<div class="cards"><div class="stat"><div class="n">5</div><div class="l">cases run</div></div><div class="stat"><div class="n">5</div><div class="l">skipped</div></div><div class="stat"><div class="n">0</div><div class="l">reproduction drift</div></div><div class="stat"><div class="n">5</div><div class="l">edit flipped decision</div></div></div>
+
+<div class="card"><h2>Metrics — cohort means</h2>
+<table>
+<tr><th>metric</th><th>baseline</th><th></th><th>variant</th><th>delta</th><th>direction</th><th>verdict</th></tr>
+<tr><td>cost</td><td class="num">0.001</td><td class="arrow">→</td><td class="num">0.001</td><td class="num">-0.001</td><td>↓ lower better</td><td><span class="tag ok">no worse</span></td></tr><tr><td>latency</td><td class="num">21.000</td><td class="arrow">→</td><td class="num">18.800</td><td class="num">-2.200</td><td>↓ lower better</td><td><span class="tag ok">no worse</span></td></tr><tr><td>quality</td><td class="num">4.200</td><td class="arrow">→</td><td class="num">4.800</td><td class="num">+0.600</td><td>↑ higher better</td><td><span class="tag ok">no worse</span></td></tr>
+</table></div>
+
+<div class="card"><h2>Per case</h2>
+<table>
+<tr><th>exec id</th><th>reproduced faithfully</th><th>edit flipped decision</th><th>cost (base→var)</th><th>latency (base→var)</th><th>quality (base→var)</th></tr>
+<tr><td class="mono">e76f79ea-97c…</td><td><span class="tag ok">yes</span></td><td><span class="tag bad">yes</span></td><td class="num"><span class="tag ok">0.001 → 0.001</span></td><td class="num"><span class="tag bad">20.000 → 21.000</span></td><td class="num"><span class="tag ok">4 → 5</span></td></tr><tr><td class="mono">3f4596c9-641…</td><td><span class="tag ok">yes</span></td><td><span class="tag bad">yes</span></td><td class="num"><span class="tag ok">0.001 → 0.000</span></td><td class="num"><span class="tag ok">21.000 → 18.000</span></td><td class="num"><span class="tag ok">5 → 5</span></td></tr><tr><td class="mono">c6c6b837-bc8…</td><td><span class="tag ok">yes</span></td><td><span class="tag bad">yes</span></td><td class="num"><span class="tag ok">0.001 → 0.000</span></td><td class="num"><span class="tag ok">21.000 → 17.000</span></td><td class="num"><span class="tag ok">4 → 4</span></td></tr><tr><td class="mono">1bf15b16-6b2…</td><td><span class="tag ok">yes</span></td><td><span class="tag bad">yes</span></td><td class="num"><span class="tag ok">0.001 → 0.001</span></td><td class="num"><span class="tag ok">23.000 → 21.000</span></td><td class="num"><span class="tag ok">4 → 5</span></td></tr><tr><td class="mono">bf58aaad-f87…</td><td><span class="tag ok">yes</span></td><td><span class="tag bad">yes</span></td><td class="num"><span class="tag ok">0.001 → 0.000</span></td><td class="num"><span class="tag ok">20.000 → 17.000</span></td><td class="num"><span class="tag ok">4 → 5</span></td></tr>
+</table></div>
+
+<div class="card"><h2>Skipped cases</h2><table><tr><th>exec id</th><th>reason</th></tr><tr><td class="mono">98d1e936-8e1…</td><td>no &#x27;support_decide_model_request&#x27; checkpoint</td></tr><tr><td class="mono">0430fa48-fc4…</td><td>no &#x27;support_decide_model_request&#x27; checkpoint</td></tr><tr><td class="mono">4b5509d7-d6d…</td><td>no &#x27;support_decide_model_request&#x27; checkpoint</td></tr><tr><td class="mono">7f439ef2-49e…</td><td>no &#x27;support_decide_model_request&#x27; checkpoint</td></tr><tr><td class="mono">3646552c-b62…</td><td>no &#x27;support_decide_model_request&#x27; checkpoint</td></tr></table></div>
+</div></body></html>
