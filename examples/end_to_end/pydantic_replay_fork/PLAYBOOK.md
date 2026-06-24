@@ -19,6 +19,7 @@ uv run kitaru init
 uv run kitaru login          # local server; compare URLs need a dashboard connection
 uv run kitaru stack use local   # or your remote stack (see Act 5 note on --deployment)
 echo "OPENAI_API_KEY=sk-..." > .env   # or export it
+export KITARU_UI_URL=https://preview.demo.kitaru.zenml.io
 ```
 
 ### Create the “prod” run

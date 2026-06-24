@@ -168,6 +168,8 @@ When deployment metadata is absent on the execution, the version segment default
 
 Use `kitaru.build_compare_url_for_executions(...)`, `kitaru.compare_url_for_executions(...)`, or `kitaru.build_compare_url(...)` when constructing links yourself.
 
+When the Kitaru frontend is hosted separately from the API server (for example a preview UI pointing at a staging workspace), set `KITARU_UI_URL` to the dashboard origin. Compare and execution links from `kitaru executions replay`, `kitaru.diff()`, and flow submission logs use that override; API traffic still uses `KITARU_SERVER_URL`.
+
 ## Waits during replay
 
 Replay does not support overriding or pre-populating wait results. If a replayed execution reaches a `wait()` during normal execution, resolve it through the normal wait input flow:

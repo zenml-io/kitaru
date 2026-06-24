@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from kitaru._client._models import CheckpointCall, Execution
+from kitaru._ui_urls import resolve_ui_base_url
 from kitaru.client import KitaruClient
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
@@ -46,24 +47,7 @@ class CohortDiff:
 
 def _client_server_url(client: KitaruClient) -> str | None:
     """Return an HTTP(S) dashboard base URL for UI compare links."""
-    try:
-        from kitaru.config import resolve_connection_config
-
-        resolved = resolve_connection_config(validate_for_use=False)
-        candidate = (resolved.server_url or "").strip()
-        if candidate.startswith(("http://", "https://")):
-            return candidate.rstrip("/")
-    except Exception:
-        pass
-
-    try:
-        zen_store = client._client().zen_store
-        url = getattr(zen_store, "url", None)
-    except Exception:
-        return None
-    if isinstance(url, str) and url.strip().startswith(("http://", "https://")):
-        return url.strip().rstrip("/")
-    return None
+    return resolve_ui_base_url(client)
 
 
 def compare_urls_for_replay(

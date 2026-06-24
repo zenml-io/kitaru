@@ -1447,8 +1447,9 @@ def replay_(
             print(f"  {compare_url}")
     else:
         print(
-            "\nCompare URL unavailable. Run `kitaru login` or set KITARU_SERVER_URL "
-            "to a reachable dashboard URL."
+            "\nCompare URL unavailable. Run `kitaru login`, set KITARU_SERVER_URL "
+            "to a reachable dashboard URL, or set KITARU_UI_URL when the frontend "
+            "is hosted separately from the API server."
         )
 
 

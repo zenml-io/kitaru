@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru executions replay` now prints UI compare URLs (and includes `compare_urls` in JSON output) for the original execution vs the new replay.
 - Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
 - `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
+- Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
 
 ### Changed
 - Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.

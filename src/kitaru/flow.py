@@ -713,12 +713,15 @@ def _build_kitaru_execution_url(
 
 def _emit_kitaru_execution_url(
     run: PipelineRunResponse,
-    *,
-    server_url: str | None,
 ) -> None:
     """Log a Kitaru-native execution URL without risking flow execution."""
     try:
-        url = _build_kitaru_execution_url(run, server_url=server_url)
+        from kitaru._ui_urls import resolve_ui_base_url
+
+        url = _build_kitaru_execution_url(
+            run,
+            server_url=resolve_ui_base_url(),
+        )
     except Exception:
         logger.debug(
             "Failed to build Kitaru execution URL for run %s.",
@@ -1808,10 +1811,7 @@ class _FlowDefinition:
             )
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
-        _emit_kitaru_execution_url(
-            replayed_run,
-            server_url=getattr(resolved_connection, "server_url", None),
-        )
+        _emit_kitaru_execution_url(replayed_run)
         persist_frozen_execution_spec(
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
@@ -2016,10 +2016,7 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
-        _emit_kitaru_execution_url(
-            run,
-            server_url=getattr(resolved_connection, "server_url", None),
-        )
+        _emit_kitaru_execution_url(run)
         track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
         persist_frozen_execution_spec(
             run_id=run.id,

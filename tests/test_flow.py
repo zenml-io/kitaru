@@ -2189,6 +2189,10 @@ def test_run_logs_kitaru_native_execution_url() -> None:
             "kitaru.flow.resolve_connection_config",
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
         ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
         patch("kitaru.flow.logger.info") as logger_info_mock,
@@ -2378,6 +2382,10 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
         ),
         patch(
             "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+        ),
+        patch(
+            "kitaru.config.resolve_connection_config",
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
         ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
