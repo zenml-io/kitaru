@@ -4940,7 +4940,8 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
         flow_name="sample_flow",
     )
 
-    replay_handle = SimpleNamespace(exec_id=str(replayed_run.id))
+    replay_handle = MagicMock()
+    replay_handle.exec_id = str(replayed_run.id)
     replay_flow = SimpleNamespace(
         replay=MagicMock(return_value=replay_handle),
         replay_many=MagicMock(),
@@ -4982,7 +4983,22 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
         skip=None,
         topic="new topic",
     )
+    replay_handle.wait.assert_called_once()
     assert execution.exec_id == str(replayed_run.id)
+
+
+def test_replay_client_awaits_handle_before_returning_execution() -> None:
+    handle = MagicMock()
+    handle.exec_id = "replay-exec-1"
+
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(),
+    ):
+        exec_id = KitaruClient().executions._await_replay_completion(handle)
+
+    assert exec_id == "replay-exec-1"
+    handle.wait.assert_called_once()
 
 
 def test_replay_stops_when_source_module_dependency_is_missing() -> None:
@@ -5443,6 +5459,10 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
             "kitaru.client._resolve_flow_for_replay",
             side_effect=KitaruRuntimeError("no replay flow"),
         ),
+        patch(
+            "kitaru.client._ExecutionsAPI._await_replay_completion",
+            _immediate_replay_completion,
+        ),
         patch("kitaru.client.importlib.import_module", return_value=replay_module),
     ):
         client_mock = client_cls.return_value
@@ -5892,6 +5912,17 @@ def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:
 # ── Replay analytics instrumentation tests ───────────────────────────────────
 
 
+def _immediate_replay_completion(_self: object, handle_or_run: object) -> str:
+    """Test helper: mimic replay completion without blocking on ZenML polling."""
+    exec_id = getattr(handle_or_run, "exec_id", None)
+    if exec_id is not None:
+        wait = getattr(handle_or_run, "wait", None)
+        if callable(wait):
+            wait()
+        return str(exec_id)
+    return str(getattr(handle_or_run, "id"))
+
+
 def test_replay_fallback_emits_requested_and_replayed_events() -> None:
     """Successful fallback replay should emit REPLAY_REQUESTED then FLOW_REPLAYED."""
     fetch_step = _DummyStep(
@@ -5951,6 +5982,10 @@ def test_replay_fallback_emits_requested_and_replayed_events() -> None:
             side_effect=KitaruRuntimeError("no replay flow"),
         ),
         patch("kitaru.client.track") as track_mock,
+        patch(
+            "kitaru.client._ExecutionsAPI._await_replay_completion",
+            _immediate_replay_completion,
+        ),
         patch("kitaru.client.importlib.import_module", return_value=replay_module),
     ):
         client_mock = client_cls.return_value
@@ -6068,7 +6103,8 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
         flow_name="sample_flow",
     )
 
-    replay_handle = SimpleNamespace(exec_id=str(replayed_run.id))
+    replay_handle = MagicMock()
+    replay_handle.exec_id = str(replayed_run.id)
     replay_flow = SimpleNamespace(
         replay=MagicMock(return_value=replay_handle),
         replay_many=MagicMock(),
@@ -6098,6 +6134,7 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
         client = KitaruClient()
         client.executions.replay(str(source_run.id), at="write")
 
+    replay_handle.wait.assert_called_once()
     track_mock.assert_not_called()
 
 

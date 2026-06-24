@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** Redesigned replay API: `flow.replay(execution, *, at=..., input=..., output=..., tool=..., llm_model=..., skip=..., **flow_inputs)`. Checkpoints before `at` are skipped (playback); the cut and downstream re-execute. `input` overrides checkpoint inputs, `output` mocks tool/LLM returns without running code, `tool` swaps tool implementations by import path, `llm_model` overrides native `kitaru.llm()` checkpoints in the live tail, and `skip` forces playback for checkpoints in the live tail. Flow parameters remain `**flow_inputs` kwargs.
 
 ### Fixed
+- `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
 - Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
 - `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.

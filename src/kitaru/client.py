@@ -1423,6 +1423,19 @@ class _ExecutionsAPI:
         track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
 
+    def _await_replay_completion(self, handle_or_run: Any) -> str:
+        """Block until a replay finishes and roll up terminal LLM usage metadata."""
+        from kitaru.flow import FlowHandle
+
+        if isinstance(handle_or_run, FlowHandle):
+            handle = handle_or_run
+        elif callable(getattr(handle_or_run, "wait", None)):
+            handle = handle_or_run
+        else:
+            handle = FlowHandle(handle_or_run)
+        handle.wait()
+        return str(handle.exec_id)
+
     def replay(
         self,
         execution: str,
@@ -1435,7 +1448,11 @@ class _ExecutionsAPI:
         skip: Sequence[str] | None = None,
         **flow_inputs: Any,
     ) -> Execution:
-        """Replay an execution from a checkpoint cut point."""
+        """Replay an execution from a checkpoint cut point.
+
+        Blocks until the replay finishes and writes terminal LLM usage
+        aggregation metadata before returning the replayed execution.
+        """
         source_run = self._client_ref._get_pipeline_run(execution, hydrate=True)
 
         run_status_value = _run_status_value(source_run)
@@ -1470,12 +1487,8 @@ class _ExecutionsAPI:
                 skip=skip,
                 **flow_inputs,
             )
-            replay_exec_id = getattr(handle, "exec_id", None)
-            if not replay_exec_id:
-                raise KitaruRuntimeError(
-                    "Resolved flow replay call did not return a valid execution handle."
-                )
-            return self.get(str(replay_exec_id))
+            replay_exec_id = self._await_replay_completion(handle)
+            return self.get(replay_exec_id)
 
         replay_pipeline = _resolve_pipeline_for_replay(source_run)
         replay_plan = build_replay_plan(
@@ -1541,7 +1554,8 @@ class _ExecutionsAPI:
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
         track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
-        return self.get(replayed_exec_id)
+        replay_exec_id = self._await_replay_completion(replayed_run)
+        return self.get(replay_exec_id)
 
     def replay_many(
         self,
