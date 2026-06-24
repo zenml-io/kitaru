@@ -92,6 +92,7 @@ from kitaru.config import (
     run_sandbox_command,
     use_stack,
 )
+from kitaru.diff import CohortDiff, ExecutionDiff, build_compare_url, build_compare_urls, diff, diff_cohort
 from kitaru.errors import (
     FailureOrigin,
     KitaruAmbiguousFlowResultError,
@@ -113,6 +114,7 @@ from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.replay import ReplayManyResult
 from kitaru.runtime import current_execution_id
 from kitaru.secrets import (
     Secret,
@@ -129,7 +131,9 @@ __all__ = [
     "AuthAPIKey",
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
+    "CohortDiff",
     "Deployment",
+    "ExecutionDiff",
     "ExecutionEvent",
     "ExecutionStatistics",
     "ExecutionStatisticsDimension",
@@ -158,10 +162,13 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "ReplayManyResult",
     "SandboxCommandResult",
     "Secret",
     "SecretSummary",
     "StackInfo",
+    "build_compare_url",
+    "build_compare_urls",
     "checkpoint",
     "configure",
     "connect",
@@ -171,6 +178,8 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "diff",
+    "diff_cohort",
     "events",
     "flow",
     "get_secret",

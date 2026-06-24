@@ -472,10 +472,13 @@ class _ReplayFlowLike(Protocol):
 
     def replay(
         self,
-        exec_id: str,
+        execution: str,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
         **flow_inputs: Any,
     ) -> Any: ...
 
@@ -1406,14 +1409,17 @@ class _ExecutionsAPI:
 
     def replay(
         self,
-        exec_id: str,
+        execution: str,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
         **flow_inputs: Any,
     ) -> Execution:
-        """Replay an execution from a checkpoint boundary."""
-        source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        """Replay an execution from a checkpoint cut point."""
+        source_run = self._client_ref._get_pipeline_run(execution, hydrate=True)
 
         run_status_value = _run_status_value(source_run)
         if run_status_value in {
@@ -1425,7 +1431,7 @@ class _ExecutionsAPI:
         }:
             raise KitaruStateError(
                 "Replay requires a non-running source execution. "
-                f"Execution '{exec_id}' is currently '{run_status_value}'."
+                f"Execution '{execution}' is currently '{run_status_value}'."
             )
 
         replay_flow: _ReplayFlowLike | None = None
@@ -1438,9 +1444,12 @@ class _ExecutionsAPI:
 
         if replay_flow is not None:
             handle = replay_flow.replay(
-                exec_id,
-                from_=from_,
-                overrides=overrides,
+                execution,
+                at=at,
+                input=input,
+                output=output,
+                tool=tool,
+                llm_model=llm_model,
                 **flow_inputs,
             )
             replay_exec_id = getattr(handle, "exec_id", None)
@@ -1453,13 +1462,16 @@ class _ExecutionsAPI:
         replay_pipeline = _resolve_pipeline_for_replay(source_run)
         replay_plan = build_replay_plan(
             run=source_run,
-            from_=from_,
-            overrides=overrides,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
             flow_inputs=flow_inputs,
         )
 
         replay_metadata: dict[str, Any] = {
-            "from_checkpoint": from_,
+            "at_checkpoint": at,
             "replay_path": "pipeline_fallback",
         }
         track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
@@ -1488,13 +1500,13 @@ class _ExecutionsAPI:
             )
             if failure_origin == FailureOrigin.DIVERGENCE:
                 raise execution_error_from_failure(
-                    f"Replay divergence detected for execution '{exec_id}': {exc}",
+                    f"Replay divergence detected for execution '{execution}': {exc}",
                     exec_id=str(source_run.id),
                     status="failed",
                     origin=failure_origin,
                 ) from exc
             raise KitaruBackendError(
-                f"Failed to replay execution '{exec_id}': {exc}"
+                f"Failed to replay execution '{execution}': {exc}"
             ) from exc
 
         replayed_exec_id = str(getattr(replayed_run, "id", ""))

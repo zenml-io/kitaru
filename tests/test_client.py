@@ -4965,14 +4965,17 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
         client = KitaruClient()
         execution = client.executions.replay(
             str(source_run.id),
-            from_="write_summary",
+            at="write_summary",
             topic="new topic",
         )
 
     replay_flow.replay.assert_called_once_with(
         str(source_run.id),
-        from_="write_summary",
-        overrides=None,
+        at="write_summary",
+        input=None,
+        output=None,
+        tool=None,
+        llm_model=None,
         topic="new topic",
     )
     assert execution.exec_id == str(replayed_run.id)
@@ -5010,7 +5013,7 @@ def test_replay_stops_when_source_module_dependency_is_missing() -> None:
         with pytest.raises(
             KitaruRuntimeError, match="missing dependency 'missing_dependency'"
         ) as exc_info:
-            client.executions.replay(str(source_run.id), from_="write")
+            client.executions.replay(str(source_run.id), at="write")
 
     assert exc_info.value.__cause__ is missing_dependency
     resolve_pipeline.assert_not_called()
@@ -5447,7 +5450,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         client = KitaruClient()
         execution = client.executions.replay(
             str(source_run.id),
-            from_="write",
+            at="write",
         )
 
     replay_pipeline.replay.assert_called_once()
@@ -5953,13 +5956,13 @@ def test_replay_fallback_emits_requested_and_replayed_events() -> None:
         client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
 
         client = KitaruClient()
-        client.executions.replay(str(source_run.id), from_="write")
+        client.executions.replay(str(source_run.id), at="write")
 
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
     assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
     assert requested_call.args[1]["replay_path"] == "pipeline_fallback"
-    assert requested_call.args[1]["from_checkpoint"] == "write"
+    assert requested_call.args[1]["at_checkpoint"] == "write"
 
     replayed_call = track_mock.call_args_list[1]
     assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
@@ -6028,7 +6031,7 @@ def test_replay_fallback_failure_emits_requested_then_failed() -> None:
         client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
 
         client = KitaruClient()
-        client.executions.replay(str(source_run.id), from_="write")
+        client.executions.replay(str(source_run.id), at="write")
 
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
@@ -6084,7 +6087,7 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
         client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
 
         client = KitaruClient()
-        client.executions.replay(str(source_run.id), from_="write")
+        client.executions.replay(str(source_run.id), at="write")
 
     track_mock.assert_not_called()
 

@@ -5,8 +5,8 @@ improvement verdict) and a **per-case** table (one row per production run, with
 its reproduction/decision drift and metric values).
 
 Single public function: ``write(path, report) -> path``. It reads the public
-accessors on ``cohort.Report`` (``metric_aggregates`` / ``per_case`` /
-``skipped_cases`` / ``improvement`` / ``decision_change_count`` /
+accessors on ``reporting.cohort_report.Report`` (``metric_aggregates`` /
+``per_case`` / ``skipped_cases`` / ``improvement`` / ``decision_change_count`` /
 ``reproduction_drift_count``).
 """
 
@@ -16,7 +16,7 @@ import html
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from cohort import Report
+    from reporting.cohort_report import Report
 
 _CSS = """
 :root { color-scheme: light; }
@@ -119,7 +119,9 @@ def render(report: Report) -> str:
         )
 
     # Per-case table.
-    metric_headers = "".join(f"<th>{html.escape(n)} (base→var)</th>" for n in metric_names)
+    metric_headers = "".join(
+        f"<th>{html.escape(n)} (base→var)</th>" for n in metric_names
+    )
     case_rows = ""
     for case in cases:
         metric_cells = ""
@@ -132,7 +134,7 @@ def render(report: Report) -> str:
             cls = "bad" if worse else "ok"
             metric_cells += (
                 f'<td class="num"><span class="tag {cls}">'
-                f'{_fmt(m["baseline"])} → {_fmt(m["variant"])}</span></td>'
+                f"{_fmt(m['baseline'])} → {_fmt(m['variant'])}</span></td>"
             )
         case_rows += (
             f'<tr><td class="mono">{html.escape(case["exec_id"][:12])}…</td>'
@@ -141,15 +143,13 @@ def render(report: Report) -> str:
             f"{metric_cells}</tr>"
         )
     if not case_rows:
-        case_rows = (
-            f'<tr><td colspan="{3 + len(metric_names)}">no cases ran</td></tr>'
-        )
+        case_rows = f'<tr><td colspan="{3 + len(metric_names)}">no cases ran</td></tr>'
 
     skipped_block = ""
     if skipped:
         skipped_rows = "".join(
             f'<tr><td class="mono">{html.escape(s["exec_id"][:12])}…</td>'
-            f'<td>{html.escape(s["reason"])}</td></tr>'
+            f"<td>{html.escape(s['reason'])}</td></tr>"
             for s in skipped
         )
         skipped_block = (
@@ -192,5 +192,6 @@ def write(path: str, report: Report) -> str:
     """Write the cohort HTML to *path* and return the resolved absolute path."""
     from pathlib import Path
 
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(render(report), encoding="utf-8")
     return str(Path(path).resolve())

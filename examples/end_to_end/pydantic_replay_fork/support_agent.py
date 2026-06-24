@@ -24,7 +24,6 @@ from pydantic_ai import Agent
 
 from kitaru import (
     ImageSettings,
-    KitaruClient,
     checkpoint,
     flow,
 )
@@ -36,7 +35,7 @@ FLOW_NAME = "support_copilot_flow"
 
 #: The checkpoint we replay from. This is a real PydanticAI tool call checkpoint
 #: created by ``KitaruAgent(checkpoint_strategy="calls")``.
-CUT = "lookup_policy_tool"
+REPLAY_POINT = "lookup_policy_tool"
 
 #: Stable final checkpoint written by the flow after the agent returns. The demo
 #: reads this first because it is easier to explain than parsing a PydanticAI
@@ -222,10 +221,15 @@ def build_support_agent(
 
 @checkpoint(cache=False)
 def publish_support_decision(
-    decision: SupportDecision,
+    decision: dict,
 ) -> Annotated[dict, "support_decision"]:
-    """Store the final decision on a stable checkpoint for the demo UI/CLI."""
-    return decision.model_dump()
+    """Store the final decision on a stable checkpoint for the demo UI/CLI.
+
+    Takes/returns a plain dict: a checkpoint input/output is materialized as a
+    ZenML artifact, and a JSON-friendly dict serializes cleanly where a custom
+    Pydantic model trips ZenML's materializer selection.
+    """
+    return decision
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +240,7 @@ def publish_support_decision(
 @flow(
     cache=False,
     image=ImageSettings(
-        requirements=["pydantic-ai"],
+        requirements=["pydantic-ai-slim[openai]>=1.96.0,<1.104.0"],
         secret_environment_from=["openai-creds"],
     ),
 )
@@ -252,20 +256,7 @@ def support_copilot_flow(
         "with the triage fields. Finally return a SupportDecision."
     )
     result = agent.run_sync(user_prompt)
-    return publish_support_decision(result.output)
+    decision = result.output.model_dump()
 
-
-# ---------------------------------------------------------------------------
-# Listing prior runs — a plain helper over the SDK client
-# ---------------------------------------------------------------------------
-
-
-def recent_exec_ids(client: KitaruClient, n: int) -> list[str]:
-    """Return the ``n`` most recent ORIGINAL (non-replay) exec_ids, newest first.
-
-    Replays show up in the list too; we keep only the originals (those with no
-    ``original_exec_id``) so the cohort experiments against real production runs.
-    """
-    runs = client.executions.list(flow=FLOW_NAME, limit=n * 5)
-    originals = [e for e in runs if e.original_exec_id is None]
-    return [e.exec_id for e in originals[:n]]
+    publish_support_decision(decision)
+    return decision

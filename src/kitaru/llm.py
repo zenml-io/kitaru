@@ -38,6 +38,7 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.logging import log
+from kitaru.replay_context import get_replay_runtime_context
 from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
 from kitaru.secrets import _read_secret_values
 
@@ -873,6 +874,10 @@ def _track_llm_call_analytics(
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
+    replay_context = get_replay_runtime_context()
+    if replay_context is not None and replay_context.llm_model:
+        request = request.model_copy(update={"model": replay_context.llm_model})
+
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
 

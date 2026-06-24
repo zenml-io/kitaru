@@ -1299,11 +1299,13 @@ def replay_(
         Parameter(help="Execution ID."),
     ],
     *,
-    from_: Annotated[
+    at: Annotated[
         str,
         Parameter(
-            help="Checkpoint selector (name, invocation ID, or call ID).",
-            alias=["--from"],
+            help=(
+                "Checkpoint selector for the replay cut "
+                "(name, invocation ID, or call ID)."
+            ),
         ),
     ],
     args: Annotated[
@@ -1315,26 +1317,53 @@ def replay_(
             )
         ),
     ] = None,
-    overrides: Annotated[
+    input: Annotated[
         str | None,
-        Parameter(help=("Replay overrides as a JSON object with `checkpoint.*` keys.")),
+        Parameter(
+            help="Checkpoint input overrides as a JSON object keyed by selector."
+        ),
+    ] = None,
+    mock_output: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Checkpoint output mocks as a JSON object keyed by "
+                "tool/checkpoint name."
+            ),
+            alias=["--mock-output"],
+        ),
+    ] = None,
+    tool: Annotated[
+        str | None,
+        Parameter(
+            help="Tool implementation overrides as a JSON object of import paths."
+        ),
+    ] = None,
+    llm_model: Annotated[
+        str | None,
+        Parameter(help="Model alias applied to llm_call checkpoints in the live tail."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Replay an execution from a checkpoint boundary."""
+    """Replay an execution from a checkpoint cut point."""
     command = "executions.replay"
     output_format = _resolve_output_format(output)
 
     def _replay_execution() -> Execution:
         flow_inputs = _parse_json_object(args, option_name="--args")
-        parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
+        parsed_input = _parse_json_object(input, option_name="--input")
+        parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
+        parsed_tool = _parse_json_object(tool, option_name="--tool")
         return (
             cli_dependencies()
             .kitaru_client()
             .executions.replay(
                 exec_id,
-                from_=from_,
-                overrides=parsed_overrides or None,
+                at=at,
+                input=parsed_input or None,
+                output=parsed_output or None,
+                tool=parsed_tool or None,
+                llm_model=llm_model,
                 **flow_inputs,
             )
         )

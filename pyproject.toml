@@ -172,8 +172,7 @@ select = [
 "src/kitaru/adapters/pydantic_ai/**" = ["E501", "I001", "UP006", "UP007", "UP008", "UP035", "UP045", "SIM105"]
 # Demo HTML/CSS report builders: long inline style and markup string literals
 # that read more clearly unwrapped than broken across lines.
-"examples/end_to_end/*/comparison_html.py" = ["E501"]
-"examples/end_to_end/*/cohort_html.py" = ["E501"]
+"examples/end_to_end/*/reporting/*_html.py" = ["E501"]
 
 [tool.ruff.format]
 exclude = ["src/kitaru/adapters/pydantic_ai/**"]

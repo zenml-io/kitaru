@@ -18,11 +18,9 @@ client = kitaru.KitaruClient()
 
 replayed = client.executions.replay(
     "kr-a8f3c2",
-    from_="write_draft",
+    at="write_draft",
     topic="New topic",
-    overrides={
-        "checkpoint.research": "Edited notes",
-    },
+    output={"research": "Edited notes"},
 )
 
 print(replayed.exec_id)
@@ -33,10 +31,10 @@ print(replayed.original_exec_id)  # points to source execution
 
 ```python
 handle = content_pipeline.replay(
-    exec_id="kr-a8f3c2",
-    from_="write_draft",
+    "kr-a8f3c2",
+    at="write_draft",
     topic="New topic",
-    overrides={"checkpoint.research": "Edited notes"},
+    output={"research": "Edited notes"},
 )
 
 result = handle.wait()
@@ -46,14 +44,16 @@ result = handle.wait()
 
 ```bash
 kitaru executions replay kr-a8f3c2 \
-  --from write_draft \
+  --at write_draft \
   --args '{"topic":"New topic"}' \
-  --overrides '{"checkpoint.research":"Edited notes"}'
+  --mock-output '{"research":"Edited notes"}'
 ```
 
-## Selector rules
+## Cut point (`at`)
 
-`from_` can target:
+`at` selects the replay cut. Checkpoints before `at` are skipped and return recorded outputs. `at` and its downstream descendants re-execute unless mocked via `output=`.
+
+`at` can target:
 
 - checkpoint name (for example `write_draft`)
 - checkpoint invocation ID
@@ -61,60 +61,46 @@ kitaru executions replay kr-a8f3c2 \
 
 If a selector is ambiguous, replay raises `KitaruStateError`.
 
-## What gets replayed
+## Override parameters
 
-Replay computes a set of replay roots, then re-executes those roots and their
-downstream descendants.
+| Parameter | Purpose |
+|---|---|
+| `**flow_inputs` | Override `@flow` parameters (for example `topic=`, `model=`) |
+| `input=` | Override checkpoint inputs and force those checkpoints to re-execute |
+| `output=` | Mock checkpoint outputs without running tool/LLM code |
+| `tool=` | Swap a tool implementation by import path for the replay run |
+| `llm_model=` | Override model alias for `llm_call` checkpoints in the live tail |
 
-- `from_` always contributes one replay root.
-- Each `checkpoint.<selector>` override adds replay roots at the direct
-  consumers of that checkpoint output.
-- Any checkpoint that is neither a replay root nor a downstream dependency is skipped.
+### Output mocks
 
-## Override keys
+- `output={"lookup_policy": mock_value}` mocks all invocations of that tool (strict when ambiguous).
+- `at=<tool_checkpoint>, output={"lookup_policy": mock_value}` mocks only the invocation at the cut when the tool key matches.
 
-Replay override keys must start with `checkpoint.`.
+### Diff
 
-Examples:
+```python
+diff = kitaru.diff("kr-original")
+diff = kitaru.diff("kr-original", "kr-replay-a", "kr-replay-b")
+```
 
-- `checkpoint.research`
-- `checkpoint.fetch_data`
+When replay executions are omitted, `kitaru.diff` discovers all runs whose `original_exec_id` matches the source.
 
-Any other prefix raises `KitaruUsageError`.
+`ExecutionDiff.urls` links to the Kitaru UI compare view — one URL per original-vs-replay pair (the UI compares two executions at a time):
 
-Override behavior:
-
-- Overrides target checkpoint outputs (`checkpoint.<selector>`).
-- The overridden checkpoint must expose a single output.
-- `checkpoint.<selector>` replaces that checkpoint output at each direct
-  consumer input; the source checkpoint itself is not forced to re-execute.
-- Replay roots include direct consumers of the overridden checkpoint output, so
-  replay re-executes from those consumers forward.
-- If an overridden checkpoint fans out to multiple direct consumers, replay
-  re-executes all those consumer branches.
+```text
+{server}/flows/{flow_id}/v/local/compare?executions={original},{replay}
+```
 
 ## Waits during replay
 
-Replay does not support overriding or pre-populating wait results. If a replayed
-execution reaches a `wait()` during normal execution, that wait behaves like any
-new wait and must be resolved through the normal wait input flow:
+Replay does not support overriding or pre-populating wait results. If a replayed execution reaches a `wait()` during normal execution, resolve it through the normal wait input flow:
 
 - SDK: `client.executions.input(exec_id, wait="name", value=...)`
-- CLI: `kitaru executions input <exec_id> --value ...` (auto-detects single pending wait)
-- CLI interactive: `kitaru executions input <exec_id> --interactive`
+- CLI: `kitaru executions input <exec_id> --value ...`
 
 ## Divergence
 
-Replay can raise `KitaruDivergenceError` when the backend detects that durable
-call sequence compatibility is broken.
-
-Also check replayed execution failure metadata:
-
-```python
-latest = client.executions.get(replayed.exec_id)
-if latest.failure:
-    print(latest.failure.origin, latest.failure.message)
-```
+Replay can raise `KitaruDivergenceError` when the backend detects that durable call sequence compatibility is broken.
 
 ## Example in this repository
 

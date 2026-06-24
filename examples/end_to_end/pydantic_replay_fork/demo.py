@@ -3,18 +3,18 @@
 This is the replay story in plain code. The existing CLI
 command is the fastest way to replay a recorded execution:
 
-    kitaru executions replay <EXEC-ID> --from lookup_policy_tool
-    kitaru executions replay <EXEC-ID> --from lookup_policy_tool \
+    kitaru executions replay <EXEC-ID> --at lookup_policy_tool
+    kitaru executions replay <EXEC-ID> --at lookup_policy_tool \
       --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
 
 (The PydanticAI agent calls a ``lookup_policy`` tool. With
 ``KitaruAgent(checkpoint_strategy="calls")``, that tool call becomes the
-``lookup_policy_tool`` checkpoint — the replay anchor, the constant CUT.)
+``lookup_policy_tool`` checkpoint — the replay anchor, ``REPLAY_POINT``.)
 
 The script below narrates the same operations with SDK calls:
 
     support_copilot_flow.run(prompt, customer, model, prompt_profile)
-    support_copilot_flow.replay(exec_id, from_=CUT, cache=False, ...)
+    support_copilot_flow.replay(exec_id, at=REPLAY_POINT, cache=False, ...)
     KitaruClient().executions.get(...) / .list(...)
 
 Pick which step to run via the command line:
@@ -28,25 +28,26 @@ Pick which step to run via the command line:
 
 import sys
 
-from cohort import run_cohort
-from cohort_html import write as write_cohort_html
-from comparison_html import write as write_html
 from dotenv import load_dotenv
+from reporting.cohort_html import write as write_cohort_html
+from reporting.comparison_html import write as write_html
 from support_agent import (
-    CUT,
+    REPLAY_POINT,
     SupportDecision,
-    recent_exec_ids,
     support_copilot_flow,
 )
 from utils import (
     cost,
     diff_decisions,
+    execution_stats,
     latency,
     load_support_decision_from_execution,
     quality_judge,
+    recent_exec_ids,
 )
+from utils.cohort import run_cohort
 
-from kitaru import KitaruClient
+from kitaru import KitaruClient, diff
 
 # --- The scenario and the config we run/replay under -----------------------
 
@@ -61,8 +62,8 @@ BASELINE_MODEL = "openai:gpt-5-mini"  # what production runs under
 FORK_MODEL = "openai:gpt-5-nano"  # the cheaper model we replay under
 FORK_PROMPT_PROFILE = "trimmed_permissions"  # the looser prompt we replay under
 
-HTML_PATH = "replay_three_way.html"
-COHORT_HTML_PATH = "cohort_report.html"
+HTML_PATH = "reports/replay_three_way.html"
+COHORT_HTML_PATH = "reports/cohort_report.html"
 _FLOW_NODES = (
     "support_copilot_model_request",
     "gather_context_tool",
@@ -93,10 +94,10 @@ def require_replay_anchor(client: KitaruClient, exec_id: str) -> None:
     """Fail clearly if the original run did not create the replay anchor."""
     run = client.executions.get(exec_id)
     checkpoint_names = [c.name for c in run.checkpoints]
-    if CUT in checkpoint_names:
+    if REPLAY_POINT in checkpoint_names:
         return
     raise RuntimeError(
-        f"Expected replay anchor {CUT!r}, but execution {exec_id!r} did not "
+        f"Expected replay anchor {REPLAY_POINT!r}, but execution {exec_id!r} did not "
         f"create it. Checkpoints present: {checkpoint_names}. The live model may "
         "have skipped the lookup_policy tool; rerun, or use a model that follows "
         "the tool-use instruction more reliably."
@@ -104,7 +105,9 @@ def require_replay_anchor(client: KitaruClient, exec_id: str) -> None:
 
 
 def write_comparison_html(
-    exec_id: str,
+    original_id: str,
+    reproduced_id: str,
+    edited_id: str,
     original: dict,
     reproduced: dict,
     edited: dict,
@@ -122,14 +125,36 @@ def write_comparison_html(
         )
         for f in fields
     ]
+
+    # Per-execution runtime / tokens / checkpoint count, for the three runs.
+    client = KitaruClient()
+    o, r, e = (
+        execution_stats(client, i) for i in (original_id, reproduced_id, edited_id)
+    )
+
+    def _runtime(stat: dict) -> str | None:
+        seconds = stat["runtime_s"]
+        return f"{seconds:.1f}s" if isinstance(seconds, (int, float)) else None
+
+    run_stats = [
+        ("runtime", _runtime(o), _runtime(r), _runtime(e)),
+        ("total tokens", o["total_tokens"], r["total_tokens"], e["total_tokens"]),
+        (
+            "checkpoints",
+            o["checkpoint_count"],
+            r["checkpoint_count"],
+            e["checkpoint_count"],
+        ),
+    ]
+
     reproduction_drift = diff_decisions(original, reproduced).has_drift
     edited_drift = diff_decisions(reproduced, edited).has_drift
     return write_html(
         HTML_PATH,
-        exec_id=exec_id,
+        exec_id=original_id,
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
         # The HTML diagram labels steps with friendly names (_FLOW_NODES); the
-        # real replay anchor is CUT == "lookup_policy_tool".
+        # real replay anchor is REPLAY_POINT == "lookup_policy_tool".
         cut="lookup_policy_tool",
         nodes=_FLOW_NODES,
         settings_changes=[
@@ -137,6 +162,7 @@ def write_comparison_html(
             ("prompt_profile", "baseline", FORK_PROMPT_PROFILE),
         ],
         outcomes=outcomes,
+        run_stats=run_stats,
         has_reproduction_drift=reproduction_drift,
         has_edited_drift=edited_drift,
         original_summary=decision_summary(original),
@@ -164,10 +190,10 @@ def run() -> str:
     print(f"   original exec_id={handle.exec_id}")
     print(f"   {decision_summary(decision)}")
     print("   CLI reproduction:")
-    print(f"     kitaru executions replay {handle.exec_id} --from {CUT}")
+    print(f"     kitaru executions replay {handle.exec_id} --at {REPLAY_POINT}")
     print("   CLI edited replay:")
     print(
-        f"     kitaru executions replay {handle.exec_id} --from {CUT} "
+        f"     kitaru executions replay {handle.exec_id} --at {REPLAY_POINT} "
         f'--args \'{{"model": "{FORK_MODEL}", '
         f'"prompt_profile": "{FORK_PROMPT_PROFILE}"}}\''
     )
@@ -189,7 +215,7 @@ def replay(exec_id: str) -> None:
         "(cached first model/context, live policy/final decision)"
     )
 
-    reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
+    reproduced = support_copilot_flow.replay(exec_id, at=REPLAY_POINT, cache=False)
     reproduced.wait()
 
     reproduced_decision = load_support_decision_from_execution(
@@ -209,7 +235,7 @@ def replay(exec_id: str) -> None:
     )
     edited = support_copilot_flow.replay(
         exec_id,
-        from_=CUT,
+        at=REPLAY_POINT,
         cache=False,
         model=FORK_MODEL,
         prompt_profile=FORK_PROMPT_PROFILE,
@@ -225,9 +251,34 @@ def replay(exec_id: str) -> None:
     )
 
     path = write_comparison_html(
-        exec_id, original_decision, reproduced_decision, edited_decision
+        exec_id,
+        reproduced.exec_id,
+        edited.exec_id,
+        original_decision,
+        reproduced_decision,
+        edited_decision,
     )
     print(f"   html: {path}")
+
+    section("Diff — structural checkpoint comparison via kitaru.diff()")
+    execution_diff = diff(exec_id, reproduced.exec_id, edited.exec_id)
+    if execution_diff.urls:
+        for compare_url in execution_diff.urls:
+            print(f"   ui: {compare_url}")
+    for replay_id, checkpoint_diffs in execution_diff.compared:
+        changed = [
+            item.name
+            for item in checkpoint_diffs
+            if not item.status_match
+            or any(
+                left != right
+                for left, right in item.artifact_hashes.values()
+                if left is not None or right is not None
+            )
+        ]
+        print(f"   diff vs {replay_id}: {len(changed)} changed checkpoint(s)")
+        if changed:
+            print(f"     {', '.join(changed)}")
 
 
 def cohort() -> None:
@@ -235,7 +286,7 @@ def cohort() -> None:
     section("Cohort — apply the edit across recent 10 production runs")
 
     client = KitaruClient()
-    cases = recent_exec_ids(client, 10)
+    cases = recent_exec_ids(client, 3)
     report = run_cohort(
         cases,
         baseline_model=BASELINE_MODEL,

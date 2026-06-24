@@ -1093,14 +1093,17 @@ def test_executions_replay_returns_structured_execution(
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
         payload = kitaru_executions_replay(
             "kr-a8f3c2",
-            from_="write_summary",
+            at="write_summary",
             flow_inputs={"topic": "new topic"},
         )
 
     mock_kitaru_client.executions.replay.assert_called_once_with(
         "kr-a8f3c2",
-        from_="write_summary",
-        overrides=None,
+        at="write_summary",
+        input=None,
+        output=None,
+        tool=None,
+        llm_model=None,
         topic="new topic",
     )
     assert payload["available"] is True

@@ -11,13 +11,13 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from functools import update_wrapper, wraps
-from typing import Any, cast, overload
+from typing import Any, Literal, cast, overload
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -98,7 +98,13 @@ from kitaru.errors import (
     format_recovery_hint,
     traceback_last_line,
 )
-from kitaru.replay import build_replay_plan
+from kitaru.replay import (
+    ReplayManyResult,
+    build_replay_plan,
+    replay_at_skip_reason,
+    replay_at_status,
+)
+from kitaru.replay_context import KITARU_REPLAY_CONTEXT_ENV
 from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
@@ -397,9 +403,7 @@ def _record_flow_result_reference(artifact: ArtifactVersionResponse) -> None:
 
         _log_flow_metadata(**{_FLOW_RESULT_REF_METADATA_KEY: str(artifact.id)})
     except Exception:
-        logger.debug(
-            "Could not record flow result reference metadata.", exc_info=True
-        )
+        logger.debug("Could not record flow result reference metadata.", exc_info=True)
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -491,6 +495,21 @@ def _build_pipeline_options(
     if transport_image is not None and transport_image.secret_environment_from:
         options["secrets"] = list(transport_image.secret_environment_from)
     return options
+
+
+def _inject_replay_context_env(
+    image: ImageSettings | None,
+    *,
+    replay_context_json: str,
+) -> ImageSettings:
+    """Attach replay runtime context to the transport image environment."""
+    existing_environment = (
+        dict(image.environment) if image and image.environment else {}
+    )
+    existing_environment[KITARU_REPLAY_CONTEXT_ENV] = replay_context_json
+    if image is None:
+        return ImageSettings(environment=existing_environment)
+    return image.model_copy(update={"environment": existing_environment})
 
 
 def _inject_model_registry_env(
@@ -1631,30 +1650,37 @@ class _FlowDefinition:
 
     def replay(
         self,
-        exec_id: str,
+        execution: str,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
         stack: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
         **flow_inputs: Any,
     ) -> FlowHandle:
-        """Replay a prior execution from a checkpoint boundary.
+        """Replay a prior execution from a checkpoint cut point.
 
         Args:
-            exec_id: Source execution ID.
-            from_: Checkpoint selector (name, invocation ID, or call ID).
-            overrides: Optional `checkpoint.*` override map.
+            execution: Source execution ID.
+            at: Checkpoint selector for the replay cut (name, invocation ID,
+                or call ID). Checkpoints before ``at`` are skipped; ``at`` and
+                downstream checkpoints re-execute unless mocked via ``output=``.
+            input: Optional checkpoint input overrides keyed by selector.
+            output: Optional checkpoint output mocks keyed by tool/checkpoint
+                name or call ID.
+            tool: Optional tool implementation overrides as import paths.
+            llm_model: Optional model alias applied to ``llm_call`` checkpoints
+                in the live replay tail.
             stack: Optional stack override for the replay run.
             image: Optional image override for the replay run.
             cache: Optional cache override for the replay run.
-            retries: Optional retry override for the replay run. Retries rerun
-                the whole flow body; if an internal result-artifact save fails
-                after user code returns, ZenML may replay any side effects in
-                the flow.
-            **flow_inputs: Optional flow input overrides.
+            retries: Optional retry override for the replay run.
+            **flow_inputs: Flow input overrides forwarded to the pipeline.
 
         Returns:
             A handle for the replayed execution.
@@ -1664,19 +1690,22 @@ class _FlowDefinition:
 
         try:
             original_run = Client().get_pipeline_run(
-                name_id_or_prefix=exec_id,
+                name_id_or_prefix=execution,
                 allow_name_prefix_match=False,
                 hydrate=True,
             )
         except Exception as exc:
             raise KitaruBackendError(
-                f"Failed to load source execution '{exec_id}' for replay: {exc}"
+                f"Failed to load source execution '{execution}' for replay: {exc}"
             ) from exc
 
         replay_plan = build_replay_plan(
             run=original_run,
-            from_=from_,
-            overrides=overrides,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
             flow_inputs=flow_inputs,
         )
 
@@ -1697,6 +1726,13 @@ class _FlowDefinition:
         transport_image, effective_model_registry = _prepare_model_registry_transport(
             resolved_execution.image
         )
+        transport_image = _inject_replay_context_env(
+            transport_image,
+            replay_context_json=replay_plan.runtime_context.to_json(),
+        )
+        resolved_execution = resolved_execution.model_copy(
+            update={"image": transport_image}
+        )
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
             flow_defaults=self._decorator_config,
@@ -1716,7 +1752,7 @@ class _FlowDefinition:
                 resolved_execution.stack
             )
             replay_metadata = {
-                "from_checkpoint": from_,
+                "at_checkpoint": at,
                 "replay_path": "flow_wrapper",
                 **deployment_metadata,
             }
@@ -1747,13 +1783,13 @@ class _FlowDefinition:
                 )
                 if failure_origin == FailureOrigin.DIVERGENCE:
                     raise execution_error_from_failure(
-                        f"Replay diverged for execution '{exec_id}': {exc}",
+                        f"Replay diverged for execution '{execution}': {exc}",
                         exec_id=str(original_run.id),
                         status="failed",
                         origin=failure_origin,
                     ) from exc
                 raise KitaruBackendError(
-                    f"Failed to replay execution '{exec_id}': {exc}"
+                    f"Failed to replay execution '{execution}': {exc}"
                 ) from exc
 
         if replayed_run is None:
@@ -1785,6 +1821,122 @@ class _FlowDefinition:
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
+        )
+
+    def replay_many(
+        self,
+        executions: Sequence[str],
+        *,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
+        stack: str | None = None,
+        image: ImageSetting | None = None,
+        cache: bool | None = None,
+        retries: int | None = None,
+        wait: bool = False,
+        on_error: Literal["collect", "fail"] = "collect",
+        **flow_inputs: Any,
+    ) -> ReplayManyResult:
+        """Replay many source executions with the same replay plan.
+
+        Parent executions whose checkpoint history does not contain ``at`` are
+        skipped and recorded in ``ReplayManyResult.skipped``. Other per-parent
+        failures are collected in ``ReplayManyResult.failures`` unless
+        ``on_error="fail"``.
+
+        Args:
+            executions: Source execution IDs to replay.
+            at: Checkpoint selector for the replay cut (same semantics as
+                ``replay()``).
+            input: Optional checkpoint input overrides keyed by selector.
+            output: Optional checkpoint output mocks keyed by tool/checkpoint
+                name or call ID.
+            tool: Optional tool implementation overrides as import paths.
+            llm_model: Optional model alias applied to ``llm_call`` checkpoints
+                in the live replay tail.
+            stack: Optional stack override for each replay run.
+            image: Optional image override for each replay run.
+            cache: Optional cache override for each replay run.
+            retries: Optional retry override for each replay run.
+            wait: When ``True``, block until each submitted replay completes.
+            on_error: ``"collect"`` records per-parent failures and continues;
+                ``"fail"`` raises on the first load or replay error.
+            **flow_inputs: Flow input overrides forwarded to each replay.
+
+        Returns:
+            Aggregated batch replay outcome grouped into successes, failures,
+            and skipped parents.
+        """
+        if not at or not at.strip():
+            raise KitaruUsageError("`at` must be a non-empty checkpoint selector.")
+
+        client = Client()
+        successes: list[tuple[str, FlowHandle]] = []
+        failures: list[tuple[str, str]] = []
+        skipped: list[tuple[str, str]] = []
+
+        replay_kwargs = {
+            "at": at,
+            "input": input,
+            "output": output,
+            "tool": tool,
+            "llm_model": llm_model,
+            "stack": stack,
+            "image": image,
+            "cache": cache,
+            "retries": retries,
+            **flow_inputs,
+        }
+
+        for execution in executions:
+            try:
+                original_run = client.get_pipeline_run(
+                    name_id_or_prefix=execution,
+                    allow_name_prefix_match=False,
+                    hydrate=True,
+                )
+            except Exception as exc:
+                message = (
+                    f"Failed to load source execution '{execution}' for replay: {exc}"
+                )
+                if on_error == "fail":
+                    raise KitaruBackendError(message) from exc
+                failures.append((execution, message))
+                continue
+
+            at_status = replay_at_status(run=original_run, at=at)
+            if at_status in {"missing", "no_checkpoints"}:
+                skipped.append(
+                    (execution, replay_at_skip_reason(run=original_run, at=at))
+                )
+                continue
+            if at_status == "ambiguous":
+                message = replay_at_skip_reason(run=original_run, at=at)
+                if on_error == "fail":
+                    raise KitaruStateError(message)
+                failures.append((execution, message))
+                continue
+
+            try:
+                handle = self.replay(execution, **replay_kwargs)
+            except Exception as exc:
+                if on_error == "fail":
+                    raise
+                failures.append((execution, str(exc)))
+                continue
+
+            if wait:
+                handle.wait()
+            successes.append((execution, handle))
+
+        return ReplayManyResult(
+            at=at,
+            successes=successes,
+            failures=failures,
+            skipped=skipped,
         )
 
     def _submit(

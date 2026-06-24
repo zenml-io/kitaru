@@ -29,21 +29,21 @@ Add `--output json` if you want to capture the new execution id programmatically
 `demo.py` narrates the same operations with SDK calls, prints the decisions, writes a three-way HTML report, and can run a small cohort experiment.
 
 ```python
-from support_agent import CUT, support_copilot_flow
+from support_agent import REPLAY_POINT, support_copilot_flow
 
 # Original recorded run.
 handle = support_copilot_flow.run(prompt, customer, "openai:gpt-5-mini", "baseline")
 handle.wait()
 exec_id = handle.exec_id
 
-# Unchanged replay / reproduction. CUT == "lookup_policy_tool".
-reproduced = support_copilot_flow.replay(exec_id, from_=CUT, cache=False)
+# Unchanged replay / reproduction. REPLAY_POINT == "lookup_policy_tool".
+reproduced = support_copilot_flow.replay(exec_id, at=REPLAY_POINT, cache=False)
 reproduced.wait()
 
 # Edited replay with new flow-input values.
 edited = support_copilot_flow.replay(
     exec_id,
-    from_=CUT,
+    at=REPLAY_POINT,
     cache=False,
     model="openai:gpt-5-nano",
     prompt_profile="trimmed_permissions",
@@ -78,7 +78,7 @@ Individual commands:
 | command | what it does |
 |---|---|
 | `uv run python demo.py run` | Run the agent once; print the original execution id, decision, and CLI replay commands. |
-| `uv run python demo.py replay <EXEC-ID>` | Load the original decision, run an unchanged replay, run an edited replay, then write `replay_three_way.html`. |
+| `uv run python demo.py replay <EXEC-ID>` | Load the original decision, run an unchanged replay, run an edited replay, then write `reports/replay_three_way.html`. |
 | `uv run python demo.py cohort` | For recent runs, first check original→unchanged replay, then measure unchanged replay→edited replay. |
 
 ## Running on a remote stack (Kubernetes)
@@ -110,7 +110,7 @@ support_copilot_model_request  →  gather_context_tool  →  lookup_policy_tool
 ```
 
 - The replay anchor is the PydanticAI `lookup_policy` tool call checkpoint,
-  `lookup_policy_tool` (the constant `CUT`).
+  `lookup_policy_tool` (the constant `REPLAY_POINT`).
 - Replaying from that checkpoint keeps the first model request and gathered context cached, then reruns the policy lookup and final model decision.
 - Because the adapter checkpoints model requests and tool calls, the cohort metrics have real LLM **token** usage and tool-call artifacts to read. Note the PydanticAI adapter records token usage, not provider dollar cost.
 - The `baseline` prompt profile treats permission, SSO, and admin changes as `needs_review`.
@@ -135,18 +135,25 @@ Three metrics are provided in `utils.py`:
 - `latency` — wall-clock seconds (lower is better)
 - `quality_judge` — an LLM judge scoring the answer 1–5 (higher is better)
 
-`report.summary()` prints metric means, original→reproduction drift count, reproduction→edited drift count, and an improvement verdict. `report.regressions()` returns the metrics and decision checks that got worse. `demo.py cohort` also writes **`cohort_report.html`** — a per-case table (each run's reproduction/decision drift and metric values) plus a numeric summary screen (cohort means, drift counts, improvement verdict).
+`report.summary()` prints metric means, original→reproduction drift count, reproduction→edited drift count, and an improvement verdict. `report.regressions()` returns the metrics and decision checks that got worse. `demo.py cohort` also writes **`reports/cohort_report.html`** — a per-case table (each run's reproduction/decision drift and metric values) plus a numeric summary screen (cohort means, drift counts, improvement verdict).
 
-## Files
+## Layout
 
-| file | purpose |
-|---|---|
-| `support_agent.py` | The PydanticAI support agent, its tools, the `KitaruAgent` wrapper, the durable `@flow`, `CUT`, and `recent_exec_ids()`. |
-| `demo.py` | The walkthrough: `run`, `replay`, and `cohort` as plain functions over SDK primitives. |
-| `cohort.py` | `run_cohort(...) -> Report` with `summary()`, `regressions()`, and per-case accessors. |
-| `utils.py` | Analysis helpers: metrics, quality judge, decision extraction, and `ReplayRun`. |
-| `comparison_html.py` | Single-run reproduce-vs-edited HTML report. |
-| `cohort_html.py` | Cohort HTML report: per-case table + numeric summary. |
+```text
+demo.py            # the walkthrough: run / replay / cohort over SDK primitives
+support_agent.py   # the PydanticAI agent, its tools, the KitaruAgent wrapper, and the durable @flow
+scratchpad.py      # the same story flat, top to bottom
+utils/             # analysis helpers
+  metrics.py       #   metrics, quality judge, decision extraction, ReplayRun, drift
+  cohort.py        #   run_cohort(...) — replay orchestration only
+reporting/         # report models + HTML render helpers
+  cohort_report.py    #   Report aggregates (summary, regressions, per-case accessors)
+  comparison_html.py  #   single-run reproduce-vs-edited report
+  cohort_html.py      #   cohort report: per-case table + numeric summary
+reports/           # generated HTML output (gitignored)
+```
+
+`utils/__init__.py` re-exports the `utils.metrics` helpers, so `from utils import cost, ...` still works.
 
 ## Validating
 

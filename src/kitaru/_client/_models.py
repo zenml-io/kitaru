@@ -546,15 +546,21 @@ class Execution:
     def replay(
         self,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
         **flow_inputs: Any,
     ) -> Execution:
-        """Replay this execution from a prior checkpoint boundary."""
+        """Replay this execution from a checkpoint cut point."""
         return self._client.executions.replay(
             self.exec_id,
-            from_=from_,
-            overrides=overrides,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
             **flow_inputs,
         )
 

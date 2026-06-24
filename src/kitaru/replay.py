@@ -1,14 +1,16 @@
 """Replay planning utilities.
 
-This module translates Kitaru replay semantics (`from_` + overrides) into the
-ZenML replay inputs consumed by `Pipeline.replay(...)`.
+Translates Kitaru replay semantics (`at`, `input`, `output`, `tool`, `llm_model`)
+into ZenML replay inputs consumed by ``Pipeline.replay(...)``.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from zenml.models import PipelineRunResponse, StepRunResponse
 
@@ -16,18 +18,53 @@ from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
 from kitaru.errors import KitaruStateError, KitaruUsageError
+from kitaru.replay_context import ReplayRuntimeContext
 
-_CHECKPOINT_OVERRIDE_PREFIX = "checkpoint."
+_TOOL_CHECKPOINT_SUFFIX = re.compile(r"_tool(?:_\d+)?$")
+
+REPLAY_RESERVED_KWARGS = frozenset(
+    {
+        "at",
+        "input",
+        "output",
+        "tool",
+        "llm_model",
+        "stack",
+        "image",
+        "cache",
+        "retries",
+    }
+)
 
 
 @dataclass(frozen=True)
 class ReplayPlan:
-    """Resolved replay parameters ready for `Pipeline.replay(...)`."""
+    """Resolved replay parameters ready for ``Pipeline.replay(...)``."""
 
     original_run_id: str
     steps_to_skip: set[str]
     input_overrides: dict[str, Any]
     step_input_overrides: dict[str, dict[str, Any]]
+    runtime_context: ReplayRuntimeContext
+
+
+ReplayAtStatus = Literal["present", "missing", "ambiguous", "no_checkpoints"]
+
+
+@dataclass(frozen=True)
+class ReplayManyResult:
+    """Batch replay outcome for ``flow.replay_many(...)``."""
+
+    at: str
+    successes: list[tuple[str, Any]]
+    failures: list[tuple[str, str]]
+    skipped: list[tuple[str, str]]
+
+    def wait(self) -> ReplayManyResult:
+        """Block until every successful replay handle completes."""
+        for _, handle in self.successes:
+            handle.wait()
+        return self
 
 
 @dataclass(frozen=True)
@@ -38,18 +75,26 @@ class _Checkpoint:
     call_id: str
     name: str
     step: StepRunResponse
+    started_at: datetime | None
+    checkpoint_type: str | None
 
 
 def _checkpoint_invocation_id(step: StepRunResponse) -> str:
-    """Return invocation ID for a step, falling back to the step name."""
     invocation_id = getattr(getattr(step, "spec", None), "invocation_id", None)
     if not isinstance(invocation_id, str) or not invocation_id:
         return step.name
     return invocation_id
 
 
+def _checkpoint_type(step: StepRunResponse) -> str | None:
+    step_type = getattr(step, "type", None)
+    if step_type is None:
+        return None
+    value = getattr(step_type, "value", step_type)
+    return str(value) if value is not None else None
+
+
 def _checkpoints(run: PipelineRunResponse) -> list[_Checkpoint]:
-    """Build checkpoint metadata list from run steps."""
     checkpoints: list[_Checkpoint] = []
     for step in run.steps.values():
         checkpoints.append(
@@ -58,6 +103,8 @@ def _checkpoints(run: PipelineRunResponse) -> list[_Checkpoint]:
                 call_id=str(step.id),
                 name=_normalize_checkpoint_name(step.name),
                 step=step,
+                started_at=getattr(step, "start_time", None),
+                checkpoint_type=_checkpoint_type(step),
             )
         )
     return checkpoints
@@ -68,6 +115,64 @@ def _available_checkpoint_selectors(checkpoints: Sequence[_Checkpoint]) -> str:
     if not names:
         return "none"
     return ", ".join(names)
+
+
+def replay_at_status(
+    *,
+    run: PipelineRunResponse,
+    at: str,
+) -> ReplayAtStatus:
+    """Return whether ``at`` resolves for a source execution."""
+    checkpoints = _checkpoints(run)
+    if not checkpoints:
+        return "no_checkpoints"
+
+    matches = [
+        checkpoint
+        for checkpoint in checkpoints
+        if at
+        in {
+            checkpoint.name,
+            checkpoint.invocation_id,
+            checkpoint.call_id,
+        }
+    ]
+    if len(matches) == 1:
+        return "present"
+    if len(matches) > 1:
+        return "ambiguous"
+    return "missing"
+
+
+def replay_at_skip_reason(*, run: PipelineRunResponse, at: str) -> str:
+    """Return a human-readable skip/failure reason for a replay ``at`` selector."""
+    status = replay_at_status(run=run, at=at)
+    if status == "no_checkpoints":
+        return f"Execution '{run.id}' has no checkpoint history to replay."
+    if status == "missing":
+        checkpoints = _checkpoints(run)
+        return (
+            f"Unknown checkpoint selector '{at}'. Available checkpoints: "
+            f"{_available_checkpoint_selectors(checkpoints)}."
+        )
+    call_ids = ", ".join(
+        sorted(
+            {
+                checkpoint.call_id
+                for checkpoint in _checkpoints(run)
+                if at
+                in {
+                    checkpoint.name,
+                    checkpoint.invocation_id,
+                    checkpoint.call_id,
+                }
+            }
+        )
+    )
+    return (
+        f"Replay selector '{at}' is ambiguous. Use a checkpoint call ID instead. "
+        f"Matching call IDs: {call_ids}."
+    )
 
 
 def _resolve_checkpoint_selector(
@@ -88,15 +193,46 @@ def _resolve_checkpoint_selector(
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
+        call_ids = ", ".join(sorted({match.call_id for match in matches}))
         raise KitaruStateError(
             "Replay selector is ambiguous for checkpoint "
-            f"'{selector}'. Use a checkpoint call ID instead."
+            f"'{selector}'. Use a checkpoint call ID instead. "
+            f"Matching call IDs: {call_ids}."
         )
 
     raise KitaruStateError(
         f"Unknown checkpoint selector '{selector}'. Available checkpoints: "
         f"{_available_checkpoint_selectors(checkpoints)}."
     )
+
+
+def _normalized_tool_name(name: str) -> str:
+    """Normalize adapter tool checkpoint names for replay selectors."""
+    if _TOOL_CHECKPOINT_SUFFIX.search(name):
+        return _TOOL_CHECKPOINT_SUFFIX.sub("", name)
+    return name.removesuffix("_tool")
+
+
+def _tool_key_matches_checkpoint(tool_key: str, checkpoint: _Checkpoint) -> bool:
+    normalized_key = _normalized_tool_name(tool_key.removesuffix("_tool"))
+    normalized_name = _normalized_tool_name(checkpoint.name)
+    return normalized_key == normalized_name or tool_key in {
+        checkpoint.name,
+        checkpoint.invocation_id,
+        checkpoint.call_id,
+    }
+
+
+def _checkpoints_for_tool_key(
+    tool_key: str,
+    checkpoints: Sequence[_Checkpoint],
+) -> list[_Checkpoint]:
+    matches = [
+        checkpoint
+        for checkpoint in checkpoints
+        if _tool_key_matches_checkpoint(tool_key, checkpoint)
+    ]
+    return matches
 
 
 def _iter_step_input_specs(step: StepRunResponse) -> Iterator[tuple[str, Any]]:
@@ -139,8 +275,9 @@ def _single_checkpoint_output_name(checkpoint: _Checkpoint) -> str:
         )
     if len(output_names) > 1:
         raise KitaruUsageError(
-            "Checkpoint overrides currently require single-output checkpoints. "
-            f"Checkpoint '{checkpoint.name}' has outputs: {', '.join(output_names)}."
+            "Checkpoint output overrides currently require single-output "
+            f"checkpoints. Checkpoint '{checkpoint.name}' has outputs: "
+            f"{', '.join(output_names)}."
         )
     return output_names[0]
 
@@ -161,13 +298,12 @@ def _find_downstream_consumers(
                 continue
             if upstream_output_name != output_name:
                 continue
-
             consumers.append((checkpoint.invocation_id, input_name))
 
     if not consumers:
         raise KitaruStateError(
-            "Checkpoint override has no downstream consumer in this execution: "
-            f"{source.name}."
+            "Checkpoint output override has no downstream consumer in this "
+            f"execution: {source.name}."
         )
 
     return consumers
@@ -176,7 +312,6 @@ def _find_downstream_consumers(
 def _build_children_by_invocation(
     checkpoints: Sequence[_Checkpoint],
 ) -> dict[str, set[str]]:
-    """Build parent->children adjacency for checkpoints in this run."""
     checkpoints_by_invocation = {
         checkpoint.invocation_id: checkpoint for checkpoint in checkpoints
     }
@@ -202,7 +337,6 @@ def _collect_descendants(
     roots: set[str],
     children_by_invocation: Mapping[str, set[str]],
 ) -> set[str]:
-    """Collect all transitive descendants for the provided roots."""
     descendants: set[str] = set()
     to_visit = list(roots)
 
@@ -217,74 +351,158 @@ def _collect_descendants(
     return descendants
 
 
-def _split_overrides(
-    overrides: Mapping[str, Any] | None,
+def _checkpoint_input_slot_names(checkpoint: _Checkpoint) -> set[str]:
+    if checkpoint.checkpoint_type == "tool_call":
+        return {"tool_args"}
+    if checkpoint.checkpoint_type == "llm_call":
+        return {"messages", "input", "user_prompt", "message_history"}
+    names: set[str] = set()
+    for input_name, _ in _iter_step_input_specs(checkpoint.step):
+        names.add(input_name)
+    return names or {"input"}
+
+
+def _normalize_checkpoint_input_value(
+    checkpoint: _Checkpoint,
+    value: Any,
 ) -> dict[str, Any]:
-    checkpoint_overrides: dict[str, Any] = {}
+    if isinstance(value, Mapping):
+        slot_names = _checkpoint_input_slot_names(checkpoint)
+        if slot_names.intersection(value.keys()):
+            return dict(value)
+        if checkpoint.checkpoint_type == "tool_call":
+            return {"tool_args": value}
+        if checkpoint.checkpoint_type == "llm_call":
+            return {"messages": value}
+        if len(slot_names) == 1:
+            slot_name = next(iter(slot_names))
+            return {slot_name: value}
+        return dict(value)
+    slot_names = _checkpoint_input_slot_names(checkpoint)
+    if len(slot_names) == 1:
+        return {next(iter(slot_names)): value}
+    raise KitaruUsageError(
+        f"Checkpoint input override for '{checkpoint.name}' must be a mapping "
+        f"with one of: {', '.join(sorted(slot_names))}."
+    )
 
-    if not overrides:
-        return checkpoint_overrides
 
-    for key, value in overrides.items():
-        if key.startswith(_CHECKPOINT_OVERRIDE_PREFIX):
-            selector = key.removeprefix(_CHECKPOINT_OVERRIDE_PREFIX).strip()
-            if not selector:
-                raise KitaruUsageError(
-                    "Checkpoint override keys must include a selector after "
-                    "`checkpoint.`."
-                )
-            checkpoint_overrides[selector] = value
+def _resolve_input_targets(
+    input_overrides: Mapping[str, Any] | None,
+    checkpoints: Sequence[_Checkpoint],
+) -> list[tuple[_Checkpoint, dict[str, Any]]]:
+    if not input_overrides:
+        return []
+
+    targets: list[tuple[_Checkpoint, dict[str, Any]]] = []
+    for selector, value in input_overrides.items():
+        checkpoint = _resolve_checkpoint_selector(selector, checkpoints)
+        targets.append(
+            (checkpoint, _normalize_checkpoint_input_value(checkpoint, value))
+        )
+    return targets
+
+
+def _resolve_output_targets(
+    output_overrides: Mapping[str, Any] | None,
+    *,
+    at_checkpoint: _Checkpoint,
+    checkpoints: Sequence[_Checkpoint],
+) -> list[tuple[_Checkpoint, Any]]:
+    if not output_overrides:
+        return []
+
+    targets: list[tuple[_Checkpoint, Any]] = []
+    for tool_key, value in output_overrides.items():
+        if _tool_key_matches_checkpoint(tool_key, at_checkpoint):
+            targets.append((at_checkpoint, value))
             continue
 
-        if key.startswith("wait."):
-            raise KitaruUsageError(
-                "Wait overrides (`wait.*`) are not supported in replay. "
-                "If the replayed execution reaches a wait, resolve it "
-                "via `client.executions.input(...)` or "
-                "`kitaru executions input`."
+        matches = _checkpoints_for_tool_key(tool_key, checkpoints)
+        if not matches:
+            raise KitaruStateError(
+                f"Unknown output override target '{tool_key}'. Available "
+                f"checkpoints: {_available_checkpoint_selectors(checkpoints)}."
             )
+        if len(matches) > 1:
+            call_ids = ", ".join(sorted({match.call_id for match in matches}))
+            raise KitaruStateError(
+                f"Output override target '{tool_key}' is ambiguous. Scope with "
+                f"`at=` on the target invocation or use a checkpoint call ID. "
+                f"Matching call IDs: {call_ids}."
+            )
+        targets.append((matches[0], value))
 
-        raise KitaruUsageError(
-            f"Override keys must start with `checkpoint.`. Received: {key!r}."
-        )
+    return targets
 
-    return checkpoint_overrides
+
+def _compute_live_steps(
+    *,
+    at_checkpoint: _Checkpoint,
+    checkpoints: Sequence[_Checkpoint],
+    children_by_invocation: Mapping[str, set[str]],
+) -> set[str]:
+    live_roots = {at_checkpoint.invocation_id}
+    live = live_roots | _collect_descendants(
+        roots=live_roots,
+        children_by_invocation=children_by_invocation,
+    )
+
+    at_started_at = at_checkpoint.started_at
+    if at_started_at is None:
+        return live
+
+    checkpoints_by_invocation = {
+        checkpoint.invocation_id: checkpoint for checkpoint in checkpoints
+    }
+    for checkpoint in checkpoints:
+        if checkpoint.invocation_id in live:
+            continue
+        if checkpoint.started_at is None:
+            continue
+        if checkpoint.started_at < at_started_at:
+            continue
+        has_dag_link = False
+        to_visit = [at_checkpoint.invocation_id]
+        visited: set[str] = set()
+        while to_visit:
+            current = to_visit.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            if current == checkpoint.invocation_id:
+                has_dag_link = True
+                break
+            upstream_steps: Sequence[str] = (
+                getattr(
+                    getattr(checkpoints_by_invocation[current].step, "spec", None),
+                    "upstream_steps",
+                    None,
+                )
+                or ()
+            )
+            to_visit.extend(upstream_steps)
+
+        if not has_dag_link and checkpoint.started_at >= at_started_at:
+            continue
+
+    return live
 
 
 def build_replay_plan(
     *,
     run: PipelineRunResponse,
-    from_: str | None = None,
-    skip: Sequence[str] | None = None,
-    overrides: Mapping[str, Any] | None = None,
+    at: str,
+    input: Mapping[str, Any] | None = None,
+    output: Mapping[str, Any] | None = None,
+    tool: Mapping[str, str] | None = None,
+    llm_model: str | None = None,
     flow_inputs: Mapping[str, Any] | None = None,
 ) -> ReplayPlan:
-    """Build a replay plan for a completed/paused execution.
+    """Build a replay plan for a completed or paused execution.
 
-    Exactly one of ``from_`` or ``skip`` must be provided.
-
-    When ``from_`` is given, replay starts from the explicit checkpoint.
-    For checkpoint overrides, the direct consumers of each overridden source
-    are added as replay roots (the source itself is not forced to re-execute).
-
-    When ``skip`` is given, the named checkpoints are frozen (kept cached)
-    and everything else re-executes.
-
-    Args:
-        run: Source execution to replay from.
-        from_: Checkpoint selector (checkpoint name, invocation ID, or call ID).
-            Mutually exclusive with ``skip``.
-        skip: List of checkpoint selectors to keep cached (freeze). Everything
-            else re-executes. Mutually exclusive with ``from_``.
-        overrides: Optional checkpoint override map (`checkpoint.*` keys).
-        flow_inputs: Optional flow input overrides.
-
-    Returns:
-        A resolved replay plan.
-
-    Raises:
-        KitaruStateError: If replay planning fails due to invalid run state.
-        KitaruUsageError: If replay planning fails due to invalid usage.
+    Checkpoints before ``at`` are skipped (playback). ``at`` and its downstream
+    descendants re-execute unless mocked via ``output=``.
     """
     checkpoints = _checkpoints(run)
     if not checkpoints:
@@ -292,67 +510,84 @@ def build_replay_plan(
             f"Execution '{run.id}' has no checkpoint history to replay."
         )
 
-    if (from_ is None) == (skip is None):
-        raise KitaruUsageError("Provide exactly one of `from_` or `skip`.")
+    if not at or not at.strip():
+        raise KitaruUsageError("`at` must be a non-empty checkpoint selector.")
 
-    checkpoint_overrides = _split_overrides(overrides)
-
-    if skip is not None:
-        if checkpoint_overrides:
-            raise KitaruUsageError(
-                "`overrides` is only supported with `from_`, not `skip`."
-            )
-        frozen = {
-            _resolve_checkpoint_selector(sel, checkpoints).invocation_id for sel in skip
-        }
-        all_steps = {cp.invocation_id for cp in checkpoints}
-        steps_to_skip = frozen & all_steps
-        return ReplayPlan(
-            original_run_id=str(run.id),
-            steps_to_skip=steps_to_skip,
-            input_overrides=dict(flow_inputs or {}),
-            step_input_overrides={},
-        )
-
-    if not from_ or not from_.strip():
-        raise KitaruUsageError("`from_` must be a non-empty selector.")
-
-    explicit_checkpoint = _resolve_checkpoint_selector(from_, checkpoints)
-
-    step_input_overrides: dict[str, dict[str, Any]] = {}
-    replay_roots = {explicit_checkpoint.invocation_id}
-
-    for selector, value in checkpoint_overrides.items():
-        source = _resolve_checkpoint_selector(selector, checkpoints)
-        consumers = _find_downstream_consumers(
-            source=source,
-            checkpoints=checkpoints,
-        )
-        for invocation_id, input_name in consumers:
-            step_input_overrides.setdefault(invocation_id, {})[input_name] = value
-            replay_roots.add(invocation_id)
-
+    at_checkpoint = _resolve_checkpoint_selector(at, checkpoints)
     children_by_invocation = _build_children_by_invocation(checkpoints)
-    steps_to_reexecute = replay_roots | _collect_descendants(
-        roots=replay_roots,
+    all_steps = {checkpoint.invocation_id for checkpoint in checkpoints}
+
+    live = _compute_live_steps(
+        at_checkpoint=at_checkpoint,
+        checkpoints=checkpoints,
         children_by_invocation=children_by_invocation,
     )
-    all_steps = {checkpoint.invocation_id for checkpoint in checkpoints}
-    steps_to_skip = all_steps - steps_to_reexecute
+    steps_to_skip = all_steps - live
 
-    # Safety check: ZenML's explicit steps_to_skip wins unconditionally — it
-    # does NOT check for step_input_overrides. If a step appears in both sets,
-    # the override would be silently discarded.
+    step_input_overrides: dict[str, dict[str, Any]] = {}
+    runtime_input_overrides: dict[str, dict[str, Any]] = {}
+
+    for checkpoint, normalized in _resolve_input_targets(input, checkpoints):
+        steps_to_skip.discard(checkpoint.invocation_id)
+        live.add(checkpoint.invocation_id)
+        live |= _collect_descendants(
+            roots={checkpoint.invocation_id},
+            children_by_invocation=children_by_invocation,
+        )
+        step_input_overrides.setdefault(checkpoint.invocation_id, {}).update(normalized)
+        runtime_input_overrides[checkpoint.call_id] = normalized
+
+    steps_to_skip = all_steps - live
+
+    output_mocks: dict[str, Any] = {}
+    for source, value in _resolve_output_targets(
+        output,
+        at_checkpoint=at_checkpoint,
+        checkpoints=checkpoints,
+    ):
+        steps_to_skip.add(source.invocation_id)
+        live.discard(source.invocation_id)
+        for invocation_id, input_name in _find_downstream_consumers(
+            source=source,
+            checkpoints=checkpoints,
+        ):
+            live.add(invocation_id)
+            live |= _collect_descendants(
+                roots={invocation_id},
+                children_by_invocation=children_by_invocation,
+            )
+            step_input_overrides.setdefault(invocation_id, {})[input_name] = value
+        output_mocks[source.call_id] = value
+
+    steps_to_skip = all_steps - live
+
     overlap = steps_to_skip & set(step_input_overrides)
     if overlap:
         steps_to_skip -= overlap
+
+    runtime_context = ReplayRuntimeContext(
+        at=at,
+        output_mocks=output_mocks,
+        tool_overrides=dict(tool or {}),
+        llm_model=llm_model,
+        llm_model_at=at if llm_model and at else None,
+        input_overrides=runtime_input_overrides,
+    )
 
     return ReplayPlan(
         original_run_id=str(run.id),
         steps_to_skip=steps_to_skip,
         input_overrides=dict(flow_inputs or {}),
         step_input_overrides=step_input_overrides,
+        runtime_context=runtime_context,
     )
 
 
-__all__ = ["ReplayPlan", "build_replay_plan"]
+__all__ = [
+    "REPLAY_RESERVED_KWARGS",
+    "ReplayManyResult",
+    "ReplayPlan",
+    "build_replay_plan",
+    "replay_at_skip_reason",
+    "replay_at_status",
+]

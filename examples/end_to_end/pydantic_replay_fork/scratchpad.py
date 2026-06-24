@@ -1,6 +1,6 @@
 from demo import write_comparison_html
 from dotenv import load_dotenv
-from support_agent import CUT, support_copilot_flow
+from support_agent import REPLAY_POINT, support_copilot_flow
 from utils import load_support_decision_from_execution
 
 from kitaru import KitaruClient
@@ -23,14 +23,14 @@ handle.wait()
 original_id = handle.exec_id
 
 # 2) Reproduce from `decide`, NO edits.
-repro = support_copilot_flow.replay(original_id, from_=CUT, cache=False)
+repro = support_copilot_flow.replay(original_id, at=REPLAY_POINT, cache=False)
 repro.wait()
 repro_id = repro.exec_id
 
 # 3) Edited replay from `decide` — cheaper model (gpt-5-nano) + looser prompt.
 edited = support_copilot_flow.replay(
     original_id,
-    from_=CUT,
+    at=REPLAY_POINT,
     cache=False,
     model="openai:gpt-5-nano",
     prompt_profile="trimmed_permissions",
@@ -49,6 +49,6 @@ print(f"Edited Decision: {edited_decision}")
 
 # 5) Write the three-way original/reproduced/edited comparison HTML.
 path = write_comparison_html(
-    original_id, original_decision, repro_decision, edited_decision
+    original_id, repro_id, edited_id, original_decision, repro_decision, edited_decision
 )
 print(f"HTML: {path}")

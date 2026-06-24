@@ -437,8 +437,11 @@ def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
 @tracked_mcp_tool
 def kitaru_executions_replay(
     exec_id: str,
-    from_: str,
-    overrides: dict[str, Any] | None = None,
+    at: str,
+    input: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
+    tool: dict[str, str] | None = None,
+    llm_model: str | None = None,
     flow_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Replay an execution and return structured replay details."""
@@ -450,8 +453,11 @@ def kitaru_executions_replay(
         )
         execution = client_api.KitaruClient().executions.replay(
             exec_id,
-            from_=from_,
-            overrides=overrides,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
             **replay_inputs,
         )
 

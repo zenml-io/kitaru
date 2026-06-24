@@ -54,8 +54,8 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, str, str]:
     edited_notes = f"edited notes for {topic}"
     replayed = client.executions.replay(
         source_handle.exec_id,
-        from_="write_draft",
-        overrides={"checkpoint.research": edited_notes},
+        at="write_draft",
+        output={"research": edited_notes},
     )
     print(f"Replay execution started: {replayed.exec_id}")
 

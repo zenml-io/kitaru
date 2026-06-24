@@ -25,7 +25,11 @@ from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from support_agent import FINAL_DECISION_CHECKPOINT, MODEL_CHECKPOINT_PREFIX
+from support_agent import (
+    FINAL_DECISION_CHECKPOINT,
+    FLOW_NAME,
+    MODEL_CHECKPOINT_PREFIX,
+)
 
 from kitaru import KitaruClient
 
@@ -383,3 +387,46 @@ def quality_judge(baseline: ReplayRun, variant: ReplayRun) -> MetricDelta:
         variant_value=v_score,
         lower_is_better=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Execution-level stats — runtime, tokens, checkpoint count
+# ---------------------------------------------------------------------------
+
+
+def execution_stats(client: KitaruClient, exec_id: str) -> dict:
+    """Return wall-clock runtime (s), total tokens, and checkpoint count.
+
+    Any field is None when the backend did not record it (e.g. no usage summary
+    or missing timestamps).
+    """
+    run = client.executions.get(exec_id)
+    started = run.started_at
+    ended = run.ended_at
+    runtime_s = (
+        max(0.0, (ended - started).total_seconds())
+        if started is not None and ended is not None
+        else None
+    )
+    summary = run.llm_usage_summary or {}
+    return {
+        "runtime_s": runtime_s,
+        "total_tokens": summary.get("total_tokens"),
+        "checkpoint_count": len(run.checkpoints),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Listing prior runs — a plain helper over the SDK client
+# ---------------------------------------------------------------------------
+
+
+def recent_exec_ids(client: KitaruClient, n: int) -> list[str]:
+    """Return the ``n`` most recent ORIGINAL (non-replay) exec_ids, newest first.
+
+    Replays show up in the list too; we keep only the originals (those with no
+    ``original_exec_id``) so the cohort experiments against real production runs.
+    """
+    runs = client.executions.list(flow=FLOW_NAME, limit=n * 5)
+    originals = [e for e in runs if e.original_exec_id is None]
+    return [e.exec_id for e in originals[:n]]

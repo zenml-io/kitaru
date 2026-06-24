@@ -94,6 +94,7 @@ def render(
     nodes: Sequence[str],
     settings_changes: Sequence[tuple[str, Any, Any]],
     outcomes: Sequence[tuple[str, Any, Any, Any, bool, bool]],
+    run_stats: Sequence[tuple[str, Any, Any, Any]],
     has_reproduction_drift: bool,
     has_edited_drift: bool,
     original_summary: str,
@@ -128,6 +129,22 @@ def render(
     ) or (
         '<tr><td class="field">—</td>'
         '<td class="val">no settings changed</td><td></td><td></td></tr>'
+    )
+
+    stats_rows = "".join(
+        f'<tr><td class="field">{html.escape(label)}</td>'
+        f'<td class="val">{_fmt(o)}</td>'
+        f'<td class="val">{_fmt(r)}</td>'
+        f'<td class="val">{_fmt(e)}</td></tr>'
+        for label, o, r, e in run_stats
+    )
+    stats_card = (
+        '<div class="card"><h2>Run stats — original vs unchanged replay vs '
+        "edited replay</h2><table><thead><tr><th>Metric</th>"
+        "<th>Original recorded run</th><th>Unchanged replay</th>"
+        f"<th>Edited replay</th></tr></thead><tbody>{stats_rows}</tbody></table></div>"
+        if run_stats
+        else ""
     )
 
     outcome_rows = ""
@@ -166,6 +183,8 @@ def render(
 <p class="legend">Dashed = served from checkpoint cache. Blue = re-executed live from the cut point.</p>
 </div>
 
+{stats_card}
+
 <div class="card"><h2>Outcomes — original → unchanged replay → edited replay</h2>
 <table>
 <thead><tr><th>Field</th><th>Original recorded run</th><th>Unchanged replay</th><th>Edited replay</th><th>Original→Replay</th><th>Replay→Edited</th></tr></thead>
@@ -191,6 +210,7 @@ def write(
     nodes: Sequence[str],
     settings_changes: Sequence[tuple[str, Any, Any]],
     outcomes: Sequence[tuple[str, Any, Any, Any, bool, bool]],
+    run_stats: Sequence[tuple[str, Any, Any, Any]] = (),
     has_reproduction_drift: bool,
     has_edited_drift: bool,
     original_summary: str,
@@ -207,11 +227,13 @@ def write(
         nodes=nodes,
         settings_changes=settings_changes,
         outcomes=outcomes,
+        run_stats=run_stats,
         has_reproduction_drift=has_reproduction_drift,
         has_edited_drift=has_edited_drift,
         original_summary=original_summary,
         reproduced_summary=reproduced_summary,
         edited_summary=edited_summary,
     )
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(content, encoding="utf-8")
     return str(Path(path).resolve())

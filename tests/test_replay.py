@@ -10,8 +10,8 @@ from uuid import uuid4
 import pytest
 from zenml.models import PipelineRunResponse
 
-from kitaru.errors import KitaruStateError, KitaruUsageError
-from kitaru.replay import build_replay_plan
+from kitaru.errors import KitaruStateError
+from kitaru.replay import build_replay_plan, replay_at_status
 
 
 def _input_spec(step_name: str, output_name: str) -> Any:
@@ -25,10 +25,15 @@ def _step(
     started_at: datetime,
     upstream_steps: list[str] | None = None,
     inputs_v2: dict[str, list[Any]] | None = None,
+    step_type: str | None = None,
 ) -> Any:
+    step_type_obj = None
+    if step_type is not None:
+        step_type_obj = SimpleNamespace(value=step_type)
     return SimpleNamespace(
         id=uuid4(),
         name=name,
+        type=step_type_obj,
         start_time=started_at,
         end_time=started_at + timedelta(seconds=1),
         spec=SimpleNamespace(
@@ -51,13 +56,27 @@ def _run(*steps: Any) -> PipelineRunResponse:
     )
 
 
-def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
+def test_replay_at_status_detects_present_missing_and_ambiguous() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    fetch = _step(
-        name="fetch",
-        invocation_id="fetch",
-        started_at=t0,
+    write_a = _step(name="write", invocation_id="write-a", started_at=t0)
+    write_b = _step(name="write", invocation_id="write-b", started_at=t0)
+    ambiguous_run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(
+            id=uuid4(),
+            steps={"write-a": write_a, "write-b": write_b},
+        ),
     )
+
+    assert replay_at_status(run=_run(write_a), at="write") == "present"
+    assert replay_at_status(run=ambiguous_run, at="write") == "ambiguous"
+    assert replay_at_status(run=_run(write_a), at="missing") == "missing"
+    assert replay_at_status(run=_run(), at="write") == "no_checkpoints"
+
+
+def test_build_replay_plan_skips_steps_before_at_selector() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    fetch = _step(name="fetch", invocation_id="fetch", started_at=t0)
     write = _step(
         name="write",
         invocation_id="write",
@@ -73,23 +92,20 @@ def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
         inputs_v2={"draft": [_input_spec("write", "output")]},
     )
 
-    plan = build_replay_plan(
-        run=_run(fetch, write, publish),
-        from_="write",
-    )
+    plan = build_replay_plan(run=_run(fetch, write, publish), at="write")
 
     assert plan.steps_to_skip == {"fetch"}
     assert plan.input_overrides == {}
     assert plan.step_input_overrides == {}
 
 
-def test_checkpoint_override_reexecutes_override_source_path() -> None:
-    """Checkpoint overrides should replay from direct override consumers."""
+def test_output_override_skips_source_and_injects_downstream() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
         name="fetch",
         invocation_id="fetch",
         started_at=t0,
+        step_type="tool_call",
     )
     write = _step(
         name="write",
@@ -108,23 +124,21 @@ def test_checkpoint_override_reexecutes_override_source_path() -> None:
 
     plan = build_replay_plan(
         run=_run(fetch, write, publish),
-        from_="publish",
-        overrides={"checkpoint.fetch": "edited research"},
+        at="publish",
+        output={"fetch": "edited research"},
     )
 
-    # Replay roots include publish (from_) and direct consumers of the override
-    # source (write). fetch remains skipped.
-    assert plan.steps_to_skip == {"fetch"}
+    assert "fetch" in plan.steps_to_skip
     assert plan.step_input_overrides == {"write": {"research": "edited research"}}
 
 
-def test_skip_override_disjointness_is_enforced() -> None:
-    """Steps with input overrides must not appear in steps_to_skip."""
+def test_input_override_forces_checkpoint_reexecution() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
         name="fetch",
         invocation_id="fetch",
         started_at=t0,
+        step_type="tool_call",
     )
     transform = _step(
         name="transform",
@@ -141,27 +155,19 @@ def test_skip_override_disjointness_is_enforced() -> None:
         inputs_v2={"features": [_input_spec("transform", "output")]},
     )
 
-    # from_="train" skips fetch/transform. Override on transform injects into
-    # train (already a replay root), so skip set remains unchanged.
     plan = build_replay_plan(
         run=_run(fetch, transform, train),
-        from_="train",
-        overrides={"checkpoint.transform": "new features"},
+        at="train",
+        input={"transform": {"data": "new features"}},
     )
 
-    assert plan.steps_to_skip == {"fetch", "transform"}
-    assert "train" not in plan.steps_to_skip
-    assert plan.step_input_overrides == {"train": {"features": "new features"}}
+    assert "transform" not in plan.steps_to_skip
+    assert plan.step_input_overrides["transform"] == {"data": "new features"}
 
 
-def test_replay_from_branch_leaf_skips_unrelated_branch() -> None:
-    """Replay from a branch leaf should not re-execute sibling-branch work."""
+def test_replay_at_branch_leaf_skips_unrelated_branch() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    step_a = _step(
-        name="a",
-        invocation_id="a",
-        started_at=t0,
-    )
+    step_a = _step(name="a", invocation_id="a", started_at=t0)
     step_b = _step(
         name="b",
         invocation_id="b",
@@ -184,175 +190,67 @@ def test_replay_from_branch_leaf_skips_unrelated_branch() -> None:
         inputs_v2={"a_input": [_input_spec("a", "output")]},
     )
 
-    plan = build_replay_plan(run=_run(step_a, step_b, step_c, step_d), from_="d")
+    plan = build_replay_plan(run=_run(step_a, step_b, step_c, step_d), at="d")
 
     assert plan.steps_to_skip == {"a", "b", "c"}
 
 
-def test_checkpoint_override_fanout_reexecutes_consumer_branches() -> None:
-    """Override fan-out re-executes every direct consumer branch."""
+def test_output_scoped_to_at_when_tool_key_matches_cut() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    step_a = _step(
-        name="a",
-        invocation_id="a",
+    policy = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
         started_at=t0,
+        step_type="tool_call",
     )
-    step_b = _step(
-        name="b",
-        invocation_id="b",
-        started_at=t0 + timedelta(seconds=1),
-        upstream_steps=["a"],
-        inputs_v2={"a_input": [_input_spec("a", "output")]},
-    )
-    step_c = _step(
-        name="c",
-        invocation_id="c",
-        started_at=t0 + timedelta(seconds=2),
-        upstream_steps=["b"],
-        inputs_v2={"b_input": [_input_spec("b", "output")]},
-    )
-    step_d = _step(
-        name="d",
-        invocation_id="d",
-        started_at=t0 + timedelta(seconds=3),
-        upstream_steps=["a"],
-        inputs_v2={"a_input": [_input_spec("a", "output")]},
-    )
-
-    plan = build_replay_plan(
-        run=_run(step_a, step_b, step_c, step_d),
-        from_="d",
-        overrides={"checkpoint.a": "edited"},
-    )
-
-    assert plan.steps_to_skip == {"a"}
-    assert plan.step_input_overrides == {
-        "b": {"a_input": "edited"},
-        "d": {"a_input": "edited"},
-    }
-
-
-def test_dag_ordering_not_timestamp_ordering() -> None:
-    """Steps should be ordered by DAG topology, not timestamps.
-
-    In this test, validate starts *before* extract in wall-clock time but
-    depends on extract in the DAG. DAG order must win.
-    """
-    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-
-    # validate starts first in wall clock, but depends on extract
-    extract = _step(
-        name="extract",
-        invocation_id="extract",
+    decide = _step(
+        name="decide",
+        invocation_id="decide",
         started_at=t0 + timedelta(seconds=5),
-    )
-    validate = _step(
-        name="validate",
-        invocation_id="validate",
-        started_at=t0,  # earlier timestamp!
-        upstream_steps=["extract"],
-        inputs_v2={"data": [_input_spec("extract", "output")]},
+        upstream_steps=["lookup_policy_tool"],
+        inputs_v2={"policy": [_input_spec("lookup_policy_tool", "output")]},
     )
 
     plan = build_replay_plan(
-        run=_run(extract, validate),
-        from_="validate",
+        run=_run(policy, decide),
+        at="lookup_policy_tool",
+        output={"lookup_policy": {"policy_label": "mock"}},
     )
 
-    # DAG order: extract(0) → validate(1). from_="validate" means skip extract.
-    assert plan.steps_to_skip == {"extract"}
+    assert "lookup_policy_tool" in plan.steps_to_skip
+    assert plan.step_input_overrides["decide"]["policy"] == {"policy_label": "mock"}
 
 
-def test_replay_from_parallel_branch_only_skips_unrelated_peer() -> None:
-    """Replay should skip unrelated peer branch work."""
+def test_build_replay_plan_rejects_ambiguous_output_target() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-
-    branch_a = _step(
-        name="branch_a",
-        invocation_id="branch_a",
-        started_at=t0 + timedelta(seconds=10),
-    )
-    branch_b = _step(
-        name="branch_b",
-        invocation_id="branch_b",
+    first = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
         started_at=t0,
+        step_type="tool_call",
     )
-    merge = _step(
-        name="merge",
-        invocation_id="merge",
-        started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["branch_a", "branch_b"],
+    second = _step(
+        name="lookup_policy_tool_2",
+        invocation_id="lookup_policy_tool_2",
+        started_at=t0 + timedelta(seconds=1),
+        step_type="tool_call",
+    )
+    decide = _step(
+        name="decide",
+        invocation_id="decide",
+        started_at=t0 + timedelta(seconds=5),
+        upstream_steps=["lookup_policy_tool", "lookup_policy_tool_2"],
         inputs_v2={
-            "a": [_input_spec("branch_a", "output")],
-            "b": [_input_spec("branch_b", "output")],
+            "policy_a": [_input_spec("lookup_policy_tool", "output")],
+            "policy_b": [_input_spec("lookup_policy_tool_2", "output")],
         },
     )
 
-    plan = build_replay_plan(run=_run(branch_a, branch_b, merge), from_="branch_a")
-
-    # Replaying from branch_a should not re-execute its sibling peer branch.
-    assert plan.steps_to_skip == {"branch_b"}
-
-
-def test_replay_from_parallel_branch_with_tied_start_times() -> None:
-    """Replay should be stable when peer branches share start times."""
-    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-
-    beta = _step(
-        name="beta",
-        invocation_id="beta",
-        started_at=t0,
-    )
-    alpha = _step(
-        name="alpha",
-        invocation_id="alpha",
-        started_at=t0,
-    )
-    merge = _step(
-        name="merge",
-        invocation_id="merge",
-        started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["alpha", "beta"],
-        inputs_v2={
-            "a": [_input_spec("alpha", "output")],
-            "b": [_input_spec("beta", "output")],
-        },
-    )
-
-    plan = build_replay_plan(run=_run(beta, alpha, merge), from_="beta")
-
-    # Replaying from beta still skips the sibling alpha branch.
-    assert plan.steps_to_skip == {"alpha"}
-
-
-def test_wait_overrides_are_rejected() -> None:
-    """Wait overrides should raise a clear error."""
-    step = _step(
-        name="fetch",
-        invocation_id="fetch",
-        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
-    )
-
-    with pytest.raises(KitaruUsageError, match="not supported in replay"):
+    with pytest.raises(KitaruStateError, match="ambiguous"):
         build_replay_plan(
-            run=_run(step),
-            from_="fetch",
-            overrides={"wait.approve": True},
-        )
-
-
-def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
-    step = _step(
-        name="fetch",
-        invocation_id="fetch",
-        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
-    )
-
-    with pytest.raises(KitaruUsageError, match="Override keys must start"):
-        build_replay_plan(
-            run=_run(step),
-            from_="fetch",
-            overrides={"artifact.fetch": "x"},
+            run=_run(first, second, decide),
+            at="decide",
+            output={"lookup_policy": "mock"},
         )
 
 
@@ -364,7 +262,22 @@ def test_build_replay_plan_rejects_unknown_selector() -> None:
     )
 
     with pytest.raises(KitaruStateError, match="Unknown checkpoint selector"):
-        build_replay_plan(
-            run=_run(step),
-            from_="unknown",
-        )
+        build_replay_plan(run=_run(step), at="unknown")
+
+
+def test_runtime_context_carries_tool_and_llm_model() -> None:
+    step = _step(
+        name="fetch",
+        invocation_id="fetch",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+    )
+    plan = build_replay_plan(
+        run=_run(step),
+        at="fetch",
+        tool={"lookup_policy": "mocks.lookup_policy"},
+        llm_model="openai/gpt-5-nano",
+    )
+    assert plan.runtime_context.tool_overrides == {
+        "lookup_policy": "mocks.lookup_policy"
+    }
+    assert plan.runtime_context.llm_model == "openai/gpt-5-nano"

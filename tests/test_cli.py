@@ -3810,20 +3810,23 @@ def test_executions_replay_parses_json_and_reports_success(
                 "executions",
                 "replay",
                 "kr-111",
-                "--from",
+                "--at",
                 "write_summary",
                 "--args",
                 '{"topic":"new topic"}',
-                "--overrides",
-                '{"checkpoint.research":"edited"}',
+                "--mock-output",
+                '{"research":"edited"}',
             ]
         )
 
     assert exc_info.value.code == 0
     fake_client.executions.replay.assert_called_once_with(
         "kr-111",
-        from_="write_summary",
-        overrides={"checkpoint.research": "edited"},
+        at="write_summary",
+        input=None,
+        output={"research": "edited"},
+        tool=None,
+        llm_model=None,
         topic="new topic",
     )
     output = capsys.readouterr().out
@@ -3831,25 +3834,25 @@ def test_executions_replay_parses_json_and_reports_success(
     assert "Status: running" in output
 
 
-def test_executions_replay_rejects_invalid_overrides_json(
+def test_executions_replay_rejects_invalid_mock_output_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions replay` should fail when `--overrides` is invalid JSON."""
+    """`kitaru executions replay` should fail when `--mock-output` is invalid JSON."""
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
                 "executions",
                 "replay",
                 "kr-111",
-                "--from",
+                "--at",
                 "write_summary",
-                "--overrides",
+                "--mock-output",
                 "{invalid",
             ]
         )
 
     assert exc_info.value.code == 1
-    assert "Invalid JSON for `--overrides`" in capsys.readouterr().err
+    assert "Invalid JSON for `--mock-output`" in capsys.readouterr().err
 
 
 def test_executions_resume_reports_success(

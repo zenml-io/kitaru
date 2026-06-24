@@ -11,9 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added adapter-owned cost calculator inputs for Claude Agent SDK, Gemini Interactions, and Pydantic AI, so adapter users can record estimated LLM costs with their own calculator hooks.
 - Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
 - Added `--page` and `--size` pagination options to `kitaru executions statistics`.
+- Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
+- Added `flow.replay_many(executions, *, at=..., ...)` for batch replay across many parent executions. Parents missing the `at` checkpoint are skipped and recorded in `ReplayManyResult.skipped`.
+- Added `kitaru.diff_cohort(exec_ids)` to diff many originals against their auto-discovered replays.
+- `kitaru.diff()` now sets `ExecutionDiff.urls` to UI compare links — one `{original},{replay}` URL per replay when a server URL is configured.
 
 ### Changed
 - Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
+- **Breaking:** Redesigned replay API: `flow.replay(execution, *, at=..., input=..., output=..., tool=..., llm_model=..., **flow_inputs)`. Checkpoints before `at` are skipped (playback); the cut and downstream re-execute. `input` overrides checkpoint inputs, `output` mocks tool/LLM returns without running code, `tool` swaps tool implementations by import path, and `llm_model` overrides `llm_call` checkpoints in the live tail. Flow parameters remain `**flow_inputs` kwargs.
 
 ### Fixed
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
