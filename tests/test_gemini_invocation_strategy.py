@@ -20,6 +20,7 @@ from tests._gemini_fake_sdk import (
     purge_gemini_adapter_modules,
 )
 from tests._gemini_usage_helpers import collect_usage_records
+from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
 @pytest.fixture
@@ -179,6 +180,10 @@ def test_run_sync_logs_canonical_gemini_usage_record(
     monkeypatch: pytest.MonkeyPatch,
     gemini_adapter: types.ModuleType,
 ) -> None:
+    monkeypatch.setattr(
+        "kitaru.config.resolve_llm_estimated_cost_policy",
+        lambda: "off",
+    )
     _patch_flow_checkpoint(monkeypatch, gemini_adapter)
     records = collect_usage_records(monkeypatch)
     usage = SimpleNamespace(
@@ -223,11 +228,167 @@ def test_run_sync_logs_canonical_gemini_usage_record(
     assert record["usage"]["cached_input_tokens"] == 1
     assert record["usage"]["reasoning_tokens"] == 2
     assert record["cost"]["source"] == "none"
+    assert record["cost"]["source_label"] is None
     assert record["cost"]["actual_cost_usd"] is None
     assert record["cost"]["estimated_cost_usd"] is None
     assert record["status"] == "completed"
     assert record["billing_effect"] == "incurred"
     assert record["cache_status"] == "executed"
+
+
+def test_run_sync_records_default_genai_prices_gemini_cost(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.78)
+    usage = SimpleNamespace(
+        prompt_token_count=3,
+        candidates_token_count=4,
+        total_token_count=9,
+        cached_content_token_count=1,
+        thoughts_token_count=2,
+    )
+    client = FakeClient([_completed_interaction(model="gemini-1.5-flash", usage=usage)])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-1.5-flash",
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.estimated_cost_usd == 0.78
+    cost = records[0]["cost"]
+    assert cost["actual_cost_usd"] is None
+    assert cost["estimated_cost_usd"] == 0.78
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "genai-prices"
+    assert cost["pricing_version"].startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 6,
+                "cache_read_tokens": 1,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gemini-1.5-flash",
+            "provider_id": "google",
+        }
+    ]
+
+
+def test_run_sync_records_calculated_gemini_cost(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    usage = SimpleNamespace(
+        prompt_token_count=3,
+        candidates_token_count=4,
+        total_token_count=7,
+        cached_content_token_count=1,
+        thoughts_token_count=2,
+    )
+    client = FakeClient([_completed_interaction(usage=usage)])
+
+    def calculate_cost(usage_summary: object) -> float:
+        summary = gemini_adapter.GeminiUsageSummary.model_validate(usage_summary)
+        assert summary.adapter_name == "gemini_interactions"
+        assert summary.provider == "google_gemini"
+        assert summary.model_name == "gemini-test"
+        assert summary.input_tokens == 3
+        assert summary.output_tokens == 4
+        assert summary.total_tokens == 7
+        assert summary.cached_input_tokens == 1
+        assert summary.reasoning_tokens == 2
+        return 0.23
+
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        cost_calculator=calculate_cost,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.estimated_cost_usd == 0.23
+    cost = records[0]["cost"]
+    assert cost["actual_cost_usd"] is None
+    assert cost["estimated_cost_usd"] == 0.23
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "gemini.cost_calculator"
+
+
+def test_gemini_cost_calculator_none_records_clean_no_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.99)
+    usage = SimpleNamespace(
+        prompt_token_count=3,
+        candidates_token_count=4,
+        total_token_count=7,
+    )
+    client = FakeClient([_completed_interaction(usage=usage)])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        cost_calculator=lambda _usage: None,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.estimated_cost_usd is None
+    assert genai_calls == []
+    assert not any("invalid estimated cost" in warning for warning in result.warnings)
+    assert records[0]["usage"]["input_tokens"] == 3
+    assert records[0]["usage"]["output_tokens"] == 4
+    assert records[0]["cost"]["actual_cost_usd"] is None
+    assert records[0]["cost"]["estimated_cost_usd"] is None
+    assert records[0]["cost"]["source"] == "none"
+    assert records[0]["cost"]["source_label"] is None
+    assert records[0]["warnings"] == result.warnings
+
+
+def test_gemini_invalid_cost_calculator_return_records_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch, gemini_adapter)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient([_completed_interaction()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(
+        name="gemini",
+        client=client,
+        cost_calculator=lambda _usage: -1,
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = runner.run_sync(request)
+
+    assert result.estimated_cost_usd is None
+    assert any("invalid estimated cost" in warning for warning in result.warnings)
+    assert records[0]["cost"]["source"] == "calculator_error"
+    assert records[0]["cost"]["source_label"] == "gemini.cost_calculator"
+    assert records[0]["warnings"] == result.warnings
 
 
 def test_requires_action_logs_canonical_completed_record_without_usage(
@@ -276,6 +437,7 @@ def test_requires_action_logs_canonical_completed_record_without_usage(
     assert record["usage"]["total_tokens"] is None
     assert record["usage"]["raw"] is None
     assert record["cost"]["source"] == "none"
+    assert record["cost"]["source_label"] is None
 
 
 def test_save_usage_false_skips_canonical_gemini_usage_record(

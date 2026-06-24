@@ -45,6 +45,7 @@ from pydantic_ai.output import OutputDataT, OutputSpec
 from pydantic_ai.tools import AgentDepsT, AgentNativeTool, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 
+from ._events import PydanticAIUsageSummary
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._mcp_server import has_running_mcp_toolset
@@ -385,6 +386,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         mcp_checkpoint_config: CheckpointConfig | None = None,
         persist_message_history: bool = False,
         allow_sync_tool_body_waits: bool = False,
+        cost_calculator: Callable[[PydanticAIUsageSummary], float | None] | None = None,
     ) -> None:
         """Wrap an agent so its runs become durable under Kitaru.
 
@@ -496,6 +498,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 "threading."
             )
         self._allow_sync_tool_body_waits = allow_sync_tool_body_waits
+        self._cost_calculator = cost_calculator
         if self._uses_calls_strategy:
             self._model_checkpoint_config = (
                 validate_checkpoint_config(
@@ -547,6 +550,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 "granular_checkpoints": self._uses_calls_strategy,
                 "persist_message_history": persist_message_history,
                 "allow_sync_tool_body_waits": allow_sync_tool_body_waits,
+                "has_cost_calculator": cost_calculator is not None,
             },
         )
 
@@ -713,7 +717,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         token = _TRACKING_ACTIVE.set(True)
         try:
-            with tracker_scope(self._name):
+            with tracker_scope(self._name, cost_calculator=self._cost_calculator):
                 yield
         finally:
             _TRACKING_ACTIVE.reset(token)

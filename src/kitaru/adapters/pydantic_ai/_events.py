@@ -32,12 +32,29 @@ class _BaseEvent(BaseModel):
     checkpoint_id: str | None = None
 
 
+class PydanticAIUsageSummary(BaseModel):
+    """Kitaru-owned usage input for Pydantic AI cost calculators."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter_name: Literal["pydantic_ai"] = "pydantic_ai"
+    provider: str | None = None
+    model_name: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    raw_usage: dict[str, Any] | None = None
+
+
 class ModelEvent(_BaseEvent):
     kind: Literal["llm_call"] = "llm_call"
     fan_in_from: list[str] = Field(default_factory=list)
     duration_ms: float | None = None
     artifacts: dict[str, str] = Field(default_factory=dict)
     model_name: str | None = None
+    provider_name: str | None = None
     usage: RequestUsage | None = None
     billing_effect: LLMBillingEffect = "incurred"
     cache_status: LLMCacheStatus = "executed"

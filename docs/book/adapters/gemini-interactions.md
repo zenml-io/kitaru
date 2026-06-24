@@ -96,7 +96,9 @@ The adapter gives existing Gemini Interactions users:
 - one durable Kitaru checkpoint around each stable Gemini interaction response
 - replay-skip for completed Gemini turns inside larger Kitaru flows
 - a typed `GeminiInteractionResult` with status, interaction IDs, output text,
-  model/agent, environment ID when reported, usage, timing, and warnings
+  model/agent, environment ID when reported, usage, estimated cost when Kitaru
+  can estimate one automatically or a configured calculator returns one, timing,
+  and warnings
 - safe step summaries from `interaction.steps` so your flow can respond to
   handoff points without storing raw provider payloads by default. Step
   summaries keep metadata such as type, status, and call IDs; `text_preview` is
@@ -140,20 +142,46 @@ thing your application must do. So a Gemini interaction that returns
 LLM usage record with `status="completed"`: Google returned a stable response,
 and that response is asking your code to send a follow-up turn.
 
-Gemini tracking is token-only in this adapter version. Google reports token usage
-metadata for these calls, but Kitaru does not receive a provider-reported
-per-call dollar cost from Gemini Interactions and does not estimate Gemini price
-locally here. That means Gemini records normally have:
+Google reports token usage metadata for these calls, but Kitaru does not receive
+a provider-reported per-call dollar cost from Gemini Interactions. By default,
+Kitaru estimates with `genai-prices` when the interaction names a Gemini model
+and includes priceable input/output/cache-read token counts. That value is stored
+as `estimated_cost_usd`, not `actual_cost_usd`.
 
-```text
-cost.source = "none"
-actual_cost_usd = null
-estimated_cost_usd = null
+If Kitaru cannot identify the model, cannot price the model, or only has token
+categories that `genai-prices` does not price, the record keeps the tokens and
+leaves the cost empty. Kitaru does not add `thoughts_token_count` /
+`thoughtsTokenCount` to output tokens. It also does not subtract thought tokens
+from Gemini candidate/output token counts unless Google's usage contract proves
+those counts include thoughts.
+
+If you know the pricing you want to use, pass `cost_calculator=` to
+`KitaruGeminiInteractionsRunner`. Kitaru calls it with a `GeminiUsageSummary`
+containing the requested/resolved model fields and normalized token counts, then
+records the returned non-negative number as `estimated_cost_usd`. Return `None`
+when your calculator cannot estimate the call; Kitaru leaves the cost empty and
+records the usage as a no-estimate token record.
+
+```python
+from kitaru.adapters.gemini import GeminiUsageSummary, KitaruGeminiInteractionsRunner
+
+
+def calculate_gemini_cost(usage: GeminiUsageSummary) -> float | None:
+    if usage.input_tokens is None or usage.output_tokens is None:
+        return None
+    # Replace these example rates with your own contract or billing source.
+    return (usage.input_tokens / 1_000_000 * 0.35) + (
+        usage.output_tokens / 1_000_000 * 1.05
+    )
+
+
+runner = KitaruGeminiInteractionsRunner(
+    name="gemini_summary",
+    cost_calculator=calculate_gemini_cost,
+)
 ```
 
-So if an execution includes Gemini calls, `records_without_cost_count` increasing
-is expected. It means “this provider call had no dollar-cost value attached,” not
-“usage tracking failed.” Token counts can still be present and aggregated.
+User calculators take priority over the built-in estimate. If you disable automatic estimates with `KITARU_LLM_ESTIMATED_COSTS=off`, or if pricing is not possible, `records_without_cost_count` can still increase. It means “this provider call had no dollar-cost value attached,” not “usage tracking failed.” Token counts can still be present and aggregated.
 
 Set `save_usage=False` when you do not want Gemini usage persisted. That disables
 both the raw usage artifact and the canonical `llm_usage_v1` metadata record for
@@ -761,6 +789,8 @@ live client object or anything whose `repr()` can change between processes.
 - `steps`, a list of `GeminiInteractionStepSummary` records derived primarily
   from `interaction.steps`
 - `usage` when reported by the SDK
+- `estimated_cost_usd` when Kitaru can estimate one automatically or a configured
+  calculator returns one
 - `poll_count`, `duration_ms`, `sdk_version`, and non-sensitive `metadata`
 - artifact names for captured request manifest, output, usage, event log, and
   run summary

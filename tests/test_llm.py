@@ -14,7 +14,12 @@ from pydantic import ValidationError
 
 from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
 from kitaru.analytics import AnalyticsEvent
-from kitaru.config import ResolvedModelSelection, configure, register_model_alias
+from kitaru.config import (
+    ResolvedModelSelection,
+    configure,
+    register_model_alias,
+    resolve_llm_estimated_cost_policy,
+)
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -32,7 +37,6 @@ from kitaru.llm import (
     _parse_provider_target,
     _ProviderCallResult,
     _resolve_credential_overlay,
-    _resolve_llm_estimated_cost_policy,
     llm,
 )
 from kitaru.runtime import _checkpoint_scope, _flow_scope
@@ -850,7 +854,7 @@ def test_direct_cost_uses_installed_genai_prices_for_zero_and_anthropic_usage(
 
 
 def test_llm_estimated_cost_policy_defaults_to_auto() -> None:
-    assert _resolve_llm_estimated_cost_policy() == "auto"
+    assert resolve_llm_estimated_cost_policy() == "auto"
 
 
 def test_llm_estimated_cost_policy_honors_env_opt_out(
@@ -858,7 +862,7 @@ def test_llm_estimated_cost_policy_honors_env_opt_out(
 ) -> None:
     monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "off")
 
-    assert _resolve_llm_estimated_cost_policy() == "off"
+    assert resolve_llm_estimated_cost_policy() == "off"
 
 
 def test_llm_estimated_cost_runtime_setting_beats_env(
@@ -867,7 +871,7 @@ def test_llm_estimated_cost_runtime_setting_beats_env(
     monkeypatch.setenv("KITARU_LLM_ESTIMATED_COSTS", "off")
     configure(llm_estimated_costs="auto")
 
-    assert _resolve_llm_estimated_cost_policy() == "auto"
+    assert resolve_llm_estimated_cost_policy() == "auto"
 
 
 def test_llm_estimated_cost_invalid_env_is_non_fatal_after_provider_success(

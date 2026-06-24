@@ -81,7 +81,7 @@ OpenAI and Anthropic models, estimated cost tracking is on by default and uses
 
 Kitaru stores that value as `estimated_cost_usd`, not `actual_cost_usd`. If
 pricing fails or the model cannot be priced, the LLM call still succeeds and the
-usage record keeps the tokens plus a warning. Disable direct estimates with:
+usage record keeps the tokens plus a warning. The same setting also controls built-in `genai-prices` estimates for framework adapters. Disable automatic estimates with:
 
 ```bash
 export KITARU_LLM_ESTIMATED_COSTS=off

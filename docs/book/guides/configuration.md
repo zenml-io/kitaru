@@ -188,9 +188,7 @@ saved deployment snapshot.
 
 - `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
   explicit `model=` argument is provided.
-- `KITARU_LLM_ESTIMATED_COSTS` controls automatic estimated-cost tracking for
-  direct OpenAI and Anthropic `kitaru.llm()` calls. Use `auto` (default) or
-  `off`.
+- `KITARU_LLM_ESTIMATED_COSTS` controls automatic `genai-prices` estimated-cost tracking for direct `kitaru.llm()` calls and framework adapters. Use `auto` (default) or `off`.
 - `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
 - `OLLAMA_HOST` sets the Ollama server address for `ollama/*` models
   (default: `http://localhost:11434`).
@@ -200,11 +198,7 @@ registered alias, Kitaru passes it straight through as a raw provider/model
 string. This lookup happens before Kitaru falls back to the locally configured
 default alias.
 
-Direct `kitaru.llm()` estimated costs are calculated with
-[`genai-prices`](https://github.com/pydantic/genai-prices) after the provider
-call succeeds. If pricing fails, the LLM response and token counts are still
-recorded. See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata)
-for the actual-vs-estimated cost fields.
+Automatic estimated costs are calculated with [`genai-prices`](https://github.com/pydantic/genai-prices) after the provider or adapter call succeeds. Kitaru only estimates when it has reliable provider, model, and token data. If pricing fails, the model response and token counts are still recorded. See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata) for the actual-vs-estimated cost fields.
 
 If you want the full secret-backed setup path for `kitaru.llm()`, see
 [Secrets + Model Registration](secrets-and-model-registration.md).

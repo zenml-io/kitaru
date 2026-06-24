@@ -7,7 +7,13 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from kitaru._llm_usage import build_usage_record, log_usage_record
+from kitaru._llm_usage import (
+    CalculatedCostMetadata,
+    build_usage_record,
+    calculated_or_genai_cost_metadata,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
@@ -31,7 +37,11 @@ from ._tracking import (
     EventTracker,
     tracker_scope,
 )
-from ._types import GeminiInteractionRequest, GeminiInteractionResult
+from ._types import (
+    GeminiInteractionRequest,
+    GeminiInteractionResult,
+    GeminiUsageSummary,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointStrategy,
@@ -184,6 +194,7 @@ class KitaruGeminiInteractionsRunner:
         cache_identity: str | None = None,
         allow_direct_execution_inside_checkpoint: bool = False,
         poll_interval_s: float = 2.0,
+        cost_calculator: Callable[[GeminiUsageSummary], float | None] | None = None,
     ) -> None:
         if not isinstance(name, str) or not name.strip():
             raise KitaruUsageError(
@@ -212,6 +223,7 @@ class KitaruGeminiInteractionsRunner:
             allow_direct_execution_inside_checkpoint
         )
         self._poll_interval_s = poll_interval_s
+        self._cost_calculator = cost_calculator
         self._checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             checkpoint_config,
             context="checkpoint_config",
@@ -227,6 +239,7 @@ class KitaruGeminiInteractionsRunner:
                 "allow_direct_execution_inside_checkpoint": (
                     self._allow_direct_execution_inside_checkpoint
                 ),
+                "has_cost_calculator": cost_calculator is not None,
             },
         )
 
@@ -555,6 +568,11 @@ class KitaruGeminiInteractionsRunner:
         ]
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
+        cost_metadata = self._cost_metadata(
+            payload=payload,
+            request=request,
+            warnings=warnings,
+        )
         result = GeminiInteractionResult(
             status=payload.status,
             interaction_id=payload.interaction_id,
@@ -565,6 +583,7 @@ class KitaruGeminiInteractionsRunner:
             environment_id=payload.environment_id,
             steps=payload.steps,
             usage=payload.usage,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             duration_ms=payload.duration_ms,
             poll_count=payload.poll_count,
             sdk_version=payload.sdk_version,
@@ -588,6 +607,7 @@ class KitaruGeminiInteractionsRunner:
             payload=payload,
             tracker=tracker,
             request=request,
+            cost_metadata=cost_metadata,
         )
         warnings = result.warnings
         if self._capture.emit_events:
@@ -606,6 +626,57 @@ class KitaruGeminiInteractionsRunner:
             )
         return result
 
+    def _usage_summary(
+        self,
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+    ) -> GeminiUsageSummary | None:
+        if payload.usage is None:
+            return None
+        model, requested_model, resolved_model = self._usage_model_fields(
+            payload=payload,
+            request=request,
+        )
+        token_usage = token_usage_from_mapping(payload.usage)
+        return GeminiUsageSummary(
+            model_name=model,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
+            input_tokens=token_usage["input_tokens"],
+            output_tokens=token_usage["output_tokens"],
+            total_tokens=token_usage["total_tokens"],
+            cached_input_tokens=token_usage["cached_input_tokens"],
+            reasoning_tokens=token_usage["reasoning_tokens"],
+            raw_usage=token_usage["raw"],
+        )
+
+    def _cost_metadata(
+        self,
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+        warnings: list[str],
+    ) -> CalculatedCostMetadata:
+        usage_summary = self._usage_summary(payload=payload, request=request)
+        usage_payload = (
+            usage_summary.model_dump(mode="json") if usage_summary is not None else None
+        )
+        return calculated_or_genai_cost_metadata(
+            calculator=self._cost_calculator,
+            calculator_usage=usage_summary,
+            genai_provider="google_gemini",
+            genai_model=(
+                usage_summary.resolved_model or usage_summary.model_name
+                if usage_summary is not None
+                else None
+            ),
+            genai_usage=usage_payload,
+            warnings=warnings,
+            adapter_name="Gemini Interactions",
+            calculator_source_label="gemini.cost_calculator",
+        )
+
     def _log_canonical_llm_call_record(
         self,
         result: GeminiInteractionResult,
@@ -613,6 +684,7 @@ class KitaruGeminiInteractionsRunner:
         payload: GeminiInteractionPayload,
         tracker: EventTracker,
         request: GeminiInteractionRequest,
+        cost_metadata: CalculatedCostMetadata | None = None,
     ) -> None:
         """Log one canonical LLM call record, even when tokens are absent.
 
@@ -625,6 +697,12 @@ class KitaruGeminiInteractionsRunner:
             is_inside_flow() or is_inside_checkpoint()
         ):
             return
+        if cost_metadata is None:
+            cost_metadata = self._cost_metadata(
+                payload=payload,
+                request=request,
+                warnings=result.warnings,
+            )
         try:
             model, requested_model, resolved_model = self._usage_model_fields(
                 payload=payload,
@@ -641,7 +719,10 @@ class KitaruGeminiInteractionsRunner:
                 requested_model=requested_model,
                 resolved_model=resolved_model,
                 provider="google_gemini",
-                cost_source="none",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 latency_ms=payload.duration_ms,
                 status="completed",
                 billing_effect="incurred",
