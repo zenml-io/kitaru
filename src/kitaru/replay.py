@@ -471,9 +471,12 @@ def _compute_live_steps(
     if at_started_at is None:
         return live
 
-    checkpoints_by_invocation = {
-        checkpoint.invocation_id: checkpoint for checkpoint in checkpoints
+    skipped_before_at = {
+        checkpoint.invocation_id
+        for checkpoint in checkpoints
+        if checkpoint.started_at is not None and checkpoint.started_at < at_started_at
     }
+
     for checkpoint in checkpoints:
         if checkpoint.invocation_id in live:
             continue
@@ -481,29 +484,29 @@ def _compute_live_steps(
             continue
         if checkpoint.started_at < at_started_at:
             continue
-        has_dag_link = False
-        to_visit = [at_checkpoint.invocation_id]
-        visited: set[str] = set()
-        while to_visit:
-            current = to_visit.pop()
-            if current in visited:
-                continue
-            visited.add(current)
-            if current == checkpoint.invocation_id:
-                has_dag_link = True
-                break
-            upstream_steps: Sequence[str] = (
-                getattr(
-                    getattr(checkpoints_by_invocation[current].step, "spec", None),
-                    "upstream_steps",
-                    None,
-                )
-                or ()
-            )
-            to_visit.extend(upstream_steps)
 
-        if not has_dag_link and checkpoint.started_at >= at_started_at:
-            continue
+        upstream_steps: Sequence[str] = (
+            getattr(
+                getattr(checkpoint.step, "spec", None),
+                "upstream_steps",
+                None,
+            )
+            or ()
+        )
+        if upstream_steps:
+            if all(upstream in skipped_before_at for upstream in upstream_steps):
+                continue
+            if not any(
+                upstream in live or upstream == at_checkpoint.invocation_id
+                for upstream in upstream_steps
+            ):
+                continue
+
+        live.add(checkpoint.invocation_id)
+        live |= _collect_descendants(
+            roots={checkpoint.invocation_id},
+            children_by_invocation=children_by_invocation,
+        )
 
     return live
 

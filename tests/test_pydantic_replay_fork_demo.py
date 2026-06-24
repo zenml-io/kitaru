@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 DEMO_ROOT = Path("examples/end_to_end/pydantic_replay_fork")
@@ -29,7 +30,17 @@ def test_demo_uses_new_replay_api() -> None:
     assert "at=REPLAY_POINT" in source
     assert "kitaru.cohort" in source or "kitaru import" in source
     assert "seed" in source
+    assert "seed-cohort" in source
     assert 'tool={"lookup_policy": "mocks.lookup_policy"}' in source
+
+
+def test_cohort_scenarios_file_has_ten_entries() -> None:
+    payload = json.loads(
+        (DEMO_ROOT / "fixtures" / "cohort_scenarios.json").read_text(encoding="utf-8")
+    )
+    assert len(payload) >= 10
+    for item in payload[:10]:
+        assert {"label", "customer", "prompt"} <= set(item)
 
 
 def test_cohort_uses_replay_many() -> None:

@@ -53,6 +53,9 @@ echo "OPENAI_API_KEY=sk-..." > .env
 uv run python demo.py seed
 export PROD_ID="$(cat fixtures/prod_exec_id)"
 
+# Optional: seed 10 distinct runs for cohort Act 5
+uv run python demo.py seed-cohort --count 10
+
 # Open PROD_ID in the Kitaru UI, then replay with a model change:
 kitaru executions replay "$PROD_ID" \
   --at lookup_policy_tool \
@@ -103,6 +106,7 @@ three-way diff, and cohort.
 | Command | What it does |
 |---------|----------------|
 | `uv run python demo.py seed` | Run the agent once; write `fixtures/prod_exec_id` |
+| `uv run python demo.py seed-cohort --count 10` | Ten distinct runs for local cohort demos |
 | `uv run python demo.py replay <PROD-ID>` | Model + tool replay legs; print three-way compare URL |
 | `uv run python demo.py cohort --export-json reports/cohort_report.json` | Batch variant replay + HTML/JSON report |
 
@@ -150,5 +154,5 @@ mocks.py            # lookup_policy mock for --tool replay demos
 utils/              # metrics, cohort orchestration
 reporting/          # HTML + report models
 reports/            # generated output (gitignored)
-fixtures/           # prod_exec_id (gitignored after seed)
+fixtures/           # prod_exec_id, cohort_exec_ids (gitignored); cohort_scenarios.json
 ```

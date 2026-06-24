@@ -195,6 +195,48 @@ def test_replay_at_branch_leaf_skips_unrelated_branch() -> None:
     assert plan.steps_to_skip == {"a", "b", "c"}
 
 
+def test_replay_at_includes_linear_tail_without_upstream_edges() -> None:
+    """Adapter call checkpoints may lack DAG edges; time-ordered tail still re-runs."""
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    model_1 = _step(name="support_copilot_model_request", invocation_id="m1", started_at=t0)
+    gather = _step(
+        name="gather_context_tool",
+        invocation_id="gather",
+        started_at=t0 + timedelta(seconds=1),
+    )
+    model_2 = _step(
+        name="support_copilot_model_request_2",
+        invocation_id="m2",
+        started_at=t0 + timedelta(seconds=2),
+    )
+    lookup = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup",
+        started_at=t0 + timedelta(seconds=3),
+        step_type="tool_call",
+    )
+    model_3 = _step(
+        name="support_copilot_model_request_3",
+        invocation_id="m3",
+        started_at=t0 + timedelta(seconds=4),
+    )
+    publish = _step(
+        name="publish_support_decision",
+        invocation_id="publish",
+        started_at=t0 + timedelta(seconds=5),
+    )
+
+    plan = build_replay_plan(
+        run=_run(model_1, gather, model_2, lookup, model_3, publish),
+        at="lookup_policy_tool",
+    )
+
+    assert plan.steps_to_skip == {"m1", "gather", "m2"}
+    assert "lookup" not in plan.steps_to_skip
+    assert "m3" not in plan.steps_to_skip
+    assert "publish" not in plan.steps_to_skip
+
+
 def test_output_scoped_to_at_when_tool_key_matches_cut() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     policy = _step(

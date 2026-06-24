@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
 - Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
 - `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
+- Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
 - `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 
 ## [0.17.1] - 2026-06-22

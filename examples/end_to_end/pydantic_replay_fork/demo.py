@@ -3,6 +3,7 @@
 Operator story: see ``PLAYBOOK.md``. Quick commands:
 
     uv run python demo.py seed
+    uv run python demo.py seed-cohort --count 10
     uv run python demo.py replay <PROD-ID>
     uv run python demo.py cohort --export-json reports/cohort_report.json
 
@@ -14,6 +15,7 @@ CLI equivalents:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -54,6 +56,8 @@ VARIANT_MODEL = "openai:gpt-5-nano"
 VARIANT_PROMPT_PROFILE = "trimmed_permissions"
 
 PROD_FIXTURE = Path("fixtures/prod_exec_id")
+COHORT_SCENARIOS_PATH = Path("fixtures/cohort_scenarios.json")
+COHORT_EXEC_IDS_FIXTURE = Path("fixtures/cohort_exec_ids")
 HTML_PATH = "reports/replay_three_way.html"
 COHORT_HTML_PATH = "reports/cohort_report.html"
 COHORT_JSON_PATH = "reports/cohort_report.json"
@@ -157,10 +161,9 @@ def write_comparison_html(
     )
 
 
-def run() -> str:
+def run_once(*, prompt: str, customer: str) -> str:
     """Run the agent once and return its exec id."""
-    section("Run the PydanticAI agent as a durable Kitaru flow")
-    handle = support_copilot_flow.run(SCENARIO, CUSTOMER, BASELINE_MODEL, "baseline")
+    handle = support_copilot_flow.run(prompt, customer, BASELINE_MODEL, "baseline")
     handle.wait()
 
     client = KitaruClient()
@@ -168,13 +171,82 @@ def run() -> str:
     decision = load_support_decision_from_execution(client, handle.exec_id)
     print(f"   original exec_id={handle.exec_id}")
     print(f"   {decision_summary(decision)}")
+    return handle.exec_id
+
+
+def run() -> str:
+    """Run the default scenario once and return its exec id."""
+    section("Run the PydanticAI agent as a durable Kitaru flow")
+    exec_id = run_once(prompt=SCENARIO, customer=CUSTOMER)
     print("   CLI variant replay:")
     print(
-        f"     kitaru executions replay {handle.exec_id} --at {REPLAY_POINT} "
+        f"     kitaru executions replay {exec_id} --at {REPLAY_POINT} "
         f'--args \'{{"model": "{VARIANT_MODEL}", '
         f'"prompt_profile": "{VARIANT_PROMPT_PROFILE}"}}\''
     )
-    return handle.exec_id
+    return exec_id
+
+
+def _load_cohort_scenarios() -> list[dict[str, str]]:
+    if not COHORT_SCENARIOS_PATH.is_file():
+        raise RuntimeError(
+            f"Missing cohort scenarios file: {COHORT_SCENARIOS_PATH}. "
+            "Expected a JSON list of {label, customer, prompt} objects."
+        )
+    payload = json.loads(COHORT_SCENARIOS_PATH.read_text(encoding="utf-8"))
+    if not isinstance(payload, list) or not payload:
+        raise RuntimeError(
+            f"{COHORT_SCENARIOS_PATH} must contain a non-empty JSON list."
+        )
+    scenarios: list[dict[str, str]] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                f"{COHORT_SCENARIOS_PATH}[{index}] must be an object with "
+                "label, customer, and prompt."
+            )
+        label = str(item.get("label", "")).strip()
+        customer = str(item.get("customer", "")).strip()
+        prompt = str(item.get("prompt", "")).strip()
+        if not label or not customer or not prompt:
+            raise RuntimeError(
+                f"{COHORT_SCENARIOS_PATH}[{index}] missing label, customer, or prompt."
+            )
+        scenarios.append({"label": label, "customer": customer, "prompt": prompt})
+    return scenarios
+
+
+def seed_cohort(*, count: int = 10) -> list[str]:
+    """Run distinct support requests and persist exec ids for cohort demos."""
+    scenarios = _load_cohort_scenarios()[:count]
+    if len(scenarios) < count:
+        raise RuntimeError(
+            f"Requested {count} cohort seeds but {COHORT_SCENARIOS_PATH} "
+            f"only defines {len(scenarios)} scenario(s)."
+        )
+
+    section(f"Seed cohort — {count} distinct support_copilot_flow runs")
+    exec_ids: list[str] = []
+    for index, scenario in enumerate(scenarios, start=1):
+        print(f"\n   [{index}/{count}] {scenario['label']}")
+        exec_ids.append(
+            run_once(prompt=scenario["prompt"], customer=scenario["customer"])
+        )
+
+    PROD_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    PROD_FIXTURE.write_text(f"{exec_ids[0]}\n", encoding="utf-8")
+    COHORT_EXEC_IDS_FIXTURE.write_text(
+        "\n".join(exec_ids) + "\n",
+        encoding="utf-8",
+    )
+    print(f"\n   wrote {PROD_FIXTURE} (first run for Act 2-4)")
+    print(f"   wrote {COHORT_EXEC_IDS_FIXTURE} ({len(exec_ids)} exec ids)")
+    print("   resolve cohort:")
+    print(
+        f"     kitaru executions cohort --flow {FLOW_NAME} "
+        f"--at {REPLAY_POINT} --order-by=-display_cost_usd --limit {count}"
+    )
+    return exec_ids
 
 
 def seed() -> str:
@@ -344,6 +416,10 @@ def main(argv: list[str]) -> None:
         run()
     elif command == "seed":
         seed()
+    elif command == "seed-cohort":
+        rest, count_raw = _parse_flag(rest, "--count")
+        count = int(count_raw or os.environ.get("COHORT_SEED_COUNT", "10"))
+        seed_cohort(count=count)
     elif command == "replay":
         if not rest:
             if PROD_FIXTURE.is_file():
@@ -363,7 +439,8 @@ def main(argv: list[str]) -> None:
     else:
         sys.exit(
             f"unknown command {command!r}. "
-            "try: seed | run | replay [EXEC-ID] | cohort | run-all"
+            "try: seed | seed-cohort [--count N] | run | replay [EXEC-ID] "
+            "| cohort | run-all"
         )
 
 

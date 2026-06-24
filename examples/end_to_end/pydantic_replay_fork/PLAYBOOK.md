@@ -23,10 +23,23 @@ echo "OPENAI_API_KEY=sk-..." > .env   # or export it
 
 ### Create the “prod” run
 
+Single run for Acts 2–4:
+
 ```bash
 uv run python demo.py seed
 # writes fixtures/prod_exec_id and prints kr-...
 ```
+
+**Cohort prep (10 distinct originals):** run ten different support requests so
+`executions cohort --limit 10` has enough matches locally:
+
+```bash
+uv run python demo.py seed-cohort --count 10
+# writes fixtures/prod_exec_id (first run) + fixtures/cohort_exec_ids (all ten)
+```
+
+Scenarios live in `fixtures/cohort_scenarios.json` — edit or extend that file to
+change the prompts/customers.
 
 ```bash
 export PROD_ID="$(cat fixtures/prod_exec_id)"
@@ -138,8 +151,8 @@ kitaru executions cohort \
   -o json | tee fixtures/cohort.json
 ```
 
-For a **local trial** after `demo.py seed` (no deployment tag), omit `--deployment` or
-filter by flow only:
+For a **local trial** after `demo.py seed-cohort --count 10` (no deployment tag),
+omit `--deployment` or filter by flow only:
 
 ```bash
 kitaru executions cohort \
