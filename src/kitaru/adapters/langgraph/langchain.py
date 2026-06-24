@@ -770,12 +770,20 @@ def _model_metadata(
         "model_type": _type_label(getattr(request, "model", None)),
         "tool_count": len(_request_tools(request)),
     }
+    messages = response_messages
     if capture.save_model_input:
         metadata["input_available"] = model_input is not None
     if response is not None:
         metadata["response_type"] = _type_label(response)
         messages = response_messages or _model_response_messages(response)
         metadata["response_message_count"] = len(messages)
+    provider_name = _model_provider_name(
+        request,
+        response=response,
+        response_messages=messages,
+    )
+    if provider_name is not None:
+        metadata["model_provider"] = provider_name
     if response is not None and capture.save_model_usage:
         usage = _usage_from_response(response)
         if usage is not None:
@@ -976,6 +984,59 @@ def _model_name(request: Any) -> str | None:
         value = getattr(model, attr, None)
         if isinstance(value, str) and value.strip():
             return value
+    return None
+
+
+_MODEL_PROVIDER_METADATA_KEYS = (
+    "model_provider",
+    "ls_provider",
+    "provider_name",
+    "provider",
+)
+_MODEL_PROVIDER_METADATA_CONTAINERS = (
+    "response_metadata",
+    "metadata",
+    "kwargs",
+)
+
+
+def _model_provider_name(
+    request: Any,
+    *,
+    response: Any | None,
+    response_messages: list[Any] | None,
+) -> str | None:
+    model = getattr(request, "model", None)
+    for value in (request, model, response, getattr(response, "model_response", None)):
+        provider_name = _provider_name_from_value(value)
+        if provider_name is not None:
+            return provider_name
+    for message in response_messages or []:
+        provider_name = _provider_name_from_value(message)
+        if provider_name is not None:
+            return provider_name
+    return None
+
+
+def _provider_name_from_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    for key in _MODEL_PROVIDER_METADATA_KEYS:
+        if isinstance(value, Mapping):
+            candidate = value.get(key)
+        else:
+            candidate = getattr(value, key, None)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    for container_name in _MODEL_PROVIDER_METADATA_CONTAINERS:
+        if isinstance(value, Mapping):
+            container = value.get(container_name)
+        else:
+            container = getattr(value, container_name, None)
+        if isinstance(container, Mapping):
+            provider_name = _provider_name_from_value(container)
+            if provider_name is not None:
+                return provider_name
     return None
 
 

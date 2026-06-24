@@ -1009,7 +1009,7 @@ class KitaruGraphRunner:
         cost_metadata = calculated_or_genai_cost_metadata(
             calculator=self._cost_calculator,
             calculator_usage=usage,
-            genai_provider=None,
+            genai_provider=usage.provider_name if usage is not None else None,
             genai_model=usage.model_name if usage is not None else None,
             genai_usage=usage_payload,
             warnings=warnings,
@@ -1905,6 +1905,7 @@ class KitaruGraphRunner:
     ) -> LangGraphUsageSummary | None:
         usages: list[Any] = []
         model_names: set[str] = set()
+        provider_names: set[str] = set()
         seen_event_ids: set[str] = set()
         for event in tracker.events:
             if event.kind != "model_call" or event.status != "completed":
@@ -1921,7 +1922,20 @@ class KitaruGraphRunner:
             metadata_model_name = event.metadata.get("model_name")
             if isinstance(metadata_model_name, str) and metadata_model_name:
                 model_names.add(metadata_model_name)
-        return _usage_summary_from_payloads(usages, model_names=model_names)
+            for provider_key in (
+                "model_provider",
+                "ls_provider",
+                "provider_name",
+                "provider",
+            ):
+                metadata_provider = event.metadata.get(provider_key)
+                if isinstance(metadata_provider, str) and metadata_provider.strip():
+                    provider_names.add(metadata_provider)
+        return _usage_summary_from_payloads(
+            usages,
+            model_names=model_names,
+            provider_names=provider_names,
+        )
 
     def _usage_from_output(self, output: Any) -> LangGraphUsageSummary | None:
         return _usage_summary_from_payloads(_find_usages(output, max_depth=6))
@@ -2175,6 +2189,7 @@ def _usage_summary_from_payloads(
     payloads: Sequence[Any],
     *,
     model_names: set[str] | None = None,
+    provider_names: set[str] | None = None,
 ) -> LangGraphUsageSummary | None:
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -2219,8 +2234,12 @@ def _usage_summary_from_payloads(
     model_name = None
     if model_names is not None and len(model_names) == 1:
         model_name = next(iter(model_names))
+    provider_name = None
+    if provider_names is not None and len(provider_names) == 1:
+        provider_name = next(iter(provider_names))
     return LangGraphUsageSummary(
         model_name=model_name,
+        provider_name=provider_name,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,

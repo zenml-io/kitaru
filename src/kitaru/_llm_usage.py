@@ -330,13 +330,33 @@ _PROVIDER_ID_ALIASES = {
     "xai": "xai",
 }
 _SUPPORTED_PROVIDER_IDS = frozenset(_PROVIDER_ID_ALIASES.values())
-_OPENAI_BARE_MODEL_PREFIXES = (
-    "chatgpt-",
-    "codex-",
-    "gpt-",
-    "o1",
-    "o3",
-    "o4",
+_BARE_MODEL_PROVIDER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "openai",
+        (
+            "chatgpt-",
+            "codex-",
+            "gpt-",
+            "o1",
+            "o3",
+            "o4",
+        ),
+    ),
+    ("anthropic", ("claude",)),
+    ("google", ("gemini",)),
+    (
+        "mistral",
+        (
+            "codestral",
+            "devstral",
+            "magistral",
+            "ministral",
+            "mistral",
+        ),
+    ),
+    ("deepseek", ("deepseek",)),
+    ("cohere", ("command-",)),
+    ("xai", ("grok",)),
 )
 
 
@@ -374,15 +394,12 @@ def _normalize_provider_id(provider: str | None, model_ref: str | None) -> str |
         provider_id = _PROVIDER_ID_ALIASES.get(candidate)
         if provider_id in _SUPPORTED_PROVIDER_IDS:
             return provider_id
-        if not explicit_provider:
-            return None
+        return None
     model_candidate = (model_ref or "").strip().lower()
-    if (
-        "/" not in model_candidate
-        and ":" not in model_candidate
-        and model_candidate.startswith(_OPENAI_BARE_MODEL_PREFIXES)
-    ):
-        return "openai"
+    if "/" not in model_candidate and ":" not in model_candidate:
+        for provider_id, prefixes in _BARE_MODEL_PROVIDER_PREFIXES:
+            if model_candidate.startswith(prefixes):
+                return provider_id
     return None
 
 

@@ -154,7 +154,7 @@ def test_genai_prices_helper_keeps_openai_reasoning_in_completion_tokens(
     ("provider", "model", "expected_provider"),
     [
         (None, "gpt-4o-mini", "openai"),
-        ("unknown", "gpt-4o-mini", "openai"),
+        ("unknown", "gpt-4o-mini", None),
         (None, "unknown/gpt-4o-mini", None),
         ("unknown", "unknown/gpt-4o-mini", None),
     ],
@@ -194,6 +194,54 @@ def test_genai_prices_helper_prices_bare_openai_model_names(
             },
             "model_ref": model,
             "provider_id": "openai",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_provider"),
+    [
+        ("claude-haiku-4-5", "anthropic"),
+        ("gemini-2.5-flash", "google"),
+        ("mistral-large-latest", "mistral"),
+        ("codestral-latest", "mistral"),
+        ("devstral-small-latest", "mistral"),
+        ("magistral-medium-latest", "mistral"),
+        ("ministral-8b-latest", "mistral"),
+        ("deepseek-chat", "deepseek"),
+        ("command-r-plus", "cohere"),
+        ("grok-3-mini", "xai"),
+    ],
+)
+def test_genai_prices_helper_prices_well_known_bare_non_openai_model_names(
+    model: str,
+    expected_provider: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.013)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider=None,
+        model=model,
+        usage={"input_tokens": 100, "output_tokens": 50},
+        warnings=warnings,
+        adapter_name="LangGraph",
+    )
+
+    assert metadata.estimated_cost_usd == 0.013
+    assert metadata.cost_source == "calculator"
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": model,
+            "provider_id": expected_provider,
         }
     ]
 
@@ -264,6 +312,27 @@ def test_genai_prices_helper_rejects_unknown_provider_prefix(
         provider=None,
         model="some-random-prefix/model",
         usage={"input_token_count": 10, "output_token_count": 5},
+        warnings=warnings,
+        adapter_name="LangGraph",
+    )
+
+    assert metadata.estimated_cost_usd is None
+    assert metadata.cost_source == "none"
+    assert metadata.cost_source_label is None
+    assert warnings == []
+    assert calls == []
+
+
+def test_genai_prices_helper_rejects_unknown_explicit_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.022)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="some-gateway",
+        model="gpt-4o-mini",
+        usage={"input_tokens": 10, "output_tokens": 5},
         warnings=warnings,
         adapter_name="LangGraph",
     )

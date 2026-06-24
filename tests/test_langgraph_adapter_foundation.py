@@ -1410,11 +1410,15 @@ def test_graph_call_samples_raw_usage_metadata_for_many_payloads(
 
 
 @pytest.mark.parametrize(
-    ("model_name", "expected_model_ref"),
+    ("model_name", "expected_model_ref", "expected_provider"),
     [
-        ("openai/gpt-4o-mini", "gpt-4o-mini"),
-        ("gpt-4o-mini", "gpt-4o-mini"),
-        ("gpt-4o-mini-2024-07-18", "gpt-4o-mini-2024-07-18"),
+        ("openai/gpt-4o-mini", "gpt-4o-mini", "openai"),
+        ("gpt-4o-mini", "gpt-4o-mini", "openai"),
+        ("gpt-4o-mini-2024-07-18", "gpt-4o-mini-2024-07-18", "openai"),
+        ("claude-haiku-4-5", "claude-haiku-4-5", "anthropic"),
+        ("gemini-2.5-flash", "gemini-2.5-flash", "google"),
+        ("mistral-large-latest", "mistral-large-latest", "mistral"),
+        ("deepseek-chat", "deepseek-chat", "deepseek"),
     ],
 )
 def test_graph_call_uses_genai_prices_for_known_single_model(
@@ -1422,6 +1426,7 @@ def test_graph_call_uses_genai_prices_for_known_single_model(
     monkeypatch: pytest.MonkeyPatch,
     model_name: str,
     expected_model_ref: str,
+    expected_provider: str,
 ) -> None:
     agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
     logged: list[dict[str, Any]] = []
@@ -1466,7 +1471,66 @@ def test_graph_call_uses_genai_prices_for_known_single_model(
                 "cache_write_tokens": None,
             },
             "model_ref": expected_model_ref,
-            "provider_id": "openai",
+            "provider_id": expected_provider,
+        }
+    ]
+
+
+def test_graph_call_uses_provider_from_model_event_metadata(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.73)
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            tracker = tracking.get_current_tracker()
+            assert tracker is not None
+            event_id, context = tracker.start_model_event()
+            tracker.record_model_event(
+                event_id,
+                context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "haiku-4-5",
+                    "ls_provider": "anthropic",
+                    "usage": {"input_tokens": 3, "output_tokens": 4},
+                },
+            )
+            return {"echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.model_name == "haiku-4-5"
+    assert result.usage.provider_name == "anthropic"
+    assert result.estimated_cost_usd == 0.73
+    assert logged[0]["cost"]["source"] == "calculator"
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "haiku-4-5",
+            "provider_id": "anthropic",
         }
     ]
 

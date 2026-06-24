@@ -178,6 +178,7 @@ class LangGraphUsageSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_name: str | None = None
+    provider_name: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
