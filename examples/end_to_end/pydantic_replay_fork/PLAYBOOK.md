@@ -139,17 +139,6 @@ Open that link in the browser.
 
 **Step 1 — resolve the cohort (read-only).** This only queries and returns exec IDs; it does not replay anything unless you pass `--replay`.
 
-For **production** runs tagged with deployment metadata:
-
-```bash
-kitaru executions cohort \
-  --flow support_copilot_flow \
-  --deployment prod \
-  --at lookup_policy_tool \
-  --order-by=-display_cost_usd \
-  --limit 10 \
-  -o json | tee fixtures/cohort.json
-```
 
 For a **local trial** after `demo.py seed-cohort --count 10` (no deployment tag),
 omit `--deployment` or filter by flow only:
