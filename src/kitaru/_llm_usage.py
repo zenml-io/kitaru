@@ -304,7 +304,40 @@ _PROVIDER_ID_ALIASES = {
     "vertexai": "google",
     "gemini": "google",
     "openai": "openai",
+    "azure-openai": "azure",
+    "azure_openai": "azure",
+    "azure": "azure",
+    "aws": "aws",
+    "bedrock": "aws",
+    "aws-bedrock": "aws",
+    "aws_bedrock": "aws",
+    "cohere": "cohere",
+    "deepseek": "deepseek",
+    "fireworks": "fireworks",
+    "fireworks-ai": "fireworks",
+    "fireworks_ai": "fireworks",
+    "groq": "groq",
+    "mistral": "mistral",
+    "mistralai": "mistral",
+    "openrouter": "openrouter",
+    "perplexity": "perplexity",
+    "sonar": "perplexity",
+    "together": "together",
+    "together-ai": "together",
+    "together_ai": "together",
+    "x-ai": "xai",
+    "x_ai": "xai",
+    "xai": "xai",
 }
+_SUPPORTED_PROVIDER_IDS = frozenset(_PROVIDER_ID_ALIASES.values())
+_OPENAI_BARE_MODEL_PREFIXES = (
+    "chatgpt-",
+    "codex-",
+    "gpt-",
+    "o1",
+    "o3",
+    "o4",
+)
 
 
 @lru_cache(maxsize=1)
@@ -331,12 +364,26 @@ def _resolve_genai_cost_policy(*, warnings: list[str], adapter_name: str) -> str
 
 
 def _normalize_provider_id(provider: str | None, model_ref: str | None) -> str | None:
-    candidate = (provider or "").strip().lower()
+    explicit_provider = (provider or "").strip().lower()
+    candidate = explicit_provider
     if not candidate and model_ref and "/" in model_ref:
         candidate = model_ref.split("/", 1)[0].strip().lower()
     if not candidate and model_ref and ":" in model_ref:
         candidate = model_ref.split(":", 1)[0].strip().lower()
-    return _PROVIDER_ID_ALIASES.get(candidate)
+    if candidate:
+        provider_id = _PROVIDER_ID_ALIASES.get(candidate)
+        if provider_id in _SUPPORTED_PROVIDER_IDS:
+            return provider_id
+        if not explicit_provider:
+            return None
+    model_candidate = (model_ref or "").strip().lower()
+    if (
+        "/" not in model_candidate
+        and ":" not in model_candidate
+        and model_candidate.startswith(_OPENAI_BARE_MODEL_PREFIXES)
+    ):
+        return "openai"
+    return None
 
 
 def _provider_model_ref(model_ref: str | None, provider_id: str | None) -> str | None:
@@ -345,13 +392,14 @@ def _provider_model_ref(model_ref: str | None, provider_id: str | None) -> str |
     normalized = model_ref.strip()
     if not normalized:
         return None
-    for separator in ("/", ":"):
-        if separator not in normalized:
-            continue
-        prefix, _, suffix = normalized.partition(separator)
-        if _normalize_provider_id(prefix, None) == provider_id and suffix.strip():
-            normalized = suffix.strip()
-            break
+    if provider_id is not None:
+        for separator in ("/", ":"):
+            if separator not in normalized:
+                continue
+            prefix, _, suffix = normalized.partition(separator)
+            if _normalize_provider_id(prefix, None) == provider_id and suffix.strip():
+                normalized = suffix.strip()
+                break
     if provider_id == "google":
         if normalized.startswith("models/"):
             return normalized.removeprefix("models/")
@@ -366,18 +414,21 @@ def _provider_model_ref(model_ref: str | None, provider_id: str | None) -> str |
 def _usage_has_genai_pricing_tokens(usage: Mapping[str, Any] | None) -> bool:
     if usage is None:
         return False
-    return any(
-        _int_or_none(usage.get(key)) is not None
-        for key in (
-            "input_tokens",
-            "prompt_tokens",
-            "output_tokens",
-            "completion_tokens",
-            "cached_input_tokens",
-            "cached_prompt_tokens",
-            "cache_read_input_tokens",
-            "cache_creation_input_tokens",
+    token_usage = token_usage_from_mapping(usage)
+    return (
+        any(
+            _int_or_none(token_usage.get(key)) is not None
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "cached_input_tokens",
+                "reasoning_tokens",
+            )
         )
+        or _int_or_none(
+            _first_present(usage, "cache_creation_input_tokens", "cache_write_tokens")
+        )
+        is not None
     )
 
 

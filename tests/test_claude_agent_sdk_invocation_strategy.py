@@ -1019,6 +1019,88 @@ def test_claude_cost_calculator_fallback_runs_without_sdk_estimate(
     assert cost["source_label"] == "claude_agent_sdk.cost_calculator"
 
 
+@pytest.mark.parametrize(
+    ("sdk_cost", "expected_result_cost", "expects_invalid_cost_warning"),
+    [(0.0, 0.0, False), (-0.01, None, True), ("invalid", None, True)],
+)
+def test_claude_cost_calculator_fallback_runs_for_invalid_or_zero_sdk_cost(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    sdk_cost: object,
+    expected_result_cost: float | None,
+    expects_invalid_cost_warning: bool,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    usage_records: list[dict[str, object]] = []
+    result_message = fake_sdk.__dict__["ResultMessage"]()
+    result_message.total_cost_usd = sdk_cost
+    result_message.usage = {"input_tokens": 3, "output_tokens": 5}
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        cost_calculator=lambda _usage: 0.12,
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.cost_usd == expected_result_cost
+    cost = cast(dict[str, object], usage_records[0]["cost"])
+    assert cost["estimated_cost_usd"] == 0.12
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "claude_agent_sdk.cost_calculator"
+    has_invalid_cost_warning = any(
+        "invalid total_cost_usd" in warning for warning in result.warnings
+    )
+    assert has_invalid_cost_warning is expects_invalid_cost_warning
+
+
+def test_claude_zero_sdk_cost_without_usage_keeps_sdk_zero(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    usage_records: list[dict[str, object]] = []
+    result_message = fake_sdk.__dict__["ResultMessage"]()
+    result_message.total_cost_usd = 0.0
+    result_message.usage = None
+    result_message.model_usage = None
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [result_message]
+    agent_module = importlib.import_module("kitaru.adapters.claude_agent_sdk._agent")
+    monkeypatch.setattr(
+        agent_module,
+        "log_usage_record",
+        lambda record: usage_records.append(dict(record)),
+    )
+    _patch_direct_execution_persistence(monkeypatch)
+
+    def fail_if_called(_usage: object) -> float:
+        raise AssertionError("calculator should not run for SDK zero without usage")
+
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+        cost_calculator=fail_if_called,
+    )
+
+    result = runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert result.cost_usd == 0.0
+    cost = cast(dict[str, object], usage_records[0]["cost"])
+    assert cost["estimated_cost_usd"] == 0.0
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "claude_agent_sdk.total_cost_usd"
+
+
 def test_claude_no_sdk_cost_without_calculator_uses_genai_prices(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,

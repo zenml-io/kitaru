@@ -1038,6 +1038,69 @@ class TestOpenAIModelToolCallReservations:
 
 
 @pytest.mark.anyio
+async def test_openai_model_call_usage_metadata_includes_requested_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kitaru.adapters.openai_agents._model as openai_model
+    from kitaru.adapters.openai_agents._model import KitaruOpenAIModel
+    from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
+
+    recorded_metadata: list[dict[str, object]] = []
+
+    async def fake_wrapped_get_response(*_args: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(
+            output=[],
+            usage=SimpleNamespace(input_tokens=7, output_tokens=3, total_tokens=10),
+            response_id="resp_usage",
+        )
+
+    class FakeTracker:
+        def start_llm_event(self) -> tuple[str, SimpleNamespace]:
+            return "agent_ab12cd34_llm_call_1", SimpleNamespace(sequence_index=1)
+
+        def record_event(self, *_args: Any, **kwargs: Any) -> None:
+            recorded_metadata.append(kwargs["metadata"])
+
+        def reserve_tool_call_order(self, _tool_call_ids: list[str]) -> None:
+            return None
+
+    monkeypatch.setattr(openai_model, "is_inside_flow", lambda: False)
+    monkeypatch.setattr(openai_model, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(openai_model, "get_current_tracker", lambda: FakeTracker())
+    monkeypatch.setattr(openai_model.kitaru, "save", lambda *_args, **_kwargs: None)
+
+    model = KitaruOpenAIModel(
+        SimpleNamespace(
+            get_response=fake_wrapped_get_response,
+            model_name="wrapped-model",
+        ),
+        capture=OpenAICapturePolicy(save_usage=True),
+        agent_name="usage_agent",
+        checkpoint_config=None,
+        requested_model_name="gpt-4o-mini",
+    )
+
+    response = await model.get_response(
+        "system",
+        "hello",
+        None,
+        [],
+        None,
+        [],
+        None,
+        previous_response_id=None,
+        conversation_id=None,
+        prompt=None,
+    )
+
+    assert response.response_id == "resp_usage"
+    usage = cast(dict[str, object], recorded_metadata[0]["usage"])
+    assert usage["model_name"] == "gpt-4o-mini"
+    assert usage["input_tokens"] == 7
+    assert usage["output_tokens"] == 3
+
+
+@pytest.mark.anyio
 async def test_openai_model_checkpoint_uses_structural_input_and_output_refs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

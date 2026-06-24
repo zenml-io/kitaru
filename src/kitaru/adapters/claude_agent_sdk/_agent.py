@@ -96,6 +96,44 @@ def _usage_summary_from_payload(
     )
 
 
+def _usage_summary_has_token_counts(usage: ClaudeUsageSummary | None) -> bool:
+    if usage is None:
+        return False
+    return any(
+        value is not None
+        for value in (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.total_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
+        )
+    )
+
+
+def _sdk_cost_metadata(
+    raw_cost: float | None,
+    usage: ClaudeUsageSummary | None,
+    warnings: list[str],
+) -> CalculatedCostMetadata | None:
+    if raw_cost is None:
+        return None
+    estimated_cost = coerce_cost_usd(raw_cost)
+    if estimated_cost is None:
+        warnings.append(
+            "Claude Agent SDK returned an invalid total_cost_usd; falling back "
+            "to the configured cost calculator or genai-prices."
+        )
+        return None
+    if estimated_cost == 0.0 and _usage_summary_has_token_counts(usage):
+        return None
+    return CalculatedCostMetadata(
+        estimated_cost_usd=estimated_cost,
+        cost_source="calculator",
+        cost_source_label="claude_agent_sdk.total_cost_usd",
+    )
+
+
 def _canonical_usage_payload(
     payload: ClaudeInvocationPayload,
 ) -> Mapping[str, Any] | None:
@@ -571,7 +609,8 @@ class KitaruClaudeRunner:
             metadata["capture_failures"] = capture_failure_metadata
         canonical_usage = _canonical_usage_payload(payload)
         usage_summary = _usage_summary_from_payload(payload, canonical_usage)
-        if payload.cost_usd is None:
+        cost_metadata = _sdk_cost_metadata(payload.cost_usd, usage_summary, warnings)
+        if cost_metadata is None:
             cost_metadata = calculated_or_genai_cost_metadata(
                 calculator=self._cost_calculator,
                 calculator_usage=usage_summary,
@@ -584,24 +623,6 @@ class KitaruClaudeRunner:
                 adapter_name="Claude Agent SDK",
                 calculator_source_label="claude_agent_sdk.cost_calculator",
             )
-        else:
-            estimated_cost = coerce_cost_usd(payload.cost_usd)
-            if estimated_cost is None:
-                warnings.append(
-                    "Claude Agent SDK reported an invalid total_cost_usd; "
-                    "estimated cost was not recorded."
-                )
-                cost_metadata = CalculatedCostMetadata(
-                    estimated_cost_usd=None,
-                    cost_source="calculator_error",
-                    cost_source_label="claude_agent_sdk.total_cost_usd",
-                )
-            else:
-                cost_metadata = CalculatedCostMetadata(
-                    estimated_cost_usd=estimated_cost,
-                    cost_source="calculator",
-                    cost_source_label="claude_agent_sdk.total_cost_usd",
-                )
         if self._capture.save_usage:
             usage_record = build_usage_record(
                 adapter="claude_agent_sdk",

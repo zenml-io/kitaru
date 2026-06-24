@@ -1409,9 +1409,19 @@ def test_graph_call_samples_raw_usage_metadata_for_many_payloads(
     assert logged[0]["cost"]["estimated_cost_usd"] is None
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_model_ref"),
+    [
+        ("openai/gpt-4o-mini", "gpt-4o-mini"),
+        ("gpt-4o-mini", "gpt-4o-mini"),
+        ("gpt-4o-mini-2024-07-18", "gpt-4o-mini-2024-07-18"),
+    ],
+)
 def test_graph_call_uses_genai_prices_for_known_single_model(
     langgraph_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    model_name: str,
+    expected_model_ref: str,
 ) -> None:
     agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
     logged: list[dict[str, Any]] = []
@@ -1431,7 +1441,7 @@ def test_graph_call_uses_genai_prices_for_known_single_model(
         runner,
         "_usage_from_model_events",
         lambda _tracker: langgraph_adapter.LangGraphUsageSummary(
-            model_name="openai/gpt-4o-mini",
+            model_name=model_name,
             input_tokens=3,
             output_tokens=4,
         ),
@@ -1455,7 +1465,7 @@ def test_graph_call_uses_genai_prices_for_known_single_model(
                 "cache_read_tokens": None,
                 "cache_write_tokens": None,
             },
-            "model_ref": "gpt-4o-mini",
+            "model_ref": expected_model_ref,
             "provider_id": "openai",
         }
     ]
