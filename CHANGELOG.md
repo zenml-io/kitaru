@@ -12,16 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
 - Added `--page` and `--size` pagination options to `kitaru executions statistics`.
 - Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
-- Added `flow.replay_many(executions, *, at=..., ...)` for batch replay across many parent executions. Parents missing the `at` checkpoint are skipped and recorded in `ReplayManyResult.skipped`.
+- Added `flow.replay_many(executions, *, at=..., ...)` and `KitaruClient().executions.replay_many(...)` for batch replay across many parent executions. Parents missing the `at` checkpoint are skipped and recorded in `ReplayManyResult.skipped`.
 - Added `kitaru.diff_cohort(exec_ids)` to diff many originals against their auto-discovered replays.
-- `kitaru.diff()` now sets `ExecutionDiff.urls` to UI compare links — one `{original},{replay}` URL per replay when a server URL is configured.
+- Added CLI commands `kitaru executions diff`, `kitaru executions diff-cohort`, and MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_cohort`, `kitaru_executions_replay_many`.
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort`, MCP `kitaru_executions_cohort`, and CLI `kitaru executions replay-many` (including `--cohort-file` for saved resolve output).
+- `kitaru executions replay` now prints UI compare URLs (and includes `compare_urls` in JSON output) for the original execution vs the new replay.
+- Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
+- `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
 
 ### Changed
 - Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
-- **Breaking:** Redesigned replay API: `flow.replay(execution, *, at=..., input=..., output=..., tool=..., llm_model=..., **flow_inputs)`. Checkpoints before `at` are skipped (playback); the cut and downstream re-execute. `input` overrides checkpoint inputs, `output` mocks tool/LLM returns without running code, `tool` swaps tool implementations by import path, and `llm_model` overrides `llm_call` checkpoints in the live tail. Flow parameters remain `**flow_inputs` kwargs.
+- **Breaking:** Redesigned replay API: `flow.replay(execution, *, at=..., input=..., output=..., tool=..., llm_model=..., skip=..., **flow_inputs)`. Checkpoints before `at` are skipped (playback); the cut and downstream re-execute. `input` overrides checkpoint inputs, `output` mocks tool/LLM returns without running code, `tool` swaps tool implementations by import path, `llm_model` overrides native `kitaru.llm()` checkpoints in the live tail, and `skip` forces playback for checkpoints in the live tail. Flow parameters remain `**flow_inputs` kwargs.
 
 ### Fixed
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
+- Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
+- `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
 - `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 
 ## [0.17.1] - 2026-06-22
