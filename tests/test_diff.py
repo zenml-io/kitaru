@@ -155,6 +155,69 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     assert matrix.rows[1].compared[0][0] == "kr-replay-b"
 
 
+def test_build_compare_url_for_executions_supports_three_way_compare() -> None:
+    from kitaru.diff import build_compare_url_for_executions
+
+    url = build_compare_url_for_executions(
+        server_url="https://demo.kitaru.zenml.io",
+        flow_id="flow-1",
+        exec_ids=[
+            "91f4a9d3-2ebb-4607-9b3d-3d1258d47a4d",
+            "4427d903-79b2-48e1-8fa2-a0f499809abf",
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        ],
+    )
+
+    assert url == (
+        "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
+        "?executions="
+        "91f4a9d3-2ebb-4607-9b3d-3d1258d47a4d,"
+        "4427d903-79b2-48e1-8fa2-a0f499809abf,"
+        "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    )
+
+
+def test_diff_with_two_explicit_replays_returns_one_three_way_url() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
+    )
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-2",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-3",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay_a, replay_b]
+    fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io"
+
+    with patch("kitaru.diff.KitaruClient", return_value=fake_client):
+        result = diff("kr-original", "kr-replay-a", "kr-replay-b")
+
+    assert result.urls == [
+        "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
+        "?executions=kr-original,kr-replay-a,kr-replay-b"
+    ]
+
+
 def test_build_compare_url_matches_ui_route() -> None:
     from kitaru.diff import build_compare_url
 
@@ -170,6 +233,49 @@ def test_build_compare_url_matches_ui_route() -> None:
         "/v/local/compare?executions="
         "91f4a9d3-2ebb-4607-9b3d-3d1258d47a4d,4427d903-79b2-48e1-8fa2-a0f499809abf"
     )
+
+
+def test_diff_auto_discovers_replays_and_returns_one_multi_exec_url() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
+    )
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-2",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-3",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay_a, replay_b]
+    fake_client.executions.list.return_value = [replay_a, replay_b]
+    fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io"
+
+    with patch("kitaru.diff.KitaruClient", return_value=fake_client):
+        result = diff("kr-original")
+
+    assert len(result.compared) == 2
+    assert result.urls == [
+        "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
+        "?executions=kr-original,kr-replay-a,kr-replay-b"
+    ]
 
 
 def test_build_compare_urls_returns_one_url_per_replay() -> None:

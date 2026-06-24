@@ -28,12 +28,12 @@ def test_fork_drift_surfaces_permission_regression(
     seed = agent.reconstruct(case)
 
     # reproduction: live tail, no edits — semantic decision reproduced.
-    repro = agent.replay(seed, from_="collect_evidence_with_tools")
+    repro = agent.replay(seed, at="collect_evidence_with_tools")
 
     # fork: trim permissions (planted regression) — risk_status must drift.
     fork = agent.fork(
         seed,
-        from_="collect_evidence_with_tools",
+        at="collect_evidence_with_tools",
         variant={"prompt_profile": "trimmed_permissions", "model": "gpt-5-nano"},
     )
 

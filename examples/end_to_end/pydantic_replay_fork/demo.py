@@ -1,37 +1,28 @@
-"""PydanticAI support-copilot demo — run / replay / cohort with Kitaru.
+"""PydanticAI support-copilot demo — seed / replay / cohort with Kitaru.
 
-This is the replay story in plain code. The existing CLI
-command is the fastest way to replay a recorded execution:
+Operator story: see ``PLAYBOOK.md``. Quick commands:
 
-    kitaru executions replay <EXEC-ID> --at lookup_policy_tool
-    kitaru executions replay <EXEC-ID> --at lookup_policy_tool \
+    uv run python demo.py seed
+    uv run python demo.py replay <PROD-ID>
+    uv run python demo.py cohort --export-json reports/cohort_report.json
+
+CLI equivalents:
+
+    kitaru executions replay <PROD-ID> --at lookup_policy_tool \\
       --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}'
-
-(The PydanticAI agent calls a ``lookup_policy`` tool. With
-``KitaruAgent(checkpoint_strategy="calls")``, that tool call becomes the
-``lookup_policy_tool`` checkpoint — the replay anchor, ``REPLAY_POINT``.)
-
-The script below narrates the same operations with SDK calls:
-
-    support_copilot_flow.run(prompt, customer, model, prompt_profile)
-    support_copilot_flow.replay(exec_id, at=REPLAY_POINT, cache=False, ...)
-    KitaruClient().executions.get(...) / .list(...)
-
-Pick which step to run via the command line:
-
-    cd examples/end_to_end/pydantic_replay_fork
-    uv run python demo.py run-all          # run -> replay -> cohort, narrated
-    uv run python demo.py run              # one production run; prints exec_id
-    uv run python demo.py replay <EXEC-ID> # reproduce + edited replay + HTML
-    uv run python demo.py cohort           # apply the edit across recent runs
 """
 
+from __future__ import annotations
+
+import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from reporting.cohort_html import write as write_cohort_html
 from reporting.comparison_html import write as write_html
 from support_agent import (
+    FLOW_NAME,
     REPLAY_POINT,
     SupportDecision,
     support_copilot_flow,
@@ -43,13 +34,13 @@ from utils import (
     latency,
     load_support_decision_from_execution,
     quality_judge,
-    recent_exec_ids,
 )
 from utils.cohort import run_cohort
 
+import kitaru
 from kitaru import KitaruClient, diff
 
-# --- The scenario and the config we run/replay under -----------------------
+# --- Scenario and replay variants -------------------------------------------
 
 SCENARIO = (
     "I need to grant all members of our engineering team admin access to the "
@@ -58,12 +49,14 @@ SCENARIO = (
 )
 CUSTOMER = "acme-corp / alice@acme.example"
 
-BASELINE_MODEL = "openai:gpt-5-mini"  # what production runs under
-FORK_MODEL = "openai:gpt-5-nano"  # the cheaper model we replay under
-FORK_PROMPT_PROFILE = "trimmed_permissions"  # the looser prompt we replay under
+BASELINE_MODEL = "openai:gpt-5-mini"
+VARIANT_MODEL = "openai:gpt-5-nano"
+VARIANT_PROMPT_PROFILE = "trimmed_permissions"
 
+PROD_FIXTURE = Path("fixtures/prod_exec_id")
 HTML_PATH = "reports/replay_three_way.html"
 COHORT_HTML_PATH = "reports/cohort_report.html"
+COHORT_JSON_PATH = "reports/cohort_report.json"
 _FLOW_NODES = (
     "support_copilot_model_request",
     "gather_context_tool",
@@ -71,9 +64,6 @@ _FLOW_NODES = (
     "support_copilot_model_request_2",
     "publish_support_decision",
 )
-
-
-# --- Tiny presentation helpers (not Kitaru — just printing) ----------------
 
 
 def section(text: str) -> None:
@@ -98,38 +88,36 @@ def require_replay_anchor(client: KitaruClient, exec_id: str) -> None:
         return
     raise RuntimeError(
         f"Expected replay anchor {REPLAY_POINT!r}, but execution {exec_id!r} did not "
-        f"create it. Checkpoints present: {checkpoint_names}. The live model may "
-        "have skipped the lookup_policy tool; rerun, or use a model that follows "
-        "the tool-use instruction more reliably."
+        f"create it. Checkpoints present: {checkpoint_names}."
     )
 
 
 def write_comparison_html(
     original_id: str,
-    reproduced_id: str,
-    edited_id: str,
+    model_replay_id: str,
+    tool_replay_id: str,
     original: dict,
-    reproduced: dict,
-    edited: dict,
+    model_replay: dict,
+    tool_replay: dict,
 ) -> str:
-    """Render the three-way original/reproduction/edited HTML report."""
+    """Render original vs two replay variants."""
     fields = list(SupportDecision.model_fields)
     outcomes = [
         (
             f,
             original.get(f),
-            reproduced.get(f),
-            edited.get(f),
-            original.get(f) == reproduced.get(f),
-            reproduced.get(f) == edited.get(f),
+            model_replay.get(f),
+            tool_replay.get(f),
+            original.get(f) == model_replay.get(f),
+            original.get(f) == tool_replay.get(f),
         )
         for f in fields
     ]
 
-    # Per-execution runtime / tokens / checkpoint count, for the three runs.
     client = KitaruClient()
-    o, r, e = (
-        execution_stats(client, i) for i in (original_id, reproduced_id, edited_id)
+    o, m, t = (
+        execution_stats(client, i)
+        for i in (original_id, model_replay_id, tool_replay_id)
     )
 
     def _runtime(stat: dict) -> str | None:
@@ -137,50 +125,41 @@ def write_comparison_html(
         return f"{seconds:.1f}s" if isinstance(seconds, (int, float)) else None
 
     run_stats = [
-        ("runtime", _runtime(o), _runtime(r), _runtime(e)),
-        ("total tokens", o["total_tokens"], r["total_tokens"], e["total_tokens"]),
+        ("runtime", _runtime(o), _runtime(m), _runtime(t)),
+        ("total tokens", o["total_tokens"], m["total_tokens"], t["total_tokens"]),
         (
             "checkpoints",
             o["checkpoint_count"],
-            r["checkpoint_count"],
-            e["checkpoint_count"],
+            m["checkpoint_count"],
+            t["checkpoint_count"],
         ),
     ]
 
-    reproduction_drift = diff_decisions(original, reproduced).has_drift
-    edited_drift = diff_decisions(reproduced, edited).has_drift
+    model_drift = diff_decisions(original, model_replay).has_drift
+    tool_drift = diff_decisions(original, tool_replay).has_drift
     return write_html(
         HTML_PATH,
         exec_id=original_id,
         scenario=SCENARIO[:80] + "..." if len(SCENARIO) > 80 else SCENARIO,
-        # The HTML diagram labels steps with friendly names (_FLOW_NODES); the
-        # real replay anchor is REPLAY_POINT == "lookup_policy_tool".
         cut="lookup_policy_tool",
         nodes=_FLOW_NODES,
         settings_changes=[
-            ("model", BASELINE_MODEL, FORK_MODEL),
-            ("prompt_profile", "baseline", FORK_PROMPT_PROFILE),
+            ("model", BASELINE_MODEL, VARIANT_MODEL),
+            ("prompt_profile", "baseline", VARIANT_PROMPT_PROFILE),
         ],
         outcomes=outcomes,
         run_stats=run_stats,
-        has_reproduction_drift=reproduction_drift,
-        has_edited_drift=edited_drift,
+        has_reproduction_drift=False,
+        has_edited_drift=model_drift or tool_drift,
         original_summary=decision_summary(original),
-        reproduced_summary=decision_summary(reproduced),
-        edited_summary=decision_summary(edited),
+        reproduced_summary=decision_summary(model_replay),
+        edited_summary=decision_summary(tool_replay),
     )
 
 
-# --- The steps. Each is independent so you can run just one. ----------------
-
-
 def run() -> str:
-    """Run the tool-using support copilot once; return its exec_id."""
-
+    """Run the agent once and return its exec id."""
     section("Run the PydanticAI agent as a durable Kitaru flow")
-
-    # The one SDK call that starts a durable execution; .wait() blocks until the
-    # flow reaches a terminal state (the final `publish_support_decision` step).
     handle = support_copilot_flow.run(SCENARIO, CUSTOMER, BASELINE_MODEL, "baseline")
     handle.wait()
 
@@ -189,82 +168,81 @@ def run() -> str:
     decision = load_support_decision_from_execution(client, handle.exec_id)
     print(f"   original exec_id={handle.exec_id}")
     print(f"   {decision_summary(decision)}")
-    print("   CLI reproduction:")
-    print(f"     kitaru executions replay {handle.exec_id} --at {REPLAY_POINT}")
-    print("   CLI edited replay:")
+    print("   CLI variant replay:")
     print(
         f"     kitaru executions replay {handle.exec_id} --at {REPLAY_POINT} "
-        f'--args \'{{"model": "{FORK_MODEL}", '
-        f'"prompt_profile": "{FORK_PROMPT_PROFILE}"}}\''
+        f'--args \'{{"model": "{VARIANT_MODEL}", '
+        f'"prompt_profile": "{VARIANT_PROMPT_PROFILE}"}}\''
     )
     return handle.exec_id
 
 
-def replay(exec_id: str) -> None:
-    """Replay exec_id from the policy lookup twice, then compare."""
+def seed() -> str:
+    """Run once and persist the prod exec id for clone-friendly demos."""
+    exec_id = run()
+    PROD_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    PROD_FIXTURE.write_text(f"{exec_id}\n", encoding="utf-8")
+    print(f"   wrote {PROD_FIXTURE}")
+    return exec_id
 
+
+def replay(exec_id: str) -> None:
+    """Replay with model + tool changes, compare each to the original."""
     client = KitaruClient()
     require_replay_anchor(client, exec_id)
-
-    # The decision the original run produced — the baseline we compare against.
     original_decision = load_support_decision_from_execution(client, exec_id)
 
-    # (1) Replay from the policy lookup with NO edits — a faithful reproduction.
     section(
-        "Replay #1 — reproduce from `lookup_policy_tool`, no edits "
-        "(cached first model/context, live policy/final decision)"
+        f"Replay #1 — model change ({VARIANT_MODEL} + {VARIANT_PROMPT_PROFILE}) "
+        "vs original"
     )
-
-    reproduced = support_copilot_flow.replay(exec_id, at=REPLAY_POINT, cache=False)
-    reproduced.wait()
-
-    reproduced_decision = load_support_decision_from_execution(
-        client, reproduced.exec_id
-    )
-
-    print(f"   unchanged replay exec_id={reproduced.exec_id}")
-    print(
-        "   original recorded run → unchanged replay: "
-        f"{diff_decisions(original_decision, reproduced_decision)}"
-    )
-
-    # (2) The SAME SDK call, now WITH edits — a cheaper model + looser prompt.
-    section(
-        f"Replay #2 — re-run policy/final decision under "
-        f"{FORK_MODEL} + {FORK_PROMPT_PROFILE}"
-    )
-    edited = support_copilot_flow.replay(
+    model_handle = support_copilot_flow.replay(
         exec_id,
         at=REPLAY_POINT,
         cache=False,
-        model=FORK_MODEL,
-        prompt_profile=FORK_PROMPT_PROFILE,
+        model=VARIANT_MODEL,
+        prompt_profile=VARIANT_PROMPT_PROFILE,
     )
-    edited.wait()
-
-    edited_decision = load_support_decision_from_execution(client, edited.exec_id)
-
-    print(f"   edited replay exec_id={edited.exec_id}")
+    model_handle.wait()
+    model_decision = load_support_decision_from_execution(client, model_handle.exec_id)
+    print(f"   model replay exec_id={model_handle.exec_id}")
     print(
-        "   unchanged replay → edited replay: "
-        f"{diff_decisions(reproduced_decision, edited_decision)}"
+        "   original → model replay: "
+        f"{diff_decisions(original_decision, model_decision)}"
     )
+    for url in diff(exec_id, model_handle.exec_id).urls:
+        print(f"   ui: {url}")
+
+    section("Replay #2 — tool mock vs original")
+    tool_handle = support_copilot_flow.replay(
+        exec_id,
+        at=REPLAY_POINT,
+        cache=False,
+        tool={"lookup_policy": "mocks.lookup_policy"},
+    )
+    tool_handle.wait()
+    tool_decision = load_support_decision_from_execution(client, tool_handle.exec_id)
+    print(f"   tool replay exec_id={tool_handle.exec_id}")
+    print(
+        f"   original → tool replay: {diff_decisions(original_decision, tool_decision)}"
+    )
+    for url in diff(exec_id, tool_handle.exec_id).urls:
+        print(f"   ui: {url}")
 
     path = write_comparison_html(
         exec_id,
-        reproduced.exec_id,
-        edited.exec_id,
+        model_handle.exec_id,
+        tool_handle.exec_id,
         original_decision,
-        reproduced_decision,
-        edited_decision,
+        model_decision,
+        tool_decision,
     )
     print(f"   html: {path}")
 
-    section("Diff — structural checkpoint comparison via kitaru.diff()")
-    execution_diff = diff(exec_id, reproduced.exec_id, edited.exec_id)
+    section("Three-way compare — prod + model replay + tool replay")
+    execution_diff = diff(exec_id, model_handle.exec_id, tool_handle.exec_id)
     if execution_diff.urls:
-        for compare_url in execution_diff.urls:
-            print(f"   ui: {compare_url}")
+        print(f"   ui: {execution_diff.urls[0]}")
     for replay_id, checkpoint_diffs in execution_diff.compared:
         changed = [
             item.name
@@ -281,18 +259,42 @@ def replay(exec_id: str) -> None:
             print(f"     {', '.join(changed)}")
 
 
-def cohort() -> None:
-    """Apply the same edit across the last N production runs and measure the delta."""
-    section("Cohort — apply the edit across recent 10 production runs")
+def _resolve_cohort(limit: int) -> kitaru.CohortResult:
+    deployment = os.environ.get("COHORT_DEPLOYMENT")
+    return kitaru.cohort(
+        flow=FLOW_NAME,
+        at=REPLAY_POINT,
+        deployment=deployment,
+        order_by="-display_cost_usd",
+        limit=limit,
+    ).resolve()
 
-    client = KitaruClient()
-    cases = recent_exec_ids(client, 3)
+
+def cohort(
+    *,
+    limit: int = 10,
+    export_json: str | None = COHORT_JSON_PATH,
+    with_quality_judge: bool = False,
+) -> None:
+    """Replay the model variant across a resolved cohort."""
+    section(f"Cohort — top {limit} expensive originals with {REPLAY_POINT}")
+
+    cohort_result = _resolve_cohort(limit)
+    print(
+        f"   resolved {cohort_result.matched} exec ids "
+        f"(scanned {cohort_result.scanned})"
+    )
+
+    metrics = [cost, latency]
+    if with_quality_judge:
+        metrics.append(quality_judge)
+
     report = run_cohort(
-        cases,
+        list(cohort_result.exec_ids),
         baseline_model=BASELINE_MODEL,
-        variant_model=FORK_MODEL,
-        variant_prompt_profile=FORK_PROMPT_PROFILE,
-        metrics=[cost, latency, quality_judge],
+        variant_model=VARIANT_MODEL,
+        variant_prompt_profile=VARIANT_PROMPT_PROFILE,
+        metrics=metrics,
         repeats=1,
     )
     report.summary()
@@ -301,40 +303,67 @@ def cohort() -> None:
         "   regressions:",
         [getattr(r, "name", r) for r in regs] if regs else "none",
     )
-    path = write_cohort_html(COHORT_HTML_PATH, report)
-    print(f"   html: {path}")
+
+    html_path = write_cohort_html(COHORT_HTML_PATH, report)
+    print(f"   html: {html_path}")
+
+    if export_json:
+        json_path = report.to_json(export_json, cohort=cohort_result.to_json())
+        print(f"   json: {json_path}")
+
+    section("Per-case compare URLs (original → variant)")
+    for row in report.rows:
+        for url in row.compare_urls:
+            print(f"   ui ({row.base_exec_id}): {url}")
 
 
 def run_all() -> None:
-    """The full narrated arc: run -> replay -> cohort."""
-    exec_id = run()
+    """Seed, replay, and cohort in one narrated arc."""
+    exec_id = seed()
     replay(exec_id)
-    cohort()
+    cohort(limit=3, export_json=COHORT_JSON_PATH, with_quality_judge=False)
 
 
-# --- Command-line dispatch -------------------------------------------------
+def _parse_flag(argv: list[str], flag: str) -> tuple[list[str], str | None]:
+    if flag not in argv:
+        return argv, None
+    index = argv.index(flag)
+    if index + 1 >= len(argv):
+        sys.exit(f"{flag} requires a value")
+    value = argv[index + 1]
+    remaining = argv[:index] + argv[index + 2 :]
+    return remaining, value
 
 
 def main(argv: list[str]) -> None:
-    # Load OPENAI_API_KEY (etc.) from a local .env so the in-process quality
-    # judge has credentials. Existing environment variables take precedence.
     load_dotenv()
     command = argv[0] if argv else "run-all"
+    rest = argv[1:]
 
     if command == "run":
         run()
+    elif command == "seed":
+        seed()
     elif command == "replay":
-        if len(argv) < 2:
-            sys.exit("usage: python demo.py replay <EXEC-ID>")
-        replay(argv[1])
+        if not rest:
+            if PROD_FIXTURE.is_file():
+                rest = [PROD_FIXTURE.read_text(encoding="utf-8").strip()]
+            else:
+                sys.exit("usage: python demo.py replay <EXEC-ID>")
+        replay(rest[0])
     elif command == "cohort":
-        cohort()
+        rest, export_json = _parse_flag(rest, "--export-json")
+        if export_json is None:
+            export_json = COHORT_JSON_PATH
+        limit = int(os.environ.get("COHORT_LIMIT", "10"))
+        with_judge = "--with-quality-judge" in rest
+        cohort(limit=limit, export_json=export_json, with_quality_judge=with_judge)
     elif command == "run-all":
         run_all()
     else:
         sys.exit(
             f"unknown command {command!r}. "
-            "try: run | replay <EXEC-ID> | cohort | run-all"
+            "try: seed | run | replay [EXEC-ID] | cohort | run-all"
         )
 
 

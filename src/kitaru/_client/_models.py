@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -551,6 +551,7 @@ class Execution:
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
         llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
         **flow_inputs: Any,
     ) -> Execution:
         """Replay this execution from a checkpoint cut point."""
@@ -561,6 +562,7 @@ class Execution:
             output=output,
             tool=tool,
             llm_model=llm_model,
+            skip=skip,
             **flow_inputs,
         )
 

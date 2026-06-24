@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import quote
 
 from kitaru._client._models import CheckpointCall, Execution
@@ -44,14 +45,76 @@ class CohortDiff:
 
 
 def _client_server_url(client: KitaruClient) -> str | None:
+    """Return an HTTP(S) dashboard base URL for UI compare links."""
+    try:
+        from kitaru.config import resolve_connection_config
+
+        resolved = resolve_connection_config(validate_for_use=False)
+        candidate = (resolved.server_url or "").strip()
+        if candidate.startswith(("http://", "https://")):
+            return candidate.rstrip("/")
+    except Exception:
+        pass
+
     try:
         zen_store = client._client().zen_store
         url = getattr(zen_store, "url", None)
     except Exception:
         return None
-    if not isinstance(url, str) or not url.strip():
+    if isinstance(url, str) and url.strip().startswith(("http://", "https://")):
+        return url.strip().rstrip("/")
+    return None
+
+
+def compare_urls_for_replay(
+    client: KitaruClient,
+    *,
+    original_exec_id: str,
+    replay_exec_id: str,
+) -> list[str]:
+    """Build UI compare URLs for one original execution and its replay."""
+    original_execution = client.executions.get(original_exec_id)
+    compare_url = build_compare_url(
+        server_url=_client_server_url(client),
+        flow_id=original_execution.flow_id,
+        original_exec_id=original_exec_id,
+        replay_exec_id=replay_exec_id,
+        flow_version=_resolve_compare_flow_version(original_execution),
+    )
+    if compare_url is None:
+        return []
+    return [compare_url]
+
+
+def build_compare_url_for_executions(
+    *,
+    server_url: str | None,
+    flow_id: str | None,
+    exec_ids: Sequence[str],
+    flow_version: str = DEFAULT_COMPARE_FLOW_VERSION,
+) -> str | None:
+    """Build a Kitaru UI compare URL for two or more executions.
+
+    Example::
+
+        {server}/flows/{flow_id}/v/local/compare?executions={id1},{id2},{id3}
+    """
+    normalized = [str(exec_id).strip() for exec_id in exec_ids if str(exec_id).strip()]
+    if len(normalized) < 2:
         return None
-    return url.strip().rstrip("/")
+    if server_url is None or flow_id is None:
+        return None
+
+    flow_segment = quote(str(flow_id), safe="")
+    version_segment = quote(
+        flow_version.strip() or DEFAULT_COMPARE_FLOW_VERSION,
+        safe="",
+    )
+    execution_segment = quote(",".join(normalized), safe=",")
+    return (
+        f"{server_url.rstrip('/')}/flows/{flow_segment}/v/{version_segment}/compare"
+        f"?executions={execution_segment}"
+    )
 
 
 def build_compare_url(
@@ -68,23 +131,31 @@ def build_compare_url(
 
         {server}/flows/{flow_id}/v/local/compare?executions={original},{replay}
     """
-    if server_url is None or flow_id is None:
-        return None
-
-    original = str(original_exec_id).strip()
-    replay = str(replay_exec_id).strip()
-    if not original or not replay:
-        return None
-
-    flow_segment = quote(str(flow_id), safe="")
-    version_segment = quote(
-        flow_version.strip() or DEFAULT_COMPARE_FLOW_VERSION,
-        safe="",
+    return build_compare_url_for_executions(
+        server_url=server_url,
+        flow_id=flow_id,
+        exec_ids=[original_exec_id, replay_exec_id],
+        flow_version=flow_version,
     )
-    execution_segment = quote(f"{original},{replay}", safe=",")
-    return (
-        f"{server_url.rstrip('/')}/flows/{flow_segment}/v/{version_segment}/compare"
-        f"?executions={execution_segment}"
+
+
+def compare_url_for_executions(
+    exec_ids: Sequence[str],
+    *,
+    client: KitaruClient | None = None,
+) -> str | None:
+    """Build one UI compare URL from explicit execution IDs (2 or more)."""
+    normalized = [str(exec_id).strip() for exec_id in exec_ids if str(exec_id).strip()]
+    if len(normalized) < 2:
+        return None
+
+    resolved_client = client or KitaruClient()
+    anchor = resolved_client.executions.get(normalized[0])
+    return build_compare_url_for_executions(
+        server_url=_client_server_url(resolved_client),
+        flow_id=anchor.flow_id,
+        exec_ids=normalized,
+        flow_version=_resolve_compare_flow_version(anchor),
     )
 
 
@@ -189,7 +260,8 @@ def _compare_checkpoints(
     replay_cp: CheckpointCall | None,
     client: KitaruClient,
 ) -> CheckpointDiff:
-    name = (original_cp or replay_cp).name if (original_cp or replay_cp) else "unknown"
+    checkpoint = original_cp or replay_cp
+    name = checkpoint.name if checkpoint is not None else "unknown"
     original_duration = (
         _checkpoint_duration_ms(original_cp) if original_cp is not None else None
     )
@@ -235,15 +307,65 @@ def _compare_checkpoints(
     )
 
 
-def diff(
+def _resolve_compare_flow_version(execution: Execution) -> str:
+    metadata = execution.metadata if isinstance(execution.metadata, Mapping) else {}
+    nested = metadata.get("kitaru_deployment")
+    nested_mapping = nested if isinstance(nested, Mapping) else {}
+    for key in (
+        "deployment_version",
+        "kitaru_deployment_version",
+    ):
+        value = metadata.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    nested_version = nested_mapping.get("version")
+    if nested_version is not None and str(nested_version).strip():
+        return str(nested_version).strip()
+    return DEFAULT_COMPARE_FLOW_VERSION
+
+
+def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "original_call_id": item.original_call_id,
+        "replay_call_id": item.replay_call_id,
+        "status_match": item.status_match,
+        "duration_delta_ms": item.duration_delta_ms,
+        "token_delta": item.token_delta,
+        "artifact_hashes": {
+            role: {"original": left, "replay": right}
+            for role, (left, right) in item.artifact_hashes.items()
+        },
+    }
+
+
+def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
+    return {
+        "original_exec_id": item.original_exec_id,
+        "compared": [
+            {
+                "replay_exec_id": replay_exec_id,
+                "checkpoints": [
+                    serialize_checkpoint_diff(checkpoint)
+                    for checkpoint in checkpoint_diffs
+                ],
+            }
+            for replay_exec_id, checkpoint_diffs in item.compared
+        ],
+        "urls": list(item.urls),
+    }
+
+
+def serialize_cohort_diff(item: CohortDiff) -> dict[str, Any]:
+    return {
+        "rows": [serialize_execution_diff(row) for row in item.rows],
+    }
+
+
+def _diff_impl(
     original: str,
     *executions: str,
 ) -> ExecutionDiff:
-    """Compare an original execution against replay executions.
-
-    When ``executions`` is omitted, all runs whose ``original_exec_id`` matches
-    ``original`` are included.
-    """
     client = KitaruClient()
     original_execution = client.executions.get(original)
 
@@ -273,12 +395,19 @@ def diff(
         ]
         compared.append((replay_exec_id, checkpoint_diffs))
 
-    compare_urls = build_compare_urls(
-        server_url=_client_server_url(client),
-        flow_id=original_execution.flow_id,
-        original_exec_id=original,
-        replay_exec_ids=compared_exec_ids,
-    )
+    server_url = _client_server_url(client)
+    flow_id = original_execution.flow_id
+    flow_version = _resolve_compare_flow_version(original_execution)
+    if compared_exec_ids:
+        multi_url = build_compare_url_for_executions(
+            server_url=server_url,
+            flow_id=flow_id,
+            exec_ids=[original, *compared_exec_ids],
+            flow_version=flow_version,
+        )
+        compare_urls = [multi_url] if multi_url else []
+    else:
+        compare_urls = []
 
     return ExecutionDiff(
         original_exec_id=original,
@@ -287,24 +416,63 @@ def diff(
     )
 
 
+def diff(
+    original: str,
+    *executions: str,
+) -> ExecutionDiff:
+    """Compare an original execution against replay executions.
+
+    When ``executions`` is omitted, all runs whose ``original_exec_id`` matches
+    ``original`` are included.
+    """
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.DIFF_REQUESTED,
+        {
+            "auto_discover": not bool(executions),
+            "replay_count": len(executions),
+        },
+    )
+    return _diff_impl(original, *executions)
+
+
 def diff_cohort(
-    exec_ids: Sequence[str],
+    exec_ids: Sequence[str] | Any,
 ) -> CohortDiff:
     """Compare many original executions against their discovered replays.
 
-    Each entry in ``exec_ids`` is passed to ``diff(...)`` with auto-discovery of
-    replay executions linked via ``original_exec_id``.
+    Each entry in ``exec_ids`` is diffed with auto-discovery of replay
+    executions linked via ``original_exec_id``.
     """
-    return CohortDiff(rows=[diff(exec_id) for exec_id in exec_ids])
+    from kitaru.analytics import AnalyticsEvent, track
+    from kitaru.cohort import coerce_exec_ids
+
+    resolved_ids = coerce_exec_ids(exec_ids)
+    track(
+        AnalyticsEvent.DIFF_REQUESTED,
+        {
+            "auto_discover": True,
+            "replay_count": len(resolved_ids),
+            "cohort": True,
+        },
+    )
+    return CohortDiff(rows=[_diff_impl(exec_id) for exec_id in resolved_ids])
 
 
 __all__ = [
+    "DEFAULT_COMPARE_FLOW_VERSION",
     "CheckpointDiff",
     "CohortDiff",
-    "DEFAULT_COMPARE_FLOW_VERSION",
     "ExecutionDiff",
     "build_compare_url",
+    "build_compare_url_for_executions",
     "build_compare_urls",
+    "compare_url_for_executions",
+    "compare_urls_for_replay",
     "diff",
     "diff_cohort",
+    "serialize_checkpoint_diff",
+    "serialize_cohort_diff",
+    "serialize_execution_diff",
 ]

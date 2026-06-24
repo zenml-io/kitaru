@@ -29,6 +29,7 @@ from support_agent import (
     FINAL_DECISION_CHECKPOINT,
     FLOW_NAME,
     MODEL_CHECKPOINT_PREFIX,
+    REPLAY_POINT,
 )
 
 from kitaru import KitaruClient
@@ -422,11 +423,14 @@ def execution_stats(client: KitaruClient, exec_id: str) -> dict:
 
 
 def recent_exec_ids(client: KitaruClient, n: int) -> list[str]:
-    """Return the ``n`` most recent ORIGINAL (non-replay) exec_ids, newest first.
+    """Return the ``n`` most recent original exec ids for the support flow."""
+    import kitaru
 
-    Replays show up in the list too; we keep only the originals (those with no
-    ``original_exec_id``) so the cohort experiments against real production runs.
-    """
-    runs = client.executions.list(flow=FLOW_NAME, limit=n * 5)
-    originals = [e for e in runs if e.original_exec_id is None]
-    return [e.exec_id for e in originals[:n]]
+    cohort_result = kitaru.cohort(
+        flow=FLOW_NAME,
+        at=REPLAY_POINT,
+        order_by="-started_at",
+        limit=n,
+        client=client,
+    ).resolve(max_scan=max(n * 5, 50))
+    return list(cohort_result.exec_ids)

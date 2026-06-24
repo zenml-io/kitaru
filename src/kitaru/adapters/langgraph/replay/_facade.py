@@ -136,9 +136,7 @@ class _Fork:
     def run(self) -> _RunResult:
         seed = self._adapter._seed(self._case)
         cut = self._at or self._adapter._cut
-        result = self._adapter._agent.fork(
-            seed, from_=cut, variant=self._variant or None
-        )
+        result = self._adapter._agent.fork(seed, at=cut, variant=self._variant or None)
         return _RunResult(self._adapter, self._case, result)
 
 
@@ -171,7 +169,7 @@ class KitaruAdapter:
 
     def replay(self, case: Any, *, at: str | None = None) -> _RunResult:
         """Reproduce the run: cached before the cut, live after — no edits."""
-        result = self._agent.replay(self._seed(case), from_=at or self._cut)
+        result = self._agent.replay(self._seed(case), at=at or self._cut)
         return _RunResult(self, case, result)
 
     def fork(self, case: Any, *, at: str | None = None, **edits: Any) -> _Fork:

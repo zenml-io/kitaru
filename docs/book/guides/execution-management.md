@@ -397,8 +397,8 @@ retried = client.executions.retry(exec_id)
 # Replay into a new execution from a checkpoint boundary
 replayed = client.executions.replay(
     exec_id,
-    from_="write_draft",
-    overrides={"checkpoint.research": "Edited notes"},
+    at="write_draft",
+    output={"research": "Edited notes"},
     topic="New topic",
 )
 
@@ -418,7 +418,7 @@ fresh = execution.refresh()          # re-fetch latest state
 retried = execution.retry()          # retry a failed execution
 resumed = execution.resume()         # resume after wait input
 cancelled = execution.cancel()       # cancel a running execution
-replayed = execution.replay(from_="write_draft", overrides={...})
+replayed = execution.replay(at="write_draft", output={"research": "Edited notes"})
 
 checkpoints = execution.list_checkpoints()
 artifacts = execution.list_artifacts()
@@ -486,7 +486,7 @@ kitaru executions input kr-a8f3c2 --abort
 kitaru executions input kr-a8f3c2 --interactive
 kitaru executions input --interactive  # sweep all waiting executions
 kitaru executions resume kr-a8f3c2
-kitaru executions replay kr-a8f3c2 --from write_draft --args '{"topic":"New topic"}' --overrides '{"checkpoint.research":"Edited notes"}'
+kitaru executions replay kr-a8f3c2 --at write_draft --args '{"topic":"New topic"}' --mock-output '{"research":"Edited notes"}'
 kitaru executions retry kr-a8f3c2
 kitaru executions cancel kr-a8f3c2
 ```

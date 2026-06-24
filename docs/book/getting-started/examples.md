@@ -100,6 +100,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `features/execution_management/client_execution_management.py` | `KitaruClient` for listing runs, reading details, and loading data | [Execution Management](../guides/execution-management.md) |
 | `features/execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait, Input, and Resume](../guides/wait-and-resume.md) |
 | `features/replay/replay_with_overrides.py` | Replay from a checkpoint with overridden inputs | [Replay and Overrides](../guides/replay-and-overrides.md) |
+| `end_to_end/pydantic_replay_fork/demo.py` | PydanticAI support copilot: reproduce, edit, tool-swap replay, cohort, and diff | [Replay and Overrides](../guides/replay-and-overrides.md) |
 
 ### LLMs and agent integrations
 

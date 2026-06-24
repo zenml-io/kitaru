@@ -182,7 +182,7 @@ def test_seeded_mirror_flow_replays_tail_without_dynamic_source_error(
 
     replay_handle = flow_def.replay(
         seed_handle.exec_id,
-        from_="collect_evidence_with_tools",
+        at="collect_evidence_with_tools",
         cache=False,
         playback=False,
     )
@@ -211,7 +211,7 @@ def test_rebuilt_mirror_flow_replays_seed_execution_without_dynamic_source_error
     fork_flow = build_replay_flow(fork_ctx)
     fork_handle = fork_flow.replay(
         seed_handle.exec_id,
-        from_="collect_evidence_with_tools",
+        at="collect_evidence_with_tools",
         cache=False,
         playback=False,
     )

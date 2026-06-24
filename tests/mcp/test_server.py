@@ -1104,6 +1104,7 @@ def test_executions_replay_returns_structured_execution(
         output=None,
         tool=None,
         llm_model=None,
+        skip=None,
         topic="new topic",
     )
     assert payload["available"] is True

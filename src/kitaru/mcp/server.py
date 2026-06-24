@@ -442,6 +442,7 @@ def kitaru_executions_replay(
     output: dict[str, Any] | None = None,
     tool: dict[str, str] | None = None,
     llm_model: str | None = None,
+    skip: list[str] | None = None,
     flow_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Replay an execution and return structured replay details."""
@@ -458,6 +459,7 @@ def kitaru_executions_replay(
             output=output,
             tool=tool,
             llm_model=llm_model,
+            skip=skip,
             **replay_inputs,
         )
 
@@ -468,6 +470,145 @@ def kitaru_executions_replay(
         }
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_executions_replay_many(
+    exec_ids: list[str],
+    at: str,
+    input: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
+    tool: dict[str, str] | None = None,
+    llm_model: str | None = None,
+    skip: list[str] | None = None,
+    wait: bool = False,
+    on_error: Literal["collect", "fail"] = "collect",
+    flow_inputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replay many executions with the same replay plan."""
+
+    def _replay_many() -> dict[str, Any]:
+        replay_inputs = execution_interface.ensure_inputs_object(
+            flow_inputs,
+            input_label="`flow_inputs`",
+        )
+        result = client_api.KitaruClient().executions.replay_many(
+            exec_ids,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
+            skip=skip,
+            wait=wait,
+            on_error=on_error,
+            **replay_inputs,
+        )
+        return {
+            "available": True,
+            "operation": "replay_many",
+            "at": result.at,
+            "successes": [
+                {
+                    "original_exec_id": original_exec_id,
+                    "replay_exec_id": getattr(handle, "exec_id", None),
+                }
+                for original_exec_id, handle in result.successes
+            ],
+            "failures": [
+                {"original_exec_id": original_exec_id, "error": error}
+                for original_exec_id, error in result.failures
+            ],
+            "skipped": [
+                {"original_exec_id": original_exec_id, "reason": reason}
+                for original_exec_id, reason in result.skipped
+            ],
+        }
+
+    return run_with_mcp_error_boundary(_replay_many)
+
+
+@tracked_mcp_tool
+def kitaru_executions_cohort(
+    flow: str,
+    at: str,
+    deployment: str | None = None,
+    deployment_version: int | None = None,
+    order_by: str = "-started_at",
+    limit: int = 50,
+    since: str | None = None,
+    until: str | None = None,
+    max_scan: int = 500,
+    include_failed: bool = False,
+) -> dict[str, Any]:
+    """Resolve a cohort of original executions for batch replay."""
+
+    def _resolve_cohort() -> dict[str, Any]:
+        status_filter: str | list[str] = (
+            ["completed", "failed"] if include_failed else "completed"
+        )
+        result = (
+            client_api.KitaruClient()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        return {
+            "available": True,
+            "operation": "cohort",
+            "cohort": result.to_json(),
+        }
+
+    return run_with_mcp_error_boundary(_resolve_cohort)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff(
+    original: str,
+    executions: list[str] | None = None,
+) -> dict[str, Any]:
+    """Compare an original execution against replay executions."""
+
+    def _diff() -> dict[str, Any]:
+        from kitaru.diff import diff, serialize_execution_diff
+
+        compared = executions or ()
+        result = diff(original, *compared)
+        return {
+            "available": True,
+            "operation": "diff",
+            "diff": serialize_execution_diff(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff_cohort(
+    exec_ids: list[str],
+) -> dict[str, Any]:
+    """Diff many original executions against their auto-discovered replays."""
+
+    def _diff_cohort() -> dict[str, Any]:
+        from kitaru.diff import diff_cohort, serialize_cohort_diff
+
+        result = diff_cohort(exec_ids)
+        return {
+            "available": True,
+            "operation": "diff_cohort",
+            "cohort": serialize_cohort_diff(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff_cohort)
 
 
 @tracked_mcp_tool

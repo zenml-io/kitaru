@@ -29,6 +29,7 @@ REPLAY_RESERVED_KWARGS = frozenset(
         "output",
         "tool",
         "llm_model",
+        "skip",
         "stack",
         "image",
         "cache",
@@ -387,6 +388,24 @@ def _normalize_checkpoint_input_value(
     )
 
 
+def _resolve_skip_invocation_ids(
+    skip: Sequence[str] | None,
+    checkpoints: Sequence[_Checkpoint],
+) -> set[str]:
+    if not skip:
+        return set()
+
+    invocation_ids: set[str] = set()
+    for selector in skip:
+        if not selector or not str(selector).strip():
+            raise KitaruUsageError(
+                "Every entry in `skip` must be a non-empty checkpoint selector."
+            )
+        checkpoint = _resolve_checkpoint_selector(str(selector).strip(), checkpoints)
+        invocation_ids.add(checkpoint.invocation_id)
+    return invocation_ids
+
+
 def _resolve_input_targets(
     input_overrides: Mapping[str, Any] | None,
     checkpoints: Sequence[_Checkpoint],
@@ -497,12 +516,13 @@ def build_replay_plan(
     output: Mapping[str, Any] | None = None,
     tool: Mapping[str, str] | None = None,
     llm_model: str | None = None,
+    skip: Sequence[str] | None = None,
     flow_inputs: Mapping[str, Any] | None = None,
 ) -> ReplayPlan:
     """Build a replay plan for a completed or paused execution.
 
     Checkpoints before ``at`` are skipped (playback). ``at`` and its downstream
-    descendants re-execute unless mocked via ``output=``.
+    descendants re-execute unless mocked via ``output=`` or listed in ``skip=``.
     """
     checkpoints = _checkpoints(run)
     if not checkpoints:
@@ -564,6 +584,17 @@ def build_replay_plan(
     overlap = steps_to_skip & set(step_input_overrides)
     if overlap:
         steps_to_skip -= overlap
+
+    explicit_skip = _resolve_skip_invocation_ids(skip, checkpoints)
+    if explicit_skip:
+        input_overlap = explicit_skip & set(step_input_overrides)
+        if input_overlap:
+            joined = ", ".join(sorted(input_overlap))
+            raise KitaruUsageError(
+                f"Cannot skip and override inputs for the same checkpoint: {joined}."
+            )
+        live -= explicit_skip
+        steps_to_skip = all_steps - live
 
     runtime_context = ReplayRuntimeContext(
         at=at,

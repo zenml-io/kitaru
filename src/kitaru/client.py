@@ -160,7 +160,7 @@ from kitaru.errors import (
     classify_failure_origin,
     execution_error_from_failure,
 )
-from kitaru.replay import build_replay_plan
+from kitaru.replay import ReplayManyResult, build_replay_plan
 
 logger = logging.getLogger(__name__)
 
@@ -479,6 +479,22 @@ class _ReplayFlowLike(Protocol):
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
         llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
+        **flow_inputs: Any,
+    ) -> Any: ...
+
+    def replay_many(
+        self,
+        executions: Sequence[str],
+        *,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
+        wait: bool = False,
+        on_error: Literal["collect", "fail"] = "collect",
         **flow_inputs: Any,
     ) -> Any: ...
 
@@ -1416,6 +1432,7 @@ class _ExecutionsAPI:
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
         llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
         **flow_inputs: Any,
     ) -> Execution:
         """Replay an execution from a checkpoint cut point."""
@@ -1450,6 +1467,7 @@ class _ExecutionsAPI:
                 output=output,
                 tool=tool,
                 llm_model=llm_model,
+                skip=skip,
                 **flow_inputs,
             )
             replay_exec_id = getattr(handle, "exec_id", None)
@@ -1467,6 +1485,7 @@ class _ExecutionsAPI:
             output=output,
             tool=tool,
             llm_model=llm_model,
+            skip=skip,
             flow_inputs=flow_inputs,
         )
 
@@ -1523,6 +1542,78 @@ class _ExecutionsAPI:
 
         track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
         return self.get(replayed_exec_id)
+
+    def replay_many(
+        self,
+        executions: Sequence[str] | Any,
+        *,
+        at: str,
+        input: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        tool: dict[str, str] | None = None,
+        llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
+        wait: bool = False,
+        on_error: Literal["collect", "fail"] = "collect",
+        **flow_inputs: Any,
+    ) -> ReplayManyResult:
+        """Replay many executions through the resolved source flow wrapper."""
+        from kitaru.cohort import coerce_exec_ids
+
+        exec_ids = coerce_exec_ids(executions)
+        if not exec_ids:
+            return ReplayManyResult(
+                at=at,
+                successes=[],
+                failures=[],
+                skipped=[],
+            )
+
+        source_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
+        replay_flow = _resolve_flow_for_replay(source_run)
+        return replay_flow.replay_many(
+            exec_ids,
+            at=at,
+            input=input,
+            output=output,
+            tool=tool,
+            llm_model=llm_model,
+            skip=skip,
+            wait=wait,
+            on_error=on_error,
+            **flow_inputs,
+        )
+
+    def cohort(
+        self,
+        *,
+        flow: str,
+        at: str,
+        deployment: str | None = None,
+        deployment_version: int | None = None,
+        order_by: str = "-started_at",
+        limit: int = 50,
+        originals_only: bool = True,
+        status: str | Sequence[str] = "completed",
+        since: Any = None,
+        until: Any = None,
+    ) -> Any:
+        """Build a cohort selection query for ``resolve()``."""
+        from kitaru.cohort import cohort as build_cohort_query
+
+        return build_cohort_query(
+            flow=flow,
+            at=at,
+            deployment=deployment,
+            deployment_version=deployment_version,
+            order_by=order_by,
+            limit=limit,
+            originals_only=originals_only,
+            status=status,
+            since=since,
+            until=until,
+            client=self._client_ref,
+        )
 
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""

@@ -1657,6 +1657,7 @@ class _FlowDefinition:
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
         llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
         stack: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
@@ -1669,13 +1670,16 @@ class _FlowDefinition:
             execution: Source execution ID.
             at: Checkpoint selector for the replay cut (name, invocation ID,
                 or call ID). Checkpoints before ``at`` are skipped; ``at`` and
-                downstream checkpoints re-execute unless mocked via ``output=``.
+                downstream checkpoints re-execute unless mocked via ``output=``
+                or listed in ``skip=``.
             input: Optional checkpoint input overrides keyed by selector.
             output: Optional checkpoint output mocks keyed by tool/checkpoint
                 name or call ID.
             tool: Optional tool implementation overrides as import paths.
             llm_model: Optional model alias applied to ``llm_call`` checkpoints
                 in the live replay tail.
+            skip: Optional checkpoint selectors to force playback even when
+                they would otherwise re-execute in the live tail.
             stack: Optional stack override for the replay run.
             image: Optional image override for the replay run.
             cache: Optional cache override for the replay run.
@@ -1706,6 +1710,7 @@ class _FlowDefinition:
             output=output,
             tool=tool,
             llm_model=llm_model,
+            skip=skip,
             flow_inputs=flow_inputs,
         )
 
@@ -1832,6 +1837,7 @@ class _FlowDefinition:
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
         llm_model: str | None = None,
+        skip: Sequence[str] | None = None,
         stack: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
@@ -1857,6 +1863,8 @@ class _FlowDefinition:
             tool: Optional tool implementation overrides as import paths.
             llm_model: Optional model alias applied to ``llm_call`` checkpoints
                 in the live replay tail.
+            skip: Optional checkpoint selectors to force playback in the live
+                tail.
             stack: Optional stack override for each replay run.
             image: Optional image override for each replay run.
             cache: Optional cache override for each replay run.
@@ -1870,6 +1878,9 @@ class _FlowDefinition:
             Aggregated batch replay outcome grouped into successes, failures,
             and skipped parents.
         """
+        from kitaru.cohort import coerce_exec_ids
+
+        exec_ids = coerce_exec_ids(executions)
         if not at or not at.strip():
             raise KitaruUsageError("`at` must be a non-empty checkpoint selector.")
 
@@ -1884,6 +1895,7 @@ class _FlowDefinition:
             "output": output,
             "tool": tool,
             "llm_model": llm_model,
+            "skip": skip,
             "stack": stack,
             "image": image,
             "cache": cache,
@@ -1891,7 +1903,17 @@ class _FlowDefinition:
             **flow_inputs,
         }
 
-        for execution in executions:
+        track(
+            AnalyticsEvent.REPLAY_MANY_REQUESTED,
+            {
+                "at_checkpoint": at,
+                "parent_count": len(exec_ids),
+                "wait": wait,
+                "on_error": on_error,
+            },
+        )
+
+        for execution in exec_ids:
             try:
                 original_run = client.get_pipeline_run(
                     name_id_or_prefix=execution,

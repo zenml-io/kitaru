@@ -3795,6 +3795,12 @@ def test_executions_replay_parses_json_and_reports_success(
 ) -> None:
     """`kitaru executions replay` should parse JSON and call replay API."""
     fake_client = Mock()
+    fake_client._client.return_value.zen_store.url = "http://localhost:8237"
+    fake_client.executions.get.return_value = _execution_stub(
+        exec_id="kr-111",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+    )
     fake_client.executions.replay.return_value = _execution_stub(
         exec_id="kr-222",
         flow_name="content_pipeline",
@@ -3827,11 +3833,14 @@ def test_executions_replay_parses_json_and_reports_success(
         output={"research": "edited"},
         tool=None,
         llm_model=None,
+        skip=None,
         topic="new topic",
     )
     output = capsys.readouterr().out
     assert "Replayed execution: kr-222" in output
     assert "Status: running" in output
+    assert "Compare original vs replay:" in output
+    assert "compare?executions=kr-111,kr-222" in output
 
 
 def test_executions_replay_rejects_invalid_mock_output_json(
@@ -3853,6 +3862,44 @@ def test_executions_replay_rejects_invalid_mock_output_json(
 
     assert exc_info.value.code == 1
     assert "Invalid JSON for `--mock-output`" in capsys.readouterr().err
+
+
+def test_executions_replay_many_loads_exec_ids_from_cohort_file(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """`executions replay-many --cohort-file` should read exec ids from cohort JSON."""
+    cohort_path = tmp_path / "cohort.json"
+    cohort_path.write_text(
+        '{"command":"executions.cohort","item":{"exec_ids":["kr-a","kr-b"]}}'
+    )
+
+    fake_client = Mock()
+    fake_result = Mock()
+    fake_result.at = "lookup_policy_tool"
+    fake_result.successes = []
+    fake_result.failures = []
+    fake_result.skipped = []
+    fake_client.executions.replay_many.return_value = fake_result
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay-many",
+                "--cohort-file",
+                str(cohort_path),
+                "--at",
+                "lookup_policy_tool",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay_many.assert_called_once()
+    assert fake_client.executions.replay_many.call_args.args[0] == ["kr-a", "kr-b"]
 
 
 def test_executions_resume_reports_success(

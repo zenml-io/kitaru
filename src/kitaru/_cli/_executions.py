@@ -8,7 +8,7 @@ import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from cyclopts import Parameter
 
@@ -104,6 +104,35 @@ def _parse_json_object(
             '(for example: \'{"topic": "AI"}\').'
         )
     return parsed
+
+
+def _load_cohort_exec_ids(path: str) -> list[str]:
+    """Load exec IDs from a cohort resolve JSON file (CLI or raw cohort export)."""
+    cohort_path = Path(path).expanduser()
+    try:
+        payload = json.loads(cohort_path.read_text())
+    except OSError as exc:
+        raise KitaruUsageError(
+            f"Unable to read cohort file '{cohort_path}': {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise KitaruUsageError(
+            f"Cohort file '{cohort_path}' is not valid JSON: {exc}"
+        ) from exc
+
+    item = payload.get("item") if isinstance(payload, dict) else None
+    if isinstance(item, dict) and "exec_ids" in item:
+        payload = item
+    if not isinstance(payload, dict):
+        raise KitaruUsageError(
+            f"Cohort file '{cohort_path}' must contain a JSON object with exec_ids."
+        )
+    raw_ids = payload.get("exec_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise KitaruUsageError(
+            f"Cohort file '{cohort_path}' did not contain a non-empty exec_ids list."
+        )
+    return [str(exec_id).strip() for exec_id in raw_ids if str(exec_id).strip()]
 
 
 def _parse_image_option(
@@ -1343,6 +1372,15 @@ def replay_(
         str | None,
         Parameter(help="Model alias applied to llm_call checkpoints in the live tail."),
     ] = None,
+    skip: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Comma-separated checkpoint selectors to force playback in the "
+                "live tail (for example 'lookup_policy_tool,write_draft')."
+            ),
+        ),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Replay an execution from a checkpoint cut point."""
@@ -1354,6 +1392,9 @@ def replay_(
         parsed_input = _parse_json_object(input, option_name="--input")
         parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
         parsed_tool = _parse_json_object(tool, option_name="--tool")
+        parsed_skip = (
+            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
+        )
         return (
             cli_dependencies()
             .kitaru_client()
@@ -1364,6 +1405,7 @@ def replay_(
                 output=parsed_output or None,
                 tool=parsed_tool or None,
                 llm_model=llm_model,
+                skip=parsed_skip,
                 **flow_inputs,
             )
         )
@@ -1375,14 +1417,39 @@ def replay_(
         exit_with_error=_exit_with_error,
     )
 
+    from kitaru.diff import compare_urls_for_replay
+
+    compare_urls: list[str] = []
+    try:
+        compare_urls = compare_urls_for_replay(
+            cli_dependencies().kitaru_client(),
+            original_exec_id=exec_id,
+            replay_exec_id=execution.exec_id,
+        )
+    except Exception:
+        compare_urls = []
+
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        payload = serialize_execution(execution)
+        payload["original_exec_id"] = exec_id
+        payload["compare_url"] = compare_urls[0] if compare_urls else None
+        payload["compare_urls"] = compare_urls
+        _emit_json_item(command, payload, output=output_format)
         return
 
     _print_success(
         f"Replayed execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
     )
+    if compare_urls:
+        print("\nCompare original vs replay:")
+        for compare_url in compare_urls:
+            print(f"  {compare_url}")
+    else:
+        print(
+            "\nCompare URL unavailable. Run `kitaru login` or set KITARU_SERVER_URL "
+            "to a reachable dashboard URL."
+        )
 
 
 @executions_app.command
@@ -1467,3 +1534,385 @@ def cancel_(
         f"Cancelled execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
     )
+
+
+@executions_app.command
+def diff_(
+    original: Annotated[
+        str,
+        Parameter(help="Original execution ID."),
+    ],
+    *executions: Annotated[
+        str,
+        Parameter(help="Optional replay execution IDs to compare."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Compare an original execution against replay executions."""
+    from kitaru.diff import diff, serialize_execution_diff
+
+    command = "executions.diff"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff(original, *executions)
+        return serialize_execution_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    compared_count = len(payload.get("compared", []))
+    _print_success(
+        f"Diff for {original}",
+        detail=f"Compared against {compared_count} replay execution(s).",
+    )
+    for url in payload.get("urls", []):
+        print(f"  ui: {url}")
+
+
+@executions_app.command(name="diff-cohort")
+def diff_cohort_(
+    *exec_ids: Annotated[
+        str,
+        Parameter(help="Original execution IDs to diff as a cohort."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Diff many original executions against their auto-discovered replays."""
+    from kitaru.diff import diff_cohort, serialize_cohort_diff
+
+    command = "executions.diff-cohort"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff_cohort(list(exec_ids))
+        return serialize_cohort_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    row_count = len(payload.get("rows", []))
+    _print_success(
+        "Cohort diff complete",
+        detail=f"Compared {row_count} original execution(s).",
+    )
+
+
+@executions_app.command(name="replay-many")
+def replay_many_(
+    exec_ids: Annotated[
+        list[str] | None,
+        Parameter(help="Original execution IDs to replay."),
+    ] = None,
+    *,
+    cohort_file: Annotated[
+        str | None,
+        Parameter(
+            help="Path to cohort JSON (CLI `executions cohort -o json` or export).",
+        ),
+    ] = None,
+    at: Annotated[
+        str,
+        Parameter(help="Checkpoint selector for the replay cut."),
+    ],
+    args: Annotated[
+        str | None,
+        Parameter(help="Flow input overrides as a JSON object."),
+    ] = None,
+    input: Annotated[
+        str | None,
+        Parameter(help="Checkpoint input overrides as a JSON object."),
+    ] = None,
+    mock_output: Annotated[
+        str | None,
+        Parameter(
+            help="Checkpoint output mocks as a JSON object.",
+            alias=["--mock-output"],
+        ),
+    ] = None,
+    tool: Annotated[
+        str | None,
+        Parameter(help="Tool implementation overrides as a JSON object."),
+    ] = None,
+    llm_model: Annotated[
+        str | None,
+        Parameter(help="Model alias for llm_call checkpoints in the live tail."),
+    ] = None,
+    skip: Annotated[
+        str | None,
+        Parameter(help="Comma-separated checkpoint selectors to force playback."),
+    ] = None,
+    wait: Annotated[
+        bool,
+        Parameter(help="Block until every replay completes."),
+    ] = False,
+    on_error: Annotated[
+        Literal["collect", "fail"],
+        Parameter(help="Whether to collect or fail on per-parent errors."),
+    ] = "collect",
+    output: OutputFormatOption = "text",
+) -> None:
+    """Replay many executions with the same replay plan."""
+    command = "executions.replay-many"
+    output_format = _resolve_output_format(output)
+
+    def _replay_many() -> dict[str, Any]:
+        resolved_ids = list(exec_ids or [])
+        if cohort_file:
+            if resolved_ids:
+                raise KitaruUsageError("Pass execution IDs or --cohort-file, not both.")
+            resolved_ids = _load_cohort_exec_ids(cohort_file)
+        if not resolved_ids:
+            raise KitaruUsageError(
+                "Provide at least one execution ID or --cohort-file."
+            )
+        flow_inputs = _parse_json_object(args, option_name="--args")
+        parsed_input = _parse_json_object(input, option_name="--input")
+        parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
+        parsed_tool = _parse_json_object(tool, option_name="--tool")
+        parsed_skip = (
+            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
+        )
+        result = (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.replay_many(
+                resolved_ids,
+                at=at,
+                input=parsed_input or None,
+                output=parsed_output or None,
+                tool=parsed_tool or None,
+                llm_model=llm_model,
+                skip=parsed_skip,
+                wait=wait,
+                on_error=on_error,
+                **flow_inputs,
+            )
+        )
+        return {
+            "at": result.at,
+            "successes": [
+                {
+                    "original_exec_id": original_exec_id,
+                    "replay_exec_id": getattr(handle, "exec_id", None),
+                }
+                for original_exec_id, handle in result.successes
+            ],
+            "failures": [
+                {"original_exec_id": original_exec_id, "error": error}
+                for original_exec_id, error in result.failures
+            ],
+            "skipped": [
+                {"original_exec_id": original_exec_id, "reason": reason}
+                for original_exec_id, reason in result.skipped
+            ],
+        }
+
+    payload = run_with_cli_error_boundary(
+        _replay_many,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    success_count = len(payload.get("successes", []))
+    _print_success(
+        "Batch replay complete",
+        detail=(
+            f"{success_count} succeeded, "
+            f"{len(payload.get('failures', []))} failed, "
+            f"{len(payload.get('skipped', []))} skipped."
+        ),
+    )
+
+
+@executions_app.command
+def cohort_(
+    *,
+    flow: Annotated[str, Parameter(help="Flow name to select executions from.")],
+    at: Annotated[
+        str,
+        Parameter(help="Replay anchor checkpoint used for pre-filtering."),
+    ],
+    deployment: Annotated[
+        str | None,
+        Parameter(help="Deployment tag pin (for example prod)."),
+    ] = None,
+    deployment_version: Annotated[
+        int | None,
+        Parameter(help="Deployment version pin."),
+    ] = None,
+    order_by: Annotated[
+        str,
+        Parameter(help="Sort field; prefix with '-' for descending."),
+    ] = "-started_at",
+    limit: Annotated[int, Parameter(help="Maximum executions to return.")] = 50,
+    since: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/after this ISO date/time."),
+    ] = None,
+    until: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/before this ISO date/time."),
+    ] = None,
+    max_scan: Annotated[
+        int,
+        Parameter(help="Maximum executions to inspect while resolving."),
+    ] = 500,
+    include_failed: Annotated[
+        bool,
+        Parameter(help="Include failed executions in addition to completed."),
+    ] = False,
+    replay: Annotated[
+        bool,
+        Parameter(help="Replay the resolved cohort with the same replay plan."),
+    ] = False,
+    args: Annotated[
+        str | None,
+        Parameter(help="Flow input overrides when --replay is set."),
+    ] = None,
+    input: Annotated[
+        str | None,
+        Parameter(help="Checkpoint input overrides when --replay is set."),
+    ] = None,
+    mock_output: Annotated[
+        str | None,
+        Parameter(
+            help="Checkpoint output mocks when --replay is set.",
+            alias=["--mock-output"],
+        ),
+    ] = None,
+    tool: Annotated[
+        str | None,
+        Parameter(help="Tool overrides when --replay is set."),
+    ] = None,
+    llm_model: Annotated[
+        str | None,
+        Parameter(help="LLM model alias when --replay is set."),
+    ] = None,
+    skip: Annotated[
+        str | None,
+        Parameter(help="Skip selectors when --replay is set."),
+    ] = None,
+    wait: Annotated[
+        bool,
+        Parameter(help="Wait for replays when --replay is set."),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Resolve a cohort of original executions for batch replay experiments."""
+    command = "executions.cohort"
+    output_format = _resolve_output_format(output)
+    status_filter: str | list[str] = (
+        ["completed", "failed"] if include_failed else "completed"
+    )
+
+    def _resolve_cohort() -> dict[str, Any]:
+        cohort_result = (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        payload = cohort_result.to_json()
+        if not replay:
+            return payload
+
+        flow_inputs = _parse_json_object(args, option_name="--args")
+        parsed_input = _parse_json_object(input, option_name="--input")
+        parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
+        parsed_tool = _parse_json_object(tool, option_name="--tool")
+        parsed_skip = (
+            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
+        )
+        replay_result = (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.replay_many(
+                cohort_result,
+                at=at,
+                input=parsed_input or None,
+                output=parsed_output or None,
+                tool=parsed_tool or None,
+                llm_model=llm_model,
+                skip=parsed_skip,
+                wait=wait,
+                on_error="collect",
+                **flow_inputs,
+            )
+        )
+        payload["replay"] = {
+            "at": replay_result.at,
+            "successes": [
+                {
+                    "original_exec_id": original_exec_id,
+                    "replay_exec_id": getattr(handle, "exec_id", None),
+                }
+                for original_exec_id, handle in replay_result.successes
+            ],
+            "failures": [
+                {"original_exec_id": original_exec_id, "error": error}
+                for original_exec_id, error in replay_result.failures
+            ],
+            "skipped": [
+                {"original_exec_id": original_exec_id, "reason": reason}
+                for original_exec_id, reason in replay_result.skipped
+            ],
+        }
+        return payload
+
+    payload = run_with_cli_error_boundary(
+        _resolve_cohort,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    matched = payload.get("matched", 0)
+    _print_success(
+        "Cohort resolved",
+        detail=(
+            f"{matched} execution(s) selected (scanned {payload.get('scanned', 0)})."
+        ),
+    )
+    if replay:
+        replay_payload = payload.get("replay", {})
+        print(
+            f"  replay: {len(replay_payload.get('successes', []))} succeeded, "
+            f"{len(replay_payload.get('failures', []))} failed, "
+            f"{len(replay_payload.get('skipped', []))} skipped."
+        )

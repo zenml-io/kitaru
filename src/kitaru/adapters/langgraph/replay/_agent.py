@@ -5,14 +5,14 @@ Public contract::
     agent = KitaruReplayAgent(graph, fanout_node="...")
     case  = agent.import_trace(rows)
     seed  = agent.reconstruct(case)                       # seed exec_id
-    repro = agent.replay(seed, from_=cut)                 # live tail, no edits
-    fork  = agent.fork(seed, from_=cut, variant={...})    # live tail, forked
+    repro = agent.replay(seed, at=cut)                 # live tail, no edits
+    fork  = agent.fork(seed, at=cut, variant={...})    # live tail, forked
     report = agent.diff(case, repro, fork)                # DriftReport
 
 ``reconstruct`` builds a mirror @flow (one checkpoint per graph node) and runs
 it in *playback* mode, returning recorded node outputs from the trace with zero
 live calls.  ``replay`` re-executes the tail of that seed run *live* with
-``flow.replay(from_=cut, cache=False, playback=False)`` — the head (skipped,
+``flow.replay(at=cut, cache=False, playback=False)`` — the head (skipped,
 upstream of the cut) reuses the seed's recorded outputs, the tail runs the real
 node callables.  ``fork`` rebuilds the flow with edits/variant and replays the
 same seed run, so the forked tail re-executes under the edited configuration.
@@ -122,12 +122,10 @@ class KitaruReplayAgent:
 
     # ---- reproduction replay (live tail, no edits) ------------------------ #
 
-    def replay(self, seed_exec_id: str, *, from_: str) -> _ReplayResult:
+    def replay(self, seed_exec_id: str, *, at: str) -> _ReplayResult:
         if self._flow_def is None:
             raise RuntimeError("reconstruct() must be called before replay().")
-        handle = self._flow_def.replay(
-            seed_exec_id, from_=from_, cache=False, playback=False
-        )
+        handle = self._flow_def.replay(seed_exec_id, at=at, cache=False, playback=False)
         node_outputs = handle.wait()
         return _ReplayResult(handle.exec_id, _as_mapping(node_outputs))
 
@@ -137,7 +135,7 @@ class KitaruReplayAgent:
         self,
         seed_exec_id: str,
         *,
-        from_: str,
+        at: str,
         edits: Sequence[Edit] = (),
         variant: dict[str, Any] | None = None,
     ) -> _ReplayResult:
@@ -160,9 +158,7 @@ class KitaruReplayAgent:
             root_state=dict(self._seed_ctx.root_state),
         )
         fork_flow = build_replay_flow(fork_ctx)
-        handle = fork_flow.replay(
-            seed_exec_id, from_=from_, cache=False, playback=False
-        )
+        handle = fork_flow.replay(seed_exec_id, at=at, cache=False, playback=False)
         node_outputs = handle.wait()
         return _ReplayResult(handle.exec_id, _as_mapping(node_outputs))
 

@@ -182,6 +182,7 @@ class _DummyRun:
         self.start_time = start_time
         self.end_time = end_time
         self.status_reason = status_reason
+        self.run_metadata: dict[str, object] = {}
         self.exception_info = (
             SimpleNamespace(traceback=traceback) if traceback else None
         )

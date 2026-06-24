@@ -6,8 +6,7 @@ its reproduction/decision drift and metric values).
 
 Single public function: ``write(path, report) -> path``. It reads the public
 accessors on ``reporting.cohort_report.Report`` (``metric_aggregates`` /
-``per_case`` / ``skipped_cases`` / ``improvement`` / ``decision_change_count`` /
-``reproduction_drift_count``).
+``per_case`` / ``skipped_cases`` / ``improvement`` / ``decision_change_count``).
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .verdict { border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-weight: 600; }
 .verdict.good { background: #e9f7ec; color: #1e6b34; border: 1px solid #bfe6c8; }
 .verdict.bad { background: #fdecec; color: #8a1c1c; border: 1px solid #f3c0c0; }
-.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .stat { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px; padding: 14px 16px; }
 .stat .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat .l { color: #8a9099; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
@@ -92,8 +91,7 @@ def render(report: Report) -> str:
     stats = [
         (len(cases), "cases run"),
         (report.skipped, "skipped"),
-        (report.reproduction_drift_count, "reproduction drift"),
-        (report.decision_change_count, "edit flipped decision"),
+        (report.decision_change_count, "decision drift"),
     ]
     stat_cards = "".join(
         f'<div class="stat"><div class="n">{n}</div><div class="l">{html.escape(label)}</div></div>'
@@ -138,7 +136,7 @@ def render(report: Report) -> str:
             )
         case_rows += (
             f'<tr><td class="mono">{html.escape(case["exec_id"][:12])}…</td>'
-            f"<td>{_yes_no_tag(case['reproduction_faithful'], good_when=True)}</td>"
+            f'<td class="mono">{html.escape(str(case.get("variant_exec_id", ""))[:12])}…</td>'
             f"<td>{_yes_no_tag(case['decision_changed'], good_when=False)}</td>"
             f"{metric_cells}</tr>"
         )
@@ -163,8 +161,8 @@ def render(report: Report) -> str:
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 <h1>Cohort experiment</h1>
-<p class="sub">The same edit applied across {len(cases)} recent production runs — \
-unchanged replay (baseline) vs edited replay (variant).</p>
+<p class="sub">The same replay change applied across {len(cases)} production runs — \
+original vs variant replay.</p>
 
 <div class="verdict {verdict_cls}">{verdict_text}</div>
 
@@ -179,7 +177,7 @@ unchanged replay (baseline) vs edited replay (variant).</p>
 
 <div class="card"><h2>Per case</h2>
 <table>
-<tr><th>exec id</th><th>reproduced faithfully</th><th>edit flipped decision</th>\
+<tr><th>exec id</th><th>variant exec</th><th>decision changed</th>\
 {metric_headers}</tr>
 {case_rows}
 </table></div>

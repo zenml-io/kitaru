@@ -448,8 +448,15 @@ workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 - `operation: "replay"`
 - the serialized replayed execution payload
 
-Use `from_` for checkpoint selection, optional `flow_inputs` for flow
-parameter overrides, and optional `overrides` for `checkpoint.*` overrides.
+Use `at` for checkpoint selection, optional `flow_inputs` for flow parameter
+overrides, and optional `input`, `output`, `tool`, `llm_model`, and `skip`
+for checkpoint-level replay controls.
+
+Batch replay and diff are also available:
+
+- `kitaru_executions_replay_many`
+- `kitaru_executions_diff`
+- `kitaru_executions_diff_cohort`
 
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.

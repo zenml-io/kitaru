@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from zenml.models import PipelineRunResponse
 
-from kitaru.errors import KitaruStateError
+from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import build_replay_plan, replay_at_status
 
 
@@ -281,3 +281,53 @@ def test_runtime_context_carries_tool_and_llm_model() -> None:
         "lookup_policy": "mocks.lookup_policy"
     }
     assert plan.runtime_context.llm_model == "openai/gpt-5-nano"
+
+
+def test_explicit_skip_forces_playback_in_live_tail() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    fetch = _step(
+        name="fetch",
+        invocation_id="fetch",
+        started_at=t0,
+        step_type="tool_call",
+    )
+    write = _step(
+        name="write",
+        invocation_id="write",
+        started_at=t0 + timedelta(seconds=10),
+        upstream_steps=["fetch"],
+        inputs_v2={"research": [_input_spec("fetch", "output")]},
+    )
+    publish = _step(
+        name="publish",
+        invocation_id="publish",
+        started_at=t0 + timedelta(seconds=20),
+        upstream_steps=["write"],
+        inputs_v2={"draft": [_input_spec("write", "output")]},
+    )
+
+    plan = build_replay_plan(
+        run=_run(fetch, write, publish),
+        at="write",
+        skip=["write"],
+    )
+
+    assert "write" in plan.steps_to_skip
+    assert "fetch" in plan.steps_to_skip
+    assert "publish" not in plan.steps_to_skip
+
+
+def test_explicit_skip_conflicts_with_input_override() -> None:
+    step = _step(
+        name="fetch",
+        invocation_id="fetch",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+    )
+    with pytest.raises(KitaruUsageError, match="Cannot skip and override inputs"):
+        build_replay_plan(
+            run=_run(step),
+            at="fetch",
+            skip=["fetch"],
+            input={"fetch": {"tool_args": {"topic": "new"}}},
+        )

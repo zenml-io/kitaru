@@ -1,12 +1,9 @@
 """Render a three-way replay comparison as a self-contained HTML report.
 
 The report shows three concrete executions next to each other:
-  - original recorded run: the durable execution that already happened.
-  - unchanged replay: Kitaru reuses checkpoints before the replay anchor and
-    re-runs the live tail with the recorded config.
-  - edited replay: Kitaru starts from the same recorded execution, reuses the
-    same earlier checkpoints, then re-runs the live tail with the edited
-    model/prompt settings.
+  - original prod run
+  - model-variant replay (cheaper model + trimmed prompt)
+  - tool-variant replay (mocked ``lookup_policy``)
 
 Single public function: ``write(path, ...) -> path``.
 """

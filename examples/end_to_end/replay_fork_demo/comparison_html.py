@@ -8,6 +8,8 @@ The report shows what happened in order:
     earlier recorded outputs, then re-runs the live tail with edited config.
 """
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import html
