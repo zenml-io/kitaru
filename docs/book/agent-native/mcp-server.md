@@ -130,6 +130,9 @@ Execution tools:
 - `kitaru_executions_input`
 - `kitaru_executions_retry`
 - `kitaru_executions_replay`
+- `kitaru_executions_cohort`
+- `kitaru_executions_diff`
+- `kitaru_executions_diff_matrix`
 
 Deployment tools:
 
@@ -442,21 +445,24 @@ workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 
 ## Replay behavior
 
-`kitaru_executions_replay` starts a new execution and returns:
+`kitaru_executions_replay` replays explicit source executions and returns the shared replay submission JSON.
 
-- `available: true`
-- `operation: "replay"`
-- the serialized replayed execution payload
+The tool accepts:
 
-Use `at` for checkpoint selection, optional `flow_inputs` for flow parameter
-overrides, and optional `input`, `output`, `tool`, `llm_model`, and `skip`
-for checkpoint-level replay controls.
+- `exec_ids`: one or more execution IDs to replay;
+- `at`: the recorded checkpoint invocation, tool call, model call, or unambiguous checkpoint name where replay starts rerunning work;
+- `flow_overrides`: flow parameters for the replay run;
+- `checkpoint_overrides`: overrides keyed by checkpoint name, applied to every matching invocation;
+- `invocation_overrides`: overrides keyed by one invocation ID or call ID;
+- `skip`: invocation IDs or call IDs that should reuse recorded outputs even though they are at or after `at`;
+- `tag`, `wait`, and `on_error` for batch handling and replay labeling.
 
-Batch replay and diff are also available:
+The returned object includes `submission_id`, `plan`, `results`, `failures`, `skipped`, `summary`, and compare URLs where Kitaru can build them.
 
-- `kitaru_executions_replay_many`
-- `kitaru_executions_diff`
-- `kitaru_executions_diff_cohort`
+For diffs, use:
+
+- `kitaru_executions_diff` for one original execution against one or more replays;
+- `kitaru_executions_diff_matrix` for many original executions against their auto-discovered replays.
 
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.

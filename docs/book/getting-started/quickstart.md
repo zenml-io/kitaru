@@ -127,11 +127,11 @@ failure point:
 
 ```bash
 kitaru executions list          # find the execution ID
-kitaru executions replay <exec-id> --from draft_report
+kitaru executions replay <exec-id> --at draft_report
 ```
 
 Replay creates a new execution that **reuses the recorded output of `research`**
-and only re-executes `draft_report`. The more checkpoints your flow has, the
+and only reruns `draft_report`. The more checkpoints your flow has, the
 less work you repeat when something goes wrong.
 
 This works the same whether you use `kitaru.llm()` or bring your own client.
