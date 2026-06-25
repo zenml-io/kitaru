@@ -5258,6 +5258,7 @@ def test_resolve_flow_for_replay_imports_standalone_module_from_cwd(
     module_path = tmp_path / f"{module_name}.py"
     module_path.write_text(
         "class ReplayFlow:\n"
+        "    _kitaru_replay_flow_wrapper = True\n"
         "    def replay(self, *args, **kwargs):\n"
         "        return None\n\n"
         "sample_flow = ReplayFlow()\n"
@@ -5287,6 +5288,42 @@ def test_resolve_flow_for_replay_imports_standalone_module_from_cwd(
 
     assert resolved.__class__.__name__ == "ReplayFlow"
     assert str(tmp_path) not in sys.path
+
+
+def test_resolve_flow_for_replay_rejects_plain_replay_attribute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "plain_pipeline_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        "class PlainPipeline:\n"
+        "    def replay(self, *args, **kwargs):\n"
+        "        return None\n\n"
+        "sample_flow = PlainPipeline()\n"
+        "__kitaru_pipeline_source_sample_flow = sample_flow\n"
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module=module_name,
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        pytest.raises(KitaruRuntimeError, match="Unable to resolve"),
+    ):
+        _resolve_flow_for_replay(_as_pipeline_run(source_run))
 
 
 def test_import_module_for_replay_retries_when_dotted_import_misses_parent_package(

@@ -1430,6 +1430,8 @@ class FlowHandle:
 class _FlowDefinition:
     """Flow wrapper returned by `@flow`."""
 
+    _kitaru_replay_flow_wrapper = True
+
     def __init__(
         self,
         func: Callable[..., Any],

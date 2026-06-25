@@ -67,8 +67,6 @@ uv run python demo.py import-trace "$TRACE_FILE" --trace-id "$TRACE_ID"
 uv run python demo.py run-all "$TRACE_FILE" --trace-id "$TRACE_ID"
 ```
 
-The deterministic pytest coverage avoids OpenAI and Langfuse by using test doubles.
-
 ## Live trace generation
 
 Live trace generation is handled by the parent demo command:

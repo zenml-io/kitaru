@@ -25,7 +25,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Protocol, cast, runtime_checkable
+from typing import Any, Literal, NoReturn, Protocol, cast
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -479,7 +479,6 @@ def _attempt_local_key_activation(
     return _with_local_key_activation_status(result, succeeded=True)
 
 
-@runtime_checkable
 class _ReplayFlowLike(Protocol):
     """Flow wrapper protocol used by client-side replay resolution."""
 
@@ -496,6 +495,21 @@ class _ReplayFlowLike(Protocol):
         wait: bool | None = None,
         on_error: Literal["collect", "fail"] | None = None,
     ) -> Any: ...
+
+
+_KITARU_REPLAY_FLOW_WRAPPER_MARKER = "_kitaru_replay_flow_wrapper"
+
+
+def _is_replay_flow_wrapper(candidate: Any) -> bool:
+    """Return whether ``candidate`` is a real Kitaru flow wrapper.
+
+    A plain ZenML ``Pipeline`` also has a ``replay`` method, but it does not
+    accept Kitaru's unified replay arguments such as ``at`` and
+    ``flow_overrides``.  Runtime-checkable protocols only verify attribute
+    presence, not signatures, so replay resolution uses an explicit marker set
+    by Kitaru's ``@flow`` wrapper before delegating to the wrapper path.
+    """
+    return bool(getattr(candidate, _KITARU_REPLAY_FLOW_WRAPPER_MARKER, False))
 
 
 def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
@@ -715,8 +729,8 @@ def _resolve_flow_for_replay(run: PipelineRunResponse) -> _ReplayFlowLike:
     )
     for selector in deduped_selectors:
         candidate = getattr(module, selector, None)
-        if isinstance(candidate, _ReplayFlowLike):
-            return candidate
+        if _is_replay_flow_wrapper(candidate):
+            return cast(_ReplayFlowLike, candidate)
 
     tried_selectors = ", ".join(deduped_selectors) or "none"
     raise KitaruRuntimeError(
