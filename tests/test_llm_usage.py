@@ -157,6 +157,9 @@ def test_genai_prices_helper_keeps_openai_reasoning_in_completion_tokens(
         ("unknown", "gpt-4o-mini", None),
         (None, "unknown/gpt-4o-mini", None),
         ("unknown", "unknown/gpt-4o-mini", None),
+        ("responses", "gpt-5-nano", "openai"),
+        ("openai_responses", "gpt-5-nano", "openai"),
+        ("openai-responses", "gpt-5-nano", "openai"),
     ],
 )
 def test_normalize_provider_id_handles_unknown_provider_and_model_prefix(

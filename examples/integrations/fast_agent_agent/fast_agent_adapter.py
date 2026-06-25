@@ -18,6 +18,7 @@ from typing import Any
 from fast_agent.agents.agent_types import AgentConfig
 from fast_agent.agents.tool_agent import ToolAgent
 from fast_agent.core.agent_app import AgentApp
+from fast_agent.mcp import prompt_message_extended as prompt_message_extended_module
 from fast_agent.types import (
     LlmStopReason,
     PromptMessageExtended,
@@ -30,6 +31,45 @@ from kitaru import flow
 from kitaru._client._models import ExecutionStatus
 from kitaru.adapters.fast_agent import KitaruFastAgent
 from kitaru.client import KitaruClient
+
+if not hasattr(prompt_message_extended_module, "PromptMessageExtended"):
+    prompt_message_extended_module.PromptMessageExtended = PromptMessageExtended
+
+
+@dataclass
+class MemoryTurnUsage:
+    """Provider-free usage turn captured by the example LLM."""
+
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    raw_usage: dict[str, Any]
+    tool_calls: int = 0
+
+    @property
+    def display_input_tokens(self) -> int:
+        return self.input_tokens
+
+
+@dataclass
+class MemoryUsageAccumulator:
+    """Small accumulator with the same ``turns`` shape fast-agent exposes."""
+
+    turns: list[MemoryTurnUsage]
+
+    @property
+    def current_context_tokens(self) -> int:
+        return self.turns[-1].total_tokens if self.turns else 0
+
+    @property
+    def context_usage_percentage(self) -> float | None:
+        return None
+
+    def count_tools(self, tool_calls: int) -> None:
+        if self.turns:
+            self.turns[-1].tool_calls = tool_calls
 
 
 @dataclass(frozen=True)
@@ -66,9 +106,9 @@ class MemoryLLM:
     model_name = "memory-fast-agent-demo"
     provider = "memory"
     resolved_model = None
-    usage_accumulator = None
 
     def __init__(self) -> None:
+        self.usage_accumulator = MemoryUsageAccumulator(turns=[])
         self.default_request_params = RequestParams(use_history=True)
         self.instruction = ""
         self.generate_calls = 0
@@ -91,11 +131,14 @@ class MemoryLLM:
         self.generate_calls += 1
         if self._tool_call_requested:
             self._tool_call_requested = False
-            return self._assistant_tool_call("uppercase", {"text": "kitaru"})
-        if any(getattr(message, "tool_results", None) for message in messages):
-            return self._assistant_message("memory tool loop complete")
-        last_user_text = messages[-1].last_text() if messages else "<empty>"
-        return self._assistant_message(f"memory reply to {last_user_text}")
+            response = self._assistant_tool_call("uppercase", {"text": "kitaru"})
+        elif any(getattr(message, "tool_results", None) for message in messages):
+            response = self._assistant_message("memory tool loop complete")
+        else:
+            last_user_text = messages[-1].last_text() if messages else "<empty>"
+            response = self._assistant_message(f"memory reply to {last_user_text}")
+        self._record_usage(messages, response)
+        return response
 
     async def structured(
         self,
@@ -103,8 +146,42 @@ class MemoryLLM:
         model: type[object],
         request_params: Any | None = None,
     ) -> tuple[None, PromptMessageExtended]:
-        del messages, model, request_params
-        return None, self._assistant_message("structured memory reply")
+        del model, request_params
+        response = self._assistant_message("structured memory reply")
+        self._record_usage(messages, response)
+        return None, response
+
+    def _record_usage(
+        self,
+        messages: list[Any],
+        response: PromptMessageExtended,
+    ) -> None:
+        input_text = "\n".join(
+            text
+            for message in messages
+            if callable(last_text := getattr(message, "last_text", None))
+            and isinstance((text := last_text()), str)
+        )
+        output_text = response.last_text() or ""
+        input_tokens = _wordish_count(input_text)
+        output_tokens = _wordish_count(output_text)
+        payload = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "unit": "wordish_count",
+            "source": "example_memory_llm",
+        }
+        self.usage_accumulator.turns.append(
+            MemoryTurnUsage(
+                provider=self.provider,
+                model=self.model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                raw_usage=payload,
+            )
+        )
 
     def _assistant_message(self, text: str) -> PromptMessageExtended:
         return PromptMessageExtended(
@@ -126,6 +203,11 @@ class MemoryLLM:
             },
             stop_reason=LlmStopReason.TOOL_USE,
         )
+
+
+def _wordish_count(text: str) -> int:
+    """Return a deterministic local token-like count for the memory LLM."""
+    return len([part for part in text.split() if part])
 
 
 def uppercase(text: str) -> str:

@@ -36,6 +36,8 @@ uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py
 ```
 
 No provider key is needed. The LLM is a local `MemoryLLM` class in the example.
+It also records deterministic local word counts through a small usage accumulator,
+so Kitaru can show `llm_usage_v1` metadata without calling a paid provider.
 
 ## What to look for
 
@@ -52,6 +54,11 @@ In Kitaru, inspect the execution and look for checkpoints with names like:
 
 - `fast_agent_demo_generate_model_call`
 - `fast_agent_demo_uppercase_tool_call`
+
+The model-call checkpoints should also include `llm_usage_v1` metadata. In this
+provider-free example the provider is `memory`, the model is
+`memory-fast-agent-demo`, and the usage numbers are local word counts rather
+than provider-billed tokens.
 
 The concrete story is:
 
@@ -76,7 +83,10 @@ pass through the app agents it can discover and wrap after `run()` yields:
 - detached agent clones returned by `spawn_detached_instance(...)`
 
 Kitaru does not claim to record hidden fast-agent internals that never pass
-through those reachable methods.
+through those reachable methods. Usage and cost tracking is also best-effort:
+Kitaru records token usage when fast-agent exposes usage counts through an
+accumulator or known result metadata, and it skips empty usage records when no
+counts are available.
 
 For the concept walkthrough, see
 [fast-agent Adapter](https://docs.zenml.io/kitaru/adapters/fast-agent/).

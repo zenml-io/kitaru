@@ -13,6 +13,7 @@ from kitaru.errors import KitaruUsageError
 from kitaru.runtime import _is_inside_checkpoint as is_inside_checkpoint
 from kitaru.runtime import _is_inside_flow as is_inside_flow
 
+from ._usage import FastAgentUsageSummary, begin_usage_capture, log_fast_agent_usage
 from ._utils import (
     CheckpointConfig,
     checkpoint_cache_key,
@@ -41,6 +42,7 @@ class FastAgentCall:
     tool_name: str | None = None
     model_name: str | None = None
     provider: str | None = None
+    usage_sources: tuple[Any, ...] = ()
     is_async: bool = False
 
 
@@ -71,9 +73,13 @@ class KitaruFastAgentCallRecorder:
         *,
         model_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config: CheckpointConfig | None = None,
+        save_usage: bool = True,
+        cost_calculator: Callable[[FastAgentUsageSummary], float | None] | None = None,
     ) -> None:
         self._model_checkpoint_config = model_checkpoint_config or {}
         self._tool_checkpoint_config = tool_checkpoint_config or {}
+        self._save_usage = save_usage
+        self._cost_calculator = cost_calculator
 
     def __call__(
         self,
@@ -95,9 +101,11 @@ class KitaruFastAgentCallRecorder:
         if call.is_async:
 
             async def async_body() -> Any:
+                usage_state = self._begin_model_usage_capture(call)
                 result = proceed()
                 if inspect.isawaitable(result):
-                    return await result
+                    result = await result
+                self._log_model_usage(call, usage_state=usage_state, result=result)
                 return result
 
             return run_async_in_checkpoint(
@@ -109,11 +117,13 @@ class KitaruFastAgentCallRecorder:
             )
 
         def sync_body() -> Any:
+            usage_state = self._begin_model_usage_capture(call)
             result = proceed()
             if inspect.isawaitable(result):
                 raise TypeError(
                     "fast-agent call was marked sync but returned an awaitable."
                 )
+            self._log_model_usage(call, usage_state=usage_state, result=result)
             return result
 
         return run_sync_in_checkpoint(
@@ -122,6 +132,29 @@ class KitaruFastAgentCallRecorder:
             body=sync_body,
             cache_key=cache_key,
             checkpoint_inputs=checkpoint_inputs,
+        )
+
+    def _begin_model_usage_capture(self, call: FastAgentCall) -> Any | None:
+        if call.kind != "model" or not self._save_usage:
+            return None
+        return begin_usage_capture(call.usage_sources)
+
+    def _log_model_usage(
+        self,
+        call: FastAgentCall,
+        *,
+        usage_state: Any | None,
+        result: Any,
+    ) -> None:
+        if call.kind != "model" or not self._save_usage:
+            return
+        log_fast_agent_usage(
+            call_name=_checkpoint_step_name(call),
+            provider=call.provider,
+            model_name=call.model_name,
+            usage_state=usage_state,
+            result=result,
+            cost_calculator=self._cost_calculator,
         )
 
     def _checkpoint_config(self, call: FastAgentCall) -> CheckpointConfig:
@@ -137,11 +170,15 @@ def kitaru_call_recorder(
     *,
     model_checkpoint_config: CheckpointConfig | None = None,
     tool_checkpoint_config: CheckpointConfig | None = None,
+    save_usage: bool = True,
+    cost_calculator: Callable[[FastAgentUsageSummary], float | None] | None = None,
 ) -> KitaruFastAgentCallRecorder:
     """Return the default Kitaru checkpoint recorder for calls-mode wrapping."""
     return KitaruFastAgentCallRecorder(
         model_checkpoint_config=model_checkpoint_config,
         tool_checkpoint_config=tool_checkpoint_config,
+        save_usage=save_usage,
+        cost_calculator=cost_calculator,
     )
 
 
@@ -152,10 +189,12 @@ class _FastAgentLLMWrapper:
         self,
         llm: Any,
         *,
+        usage_sources: tuple[Any, ...],
         agent_name: str,
         recorder: FastAgentCallRecorder,
     ) -> None:
         self._kitaru_fast_agent_original_llm = llm
+        self._kitaru_fast_agent_usage_sources = usage_sources
         self._kitaru_fast_agent_agent_name = agent_name
         self._kitaru_fast_agent_recorder = recorder
 
@@ -195,6 +234,7 @@ class _FastAgentLLMWrapper:
             kwargs=dict(kwargs),
             model_name=_optional_str(getattr(llm, "model_name", None)),
             provider=_optional_str(getattr(llm, "provider", None)),
+            usage_sources=self._kitaru_fast_agent_usage_sources,
             is_async=_is_async_callable(method),
         )
 
@@ -260,8 +300,25 @@ def _wrap_attached_llm(
     setattr(
         agent,
         llm_attr,
-        _FastAgentLLMWrapper(llm, agent_name=agent_name, recorder=recorder),
+        _FastAgentLLMWrapper(
+            llm,
+            usage_sources=_usage_sources(agent, llm),
+            agent_name=agent_name,
+            recorder=recorder,
+        ),
     )
+
+
+def _usage_sources(agent: Any, llm: Any) -> tuple[Any, ...]:
+    sources: list[Any] = []
+    for source in (
+        getattr(agent, "usage_accumulator", None),
+        getattr(llm, "usage_accumulator", None),
+        llm,
+    ):
+        if source is not None:
+            sources.append(source)
+    return tuple(sources)
 
 
 def _wrap_call_tool(

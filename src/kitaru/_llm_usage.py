@@ -142,6 +142,7 @@ LLMAdapter = Literal[
     "claude_agent_sdk",
     "langgraph",
     "gemini_interactions",
+    "fast_agent",
 ]
 LLMSurface = Literal[
     "direct_llm",
@@ -304,6 +305,9 @@ _PROVIDER_ID_ALIASES = {
     "vertexai": "google",
     "gemini": "google",
     "openai": "openai",
+    "responses": "openai",
+    "openai_responses": "openai",
+    "openai-responses": "openai",
     "azure-openai": "azure",
     "azure_openai": "azure",
     "azure": "azure",

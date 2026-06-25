@@ -121,6 +121,7 @@ def test_import_with_fast_agent_exposes_public_contract(
         "CheckpointConfig",
         "FastAgentCall",
         "FastAgentCallRecorder",
+        "FastAgentUsageSummary",
         "KitaruFastAgent",
         "KitaruFastAgentCallRecorder",
         "kitaru_call_recorder",
@@ -339,6 +340,30 @@ def test_public_runner_keeps_none_call_recorder_as_passthrough(
     assert runner._call_recorder is None
 
 
+def test_public_runner_rejects_usage_options_with_passthrough_recorder(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="save_usage and cost_calculator only apply",
+    ):
+        fast_agent_adapter.KitaruFastAgent(
+            FakeFastAgent(FakeApp({"a": FakeAgent()})),
+            call_recorder=None,
+            save_usage=False,
+        )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match="save_usage and cost_calculator only apply",
+    ):
+        fast_agent_adapter.KitaruFastAgent(
+            FakeFastAgent(FakeApp({"a": FakeAgent()})),
+            call_recorder=None,
+            cost_calculator=lambda usage: 0.0,
+        )
+
+
 def test_public_runner_records_non_sensitive_analytics(
     fast_agent_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -362,4 +387,6 @@ def test_public_runner_records_non_sensitive_analytics(
         "call_recorder": "passthrough",
         "has_model_checkpoint_config": True,
         "has_tool_checkpoint_config": False,
+        "save_usage": True,
+        "has_cost_calculator": False,
     }

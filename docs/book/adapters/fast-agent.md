@@ -129,6 +129,60 @@ These configs accept `cache`, `retries`, `type`, and `runtime="inline"`.
 body closes over live fast-agent model/tool objects in the current Python
 process.
 
+## Usage and cost statistics
+
+When `save_usage=True` (the default), each supported fast-agent model call tries
+to log one canonical `llm_usage_v1` record while the model-call checkpoint is
+still running. The sequence is:
+
+```text
+fast-agent calls LLM.generate(...)
+→ Kitaru opens the model-call checkpoint
+→ the original LLM method runs
+→ Kitaru reads token counts from fast-agent's usage accumulator
+→ Kitaru logs llm_usage_v1 on that checkpoint
+→ the original model result is returned unchanged
+```
+
+The primary source is fast-agent's own usage accumulator. Kitaru records the
+turn added during the wrapped model call when the agent or LLM exposes
+`usage_accumulator` and fast-agent's `last_turn_usage(...)` shape can read it.
+If that is not available, Kitaru falls back to known result fields such as
+`usage`, `token_usage`, `usage_metadata`, or `usage_details` when those fields
+contain recognizable token counts.
+
+Cost uses the same path as the mature Kitaru adapters: a custom calculator
+when you provide one, otherwise `genai-prices` when provider, model, and token
+counts are known.
+
+```python
+from kitaru.adapters.fast_agent import FastAgentUsageSummary, KitaruFastAgent
+
+
+def my_fast_agent_cost_calculator(usage: FastAgentUsageSummary) -> float | None:
+    if usage.model_name == "memory-fast-agent-demo":
+        return 0.0
+    return None
+
+
+runner = KitaruFastAgent(
+    fast,
+    save_usage=True,
+    cost_calculator=my_fast_agent_cost_calculator,
+)
+```
+
+Kitaru does not guess cost when fast-agent exposes no token counts, or when the
+provider/model cannot be priced. In that case the checkpoint still proves the
+model call happened, but no empty usage record is created. Tool checkpoints are
+not counted as LLM token spend; if a tool triggers a model call through a
+wrapped LLM method, that model call gets its own record.
+
+Set `save_usage=False` when you want model/tool checkpointing but do not want
+fast-agent token usage metadata persisted. `save_usage` and `cost_calculator`
+apply to Kitaru's default call recorder; if you pass a custom `call_recorder`,
+that recorder must implement any usage logging it needs.
+
 ## Replay identity
 
 For caching and replay, Kitaru builds each checkpoint identity from logical call
@@ -158,6 +212,10 @@ when it cannot build a stable identity.
   `active_agents` mapping.
 - Record supported model and tool calls as Kitaru checkpoints while a Kitaru
   flow is active.
+- Record `llm_usage_v1` metadata for model calls when fast-agent exposes token
+  counts through the usage accumulator or a known result shape.
+- Estimate model-call cost through `cost_calculator` when provided, otherwise
+  `genai-prices` when provider, model, and token counts are known.
 - Preserve normal fast-agent behavior by calling the original LLM/tool method
   inside each checkpoint.
 - Wrap detached agent clones returned by `spawn_detached_instance(...)`.
@@ -168,6 +226,12 @@ when it cannot build a stable identity.
 - Record hidden fast-agent internals that do not pass through wrapped methods.
 - Provide a coarse outer app-run checkpoint strategy yet.
 - Provide fast-agent streaming checkpoints yet.
+- Provide human approval/resume helpers yet.
+- Provide sandbox helper tools yet.
+- Provide a full capture policy for prompts, responses, transcripts, and event
+  artifacts yet. The preview API only has `save_usage` for usage metadata.
+- Provide per-tool checkpoint overrides yet.
+- Save a rich fast-agent transcript or event timeline yet.
 - Promise broad `structured_schema(...)` support across fast-agent versions; the
   wrapper supports it when the runtime object exposes that method.
 - Support isolated-runtime execution for adapter-created fast-agent checkpoints
@@ -177,7 +241,9 @@ when it cannot build a stable identity.
 
 The included example uses real fast-agent objects but no provider key. It builds
 a real `ToolAgent`, attaches an in-memory LLM, registers a local `uppercase`
-tool, and runs both app-driven and direct tool calls.
+tool, and runs both app-driven and direct tool calls. The in-memory LLM appends a
+small local usage turn after each fake model response, so you can inspect
+`llm_usage_v1` records without paying a provider.
 
 ```bash
 uv sync --extra fast-agent --no-dev
@@ -201,6 +267,11 @@ Inspect the execution in Kitaru and look for checkpoints named like:
 - `fast_agent_demo_generate_model_call`
 - `fast_agent_demo_uppercase_tool_call`
 
+The `fast_agent_demo_generate_model_call` checkpoints should also include
+`llm_usage_v1` metadata with provider `memory` and model
+`memory-fast-agent-demo`. The example usage numbers are deterministic local word
+counts, not provider-billed tokens.
+
 For the broader catalog, see [Examples](../getting-started/examples.md).
 
 ## Troubleshooting
@@ -217,6 +288,9 @@ For the broader catalog, see [Examples](../getting-started/examples.md).
 - **No checkpoints appear** — make sure the agent call happens inside a Kitaru
   `@flow` and not inside another `@checkpoint` body. The adapter needs flow
   scope so it can create one checkpoint per supported call.
+- **A model checkpoint appears but no usage record appears** — expected when
+  fast-agent exposes no token counts for that call. The adapter skips empty
+  `llm_usage_v1` records instead of inventing usage.
 - **A tool did work but no tool checkpoint appeared** — check whether that tool
   path reached `agent.call_tool(...)`. Kitaru records reachable `call_tool(...)`
   calls; it cannot record hidden fast-agent work that bypasses the wrapped

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, cast
 
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
+from ._usage import FastAgentUsageSummary
 from ._utils import CheckpointConfig, validate_checkpoint_config
 from ._wrapping import FastAgentCallRecorder, kitaru_call_recorder, wrap_fast_agent_app
 
@@ -49,7 +50,19 @@ class KitaruFastAgent:
         ),
         model_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config: CheckpointConfig | None = None,
+        save_usage: bool = True,
+        cost_calculator: Callable[[FastAgentUsageSummary], float | None] | None = None,
     ) -> None:
+        if call_recorder is not _DEFAULT_CALL_RECORDER and (
+            not save_usage or cost_calculator is not None
+        ):
+            raise KitaruUsageError(
+                "fast-agent save_usage and cost_calculator only apply when "
+                "Kitaru creates the default call recorder. Pass the usage "
+                "configuration to your custom recorder instead, or omit "
+                "call_recorder."
+            )
+
         self._fast_agent = fast_agent
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
         self._call_recorder = (
@@ -62,6 +75,8 @@ class KitaruFastAgent:
                     tool_checkpoint_config,
                     context="tool_checkpoint_config",
                 ),
+                save_usage=save_usage,
+                cost_calculator=cost_calculator,
             )
             if call_recorder is _DEFAULT_CALL_RECORDER
             else cast(FastAgentCallRecorder | None, call_recorder)
@@ -79,6 +94,8 @@ class KitaruFastAgent:
                 ),
                 "has_model_checkpoint_config": model_checkpoint_config is not None,
                 "has_tool_checkpoint_config": tool_checkpoint_config is not None,
+                "save_usage": save_usage,
+                "has_cost_calculator": cost_calculator is not None,
             },
         )
 

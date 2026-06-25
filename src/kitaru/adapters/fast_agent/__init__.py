@@ -1,9 +1,11 @@
 """fast-agent adapter for Kitaru calls-mode wrapping."""
 
+import importlib
+
 from kitaru.errors import KitaruFeatureNotAvailableError
 
 try:
-    import fast_agent  # noqa: F401
+    importlib.import_module("fast_agent")
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
     if exc.name != "fast_agent":
         raise
@@ -16,6 +18,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
     ) from exc
 
 from ._agent import KitaruFastAgent
+from ._usage import FastAgentUsageSummary
 from ._utils import CheckpointConfig
 from ._wrapping import (
     FastAgentCall,
@@ -31,6 +34,7 @@ __all__ = [
     "CheckpointConfig",
     "FastAgentCall",
     "FastAgentCallRecorder",
+    "FastAgentUsageSummary",
     "KitaruFastAgent",
     "KitaruFastAgentCallRecorder",
     "kitaru_call_recorder",
