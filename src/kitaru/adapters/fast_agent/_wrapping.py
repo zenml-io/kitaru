@@ -7,8 +7,9 @@ from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
+from kitaru.errors import KitaruUsageError
 from kitaru.runtime import _is_inside_checkpoint as is_inside_checkpoint
 from kitaru.runtime import _is_inside_flow as is_inside_flow
 
@@ -25,6 +26,7 @@ from ._utils import (
 FastAgentCallKind = Literal["model", "tool"]
 
 _AGENT_WRAPPED_ATTR = "_kitaru_fast_agent_wrapped"
+_OPTIONAL_LLM_OPERATIONS = frozenset({"structured", "structured_schema"})
 
 
 @dataclass(frozen=True)
@@ -53,10 +55,11 @@ class FastAgentCallRecorder(Protocol):
 
 
 def passthrough_call_recorder(
-    _call: FastAgentCall,
+    call: FastAgentCall,
     proceed: Callable[[], Any],
 ) -> Any:
     """Run the original fast-agent call without recording anything."""
+    del call
     return proceed()
 
 
@@ -127,7 +130,7 @@ class KitaruFastAgentCallRecorder:
             if call.kind == "model"
             else self._tool_checkpoint_config
         )
-        return dict(config)
+        return cast(CheckpointConfig, dict(config))
 
 
 def kitaru_call_recorder(
@@ -156,6 +159,13 @@ class _FastAgentLLMWrapper:
         self._kitaru_fast_agent_agent_name = agent_name
         self._kitaru_fast_agent_recorder = recorder
 
+    def __getattribute__(self, name: str) -> Any:
+        if name in _OPTIONAL_LLM_OPERATIONS:
+            llm = object.__getattribute__(self, "_kitaru_fast_agent_original_llm")
+            if not callable(getattr(llm, name, None)):
+                raise AttributeError(name)
+        return object.__getattribute__(self, name)
+
     @property
     def original_llm(self) -> Any:
         return self._kitaru_fast_agent_original_llm
@@ -165,6 +175,9 @@ class _FastAgentLLMWrapper:
 
     def structured(self, *args: Any, **kwargs: Any) -> Any:
         return self._record_model_call("structured", args, kwargs)
+
+    def structured_schema(self, *args: Any, **kwargs: Any) -> Any:
+        return self._record_model_call("structured_schema", args, kwargs)
 
     def _record_model_call(
         self,
@@ -200,8 +213,17 @@ def wrap_fast_agent_app(
     recorder: FastAgentCallRecorder | None = None,
 ) -> Any:
     """Wrap every active agent discoverable from a fast-agent AgentApp."""
-    resolved_recorder = recorder or passthrough_call_recorder
-    for agent in _iter_app_agents(app):
+    resolved_recorder = cast(
+        FastAgentCallRecorder, recorder or passthrough_call_recorder
+    )
+    agents = list(_iter_app_agents(app))
+    if not agents:
+        raise KitaruUsageError(
+            "Could not discover fast-agent agents on the object yielded by "
+            "`FastAgent.run()`. Kitaru expects an AgentApp-like object with a "
+            "non-empty `_agents`, `agents`, or `active_agents` mapping."
+        )
+    for agent in agents:
         wrap_fast_agent_agent(agent, recorder=resolved_recorder)
     return app
 
@@ -215,7 +237,9 @@ def wrap_fast_agent_agent(
     if getattr(agent, _AGENT_WRAPPED_ATTR, False):
         return agent
 
-    resolved_recorder = recorder or passthrough_call_recorder
+    resolved_recorder = cast(
+        FastAgentCallRecorder, recorder or passthrough_call_recorder
+    )
     agent_name = _agent_name(agent)
     _wrap_attached_llm(agent, agent_name=agent_name, recorder=resolved_recorder)
     _wrap_call_tool(agent, agent_name=agent_name, recorder=resolved_recorder)

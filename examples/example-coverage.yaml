@@ -672,6 +672,31 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
+  - id: fast-agent-adapter
+    path: examples/integrations/fast_agent_agent/fast_agent_adapter.py
+    public_docs:
+      - examples/README.md
+      - examples/integrations/fast_agent_agent/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/fast-agent.md
+    owner_area: fast-agent adapter provider-free call checkpoints
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_fast_agent_example.py
+        notes: uses real fast-agent objects and an in-memory LLM when the optional
+          fast-agent runtime is installed; skips cleanly if the runtime is absent
+      local_smoke:
+        status: covered
+        command: uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py
+        requires_server: false
+        timeout_seconds: 120
+        notes: provider-free; requires the fast-agent extra and Python >=3.13.5,<3.14
+      live_provider:
+        status: not_applicable
+        required: false
+    release_policy:
+      required_when_changed: true
   - id: openai-research-bot
     path: examples/end_to_end/openai_research_bot/research_bot.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

@@ -71,6 +71,10 @@ langgraph = [
     "langchain>=1.0,<2",
     "langgraph>=1.1,<2",
 ]
+fast-agent = [
+    "fast-agent-mcp>=0.4.48,<0.4.49; python_full_version >= '3.13.5' and python_version < '3.14'",
+    "a2a-sdk>=0.3.16,<1; python_full_version >= '3.13.5' and python_version < '3.14'",
+]
 langgraph-openai = [
     "kitaru[langgraph]",
     "langchain-openai>=1.0,<2",
@@ -118,6 +122,20 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 [tool.uv]
 exclude-newer = "3 days"
 exclude-newer-package = { zenml = false, aiohttp = false, langsmith = false, pydantic-settings = false }
+conflicts = [
+    [
+        { extra = "fast-agent" },
+        { extra = "mcp" },
+    ],
+    [
+        { extra = "fast-agent" },
+        { extra = "local" },
+    ],
+    [
+        { extra = "fast-agent" },
+        { group = "dev" },
+    ],
+]
 
 [dependency-groups]
 dev = [

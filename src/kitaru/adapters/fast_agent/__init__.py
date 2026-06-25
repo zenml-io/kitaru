@@ -9,7 +9,10 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
         raise
     raise KitaruFeatureNotAvailableError(
         "kitaru.adapters.fast_agent requires optional dependency "
-        "`fast-agent-mcp`. Install it before importing this adapter."
+        "`fast-agent-mcp`. Install with `uv sync --extra fast-agent --no-dev` "
+        "or `pip install 'kitaru[fast-agent]'` before importing this adapter. "
+        "The supported fast-agent adapter extra currently requires "
+        "Python >=3.13.5,<3.14."
     ) from exc
 
 from ._agent import KitaruFastAgent

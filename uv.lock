@@ -1,6 +1,22 @@
 version = 1
 revision = 3
 requires-python = ">=3.11"
+resolution-markers = [
+    "extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp'",
+    "python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev'",
+    "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev')",
+    "extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp'",
+]
+conflicts = [[
+    { package = "kitaru", extra = "fast-agent" },
+    { package = "kitaru", extra = "mcp" },
+], [
+    { package = "kitaru", extra = "fast-agent" },
+    { package = "kitaru", extra = "local" },
+], [
+    { package = "kitaru", extra = "fast-agent" },
+    { package = "kitaru", group = "dev" },
+]]
 
 [options]
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
@@ -11,6 +27,34 @@ langsmith = false
 aiohttp = false
 zenml = false
 pydantic-settings = false
+
+[[package]]
+name = "a2a-sdk"
+version = "0.3.26"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "httpx", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "httpx-sse", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "protobuf", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pydantic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/97/a6840e01795b182ce751ca165430d46459927cde9bfab838087cbb24aef7/a2a_sdk-0.3.26.tar.gz", hash = "sha256:44068e2d037afbb07ab899267439e9bc7eaa7ac2af94f1e8b239933c993ad52d", size = 274598, upload-time = "2026-04-09T15:21:13.902Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/d5/51f4ee1bf3b736add42a542d3c8a3fd3fa85f3d36c17972127defc46c26f/a2a_sdk-0.3.26-py3-none-any.whl", hash = "sha256:754e0573f6d33b225c1d8d51f640efa69cbbed7bdfb06ce9c3540ea9f58d4a91", size = 151016, upload-time = "2026-04-09T15:21:12.35Z" },
+]
+
+[[package]]
+name = "agent-client-protocol"
+version = "0.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/a0/3b96cd8374725c69bc3dae9fcc2082f3f6cafec1be35d24d7af0f8c3265f/agent_client_protocol-0.10.1.tar.gz", hash = "sha256:355c65ca19f0568344aafc2c1552b7066a8fc491df23ab28e7e253c6c9a85a25", size = 81924, upload-time = "2026-05-24T18:46:44.444Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/18/d8c7ff337cf621ea79a84006a7252ff057bfb5767549bb102cc6649f4ec2/agent_client_protocol-0.10.1-py3-none-any.whl", hash = "sha256:a03d3198f4d772f2e0ec012c00ac1cce131b4710220a3dc9fae3c991d047c750", size = 65401, upload-time = "2026-05-24T18:46:43.202Z" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -26,14 +70,14 @@ name = "aiohttp"
 version = "3.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiohappyeyeballs" },
-    { name = "aiosignal" },
-    { name = "attrs" },
-    { name = "frozenlist" },
-    { name = "multidict" },
-    { name = "propcache" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
-    { name = "yarl" },
+    { name = "aiohappyeyeballs", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "aiosignal", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "attrs", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "frozenlist", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "multidict", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "propcache", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra != 'extra-6-kitaru-fast-agent') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "yarl", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/82/78/8ea7308cac6934de8c74a14f3d5f65d1c89287426688be79538d0e5c013d/aiohttp-3.14.1.tar.gz", hash = "sha256:307f2cff90a764d329e77040603fa032db89c5c24fdad50c4c15334cba744035", size = 7955794, upload-time = "2026-06-07T21:09:35.529Z" }
 wheels = [
@@ -144,8 +188,8 @@ name = "aiosignal"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "frozenlist" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "frozenlist", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra != 'extra-6-kitaru-fast-agent') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
 wheels = [
@@ -209,7 +253,7 @@ version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/19/14/2c5dd9f512b66549ae92767a9c7b330ae88e1932ca57876909410251fe13/anyio-4.13.0.tar.gz", hash = "sha256:334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc", size = 231622, upload-time = "2026-03-24T12:59:09.671Z" }
 wheels = [
@@ -268,7 +312,7 @@ version = "0.14.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
-    { name = "requests" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2d/f6/c972b32d80760fb79d6b9eeb0b3010a46b89c0b23cf6329417ff7886cd22/cachecontrol-0.14.4.tar.gz", hash = "sha256:e6220afafa4c22a47dd0badb319f84475d79108100d04e26e8542ef7d3ab05a1", size = 16150, upload-time = "2025-11-14T04:32:13.138Z" }
 wheels = [
@@ -290,6 +334,19 @@ wheels = [
 ]
 
 [[package]]
+name = "cattrs"
+version = "26.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a0/ec/ba18945e7d6e55a58364d9fb2e46049c1c2998b3d805f19b703f14e81057/cattrs-26.1.0.tar.gz", hash = "sha256:fa239e0f0ec0715ba34852ce813986dfed1e12117e209b816ab87401271cdd40", size = 495672, upload-time = "2026-02-18T22:15:19.406Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/56/60547f7801b97c67e97491dc3d9ade9fbccbd0325058fd3dfcb2f5d98d90/cattrs-26.1.0-py3-none-any.whl", hash = "sha256:d1e0804c42639494d469d08d4f26d6b9de9b8ab26b446db7b5f8c2e97f7c3096", size = 73054, upload-time = "2026-02-18T22:15:17.958Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.4.22"
 source = { registry = "https://pypi.org/simple" }
@@ -303,7 +360,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -463,7 +520,8 @@ version = "0.1.81"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "mcp" },
+    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "mcp", version = "1.26.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
     { name = "sniffio" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ab/ce/e7a02076df66dd7dd48764321a7b103fe13a2bdabd48e2eb25f45e6d1f9e/claude_agent_sdk-0.1.81.tar.gz", hash = "sha256:9a3e873c99cd98b2e11ae5e65fd250f38ea192c3a8ddd117ed69a10bbf2b913b", size = 250295, upload-time = "2026-05-11T18:56:44.76Z" }
@@ -480,7 +538,7 @@ name = "click"
 version = "8.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/60/6c/8ca2efa64cf75a977a0d7fac081354553ebe483345c734fb6b6515d96bbc/click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202", size = 286342, upload-time = "2025-05-20T23:19:49.832Z" }
 wheels = [
@@ -522,7 +580,7 @@ name = "cryptography"
 version = "49.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1f/99/d1c90d6041656cc6ee229dc99cd67fd0cd5aec3c5f7d72fffc27cc750054/cryptography-49.0.0.tar.gz", hash = "sha256:f89660a348f4f78a92366240a61404e337586ef7f5909a2fef59ca88ef505493", size = 854345, upload-time = "2026-06-12T20:02:30.512Z" }
 wheels = [
@@ -614,6 +672,18 @@ wheels = [
 ]
 
 [[package]]
+name = "deprecated"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wrapt", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/85/12f0a49a7c4ffb70572b6c2ef13c90c88fd190debda93b23f026b25f9634/deprecated-1.3.1.tar.gz", hash = "sha256:b1b50e0ff0c1fddaa5708a2c6b0a6588bb09b892825ab2b214ac9ea9d92a5223", size = 2932523, upload-time = "2025-10-30T08:19:02.757Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/d0/205d54408c08b13550c733c4b85429e7ead111c7f0014309637425520a9a/deprecated-1.3.1-py2.py3-none-any.whl", hash = "sha256:597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f", size = 11298, upload-time = "2025-10-30T08:19:00.758Z" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -623,12 +693,22 @@ wheels = [
 ]
 
 [[package]]
+name = "dnspython"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f", size = 368251, upload-time = "2025-09-07T18:58:00.022Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af", size = 331094, upload-time = "2025-09-07T18:57:58.071Z" },
+]
+
+[[package]]
 name = "docker"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "requests" },
+    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "urllib3" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/91/9b/4a2ea29aeba62471211598dac5d96825bb49348fa07e906ea930394a83ce/docker-7.1.0.tar.gz", hash = "sha256:ad8c70e6e3f8926cb8a92619b832b4ea5299e2831c14284663184e200546fa6c", size = 117834, upload-time = "2024-05-23T11:13:57.216Z" }
@@ -646,12 +726,38 @@ wheels = [
 ]
 
 [[package]]
+name = "docstring-to-markdown"
+version = "0.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-metadata", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/d8/8abe80d62c5dce1075578031bcfde07e735bcf0afe2886dd48b470162ab4/docstring_to_markdown-0.17.tar.gz", hash = "sha256:df72a112294c7492487c9da2451cae0faeee06e86008245c188c5761c9590ca3", size = 32260, upload-time = "2025-05-02T15:09:07.932Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/7b/af3d0da15bed3a8665419bb3a630585756920f4ad67abfdfef26240ebcc0/docstring_to_markdown-0.17-py3-none-any.whl", hash = "sha256:fd7d5094aa83943bf5f9e1a13701866b7c452eac19765380dead666e36d3711c", size = 23479, upload-time = "2025-05-02T15:09:06.676Z" },
+]
+
+[[package]]
 name = "docutils"
 version = "0.22.4"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ae/b6/03bb70946330e88ffec97aefd3ea75ba575cb2e762061e0e62a213befee8/docutils-0.22.4.tar.gz", hash = "sha256:4db53b1fde9abecbb74d91230d32ab626d94f6badfc575d6db9194a49df29968", size = 2291750, upload-time = "2025-12-18T19:00:26.443Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/10/5da547df7a391dcde17f59520a231527b8571e6f46fc8efb02ccb370ab12/docutils-0.22.4-py3-none-any.whl", hash = "sha256:d0013f540772d1420576855455d050a2180186c91c15779301ac2ccb3eeb68de", size = 633196, upload-time = "2025-12-18T19:00:18.077Z" },
+]
+
+[[package]]
+name = "email-validator"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dnspython", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "idna", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426", size = 51238, upload-time = "2025-08-26T13:09:06.831Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4", size = 35604, upload-time = "2025-08-26T13:09:05.858Z" },
 ]
 
 [[package]]
@@ -664,13 +770,54 @@ wheels = [
 ]
 
 [[package]]
+name = "fast-agent-mcp"
+version = "0.4.48"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "a2a-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "agent-client-protocol", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "aiohttp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "anthropic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "deprecated", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "email-validator", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "fastapi", version = "0.138.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "google-genai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "keyring", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "mcp", version = "1.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "multilspy", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "openai", extra = ["aiohttp"], marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "opentelemetry-distro", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation-anthropic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation-google-genai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation-mcp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation-openai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "prompt-toolkit", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pydantic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pydantic-settings", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pyperclip", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "python-frontmatter", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pyyaml", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "rich", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "ruamel-yaml", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "tiktoken", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typer", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "uvloop", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and sys_platform != 'win32'" },
+    { name = "watchfiles", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/71/f082e3c1c9ec3bd41790955007b16bf3f47d4e1b020090fd7395727028a6/fast_agent_mcp-0.4.48.tar.gz", hash = "sha256:3896fbb7f30af4afd86097075faacaa93942362c0c2d0de5c36757cffe282219", size = 1635029, upload-time = "2026-02-04T10:24:17.062Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/35/84651bccf97e14a10610ba42c838fd968457c5ede8bcc83b6048c6bcea20/fast_agent_mcp-0.4.48-py3-none-any.whl", hash = "sha256:5707dab7d38989694b031a67cb76c9366bfda6edf35ac91546c4a8c07a2c5071", size = 1073850, upload-time = "2026-02-04T10:24:19.686Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.120.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
     { name = "pydantic" },
-    { name = "starlette" },
+    { name = "starlette", version = "0.45.3", source = { registry = "https://pypi.org/simple" } },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3f/3a/0bf90d5189d7f62dc2bd0523899629ca59b58ff4290d631cd3bb5c8889d4/fastapi-0.120.4.tar.gz", hash = "sha256:2d856bc847893ca4d77896d4504ffdec0fb04312b705065fca9104428eca3868", size = 339716, upload-time = "2025-10-31T18:37:28.81Z" }
@@ -679,12 +826,31 @@ wheels = [
 ]
 
 [[package]]
+name = "fastapi"
+version = "0.138.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13.5' and python_full_version < '3.14'",
+]
+dependencies = [
+    { name = "annotated-doc", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pydantic", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "starlette", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-inspection", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/58/ff455d9fe47c60abadb34b9e05a304b1f05f5ab8000ac01565156b6f5e43/fastapi-0.138.0.tar.gz", hash = "sha256:d445a4877636ad191e7053e08c9bf98cb921a6756776848400bb773d1740c061", size = 419240, upload-time = "2026-06-20T01:18:05.259Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/ff/8496d9847a5fedae775eb49460722d3efaa80487854273e9647ae876218c/fastapi-0.138.0-py3-none-any.whl", hash = "sha256:b6f54fd1bd72c80b0f899f172c61a600f6f7af9b43d4d772a018f35624048cb0", size = 126779, upload-time = "2026-06-20T01:18:03.483Z" },
+]
+
+[[package]]
 name = "fastapi-utils"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fastapi" },
-    { name = "psutil" },
+    { name = "fastapi", version = "0.120.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "psutil", version = "5.9.8", source = { registry = "https://pypi.org/simple" } },
     { name = "pydantic" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/dd/af/57c949675176acf389d94fbccd369b486579a952637fc6fb104f1bc3d0c3/fastapi_utils-0.8.0.tar.gz", hash = "sha256:eca834e80c09f85df30004fe5e861981262b296f60c93d5a1a1416fe4c784140", size = 16496, upload-time = "2024-11-11T08:30:03.852Z" }
@@ -844,6 +1010,22 @@ wheels = [
 ]
 
 [[package]]
+name = "google-api-core"
+version = "2.30.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "googleapis-common-protos", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "proto-plus", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "protobuf", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/ce/502a57fb0ec752026d24df1280b162294b22a0afb98a326084f9a979138b/google_api_core-2.30.3.tar.gz", hash = "sha256:e601a37f148585319b26db36e219df68c5d07b6382cff2d580e83404e44d641b", size = 177001, upload-time = "2026-04-10T00:41:28.035Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/15/e56f351cf6ef1cfea58e6ac226a7318ed1deb2218c4b3cc9bd9e4b786c5a/google_api_core-2.30.3-py3-none-any.whl", hash = "sha256:a85761ba72c444dad5d611c2220633480b2b6be2521eca69cca2dbb3ffd6bfe8", size = 173274, upload-time = "2026-04-09T22:57:16.198Z" },
+]
+
+[[package]]
 name = "google-auth"
 version = "2.53.0"
 source = { registry = "https://pypi.org/simple" }
@@ -858,7 +1040,8 @@ wheels = [
 
 [package.optional-dependencies]
 requests = [
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 
 [[package]]
@@ -871,7 +1054,8 @@ dependencies = [
     { name = "google-auth", extra = ["requests"] },
     { name = "httpx" },
     { name = "pydantic" },
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "sniffio" },
     { name = "tenacity" },
     { name = "typing-extensions" },
@@ -883,6 +1067,18 @@ wheels = [
 ]
 
 [[package]]
+name = "googleapis-common-protos"
+version = "1.75.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/c8/f439cffde755cffa462bfbb156278fa6f9d09119719af9814b858fd4f81f/googleapis_common_protos-1.75.0.tar.gz", hash = "sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd", size = 151035, upload-time = "2026-05-07T08:04:49.423Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/c8/e2645aa8ed02fd4c7a2f59d68783b65b1f3cbdfe39a6308e156509d1fee8/googleapis_common_protos-1.75.0-py3-none-any.whl", hash = "sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed", size = 300631, upload-time = "2026-05-07T08:03:30.345Z" },
+]
+
+[[package]]
 name = "greenlet"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -891,7 +1087,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/c6/dba32cab7e3a625b011aa5647486e2d28423a48845a2998c126dd69c85e1/greenlet-3.4.0-cp311-cp311-macosx_11_0_universal2.whl", hash = "sha256:805bebb4945094acbab757d34d6e1098be6de8966009ab9ca54f06ff492def58", size = 285504, upload-time = "2026-04-08T15:52:14.071Z" },
     { url = "https://files.pythonhosted.org/packages/54/f4/7cb5c2b1feb9a1f50e038be79980dfa969aa91979e5e3a18fdbcfad2c517/greenlet-3.4.0-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:439fc2f12b9b512d9dfa681c5afe5f6b3232c708d13e6f02c845e0d9f4c2d8c6", size = 605476, upload-time = "2026-04-08T16:24:37.064Z" },
     { url = "https://files.pythonhosted.org/packages/d6/af/b66ab0b2f9a4c5a867c136bf66d9599f34f21a1bcca26a2884a29c450bd9/greenlet-3.4.0-cp311-cp311-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:a70ed1cb0295bee1df57b63bf7f46b4e56a5c93709eea769c1fec1bb23a95875", size = 618336, upload-time = "2026-04-08T16:30:56.59Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/31/56c43d2b5de476f77d36ceeec436328533bff960a4cba9a07616e93063ab/greenlet-3.4.0-cp311-cp311-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:8c5696c42e6bb5cfb7c6ff4453789081c66b9b91f061e5e9367fa15792644e76", size = 625045, upload-time = "2026-04-08T16:40:37.111Z" },
     { url = "https://files.pythonhosted.org/packages/e5/5c/8c5633ece6ba611d64bf2770219a98dd439921d6424e4e8cf16b0ac74ea5/greenlet-3.4.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c660bce1940a1acae5f51f0a064f1bc785d07ea16efcb4bc708090afc4d69e83", size = 613515, upload-time = "2026-04-08T15:56:32.478Z" },
+    { url = "https://files.pythonhosted.org/packages/80/ca/704d4e2c90acb8bdf7ae593f5cbc95f58e82de95cc540fb75631c1054533/greenlet-3.4.0-cp311-cp311-manylinux_2_39_riscv64.whl", hash = "sha256:89995ce5ddcd2896d89615116dd39b9703bfa0c07b583b85b89bf1b5d6eddf81", size = 419745, upload-time = "2026-04-08T16:43:04.022Z" },
     { url = "https://files.pythonhosted.org/packages/a9/df/950d15bca0d90a0e7395eb777903060504cdb509b7b705631e8fb69ff415/greenlet-3.4.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:ee407d4d1ca9dc632265aee1c8732c4a2d60adff848057cdebfe5fe94eb2c8a2", size = 1574623, upload-time = "2026-04-08T16:26:18.596Z" },
     { url = "https://files.pythonhosted.org/packages/1a/e7/0839afab829fcb7333c9ff6d80c040949510055d2d4d63251f0d1c7c804e/greenlet-3.4.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:956215d5e355fffa7c021d168728321fd4d31fd730ac609b1653b450f6a4bc71", size = 1639579, upload-time = "2026-04-08T15:57:29.231Z" },
     { url = "https://files.pythonhosted.org/packages/d9/2b/b4482401e9bcaf9f5c97f67ead38db89c19520ff6d0d6699979c6efcc200/greenlet-3.4.0-cp311-cp311-win_amd64.whl", hash = "sha256:5cb614ace7c27571270354e9c9f696554d073f8aa9319079dcba466bbdead711", size = 238233, upload-time = "2026-04-08T17:02:54.286Z" },
@@ -899,7 +1097,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/65/8b/3669ad3b3f247a791b2b4aceb3aa5a31f5f6817bf547e4e1ff712338145a/greenlet-3.4.0-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:1a54a921561dd9518d31d2d3db4d7f80e589083063ab4d3e2e950756ef809e1a", size = 286902, upload-time = "2026-04-08T15:52:12.138Z" },
     { url = "https://files.pythonhosted.org/packages/38/3e/3c0e19b82900873e2d8469b590a6c4b3dfd2b316d0591f1c26b38a4879a5/greenlet-3.4.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:16dec271460a9a2b154e3b1c2fa1050ce6280878430320e85e08c166772e3f97", size = 606099, upload-time = "2026-04-08T16:24:38.408Z" },
     { url = "https://files.pythonhosted.org/packages/b5/33/99fef65e7754fc76a4ed14794074c38c9ed3394a5bd129d7f61b705f3168/greenlet-3.4.0-cp312-cp312-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:90036ce224ed6fe75508c1907a77e4540176dcf0744473627785dd519c6f9996", size = 618837, upload-time = "2026-04-08T16:30:58.298Z" },
+    { url = "https://files.pythonhosted.org/packages/44/57/eae2cac10421feae6c0987e3dc106c6d86262b1cb379e171b017aba893a6/greenlet-3.4.0-cp312-cp312-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:6f0def07ec9a71d72315cf26c061aceee53b306c36ed38c35caba952ea1b319d", size = 624901, upload-time = "2026-04-08T16:40:38.981Z" },
     { url = "https://files.pythonhosted.org/packages/36/f7/229f3aed6948faa20e0616a0b8568da22e365ede6a54d7d369058b128afd/greenlet-3.4.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a1c4f6b453006efb8310affb2d132832e9bbb4fc01ce6df6b70d810d38f1f6dc", size = 615062, upload-time = "2026-04-08T15:56:33.766Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/8a/0e73c9b94f31d1cc257fe79a0eff621674141cdae7d6d00f40de378a1e42/greenlet-3.4.0-cp312-cp312-manylinux_2_39_riscv64.whl", hash = "sha256:0e1254cf0cbaa17b04320c3a78575f29f3c161ef38f59c977108f19ffddaf077", size = 423927, upload-time = "2026-04-08T16:43:05.293Z" },
     { url = "https://files.pythonhosted.org/packages/08/97/d988180011aa40135c46cd0d0cf01dd97f7162bae14139b4a3ef54889ba5/greenlet-3.4.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:9b2d9a138ffa0e306d0e2b72976d2fb10b97e690d40ab36a472acaab0838e2de", size = 1573511, upload-time = "2026-04-08T16:26:20.058Z" },
     { url = "https://files.pythonhosted.org/packages/d4/0f/a5a26fe152fb3d12e6a474181f6e9848283504d0afd095f353d85726374b/greenlet-3.4.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:8424683caf46eb0eb6f626cb95e008e8cc30d0cb675bdfa48200925c79b38a08", size = 1640396, upload-time = "2026-04-08T15:57:30.88Z" },
     { url = "https://files.pythonhosted.org/packages/42/cf/bb2c32d9a100e36ee9f6e38fad6b1e082b8184010cb06259b49e1266ca01/greenlet-3.4.0-cp312-cp312-win_amd64.whl", hash = "sha256:a0a53fb071531d003b075c444014ff8f8b1a9898d36bb88abd9ac7b3524648a2", size = 238892, upload-time = "2026-04-08T17:03:10.094Z" },
@@ -907,7 +1107,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/75/7e9cd1126a1e1f0cd67b0eda02e5221b28488d352684704a78ed505bd719/greenlet-3.4.0-cp313-cp313-macosx_11_0_universal2.whl", hash = "sha256:43748988b097f9c6f09364f260741aa73c80747f63389824435c7a50bfdfd5c1", size = 285856, upload-time = "2026-04-08T15:52:45.82Z" },
     { url = "https://files.pythonhosted.org/packages/9d/c4/3e2df392e5cb199527c4d9dbcaa75c14edcc394b45040f0189f649631e3c/greenlet-3.4.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5566e4e2cd7a880e8c27618e3eab20f3494452d12fd5129edef7b2f7aa9a36d1", size = 610208, upload-time = "2026-04-08T16:24:39.674Z" },
     { url = "https://files.pythonhosted.org/packages/da/af/750cdfda1d1bd30a6c28080245be8d0346e669a98fdbae7f4102aa95fff3/greenlet-3.4.0-cp313-cp313-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:1054c5a3c78e2ab599d452f23f7adafef55062a783a8e241d24f3b633ba6ff82", size = 621269, upload-time = "2026-04-08T16:30:59.767Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/93/c8c508d68ba93232784bbc1b5474d92371f2897dfc6bc281b419f2e0d492/greenlet-3.4.0-cp313-cp313-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:98eedd1803353daf1cd9ef23eef23eda5a4d22f99b1f998d273a8b78b70dd47f", size = 628455, upload-time = "2026-04-08T16:40:40.698Z" },
     { url = "https://files.pythonhosted.org/packages/54/78/0cbc693622cd54ebe25207efbb3a0eb07c2639cb8594f6e3aaaa0bb077a8/greenlet-3.4.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f82cb6cddc27dd81c96b1506f4aa7def15070c3b2a67d4e46fd19016aacce6cf", size = 617549, upload-time = "2026-04-08T15:56:34.893Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/46/cfaaa0ade435a60550fd83d07dfd5c41f873a01da17ede5c4cade0b9bab8/greenlet-3.4.0-cp313-cp313-manylinux_2_39_riscv64.whl", hash = "sha256:b7857e2202aae67bc5725e0c1f6403c20a8ff46094ece015e7d474f5f7020b55", size = 426238, upload-time = "2026-04-08T16:43:06.865Z" },
     { url = "https://files.pythonhosted.org/packages/ba/c0/8966767de01343c1ff47e8b855dc78e7d1a8ed2b7b9c83576a57e289f81d/greenlet-3.4.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:227a46251ecba4ff46ae742bc5ce95c91d5aceb4b02f885487aff269c127a729", size = 1575310, upload-time = "2026-04-08T16:26:21.671Z" },
     { url = "https://files.pythonhosted.org/packages/b8/38/bcdc71ba05e9a5fda87f63ffc2abcd1f15693b659346df994a48c968003d/greenlet-3.4.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5b99e87be7eba788dd5b75ba1cde5639edffdec5f91fe0d734a249535ec3408c", size = 1640435, upload-time = "2026-04-08T15:57:32.572Z" },
     { url = "https://files.pythonhosted.org/packages/a1/c2/19b664b7173b9e4ef5f77e8cef9f14c20ec7fce7920dc1ccd7afd955d093/greenlet-3.4.0-cp313-cp313-win_amd64.whl", hash = "sha256:849f8bc17acd6295fcb5de8e46d55cc0e52381c56eaf50a2afd258e97bc65940", size = 238760, upload-time = "2026-04-08T17:04:03.878Z" },
@@ -915,7 +1117,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/78/02/bde66806e8f169cf90b14d02c500c44cdbe02c8e224c9c67bafd1b8cadd1/greenlet-3.4.0-cp314-cp314-macosx_11_0_universal2.whl", hash = "sha256:10a07aca6babdd18c16a3f4f8880acfffc2b88dfe431ad6aa5f5740759d7d75e", size = 286291, upload-time = "2026-04-08T17:09:34.307Z" },
     { url = "https://files.pythonhosted.org/packages/05/1f/39da1c336a87d47c58352fb8a78541ce63d63ae57c5b9dae1fe02801bbc2/greenlet-3.4.0-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:076e21040b3a917d3ce4ad68fb5c3c6b32f1405616c4a57aa83120979649bd3d", size = 656749, upload-time = "2026-04-08T16:24:41.721Z" },
     { url = "https://files.pythonhosted.org/packages/d3/6c/90ee29a4ee27af7aa2e2ec408799eeb69ee3fcc5abcecac6ddd07a5cd0f2/greenlet-3.4.0-cp314-cp314-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:e82689eea4a237e530bb5cb41b180ef81fa2160e1f89422a67be7d90da67f615", size = 669084, upload-time = "2026-04-08T16:31:01.372Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/4a/74078d3936712cff6d3c91a930016f476ce4198d84e224fe6d81d3e02880/greenlet-3.4.0-cp314-cp314-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:06c2d3b89e0c62ba50bd7adf491b14f39da9e7e701647cb7b9ff4c99bee04b19", size = 673405, upload-time = "2026-04-08T16:40:42.527Z" },
     { url = "https://files.pythonhosted.org/packages/07/49/d4cad6e5381a50947bb973d2f6cf6592621451b09368b8c20d9b8af49c5b/greenlet-3.4.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4df3b0b2289ec686d3c821a5fee44259c05cfe824dd5e6e12c8e5f5df23085cf", size = 665621, upload-time = "2026-04-08T15:56:35.995Z" },
+    { url = "https://files.pythonhosted.org/packages/79/3e/df8a83ab894751bc31e1106fdfaa80ca9753222f106b04de93faaa55feb7/greenlet-3.4.0-cp314-cp314-manylinux_2_39_riscv64.whl", hash = "sha256:070b8bac2ff3b4d9e0ff36a0d19e42103331d9737e8504747cd1e659f76297bd", size = 471670, upload-time = "2026-04-08T16:43:08.512Z" },
     { url = "https://files.pythonhosted.org/packages/37/31/d1edd54f424761b5d47718822f506b435b6aab2f3f93b465441143ea5119/greenlet-3.4.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:8bff29d586ea415688f4cec96a591fcc3bf762d046a796cdadc1fdb6e7f2d5bf", size = 1622259, upload-time = "2026-04-08T16:26:23.201Z" },
     { url = "https://files.pythonhosted.org/packages/b0/c6/6d3f9cdcb21c4e12a79cb332579f1c6aa1af78eb68059c5a957c7812d95e/greenlet-3.4.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:8a569c2fb840c53c13a2b8967c63621fafbd1a0e015b9c82f408c33d626a2fda", size = 1686916, upload-time = "2026-04-08T15:57:34.282Z" },
     { url = "https://files.pythonhosted.org/packages/63/45/c1ca4a1ad975de4727e52d3ffe641ae23e1d7a8ffaa8ff7a0477e1827b92/greenlet-3.4.0-cp314-cp314-win_amd64.whl", hash = "sha256:207ba5b97ea8b0b60eb43ffcacf26969dd83726095161d676aac03ff913ee50d", size = 239821, upload-time = "2026-04-08T17:03:48.423Z" },
@@ -923,7 +1127,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/8f/18d72b629783f5e8d045a76f5325c1e938e659a9e4da79c7dcd10169a48d/greenlet-3.4.0-cp314-cp314t-macosx_11_0_universal2.whl", hash = "sha256:d70012e51df2dbbccfaf63a40aaf9b40c8bed37c3e3a38751c926301ce538ece", size = 294681, upload-time = "2026-04-08T15:52:35.778Z" },
     { url = "https://files.pythonhosted.org/packages/9e/ad/5fa86ec46769c4153820d58a04062285b3b9e10ba3d461ee257b68dcbf53/greenlet-3.4.0-cp314-cp314t-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a58bec0751f43068cd40cff31bb3ca02ad6000b3a51ca81367af4eb5abc480c8", size = 658899, upload-time = "2026-04-08T16:24:43.32Z" },
     { url = "https://files.pythonhosted.org/packages/43/f0/4e8174ca0e87ae748c409f055a1ba161038c43cc0a5a6f1433a26ac2e5bf/greenlet-3.4.0-cp314-cp314t-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:05fa0803561028f4b2e3b490ee41216a842eaee11aed004cc343a996d9523aa2", size = 665284, upload-time = "2026-04-08T16:31:02.833Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/92/466b0d9afd44b8af623139a3599d651c7564fa4152f25f117e1ee5949ffb/greenlet-3.4.0-cp314-cp314t-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:c4cd56a9eb7a6444edbc19062f7b6fbc8f287c663b946e3171d899693b1c19fa", size = 665872, upload-time = "2026-04-08T16:40:43.912Z" },
     { url = "https://files.pythonhosted.org/packages/19/da/991cf7cd33662e2df92a1274b7eb4d61769294d38a1bba8a45f31364845e/greenlet-3.4.0-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e60d38719cb80b3ab5e85f9f1aed4960acfde09868af6762ccb27b260d68f4ed", size = 661861, upload-time = "2026-04-08T15:56:37.269Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/14/3395a7ef3e260de0325152ddfe19dffb3e49fe10873b94654352b53ad48e/greenlet-3.4.0-cp314-cp314t-manylinux_2_39_riscv64.whl", hash = "sha256:1f85f204c4d54134ae850d401fa435c89cd667d5ce9dc567571776b45941af72", size = 489237, upload-time = "2026-04-08T16:43:09.993Z" },
     { url = "https://files.pythonhosted.org/packages/36/c5/6c2c708e14db3d9caea4b459d8464f58c32047451142fe2cfd90e7458f41/greenlet-3.4.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:7f50c804733b43eded05ae694691c9aa68bca7d0a867d67d4a3f514742a2d53f", size = 1622182, upload-time = "2026-04-08T16:26:24.777Z" },
     { url = "https://files.pythonhosted.org/packages/7a/4c/50c5fed19378e11a29fabab1f6be39ea95358f4a0a07e115a51ca93385d8/greenlet-3.4.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:2d4f0635dc4aa638cda4b2f5a07ae9a2cff9280327b581a3fcb6f317b4fbc38a", size = 1685050, upload-time = "2026-04-08T15:57:36.453Z" },
     { url = "https://files.pythonhosted.org/packages/db/72/85ae954d734703ab48e622c59d4ce35d77ce840c265814af9c078cacc7aa/greenlet-3.4.0-cp314-cp314t-win_amd64.whl", hash = "sha256:1a4a48f24681300c640f143ba7c404270e1ebbbcf34331d7104a4ff40f8ea705", size = 245554, upload-time = "2026-04-08T17:03:50.044Z" },
@@ -1050,6 +1256,19 @@ wheels = [
 ]
 
 [[package]]
+name = "httpx-aiohttp"
+version = "0.1.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "httpx", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/63/2c/b894861cecf030fb45675ea24aa55b5722e97c602a163d872fca66c5a6d8/httpx_aiohttp-0.1.12.tar.gz", hash = "sha256:81feec51fd82c0ecfa0e9aaf1b1a6c2591260d5e2bcbeb7eb0277a78e610df2c", size = 275945, upload-time = "2025-12-12T10:12:15.283Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/8d/85c9701e9af72ca132a1783e2a54364a90c6da832304416a30fc11196ab2/httpx_aiohttp-0.1.12-py3-none-any.whl", hash = "sha256:5b0eac39a7f360fa7867a60bcb46bb1024eada9c01cbfecdb54dc1edb3fb7141", size = 6367, upload-time = "2025-12-12T10:12:14.018Z" },
+]
+
+[[package]]
 name = "httpx-sse"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1067,7 +1286,7 @@ dependencies = [
     { name = "httpcore2" },
     { name = "idna" },
     { name = "truststore" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/60/b43ced4ccf26e95b396dbf67051d3e5042b645917d4da0469dd82a3bdd4f/httpx2-2.4.0.tar.gz", hash = "sha256:32e0734b61eb0824b3f56a9e98d6d92d381a3ef12c0045aa917ee63df6c411ef", size = 81691, upload-time = "2026-06-11T06:35:54.538Z" }
 wheels = [
@@ -1111,7 +1330,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cachetools" },
-    { name = "requests" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/30/0b/f5241dea7dc0fd9fbcbebed82bd5e317f0216f3b7641b98569c0c8b3c301/ipinfo-5.6.0.tar.gz", hash = "sha256:7e428eb8f7515d69b6938b285ceca9ff868534c5fd0fd12fe714046ad0408947", size = 122431, upload-time = "2026-04-22T12:53:04.324Z" }
 wheels = [
@@ -1125,6 +1344,76 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9c/cb/8ac0172223afbccb63986cc25049b154ecfb5e85932587206f42317be31d/itsdangerous-2.2.0.tar.gz", hash = "sha256:e0050c0b7da1eea53ffaf149c0cfbb5c6e2e2b69c4bef22c81fa6eb73e5f6173", size = 54410, upload-time = "2024-04-16T21:28:15.614Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/04/96/92447566d16df59b2a776c0fb82dbc4d9e07cd95062562af01e408583fc4/itsdangerous-2.2.0-py3-none-any.whl", hash = "sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef", size = 16234, upload-time = "2024-04-16T21:28:14.499Z" },
+]
+
+[[package]]
+name = "jaraco-classes"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "more-itertools", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/c0/ed4a27bc5571b99e3cff68f8a9fa5b56ff7df1c2251cc715a652ddd26402/jaraco.classes-3.4.0.tar.gz", hash = "sha256:47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd", size = 11780, upload-time = "2024-03-31T07:27:36.643Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/66/b15ce62552d84bbfcec9a4873ab79d993a1dd4edb922cbfccae192bd5b5f/jaraco.classes-3.4.0-py3-none-any.whl", hash = "sha256:f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790", size = 6777, upload-time = "2024-03-31T07:27:34.792Z" },
+]
+
+[[package]]
+name = "jaraco-context"
+version = "6.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/50/4763cd07e722bb6285316d390a164bc7e479db9d90daa769f22578f698b4/jaraco_context-6.1.2.tar.gz", hash = "sha256:f1a6c9d391e661cc5b8d39861ff077a7dc24dc23833ccee564b234b81c82dfe3", size = 16801, upload-time = "2026-03-20T22:13:33.922Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/58/bc8954bda5fcda97bd7c19be11b85f91973d67a706ed4a3aec33e7de22db/jaraco_context-6.1.2-py3-none-any.whl", hash = "sha256:bf8150b79a2d5d91ae48629d8b427a8f7ba0e1097dd6202a9059f29a36379535", size = 7871, upload-time = "2026-03-20T22:13:32.808Z" },
+]
+
+[[package]]
+name = "jaraco-functools"
+version = "4.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "more-itertools", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/cf/ea4ef2920830dea3f5ab2ea4da6fb67724e6dca80ee2553788c3607243d0/jaraco_functools-4.5.0.tar.gz", hash = "sha256:3bb5665ea4a020cf78a7040e89154c77edadb3ca74f366479669c5999aa70b03", size = 20272, upload-time = "2026-05-15T21:34:10.025Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/9a/982e48afcffcd727a9144506720ffd4224b6b7e355c98641866f38b7c043/jaraco_functools-4.5.0-py3-none-any.whl", hash = "sha256:79ce39246eddbde4b3a03b77ea5f0f7878dc669b166a66cf3fa8e266aa3fa2f4", size = 10594, upload-time = "2026-05-15T21:34:08.595Z" },
+]
+
+[[package]]
+name = "jedi"
+version = "0.19.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "parso", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/3a/79a912fbd4d8dd6fbb02bf69afd3bb72cf0c729bb3063c6f4498603db17a/jedi-0.19.2.tar.gz", hash = "sha256:4770dc3de41bde3966b02eb84fbcf557fb33cce26ad23da12c742fb50ecb11f0", size = 1231287, upload-time = "2024-11-11T01:41:42.873Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl", hash = "sha256:a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9", size = 1572278, upload-time = "2024-11-11T01:41:40.175Z" },
+]
+
+[[package]]
+name = "jedi-language-server"
+version = "0.41.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cattrs", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "docstring-to-markdown", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "jedi", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "lsprotocol", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "pygls", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/34/4a35094c680040c8dd598b1ee9153a701289351c1dcbad1a0f2d196c524b/jedi_language_server-0.41.3.tar.gz", hash = "sha256:113ec22b95fadaceefbb704b5f365384bed296b82ede59026be375ecc97a9f8a", size = 29113, upload-time = "2024-02-26T04:28:05.521Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/67/2cf4419a8c418b0e5cba0b43dc1ea33a0bb42907694d6a786a3644889f32/jedi_language_server-0.41.3-py3-none-any.whl", hash = "sha256:7411f7479cdc9e9ea495f91e20b182a5d00170c0a8a4a87d3a147462282c06af", size = 27615, upload-time = "2024-02-26T04:28:02.084Z" },
+]
+
+[[package]]
+name = "jeepney"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/6f/357efd7602486741aa73ffc0617fb310a29b588ed0fd69c2399acbb85b0c/jeepney-0.9.0.tar.gz", hash = "sha256:cf0e9e845622b81e4a28df94c40345400256ec608d0e55bb8a3feaa9163f5732", size = 106758, upload-time = "2025-02-27T18:51:01.684Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl", hash = "sha256:97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683", size = 49010, upload-time = "2025-02-27T18:51:00.104Z" },
 ]
 
 [[package]]
@@ -1287,6 +1576,23 @@ wheels = [
 ]
 
 [[package]]
+name = "keyring"
+version = "25.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jaraco-classes", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "jaraco-context", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "jaraco-functools", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "jeepney", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and sys_platform == 'linux'" },
+    { name = "pywin32-ctypes", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and sys_platform == 'win32'" },
+    { name = "secretstorage", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516, upload-time = "2025-11-16T16:26:09.482Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160, upload-time = "2025-11-16T16:26:08.402Z" },
+]
+
+[[package]]
 name = "kitaru"
 version = "0.18.0"
 source = { editable = "." }
@@ -1304,6 +1610,10 @@ anthropic = [
 ]
 claude-agent-sdk = [
     { name = "claude-agent-sdk" },
+]
+fast-agent = [
+    { name = "a2a-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "fast-agent-mcp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
 ]
 gemini = [
     { name = "google-genai" },
@@ -1327,10 +1637,10 @@ llm = [
     { name = "openai" },
 ]
 local = [
-    { name = "zenml", extra = ["server"] },
+    { name = "zenml", extra = ["server"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
 ]
 mcp = [
-    { name = "mcp" },
+    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" } },
 ]
 openai = [
     { name = "openai" },
@@ -1360,18 +1670,20 @@ dev = [
     { name = "pytest" },
     { name = "pytest-clarity" },
     { name = "pytest-randomly" },
-    { name = "pytest-xdist", extra = ["psutil"] },
+    { name = "pytest-xdist", extra = ["psutil"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
     { name = "ruff" },
     { name = "ty" },
     { name = "yamlfix" },
-    { name = "zenml", extra = ["server"] },
+    { name = "zenml", extra = ["server"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "a2a-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'fast-agent'", specifier = ">=0.3.16,<1" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0,<1" },
     { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.58,<0.2" },
     { name = "cyclopts", specifier = ">=3.0" },
+    { name = "fast-agent-mcp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'fast-agent'", specifier = ">=0.4.48,<0.4.49" },
     { name = "genai-prices", specifier = ">=0.0.66,<0.1" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=2.8.0,<3" },
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
@@ -1392,7 +1704,7 @@ requires-dist = [
     { name = "zenml", extras = ["local"], specifier = ">=0.95.1" },
     { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.95.1" },
 ]
-provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "openai-agents", "langgraph", "langgraph-openai", "langgraph-anthropic", "claude-agent-sdk", "gemini", "mcp"]
+provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "openai-agents", "langgraph", "fast-agent", "langgraph-openai", "langgraph-anthropic", "claude-agent-sdk", "gemini", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1557,10 +1869,11 @@ version = "0.8.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
-    { name = "orjson", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "orjson", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "packaging" },
     { name = "pydantic" },
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "requests-toolbelt" },
     { name = "uuid-utils" },
     { name = "websockets" },
@@ -1604,6 +1917,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c", size = 61595, upload-time = "2024-12-06T11:20:54.538Z" },
+]
+
+[[package]]
+name = "lsprotocol"
+version = "2023.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "cattrs", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/f6/6e80484ec078d0b50699ceb1833597b792a6c695f90c645fbaf54b947e6f/lsprotocol-2023.0.1.tar.gz", hash = "sha256:cc5c15130d2403c18b734304339e51242d3018a05c4f7d0f198ad6e0cd21861d", size = 69434, upload-time = "2024-01-09T17:21:12.625Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/37/2351e48cb3309673492d3a8c59d407b75fb6630e560eb27ecd4da03adc9a/lsprotocol-2023.0.1-py3-none-any.whl", hash = "sha256:c75223c9e4af2f24272b14c6375787438279369236cd568f596d4951052a60f2", size = 70826, upload-time = "2024-01-09T17:21:14.491Z" },
 ]
 
 [[package]]
@@ -1724,21 +2050,52 @@ name = "mcp"
 version = "1.19.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
-    { name = "httpx" },
-    { name = "httpx-sse" },
-    { name = "jsonschema" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-multipart" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "sse-starlette" },
-    { name = "starlette" },
-    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
+    { name = "anyio", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "httpx", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "httpx-sse", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "jsonschema", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "pydantic", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "pydantic-settings", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "python-multipart", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "pywin32", marker = "(sys_platform == 'win32' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "sse-starlette", marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "starlette", version = "0.45.3", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "uvicorn", marker = "(sys_platform != 'emscripten' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/69/2b/916852a5668f45d8787378461eaa1244876d77575ffef024483c94c0649c/mcp-1.19.0.tar.gz", hash = "sha256:213de0d3cd63f71bc08ffe9cc8d4409cc87acffd383f6195d2ce0457c021b5c1", size = 444163, upload-time = "2025-10-24T01:11:15.839Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/a3/3e71a875a08b6a830b88c40bc413bff01f1650f1efe8a054b5e90a9d4f56/mcp-1.19.0-py3-none-any.whl", hash = "sha256:f5907fe1c0167255f916718f376d05f09a830a215327a3ccdd5ec8a519f2e572", size = 170105, upload-time = "2025-10-24T01:11:14.151Z" },
+]
+
+[[package]]
+name = "mcp"
+version = "1.26.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev'",
+    "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev')",
+    "extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp'",
+]
+dependencies = [
+    { name = "anyio", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "httpx", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "httpx-sse", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "jsonschema", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "pydantic", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "pydantic-settings", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "pyjwt", extra = ["crypto"], marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "python-multipart", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "pywin32", marker = "(sys_platform == 'win32' and extra == 'extra-6-kitaru-fast-agent') or (sys_platform == 'win32' and extra != 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "sse-starlette", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "starlette", version = "0.45.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp')" },
+    { name = "starlette", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "typing-extensions", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "typing-inspection", marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
+    { name = "uvicorn", marker = "(sys_platform != 'emscripten' and extra == 'extra-6-kitaru-fast-agent') or (sys_platform != 'emscripten' and extra != 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/6d/62e76bbb8144d6ed86e202b5edd8a4cb631e7c8130f3f4893c3f90262b10/mcp-1.26.0.tar.gz", hash = "sha256:db6e2ef491eecc1a0d93711a76f28dec2e05999f93afd48795da1c1137142c66", size = 608005, upload-time = "2026-01-24T19:40:32.468Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/d9/eaa1f80170d2b7c5ba23f3b59f766f3a0bb41155fbc32a69adfa1adaaef9/mcp-1.26.0-py3-none-any.whl", hash = "sha256:904a21c33c25aa98ddbeb47273033c435e595bbacfdb177f4bd87f6dceebe1ca", size = 233615, upload-time = "2026-01-24T19:40:30.652Z" },
 ]
 
 [[package]]
@@ -1748,6 +2105,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
+]
+
+[[package]]
+name = "more-itertools"
+version = "11.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/1d/f4da6f02cdffe04d6362210b807146a26044c88d839208aec273bb0d9184/more_itertools-11.1.0.tar.gz", hash = "sha256:48e8f4d9e7e5878571ecf6f2b4e57634f93cd474cc8cfbd2376f2d11b396e30d", size = 145772, upload-time = "2026-05-22T14:14:29.909Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/3d/1087453384dbde46a8c7f9356eead2c58be8a7bf156bca40243377c85715/more_itertools-11.1.0-py3-none-any.whl", hash = "sha256:4b65538ae22f6fed0ce4874efd317463a7489796a0939fa66824dd542125a192", size = 72226, upload-time = "2026-05-22T14:14:28.824Z" },
 ]
 
 [[package]]
@@ -1931,6 +2297,21 @@ wheels = [
 ]
 
 [[package]]
+name = "multilspy"
+version = "0.0.15"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jedi-language-server", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "psutil", version = "7.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d8/a8/4d6ab48e624f911eb5229aa01b3524b916470c9d036a9e8cc96d6fb81673/multilspy-0.0.15.tar.gz", hash = "sha256:b27a0b7c5c5306216b31fe1df9b4a42d2797735d0a78928e0df9ef8dfbcc97c5", size = 120639, upload-time = "2025-04-03T07:01:27.216Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/4d/b9d3492d6a7a2536498fc7fd49c1cc7bc86a41acf93b0ad967d75dbe5cd6/multilspy-0.0.15-py3-none-any.whl", hash = "sha256:3fa88939b953ed5d39aba4688a34105ec1e5cf2b2f778167fee2b78b3c0e1427", size = 137361, upload-time = "2025-04-03T07:01:25.492Z" },
+]
+
+[[package]]
 name = "openai"
 version = "2.36.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1949,16 +2330,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/1c/5d43735b2553baae2a5e899dcbcd0670a86930d993184d72ca909bf11c9b/openai-2.36.0-py3-none-any.whl", hash = "sha256:143f6194b548dbc2c921af1f1b03b9f14c85fed8a75b5b516f5bcc11a2a50c63", size = 1302361, upload-time = "2026-05-07T17:33:15.063Z" },
 ]
 
+[package.optional-dependencies]
+aiohttp = [
+    { name = "aiohttp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "httpx-aiohttp", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+
 [[package]]
 name = "openai-agents"
 version = "0.17.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "griffelib" },
-    { name = "mcp" },
+    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra != 'extra-6-kitaru-local' and extra == 'extra-6-kitaru-mcp') or (extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp' and extra == 'group-6-kitaru-dev')" },
+    { name = "mcp", version = "1.26.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-kitaru-fast-agent' or extra != 'extra-6-kitaru-mcp'" },
     { name = "openai" },
     { name = "pydantic" },
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "types-requests" },
     { name = "typing-extensions" },
     { name = "websockets" },
@@ -1982,6 +2371,50 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-distro"
+version = "0.61b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f5/00/1f8acc51326956a596fefaf67751380001af36029132a7a07d4debce3c06/opentelemetry_distro-0.61b0.tar.gz", hash = "sha256:975b845f50181ad53753becf4fd4b123b54fa04df5a9d78812264436d6518981", size = 2590, upload-time = "2026-03-04T14:20:12.453Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/2c/efcc995cd7484e6e55b1d26bd7fa6c55ca96bd415ff94310b52c19f330b0/opentelemetry_distro-0.61b0-py3-none-any.whl", hash = "sha256:f21d1ac0627549795d75e332006dd068877f00e461b1b2e8fe4568d6eb7b9590", size = 3349, upload-time = "2026-03-04T14:18:57.788Z" },
+]
+
+[[package]]
+name = "opentelemetry-exporter-otlp-proto-common"
+version = "1.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-proto", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/51/bc/1559d46557fe6eca0b46c88d4c2676285f1f3be2e8d06bb5d15fbffc814a/opentelemetry_exporter_otlp_proto_common-1.40.0.tar.gz", hash = "sha256:1cbee86a4064790b362a86601ee7934f368b81cd4cc2f2e163902a6e7818a0fa", size = 20416, upload-time = "2026-03-04T14:17:23.801Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/ca/8f122055c97a932311a3f640273f084e738008933503d0c2563cd5d591fc/opentelemetry_exporter_otlp_proto_common-1.40.0-py3-none-any.whl", hash = "sha256:7081ff453835a82417bf38dccf122c827c3cbc94f2079b03bba02a3165f25149", size = 18369, upload-time = "2026-03-04T14:17:04.796Z" },
+]
+
+[[package]]
+name = "opentelemetry-exporter-otlp-proto-http"
+version = "1.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-exporter-otlp-proto-common", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-proto", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/fa/73d50e2c15c56be4d000c98e24221d494674b0cc95524e2a8cb3856d95a4/opentelemetry_exporter_otlp_proto_http-1.40.0.tar.gz", hash = "sha256:db48f5e0f33217588bbc00274a31517ba830da576e59503507c839b38fa0869c", size = 17772, upload-time = "2026-03-04T14:17:25.324Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/3a/8865d6754e61c9fb170cdd530a124a53769ee5f740236064816eb0ca7301/opentelemetry_exporter_otlp_proto_http-1.40.0-py3-none-any.whl", hash = "sha256:a8d1dab28f504c5d96577d6509f80a8150e44e8f45f82cdbe0e34c99ab040069", size = 19960, upload-time = "2026-03-04T14:17:07.153Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation"
 version = "0.61b0"
 source = { registry = "https://pypi.org/simple" }
@@ -1997,6 +2430,36 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-anthropic"
+version = "0.61.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions-ai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e5/4b/dc0dcdbe5ef108d5fa19a09c7eadae75d2735eae634bc925ba063a4753e4/opentelemetry_instrumentation_anthropic-0.61.0.tar.gz", hash = "sha256:695f2841d357047a85ed9c8d68a34d1f8bef7925af66758822bf2f5951f28238", size = 700181, upload-time = "2026-05-31T07:28:33.509Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/ea/86b7bebc2f2ca3c0c8cf4d324d09592b5b1752366c90c1014529c655d621/opentelemetry_instrumentation_anthropic-0.61.0-py3-none-any.whl", hash = "sha256:f260aa8ee70862d1c79fbe72cc66bb187774fef0931b3ab7da894ecc5fed6bb0", size = 19774, upload-time = "2026-05-31T07:27:55.982Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-google-genai"
+version = "0.7b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-util-genai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/ca/da1a8d598542a3bd343859efc6e6e89b74b5189887b8f7ef447267e5e9ed/opentelemetry_instrumentation_google_genai-0.7b1.tar.gz", hash = "sha256:dc81249eb8a01184e2b3e0eb207864158e7147e3307b018dc9625b23973457a5", size = 52078, upload-time = "2026-05-19T01:46:07.689Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/52/59/6c89d9c1c72ea321b2e3f6557fa58add59c61d0ba483d90955a7d9af4ec3/opentelemetry_instrumentation_google_genai-0.7b1-py3-none-any.whl", hash = "sha256:b7b3cda48efc9b9550dee76e4437a2f5e3b6877abffc4a6c336966eceb00f8b8", size = 31414, upload-time = "2026-05-19T01:46:06.393Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-logging"
 version = "0.61b0"
 source = { registry = "https://pypi.org/simple" }
@@ -2007,6 +2470,48 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ae/e0/69473f925acfe2d4edf5c23bcced36906ac3627aa7c5722a8e3f60825f3b/opentelemetry_instrumentation_logging-0.61b0.tar.gz", hash = "sha256:feaa30b700acd2a37cc81db5f562ab0c3a5b6cc2453595e98b72c01dcf649584", size = 17906, upload-time = "2026-03-04T14:20:37.398Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/0e/2137db5239cc5e564495549a4d11488a7af9b48fc76520a0eea20e69ddae/opentelemetry_instrumentation_logging-0.61b0-py3-none-any.whl", hash = "sha256:6d87e5ded6a0128d775d41511f8380910a1b610671081d16efb05ac3711c0074", size = 17076, upload-time = "2026-03-04T14:19:36.765Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-mcp"
+version = "0.61.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions-ai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/22/ae0d1fa0c7d16bcaa2924f72989fb4f9d67f503a2918284b3b0c4499ed47/opentelemetry_instrumentation_mcp-0.61.0.tar.gz", hash = "sha256:53406c765b2eda859fd4aeb6429ddcfa0d50344098351f720567b26d39df6e43", size = 120547, upload-time = "2026-05-31T07:28:46.644Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/ed/8c7618d5888a36a8e7ce8b4f4941d1baa34da35435299303217575b4deb7/opentelemetry_instrumentation_mcp-0.61.0-py3-none-any.whl", hash = "sha256:30db132e0ce6ab597f3b85c60591ee3534c1008e58cd129f2fefba149281babd", size = 10472, upload-time = "2026-05-31T07:28:11.419Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-openai"
+version = "0.61.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions-ai", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/76/d37cde51008f47c5864cabb7f6a548c5284a10996bc9febd9f111a214d0c/opentelemetry_instrumentation_openai-0.61.0.tar.gz", hash = "sha256:f1bec3d5afa2430295dfd4e82f6d8a51079b220005e45d53b60de808fd7450bf", size = 7329795, upload-time = "2026-05-31T07:28:50.748Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/1f/66674effc0ea458896f174d735da1d73e1f4bf205ee2beed1968d8d737dc/opentelemetry_instrumentation_openai-0.61.0-py3-none-any.whl", hash = "sha256:3b1c37f53527dfca14bdff3da438aeae7a7f3477fc43c5a94e50f99137c277b9", size = 45502, upload-time = "2026-05-31T07:28:15.777Z" },
+]
+
+[[package]]
+name = "opentelemetry-proto"
+version = "1.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/77/dd38991db037fdfce45849491cb61de5ab000f49824a00230afb112a4392/opentelemetry_proto-1.40.0.tar.gz", hash = "sha256:03f639ca129ba513f5819810f5b1f42bcb371391405d99c168fe6937c62febcd", size = 45667, upload-time = "2026-03-04T14:17:31.194Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/b2/189b2577dde745b15625b3214302605b1353436219d42b7912e77fa8dc24/opentelemetry_proto-1.40.0-py3-none-any.whl", hash = "sha256:266c4385d88923a23d63e353e9761af0f47a6ed0d486979777fe4de59dc9b25f", size = 72073, upload-time = "2026-03-04T14:17:16.673Z" },
 ]
 
 [[package]]
@@ -2034,6 +2539,33 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6d/c0/4ae7973f3c2cfd2b6e321f1675626f0dab0a97027cc7a297474c9c8f3d04/opentelemetry_semantic_conventions-0.61b0.tar.gz", hash = "sha256:072f65473c5d7c6dc0355b27d6c9d1a679d63b6d4b4b16a9773062cb7e31192a", size = 145755, upload-time = "2026-03-04T14:17:32.664Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b2/37/cc6a55e448deaa9b27377d087da8615a3416d8ad523d5960b78dbeadd02a/opentelemetry_semantic_conventions-0.61b0-py3-none-any.whl", hash = "sha256:fa530a96be229795f8cef353739b618148b0fe2b4b3f005e60e262926c4d38e2", size = 231621, upload-time = "2026-03-04T14:17:19.33Z" },
+]
+
+[[package]]
+name = "opentelemetry-semantic-conventions-ai"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-sdk", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/02/10aeacc37a38a3a8fa16ff67bec1ae3bf882539f6f9efb0f70acf802ca2d/opentelemetry_semantic_conventions_ai-0.5.1.tar.gz", hash = "sha256:153906200d8c1d2f8e09bd78dbef526916023de85ac3dab35912bfafb69ff04c", size = 26533, upload-time = "2026-03-26T14:20:38.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/22/41fb05f1dc5fda2c468e05a41814c20859016c85117b66c8a257cae814f6/opentelemetry_semantic_conventions_ai-0.5.1-py3-none-any.whl", hash = "sha256:25aeb22bd261543b4898a73824026d96770e5351209c7d07a0b1314762b1f6e4", size = 11250, upload-time = "2026-03-26T14:20:37.108Z" },
+]
+
+[[package]]
+name = "opentelemetry-util-genai"
+version = "0.3b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-instrumentation", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "opentelemetry-semantic-conventions", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/d8/4dd2fb622d26ec45b10ef63eb87fd512f5d7467c7bd35ce390629bd6dff8/opentelemetry_util_genai-0.3b0.tar.gz", hash = "sha256:83e127789a9ad615b8ca65f05fc36955a67ce257b06142bfd46159a3b7ed73d3", size = 31800, upload-time = "2026-02-20T16:16:14.807Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/18/e5/fada54909e445d7b4007f8b96221d571999efeab9446f3127cc1cebe5e07/opentelemetry_util_genai-0.3b0-py3-none-any.whl", hash = "sha256:ebc2b01bcb891ddc7218452470d189d3321cd742653299ff8e7de45debcfb986", size = 28426, upload-time = "2026-02-20T16:16:12.027Z" },
 ]
 
 [[package]]
@@ -2171,6 +2703,15 @@ wheels = [
 ]
 
 [[package]]
+name = "parso"
+version = "0.8.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/4b/90c937815137d43ce71ba043cd3566221e9df6b9c805f24b5d138c9d40a7/parso-0.8.7.tar.gz", hash = "sha256:eaaac4c9fdd5e9e8852dc778d2d7405897ec510f2a298071453e5e3a07914bb1", size = 401824, upload-time = "2026-05-01T23:13:02.138Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl", hash = "sha256:a8926eb2a1b915486941fdbd31e86a4baf88fe8c210f25f2f35ecec5b574ca1c", size = 107025, upload-time = "2026-05-01T23:12:58.867Z" },
+]
+
+[[package]]
 name = "passlib"
 version = "1.7.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2210,13 +2751,13 @@ name = "pip-audit"
 version = "2.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cachecontrol", extra = ["filecache"] },
+    { name = "cachecontrol", extra = ["filecache"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
     { name = "cyclonedx-python-lib" },
     { name = "packaging" },
     { name = "pip-api" },
     { name = "pip-requirements-parser" },
     { name = "platformdirs" },
-    { name = "requests" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" } },
     { name = "rich" },
     { name = "tomli" },
     { name = "tomli-w" },
@@ -2264,6 +2805,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/06/1a/7737e7a0774da3c3824d654993cf57adc915cb04660212f03406334d8c0b/pprintpp-0.4.0.tar.gz", hash = "sha256:ea826108e2c7f49dc6d66c752973c3fc9749142a798d6b254e1e301cfdbc6403", size = 17995, upload-time = "2018-07-01T01:42:34.87Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/d1/e4ed95fdd3ef13b78630280d9e9e240aeb65cc7c544ec57106149c3942fb/pprintpp-0.4.0-py2.py3-none-any.whl", hash = "sha256:b6b4dcdd0c0c0d75e4d7b2f21a9e933e5b2ce62b26e1a54537f9651ae5a5c01d", size = 16952, upload-time = "2018-07-01T01:42:36.496Z" },
+]
+
+[[package]]
+name = "prompt-toolkit"
+version = "3.0.52"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wcwidth", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a1/96/06e01a7b38dce6fe1db213e061a4602dd6032a8a97ef6c1a862537732421/prompt_toolkit-3.0.52.tar.gz", hash = "sha256:28cde192929c8e7321de85de1ddbe736f1375148b02f2e17edd840042b1be855", size = 434198, upload-time = "2025-08-27T15:24:02.057Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/03/0d3ce49e2505ae70cf43bc5bb3033955d2fc9f932163e84dc0779cc47f48/prompt_toolkit-3.0.52-py3-none-any.whl", hash = "sha256:9aac639a3bbd33284347de5ad8d68ecc044b91a762dc39b7c21095fcd6a19955", size = 391431, upload-time = "2025-08-27T15:23:59.498Z" },
 ]
 
 [[package]]
@@ -2366,9 +2919,41 @@ wheels = [
 ]
 
 [[package]]
+name = "proto-plus"
+version = "1.28.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/56/e647b0c675392d2da368da7b6f158f7368b18542fd6f7d7400a2f39de000/proto_plus-1.28.0.tar.gz", hash = "sha256:38e5696342835b08fc116f30a25665b29531cda9d5d5643e9b81fc312385abd9", size = 57221, upload-time = "2026-05-07T08:04:50.811Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/20/b122d4626976acb81132036d2ad1bb35a1a8775fceb837ec30964622516a/proto_plus-1.28.0-py3-none-any.whl", hash = "sha256:a630604310899e73c59ec302e5765c058d412b2f090b9c79c8822589f14955b8", size = 50410, upload-time = "2026-05-07T08:03:31.962Z" },
+]
+
+[[package]]
+name = "protobuf"
+version = "6.33.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/70/e908e9c5e52ef7c3a6c7902c9dfbb34c7e29c25d2f81ade3856445fd5c94/protobuf-6.33.6.tar.gz", hash = "sha256:a6768d25248312c297558af96a9f9c929e8c4cee0659cb07e780731095f38135", size = 444531, upload-time = "2026-03-18T19:05:00.988Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/9f/2f509339e89cfa6f6a4c4ff50438db9ca488dec341f7e454adad60150b00/protobuf-6.33.6-cp310-abi3-win32.whl", hash = "sha256:7d29d9b65f8afef196f8334e80d6bc1d5d4adedb449971fefd3723824e6e77d3", size = 425739, upload-time = "2026-03-18T19:04:48.373Z" },
+    { url = "https://files.pythonhosted.org/packages/76/5d/683efcd4798e0030c1bab27374fd13a89f7c2515fb1f3123efdfaa5eab57/protobuf-6.33.6-cp310-abi3-win_amd64.whl", hash = "sha256:0cd27b587afca21b7cfa59a74dcbd48a50f0a6400cfb59391340ad729d91d326", size = 437089, upload-time = "2026-03-18T19:04:50.381Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/01/a3c3ed5cd186f39e7880f8303cc51385a198a81469d53d0fdecf1f64d929/protobuf-6.33.6-cp39-abi3-macosx_10_9_universal2.whl", hash = "sha256:9720e6961b251bde64edfdab7d500725a2af5280f3f4c87e57c0208376aa8c3a", size = 427737, upload-time = "2026-03-18T19:04:51.866Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/90/b3c01fdec7d2f627b3a6884243ba328c1217ed2d978def5c12dc50d328a3/protobuf-6.33.6-cp39-abi3-manylinux2014_aarch64.whl", hash = "sha256:e2afbae9b8e1825e3529f88d514754e094278bb95eadc0e199751cdd9a2e82a2", size = 324610, upload-time = "2026-03-18T19:04:53.096Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/ca/25afc144934014700c52e05103c2421997482d561f3101ff352e1292fb81/protobuf-6.33.6-cp39-abi3-manylinux2014_s390x.whl", hash = "sha256:c96c37eec15086b79762ed265d59ab204dabc53056e3443e702d2681f4b39ce3", size = 339381, upload-time = "2026-03-18T19:04:54.616Z" },
+    { url = "https://files.pythonhosted.org/packages/16/92/d1e32e3e0d894fe00b15ce28ad4944ab692713f2e7f0a99787405e43533a/protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl", hash = "sha256:e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593", size = 323436, upload-time = "2026-03-18T19:04:55.768Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/72/02445137af02769918a93807b2b7890047c32bfb9f90371cbc12688819eb/protobuf-6.33.6-py3-none-any.whl", hash = "sha256:77179e006c476e69bf8e8ce866640091ec42e1beb80b213c3900006ecfba6901", size = 170656, upload-time = "2026-03-18T19:04:59.826Z" },
+]
+
+[[package]]
 name = "psutil"
 version = "5.9.8"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp'",
+    "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev')",
+    "extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/90/c7/6dc0a455d111f68ee43f27793971cf03fe29b6ef972042549db29eec39a2/psutil-5.9.8.tar.gz", hash = "sha256:6be126e3225486dff286a8fb9a06246a5253f4c7c53b475ea5f5ac934e64194c", size = 503247, upload-time = "2024-01-19T20:47:09.517Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/e3/07ae864a636d70a8a6f58da27cb1179192f1140d5d1da10886ade9405797/psutil-5.9.8-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:aee678c8720623dc456fa20659af736241f575d79429a0e5e9cf88ae0605cc81", size = 248702, upload-time = "2024-01-19T20:47:36.303Z" },
@@ -2377,6 +2962,37 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6e/f5/2aa3a4acdc1e5940b59d421742356f133185667dd190b166dbcfcf5d7b43/psutil-5.9.8-cp37-abi3-win32.whl", hash = "sha256:bc56c2a1b0d15aa3eaa5a60c9f3f8e3e565303b465dbf57a1b730e7a2b9844e0", size = 251252, upload-time = "2024-01-19T20:47:52.88Z" },
     { url = "https://files.pythonhosted.org/packages/93/52/3e39d26feae7df0aa0fd510b14012c3678b36ed068f7d78b8d8784d61f0e/psutil-5.9.8-cp37-abi3-win_amd64.whl", hash = "sha256:8db4c1b57507eef143a15a6884ca10f7c73876cdf5d51e713151c1236a0e68cf", size = 255090, upload-time = "2024-01-19T20:47:56.019Z" },
     { url = "https://files.pythonhosted.org/packages/05/33/2d74d588408caedd065c2497bdb5ef83ce6082db01289a1e1147f6639802/psutil-5.9.8-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:d16bbddf0693323b8c6123dd804100241da461e41d6e332fb0ba6058f630f8c8", size = 249898, upload-time = "2024-01-19T20:47:59.238Z" },
+]
+
+[[package]]
+name = "psutil"
+version = "7.2.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13.5' and python_full_version < '3.14'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz", hash = "sha256:0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372", size = 493740, upload-time = "2026-01-28T18:14:54.428Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/08/510cbdb69c25a96f4ae523f733cdc963ae654904e8db864c07585ef99875/psutil-7.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:2edccc433cbfa046b980b0df0171cd25bcaeb3a68fe9022db0979e7aa74a826b", size = 130595, upload-time = "2026-01-28T18:14:57.293Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/f5/97baea3fe7a5a9af7436301f85490905379b1c6f2dd51fe3ecf24b4c5fbf/psutil-7.2.2-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:e78c8603dcd9a04c7364f1a3e670cea95d51ee865e4efb3556a3a63adef958ea", size = 131082, upload-time = "2026-01-28T18:14:59.732Z" },
+    { url = "https://files.pythonhosted.org/packages/37/d6/246513fbf9fa174af531f28412297dd05241d97a75911ac8febefa1a53c6/psutil-7.2.2-cp313-cp313t-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1a571f2330c966c62aeda00dd24620425d4b0cc86881c89861fbc04549e5dc63", size = 181476, upload-time = "2026-01-28T18:15:01.884Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/b5/9182c9af3836cca61696dabe4fd1304e17bc56cb62f17439e1154f225dd3/psutil-7.2.2-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:917e891983ca3c1887b4ef36447b1e0873e70c933afc831c6b6da078ba474312", size = 184062, upload-time = "2026-01-28T18:15:04.436Z" },
+    { url = "https://files.pythonhosted.org/packages/16/ba/0756dca669f5a9300d0cbcbfae9a4c30e446dfc7440ffe43ded5724bfd93/psutil-7.2.2-cp313-cp313t-win_amd64.whl", hash = "sha256:ab486563df44c17f5173621c7b198955bd6b613fb87c71c161f827d3fb149a9b", size = 139893, upload-time = "2026-01-28T18:15:06.378Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/61/8fa0e26f33623b49949346de05ec1ddaad02ed8ba64af45f40a147dbfa97/psutil-7.2.2-cp313-cp313t-win_arm64.whl", hash = "sha256:ae0aefdd8796a7737eccea863f80f81e468a1e4cf14d926bd9b6f5f2d5f90ca9", size = 135589, upload-time = "2026-01-28T18:15:08.03Z" },
+    { url = "https://files.pythonhosted.org/packages/81/69/ef179ab5ca24f32acc1dac0c247fd6a13b501fd5534dbae0e05a1c48b66d/psutil-7.2.2-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:eed63d3b4d62449571547b60578c5b2c4bcccc5387148db46e0c2313dad0ee00", size = 130664, upload-time = "2026-01-28T18:15:09.469Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/64/665248b557a236d3fa9efc378d60d95ef56dd0a490c2cd37dafc7660d4a9/psutil-7.2.2-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:7b6d09433a10592ce39b13d7be5a54fbac1d1228ed29abc880fb23df7cb694c9", size = 131087, upload-time = "2026-01-28T18:15:11.724Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/2e/e6782744700d6759ebce3043dcfa661fb61e2fb752b91cdeae9af12c2178/psutil-7.2.2-cp314-cp314t-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1fa4ecf83bcdf6e6c8f4449aff98eefb5d0604bf88cb883d7da3d8d2d909546a", size = 182383, upload-time = "2026-01-28T18:15:13.445Z" },
+    { url = "https://files.pythonhosted.org/packages/57/49/0a41cefd10cb7505cdc04dab3eacf24c0c2cb158a998b8c7b1d27ee2c1f5/psutil-7.2.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e452c464a02e7dc7822a05d25db4cde564444a67e58539a00f929c51eddda0cf", size = 185210, upload-time = "2026-01-28T18:15:16.002Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/2c/ff9bfb544f283ba5f83ba725a3c5fec6d6b10b8f27ac1dc641c473dc390d/psutil-7.2.2-cp314-cp314t-win_amd64.whl", hash = "sha256:c7663d4e37f13e884d13994247449e9f8f574bc4655d509c3b95e9ec9e2b9dc1", size = 141228, upload-time = "2026-01-28T18:15:18.385Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/fc/f8d9c31db14fcec13748d373e668bc3bed94d9077dbc17fb0eebc073233c/psutil-7.2.2-cp314-cp314t-win_arm64.whl", hash = "sha256:11fe5a4f613759764e79c65cf11ebdf26e33d6dd34336f8a337aa2996d71c841", size = 136284, upload-time = "2026-01-28T18:15:19.912Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/36/5ee6e05c9bd427237b11b3937ad82bb8ad2752d72c6969314590dd0c2f6e/psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:ed0cace939114f62738d808fdcecd4c869222507e266e574799e9c0faa17d486", size = 129090, upload-time = "2026-01-28T18:15:22.168Z" },
+    { url = "https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl", hash = "sha256:1a7b04c10f32cc88ab39cbf606e117fd74721c831c98a27dc04578deb0c16979", size = 129859, upload-time = "2026-01-28T18:15:23.795Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9", size = 155560, upload-time = "2026-01-28T18:15:25.976Z" },
+    { url = "https://files.pythonhosted.org/packages/63/65/37648c0c158dc222aba51c089eb3bdfa238e621674dc42d48706e639204f/psutil-7.2.2-cp36-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b0726cecd84f9474419d67252add4ac0cd9811b04d61123054b9fb6f57df6e9e", size = 156997, upload-time = "2026-01-28T18:15:27.794Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/13/125093eadae863ce03c6ffdbae9929430d116a246ef69866dad94da3bfbc/psutil-7.2.2-cp36-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:fd04ef36b4a6d599bbdb225dd1d3f51e00105f6d48a28f006da7f9822f2606d8", size = 148972, upload-time = "2026-01-28T18:15:29.342Z" },
+    { url = "https://files.pythonhosted.org/packages/04/78/0acd37ca84ce3ddffaa92ef0f571e073faa6d8ff1f0559ab1272188ea2be/psutil-7.2.2-cp36-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:b58fabe35e80b264a4e3bb23e6b96f9e45a3df7fb7eed419ac0e5947c61e47cc", size = 148266, upload-time = "2026-01-28T18:15:31.597Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/90/e2159492b5426be0c1fef7acba807a03511f97c5f86b3caeda6ad92351a7/psutil-7.2.2-cp37-abi3-win_amd64.whl", hash = "sha256:eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988", size = 137737, upload-time = "2026-01-28T18:15:33.849Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/c7/7bb2e321574b10df20cbde462a94e2b71d05f9bbda251ef27d104668306a/psutil-7.2.2-cp37-abi3-win_arm64.whl", hash = "sha256:8c233660f575a5a89e6d4cb65d9f938126312bca76d8fe087b947b3a1aaac9ee", size = 134617, upload-time = "2026-01-28T18:15:36.514Z" },
 ]
 
 [[package]]
@@ -2581,6 +3197,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pygls"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cattrs", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "lsprotocol", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/b9/41d173dad9eaa9db9c785a85671fc3d68961f08d67706dc2e79011e10b5c/pygls-1.3.1.tar.gz", hash = "sha256:140edceefa0da0e9b3c533547c892a42a7d2fd9217ae848c330c53d266a55018", size = 45527, upload-time = "2024-03-26T18:44:25.679Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/19/b74a10dd24548e96e8c80226cbacb28b021bc3a168a7d2709fb0d0185348/pygls-1.3.1-py3-none-any.whl", hash = "sha256:6e00f11efc56321bdeb6eac04f6d86131f654c7d49124344a9ebb968da3dd91e", size = 56031, upload-time = "2024-03-26T18:44:24.249Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2619,6 +3248,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pyperclip"
+version = "1.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/52/d87eba7cb129b81563019d1679026e7a112ef76855d6159d24754dbd2a51/pyperclip-1.11.0.tar.gz", hash = "sha256:244035963e4428530d9e3a6101a1ef97209c6825edab1567beac148ccc1db1b6", size = 12185, upload-time = "2025-09-26T14:40:37.245Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/80/fc9d01d5ed37ba4c42ca2b55b4339ae6e200b456be3a1aaddf4a9fa99b8c/pyperclip-1.11.0-py3-none-any.whl", hash = "sha256:299403e9ff44581cb9ba2ffeed69c7aa96a008622ad0c46cb575ca75b5b84273", size = 11063, upload-time = "2025-09-26T14:40:36.069Z" },
 ]
 
 [[package]]
@@ -2675,7 +3313,7 @@ wheels = [
 
 [package.optional-dependencies]
 psutil = [
-    { name = "psutil" },
+    { name = "psutil", version = "5.9.8", source = { registry = "https://pypi.org/simple" } },
 ]
 
 [[package]]
@@ -2697,6 +3335,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
+]
+
+[[package]]
+name = "python-frontmatter"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/e8/79cbe69864d44f3b48e70ebee0a872a7d5a4e7150c9f8577ed7a5beefff0/python_frontmatter-1.3.0.tar.gz", hash = "sha256:acc73e477a568dc2a25c9e130c6c68ae8daa8c204c8f7e813db47d6a7280dcf2", size = 8322, upload-time = "2026-05-20T19:21:44.164Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/a3/17c284b4f4d8ad50f0f9ba70ad8fcc35c777aeafcdbbffdd91bbdc5ab379/python_frontmatter-1.3.0-py3-none-any.whl", hash = "sha256:9f7dd9260bec99044219159a329f64f039087f9d1a2124c9442556f2fe6f82ec", size = 10562, upload-time = "2026-05-20T19:21:43.323Z" },
 ]
 
 [[package]]
@@ -2725,6 +3375,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/31/097f2e132c4f16d99a22bfb777e0fd88bd8e1c634304e102f313af69ace5/pywin32-311-cp314-cp314-win32.whl", hash = "sha256:b7a2c10b93f8986666d0c803ee19b5990885872a7de910fc460f9b0c2fbf92ee", size = 8840714, upload-time = "2025-07-14T20:13:32.449Z" },
     { url = "https://files.pythonhosted.org/packages/90/4b/07c77d8ba0e01349358082713400435347df8426208171ce297da32c313d/pywin32-311-cp314-cp314-win_amd64.whl", hash = "sha256:3aca44c046bd2ed8c90de9cb8427f581c479e594e99b5c0bb19b29c10fd6cb87", size = 9656800, upload-time = "2025-07-14T20:13:34.312Z" },
     { url = "https://files.pythonhosted.org/packages/c0/d2/21af5c535501a7233e734b8af901574572da66fcc254cb35d0609c9080dd/pywin32-311-cp314-cp314-win_arm64.whl", hash = "sha256:a508e2d9025764a8270f93111a970e1d0fbfc33f4153b388bb649b7eec4f9b42", size = 8932540, upload-time = "2025-07-14T20:13:36.379Z" },
+]
+
+[[package]]
+name = "pywin32-ctypes"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/9f/01a1a99704853cb63f253eea009390c88e7131c67e66a0a02099a8c917cb/pywin32-ctypes-0.2.3.tar.gz", hash = "sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755", size = 29471, upload-time = "2024-08-14T10:15:34.626Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/3d/8161f7711c017e01ac9f008dfddd9410dff3674334c233bde66e7ba65bbf/pywin32_ctypes-0.2.3-py3-none-any.whl", hash = "sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8", size = 30756, upload-time = "2024-08-14T10:15:33.187Z" },
 ]
 
 [[package]]
@@ -2789,7 +3448,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "rpds-py" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 wheels = [
@@ -2902,13 +3561,36 @@ wheels = [
 
 [[package]]
 name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13.5' and python_full_version < '3.14'",
+]
+dependencies = [
+    { name = "certifi", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "charset-normalizer", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "idna", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "urllib3", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/63/70/2bf7780ad2d390a8d301ad0b550f1581eadbd9a20f896afe06353c2a2913/requests-2.32.3.tar.gz", hash = "sha256:55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760", size = 131218, upload-time = "2024-05-29T15:37:49.536Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/9b/335f9764261e915ed497fcdeb11df5dfd6f7bf257d4a6a2a686d80da4d54/requests-2.32.3-py3-none-any.whl", hash = "sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6", size = 64928, upload-time = "2024-05-29T15:37:47.027Z" },
+]
+
+[[package]]
+name = "requests"
 version = "2.33.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp'",
+    "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev')",
+    "extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp'",
+]
 dependencies = [
-    { name = "certifi" },
-    { name = "charset-normalizer" },
-    { name = "idna" },
-    { name = "urllib3" },
+    { name = "certifi", marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "charset-normalizer", marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "idna", marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "urllib3", marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5f/a4/98b9c7c6428a668bf7e42ebb7c79d576a1c3c1e3ae2d47e674b468388871/requests-2.33.1.tar.gz", hash = "sha256:18817f8c57c6263968bc123d237e3b8b08ac046f5456bd1e307ee8f4250d3517", size = 134120, upload-time = "2026-03-30T16:09:15.531Z" }
 wheels = [
@@ -2920,7 +3602,7 @@ name = "requests-file"
 version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "requests" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3c/f8/5dc70102e4d337063452c82e1f0d95e39abfe67aa222ed8a5ddeb9df8de8/requests_file-3.0.1.tar.gz", hash = "sha256:f14243d7796c588f3521bd423c5dea2ee4cc730e54a3cac9574d78aca1272576", size = 6967, upload-time = "2025-10-20T18:56:42.279Z" }
 wheels = [
@@ -2932,7 +3614,8 @@ name = "requests-toolbelt"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f3/61/d7545dafb7ac2230c70d38d31cbfe4cc64f7144dc41f6e4e4b78ecd9f5bb/requests-toolbelt-1.0.0.tar.gz", hash = "sha256:7681a0a3d047012b5bdc0ee37d7f8f07ebe76ab08caeccfc3921ce23c88d5bc6", size = 206888, upload-time = "2023-05-01T04:11:33.229Z" }
 wheels = [
@@ -3074,6 +3757,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ruamel-yaml"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
+]
+
+[[package]]
 name = "ruff"
 version = "0.15.13"
 source = { registry = "https://pypi.org/simple" }
@@ -3109,6 +3801,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4b/75/abbc7eab08bad7f47887a0555d3ac9e3947f89d2416678c08e025e449fdc/ruyaml-0.91.0.tar.gz", hash = "sha256:6ce9de9f4d082d696d3bde264664d1bcdca8f5a9dff9d1a1f1a127969ab871ab", size = 239075, upload-time = "2021-12-07T16:19:58.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/9a/16ca152a04b231c179c626de40af1d5d0bc2bc57bc875c397706016ddb2b/ruyaml-0.91.0-py3-none-any.whl", hash = "sha256:50e0ee3389c77ad340e209472e0effd41ae0275246df00cdad0a067532171755", size = 108906, upload-time = "2021-12-07T16:19:56.798Z" },
+]
+
+[[package]]
+name = "secretstorage"
+version = "3.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+    { name = "jeepney", marker = "python_full_version >= '3.13.5' and python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/46/f5af3402b579fd5e11573ce652019a67074317e18c1935cc0b4ba9b35552/secretstorage-3.5.0-py3-none-any.whl", hash = "sha256:0ce65888c0725fcb2c5bc0fdb8e5438eece02c523557ea40ce0703c266248137", size = 15554, upload-time = "2025-11-23T19:02:51.545Z" },
 ]
 
 [[package]]
@@ -3179,7 +3884,7 @@ name = "sqlalchemy"
 version = "2.0.49"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "greenlet", marker = "platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'" },
+    { name = "greenlet", marker = "platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/09/45/461788f35e0364a8da7bda51a1fe1b09762d0c32f12f63727998d85a873b/sqlalchemy-2.0.49.tar.gz", hash = "sha256:d15950a57a210e36dd4cec1aac22787e2a4d57ba9318233e2ef8b2daf9ff2d5f", size = 9898221, upload-time = "2026-04-03T16:38:11.704Z" }
@@ -3269,12 +3974,32 @@ wheels = [
 name = "starlette"
 version = "0.45.3"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "extra != 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp'",
+    "(python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-local' and extra != 'extra-6-kitaru-mcp' and extra != 'group-6-kitaru-dev')",
+    "extra != 'extra-6-kitaru-fast-agent' and extra != 'extra-6-kitaru-mcp'",
+]
 dependencies = [
-    { name = "anyio" },
+    { name = "anyio", marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ff/fb/2984a686808b89a6781526129a4b51266f678b2d2b97ab2d325e56116df8/starlette-0.45.3.tar.gz", hash = "sha256:2cbcba2a75806f8a41c722141486f37c28e30a0921c5f6fe4346cb0dcee1302f", size = 2574076, upload-time = "2025-01-24T11:17:36.535Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/61/f2b52e107b1fc8944b33ef56bf6ac4ebbe16d91b94d2b87ce013bf63fb84/starlette-0.45.3-py3-none-any.whl", hash = "sha256:dfb6d332576f136ec740296c7e8bb8c8a7125044e7c6da30744718880cdd059d", size = 71507, upload-time = "2025-01-24T11:17:34.182Z" },
+]
+
+[[package]]
+name = "starlette"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13.5' and python_full_version < '3.14'",
+]
+dependencies = [
+    { name = "anyio", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/eb/e3/7c1dc7381d9f8ab7d854328ebfa884e62cb3f3d8549ddfd37c7814f42afa/starlette-1.3.1.tar.gz", hash = "sha256:05d0213193f2fbaae60e2ecb593b4add4262ad4e46536b54abe36f11a71724e0", size = 2703240, upload-time = "2026-06-12T09:23:11.602Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e7213dfc7ef4acbbaadfa440f32500c370/starlette-1.3.1-py3-none-any.whl", hash = "sha256:c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6", size = 73632, upload-time = "2026-06-12T09:23:10.017Z" },
 ]
 
 [[package]]
@@ -3301,7 +4026,8 @@ version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "regex" },
-    { name = "requests" },
+    { name = "requests", version = "2.32.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/ab/4d017d0f76ec3171d469d80fc03dfbb4e48a4bcaddaa831b31d526f05edc/tiktoken-0.12.0.tar.gz", hash = "sha256:b18ba7ee2b093863978fcb14f74b3707cdc8d4d4d3836853ce7ec60772139931", size = 37806, upload-time = "2025-10-06T20:22:45.419Z" }
 wheels = [
@@ -3356,7 +4082,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
     { name = "idna" },
-    { name = "requests" },
+    { name = "requests", version = "2.33.1", source = { registry = "https://pypi.org/simple" } },
     { name = "requests-file" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4a/4f/eee4bebcbad25a798bf55601d3a4aee52003bebcf9e55fce08b91ca541a9/tldextract-5.1.3.tar.gz", hash = "sha256:d43c7284c23f5dc8a42fd0fee2abede2ff74cc622674e4cb07f514ab3330c338", size = 125033, upload-time = "2024-11-05T00:03:00.009Z" }
@@ -3432,7 +4158,7 @@ name = "tqdm"
 version = "4.67.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
@@ -3478,10 +4204,10 @@ name = "typer"
 version = "0.24.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "annotated-doc" },
-    { name = "click" },
-    { name = "rich" },
-    { name = "shellingham" },
+    { name = "annotated-doc", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "click", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "rich", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "shellingham", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/83/b8/9ebb531b6c2d377af08ac6746a5df3425b21853a5d2260876919b58a2a4a/typer-0.24.2.tar.gz", hash = "sha256:ec070dcfca1408e85ee203c6365001e818c3b7fffe686fd07ff2d68095ca0480", size = 119849, upload-time = "2026-04-22T17:45:34.413Z" }
 wheels = [
@@ -3697,7 +4423,7 @@ name = "watchfiles"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
+    { name = "anyio", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c2/c9/8869df9b2a2d6c59d79220a4db37679e74f807c559ffe5265e08b227a210/watchfiles-1.1.1.tar.gz", hash = "sha256:a173cb5c16c4f40ab19cecf48a534c409f7ea983ab8fed0741304a1c0a31b3f2", size = 94440, upload-time = "2025-10-14T15:06:21.08Z" }
 wheels = [
@@ -3777,6 +4503,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/95/615e72cd27b85b61eec764a5ca51bd94d40b5adea5ff47567d9ebc4d275a/watchfiles-1.1.1-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:89eef07eee5e9d1fda06e38822ad167a044153457e6fd997f8a858ab7564a336", size = 396117, upload-time = "2025-10-14T15:06:11.28Z" },
     { url = "https://files.pythonhosted.org/packages/c9/81/e7fe958ce8a7fb5c73cc9fb07f5aeaf755e6aa72498c57d760af760c91f8/watchfiles-1.1.1-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ce19e06cbda693e9e7686358af9cd6f5d61312ab8b00488bc36f5aabbaf77e24", size = 450493, upload-time = "2025-10-14T15:06:12.321Z" },
     { url = "https://files.pythonhosted.org/packages/6e/d4/ed38dd3b1767193de971e694aa544356e63353c33a85d948166b5ff58b9e/watchfiles-1.1.1-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3e6f39af2eab0118338902798b5aa6664f46ff66bc0280de76fca67a7f262a49", size = 457546, upload-time = "2025-10-14T15:06:13.372Z" },
+]
+
+[[package]]
+name = "wcwidth"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/b4/51fe890511f0f242d07cb1ebe6a5b6db417262b9d2568b460347c57d95cc/wcwidth-0.8.1.tar.gz", hash = "sha256:faf5b4a5366a72dc49cad48cdf21f52bdf63bdda995178e483ba247ff79089b9", size = 1466072, upload-time = "2026-06-08T05:57:23.146Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/6e/95b0e537de1f4d4301f76f944642c6da50d1511cc7b3d64dc418a66c7509/wcwidth-0.8.1-py3-none-any.whl", hash = "sha256:f453740b1e4a4f3291faa37944c555d71056c4da08d59809b307ef4feba695c8", size = 323092, upload-time = "2026-06-08T05:57:21.413Z" },
 ]
 
 [[package]]
@@ -4047,9 +4782,9 @@ name = "yarl"
 version = "1.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "idna" },
-    { name = "multidict" },
-    { name = "propcache" },
+    { name = "idna", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "multidict", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
+    { name = "propcache", marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'group-6-kitaru-dev') or (python_full_version < '3.13.5' and extra != 'extra-6-kitaru-fast-agent') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra != 'extra-6-kitaru-fast-agent')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/23/6e/beb1beec874a72f23815c1434518bfc4ed2175065173fb138c3705f658d4/yarl-1.23.0.tar.gz", hash = "sha256:53b1ea6ca88ebd4420379c330aea57e258408dd0df9af0992e5de2078dc9f5d5", size = 194676, upload-time = "2026-03-01T22:07:53.373Z" }
 wheels = [
@@ -4179,7 +4914,8 @@ dependencies = [
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-sdk" },
     { name = "packaging" },
-    { name = "psutil" },
+    { name = "psutil", version = "5.9.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13.5' or python_full_version >= '3.14' or extra != 'extra-6-kitaru-fast-agent' or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
+    { name = "psutil", version = "7.2.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13.5' and python_full_version < '3.14' and extra == 'extra-6-kitaru-fast-agent') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version < '3.13.5' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-local') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'extra-6-kitaru-mcp') or (python_full_version >= '3.14' and extra == 'extra-6-kitaru-fast-agent' and extra == 'group-6-kitaru-dev')" },
     { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
@@ -4208,15 +4944,15 @@ server = [
     { name = "bcrypt" },
     { name = "cachetools" },
     { name = "croniter" },
-    { name = "fastapi" },
+    { name = "fastapi", version = "0.120.4", source = { registry = "https://pypi.org/simple" } },
     { name = "fastapi-utils" },
     { name = "ipinfo" },
     { name = "itsdangerous" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "orjson" },
-    { name = "passlib", extra = ["bcrypt"] },
-    { name = "pyjwt", extra = ["crypto"] },
+    { name = "passlib", extra = ["bcrypt"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
+    { name = "pyjwt", extra = ["crypto"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
     { name = "pymysql" },
     { name = "python-multipart" },
     { name = "secure" },
@@ -4224,7 +4960,7 @@ server = [
     { name = "sqlalchemy-utils" },
     { name = "sqlmodel" },
     { name = "tldextract" },
-    { name = "uvicorn", extra = ["standard"] },
+    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-6-kitaru-local' or extra == 'extra-6-kitaru-mcp' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-fast-agent'" },
 ]
 
 [[package]]

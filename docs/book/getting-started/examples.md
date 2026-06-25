@@ -32,9 +32,10 @@ source from a saved execution.
 Most examples can be run from the repository root with `uv run python path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 {% hint style="info" %}
-Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK, or
-Gemini Interactions project? See [Agent Skills](../agent-native/claude-code-skill.md)
-for migration skills that guide a coding agent through the adapter-specific path.
+Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK,
+Gemini Interactions, or fast-agent project? See
+[Agent Skills](../agent-native/claude-code-skill.md) for migration skills that
+guide a coding agent through the adapter-specific path.
 {% endhint %}
 
 ## Connection context
@@ -117,6 +118,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network previews, streaming mode, and an Antigravity managed-agent path | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
 | `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](../adapters/langgraph.md) |
 | `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](../adapters/langgraph.md#graph-call-streaming) |
+| `integrations/fast_agent_agent/fast_agent_adapter.py` | Wrap a real fast-agent `AgentApp` with an in-memory LLM and local tool, no provider key required | [fast-agent Adapter](../adapters/fast-agent.md) |
 
 | `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](../guides/llm-calls.md) |
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](examples.md) |
@@ -130,8 +132,9 @@ API keys. The Gemini Interactions example has `--help` and `--dry-run` paths
 that require no credentials or network. The OpenAI Agents sandbox-tool example
 also needs your current stack to have exactly one sandbox component. The LangGraph
 `graph_call` strategy is deterministic and local; the LangGraph `calls` strategy
-requires `langgraph-openai` and `OPENAI_API_KEY`. Check each example's README
-before running a real model-backed example.
+requires `langgraph-openai` and `OPENAI_API_KEY`. The fast-agent example uses an
+in-memory LLM, so it needs the `fast-agent` extra but no provider key. Check each
+example's README before running a real model-backed example.
 {% endhint %}
 
 ## If you'd rather build up primitive-by-primitive first
@@ -158,6 +161,7 @@ Agent Harness Platform is the recommended starting point for most readers — it
 18. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
 19. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
 20. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
-21. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-22. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
-23. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.
+21. `integrations/fast_agent_agent/fast_agent_adapter.py` — [fast-agent Adapter](../adapters/fast-agent.md).
+22. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
+23. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
+24. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.

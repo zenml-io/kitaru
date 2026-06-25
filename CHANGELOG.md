@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+- Added an experimental fast-agent adapter example and GitBook docs, plus provider-free smoke and example coverage metadata for the `kitaru[fast-agent]` preview extra.
 
 ## [0.18.0] - 2026-06-25
 

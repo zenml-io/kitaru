@@ -29,6 +29,7 @@
 * [Claude Agent SDK](adapters/claude-agent-sdk.md)
 * [Gemini Interactions](adapters/gemini-interactions.md)
 * [LangGraph](adapters/langgraph.md)
+* [fast-agent](adapters/fast-agent.md)
 
 ## Guides
 

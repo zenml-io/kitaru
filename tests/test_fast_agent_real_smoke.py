@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -24,12 +25,15 @@ def _import_real_fast_agent() -> SimpleNamespace:
     """Import real fast-agent modules or skip when the optional runtime is absent."""
     errors: list[str] = []
     local_src = Path(__file__).resolve().parents[1] / "design" / "fast-agent" / "src"
-    candidates = [local_src] if local_src.exists() else []
-    candidates.append(None)
+    candidates: list[Path | None] = [None]
+    if local_src.exists() and os.environ.get("KITARU_TEST_FAST_AGENT_LOCAL_SRC") == "1":
+        candidates.insert(0, local_src)
 
     for candidate in candidates:
         _purge_fast_agent_modules()
-        if candidate is not None and str(candidate) not in sys.path:
+        if str(local_src) in sys.path:
+            sys.path.remove(str(local_src))
+        if candidate is not None:
             sys.path.insert(0, str(candidate))
         try:
             return SimpleNamespace(
@@ -41,6 +45,7 @@ def _import_real_fast_agent() -> SimpleNamespace:
                     "fast_agent.types"
                 ).PromptMessageExtended,
                 RequestParams=importlib.import_module("fast_agent.types").RequestParams,
+                LlmStopReason=importlib.import_module("fast_agent.types").LlmStopReason,
                 ToolAgent=importlib.import_module(
                     "fast_agent.agents.tool_agent"
                 ).ToolAgent,
@@ -77,10 +82,14 @@ class _MemoryLLM:
         self.instruction = ""
         self.generate_calls = 0
         self.structured_calls = 0
+        self._tool_call_requested = False
         self._fast_agent_modules = fast_agent_modules
 
     def get_request_params(self, request_params: Any | None = None) -> Any:
         return request_params or self.default_request_params
+
+    def request_tool_call_once(self) -> None:
+        self._tool_call_requested = True
 
     async def generate(
         self,
@@ -90,7 +99,12 @@ class _MemoryLLM:
     ) -> Any:
         del request_params, tools
         self.generate_calls += 1
+        if self._tool_call_requested:
+            self._tool_call_requested = False
+            return self._assistant_tool_call("uppercase", {"text": "kitaru"})
         last_user_text = messages[-1].last_text() if messages else "<empty>"
+        if any(getattr(message, "tool_results", None) for message in messages):
+            return self._assistant_message("memory tool loop complete")
         return self._assistant_message(f"memory reply to {last_user_text}")
 
     async def structured(
@@ -108,6 +122,22 @@ class _MemoryLLM:
         return fast_agent.PromptMessageExtended(
             role="assistant",
             content=[fast_agent.text_content(text)],
+        )
+
+    def _assistant_tool_call(self, name: str, arguments: dict[str, Any]) -> Any:
+        from mcp.types import CallToolRequest, CallToolRequestParams
+
+        fast_agent = self._fast_agent_modules
+        return fast_agent.PromptMessageExtended(
+            role="assistant",
+            content=[fast_agent.text_content("calling local tool")],
+            tool_calls={
+                "call-1": CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(name=name, arguments=arguments),
+                ),
+            },
+            stop_reason=fast_agent.LlmStopReason.TOOL_USE,
         )
 
 
@@ -149,7 +179,7 @@ def test_real_fast_agent_agent_app_model_and_tool_paths_are_wrapped() -> None:
 
     runner = KitaruFastAgent(_ManualFastAgentRun(app), call_recorder=recorder)
 
-    async def exercise() -> tuple[str, str]:
+    async def exercise() -> tuple[str, str, str]:
         async with runner.run() as wrapped_app:
             assert wrapped_app is app
 
@@ -162,18 +192,28 @@ def test_real_fast_agent_agent_app_model_and_tool_paths_are_wrapped() -> None:
 
             agent.force_non_streaming_next_turn(reason="deterministic Kitaru smoke")
             model_reply = await wrapped_app.send("hello", agent_name="smoke")
+            llm.request_tool_call_once()
+            app_driven_tool_reply = await wrapped_app.send(
+                "please uppercase kitaru",
+                agent_name="smoke",
+            )
             tool_result = await agent.call_tool("uppercase", {"text": "kitaru"})
-            return model_reply, _content_text(tool_result)
+            return model_reply, app_driven_tool_reply, _content_text(tool_result)
 
-    model_reply, tool_text = asyncio.run(exercise())
+    model_reply, app_driven_tool_reply, tool_text = asyncio.run(exercise())
 
     assert model_reply == "memory reply to hello"
+    assert app_driven_tool_reply == "memory tool loop complete"
     assert "KITARU" in tool_text
-    assert llm.generate_calls == 1
+    assert llm.generate_calls == 3
     assert [(call.kind, call.operation, call.agent_name) for call in recorded] == [
+        ("model", "generate", "smoke"),
+        ("model", "generate", "smoke"),
+        ("tool", "call_tool", "smoke"),
         ("model", "generate", "smoke"),
         ("tool", "call_tool", "smoke"),
     ]
     assert recorded[0].model_name == "memory-smoke-model"
     assert recorded[0].provider == "memory-smoke-provider"
-    assert recorded[1].tool_name == "uppercase"
+    assert recorded[2].tool_name == "uppercase"
+    assert recorded[4].tool_name == "uppercase"

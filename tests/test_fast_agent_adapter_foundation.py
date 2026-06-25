@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.errors import KitaruFeatureNotAvailableError
+from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 
 
 def _purge_fast_agent_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,6 +43,7 @@ class FakeLLM:
         self.provider = "fake-provider"
         self.generate_calls = 0
         self.structured_calls = 0
+        self.structured_schema_calls = 0
 
     async def generate(self, prompt: str) -> str:
         self.generate_calls += 1
@@ -52,15 +53,23 @@ class FakeLLM:
         self.structured_calls += 1
         return schema.__name__, f"structured:{prompt}"
 
+    async def structured_schema(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        self.structured_schema_calls += 1
+        return schema, f"structured-schema:{prompt}"
+
 
 class FakeAgent:
     def __init__(self, name: str = "researcher") -> None:
         self.name = name
-        self._llm = FakeLLM()
+        self._llm: Any = FakeLLM()
         self.tool_calls = 0
 
     @property
-    def llm(self) -> FakeLLM:
+    def llm(self) -> Any:
         return self._llm
 
     async def call_tool(
@@ -95,8 +104,30 @@ def test_import_without_fast_agent_raises_feature_not_available(
     _purge_fast_agent_adapter_modules(monkeypatch)
     monkeypatch.setitem(sys.modules, "fast_agent", None)
 
-    with pytest.raises(KitaruFeatureNotAvailableError, match="fast-agent-mcp"):
+    with pytest.raises(KitaruFeatureNotAvailableError) as exc_info:
         importlib.import_module("kitaru.adapters.fast_agent")
+
+    message = str(exc_info.value)
+    assert "fast-agent-mcp" in message
+    assert "kitaru[fast-agent]" in message
+
+
+def test_import_with_fast_agent_exposes_public_contract(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    public_names = set(fast_agent_adapter.__all__)
+
+    assert {
+        "CheckpointConfig",
+        "FastAgentCall",
+        "FastAgentCallRecorder",
+        "KitaruFastAgent",
+        "KitaruFastAgentCallRecorder",
+        "kitaru_call_recorder",
+        "passthrough_call_recorder",
+        "wrap_fast_agent_agent",
+        "wrap_fast_agent_app",
+    } <= public_names
 
 
 def test_model_calls_route_through_wrapper(
@@ -113,17 +144,55 @@ def test_model_calls_route_through_wrapper(
 
     generated = asyncio.run(agent.llm.generate("hello"))
     structured = asyncio.run(agent.llm.structured("hello", dict))
+    structured_schema = asyncio.run(
+        agent.llm.structured_schema("hello", {"type": "object"})
+    )
 
     assert generated == "model:hello"
     assert structured == ("dict", "structured:hello")
+    assert structured_schema == ({"type": "object"}, "structured-schema:hello")
     assert agent.llm.original_llm.generate_calls == 1
     assert agent.llm.original_llm.structured_calls == 1
+    assert agent.llm.original_llm.structured_schema_calls == 1
     assert [(call.kind, call.operation, call.agent_name) for call in recorded] == [
         ("model", "generate", "researcher"),
         ("model", "structured", "researcher"),
+        ("model", "structured_schema", "researcher"),
     ]
     assert recorded[0].model_name == "fake-model"
     assert recorded[0].provider == "fake-provider"
+
+
+def test_optional_llm_methods_are_only_exposed_when_original_supports_them(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    class GenerateOnlyLLM:
+        model_name = "minimal-model"
+        provider = "memory"
+
+        def __init__(self) -> None:
+            self.generate_calls = 0
+
+        async def generate(self, prompt: str) -> str:
+            self.generate_calls += 1
+            return f"minimal:{prompt}"
+
+    agent = FakeAgent()
+    agent._llm = GenerateOnlyLLM()
+    recorded: list[Any] = []
+
+    def recorder(call: Any, proceed: Callable[[], Any]) -> Any:
+        recorded.append(call)
+        return proceed()
+
+    fast_agent_adapter.wrap_fast_agent_agent(agent, recorder=recorder)
+
+    assert hasattr(agent.llm, "generate")
+    assert not hasattr(agent.llm, "structured")
+    assert not hasattr(agent.llm, "structured_schema")
+    assert asyncio.run(agent.llm.generate("hello")) == "minimal:hello"
+    assert agent.llm.original_llm.generate_calls == 1
+    assert [(call.kind, call.operation) for call in recorded] == [("model", "generate")]
 
 
 def test_local_tool_calls_route_through_wrapper(
@@ -207,6 +276,20 @@ def test_app_wrapper_wraps_agents_from_private_agent_mapping(
     assert [(call.kind, call.agent_name) for call in recorded] == [("model", "writer")]
 
 
+def test_app_wrapper_requires_discoverable_agent_mapping(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="Could not discover fast-agent agents"):
+        fast_agent_adapter.wrap_fast_agent_app(types.SimpleNamespace())
+
+
+def test_app_wrapper_requires_non_empty_agent_mapping(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="non-empty"):
+        fast_agent_adapter.wrap_fast_agent_app(FakeApp({}))
+
+
 def test_public_runner_wraps_app_after_fast_agent_run(
     fast_agent_adapter: types.ModuleType,
 ) -> None:
@@ -230,3 +313,53 @@ def test_public_runner_wraps_app_after_fast_agent_run(
     assert [(call.kind, call.agent_name) for call in recorded] == [
         ("model", "runner-agent")
     ]
+
+
+def test_public_runner_uses_default_recorder_when_omitted(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    runner = fast_agent_adapter.KitaruFastAgent(
+        FakeFastAgent(FakeApp({"a": FakeAgent()}))
+    )
+
+    assert isinstance(
+        runner._call_recorder,
+        fast_agent_adapter.KitaruFastAgentCallRecorder,
+    )
+
+
+def test_public_runner_keeps_none_call_recorder_as_passthrough(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    runner = fast_agent_adapter.KitaruFastAgent(
+        FakeFastAgent(FakeApp({"a": FakeAgent()})),
+        call_recorder=None,
+    )
+
+    assert runner._call_recorder is None
+
+
+def test_public_runner_records_non_sensitive_analytics(
+    fast_agent_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[Any, dict[str, Any] | None]] = []
+    monkeypatch.setattr(
+        "kitaru.adapters.fast_agent._agent.track",
+        lambda event, metadata=None: events.append((event, metadata)) or True,
+    )
+
+    fast_agent_adapter.KitaruFastAgent(
+        FakeFastAgent(FakeApp({"a": FakeAgent()})),
+        call_recorder=None,
+        model_checkpoint_config={"cache": True},
+    )
+
+    assert len(events) == 1
+    _, metadata = events[0]
+    assert metadata == {
+        "checkpoint_strategy": "calls",
+        "call_recorder": "passthrough",
+        "has_model_checkpoint_config": True,
+        "has_tool_checkpoint_config": False,
+    }

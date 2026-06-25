@@ -26,15 +26,17 @@ single model or tool call instead of re-running the entire turn.
 | OpenAI Agents SDK agent | `KitaruRunner` | **Per call**, or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
 | LangGraph graph | `KitaruGraphRunner` | One graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+| fast-agent app | `KitaruFastAgent` | Reachable fast-agent model/tool calls after the app run context yields | [fast-agent Adapter](../adapters/fast-agent.md) |
 
 {% hint style="info" %}
 **Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI
 Agents SDK (`KitaruRunner`) adapters.** Both can record every model and tool call
 as its own checkpoint, so replay can target an individual call. The Claude Agent
-SDK adapter currently checkpoints at the invocation boundary, and LangGraph's
-per-call granularity depends on middleware wrapping the model/tool calls. If
-call-level replay fidelity is your priority, prefer PydanticAI or OpenAI calls
-mode.
+SDK adapter currently checkpoints at the invocation boundary, LangGraph's
+per-call granularity depends on middleware wrapping the model/tool calls, and
+fast-agent's preview support records calls that pass through reachable wrapped
+runtime methods. If call-level replay fidelity is your priority, prefer
+PydanticAI or OpenAI calls mode.
 {% endhint %}
 
 ## Pick by goal
@@ -61,6 +63,8 @@ Start with:
 - [PydanticAI human-in-the-loop tools](../adapters/pydantic-ai.md#ask-the-human-from-a-tool-body)
 - [OpenAI approval interruptions](../adapters/openai-agents.md#approval-interruptions)
 - [LangGraph interrupt and resume](../adapters/langgraph.md#interrupt-and-resume)
+
+fast-agent preview support does not add a Kitaru wait/approval bridge yet.
 
 ## Next
 

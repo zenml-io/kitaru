@@ -36,10 +36,28 @@ class FakeLLM:
         self.model_name = "fake-model"
         self.provider = "fake-provider"
         self.generate_calls = 0
+        self.structured_calls = 0
+        self.structured_schema_calls = 0
 
     async def generate(self, prompt: str) -> str:
         self.generate_calls += 1
         return f"model:{prompt}:{self.generate_calls}"
+
+    async def structured(
+        self,
+        prompt: str,
+        schema: type[object],
+    ) -> tuple[str, str, int]:
+        self.structured_calls += 1
+        return schema.__name__, prompt, self.structured_calls
+
+    async def structured_schema(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+    ) -> tuple[dict[str, Any], str, int]:
+        self.structured_schema_calls += 1
+        return schema, prompt, self.structured_schema_calls
 
 
 class FakeAgent:
@@ -168,6 +186,78 @@ def test_calls_strategy_tool_checkpoint_cache_skips_inner_tool(
     assert agent.tool_calls == 2
 
 
+def test_calls_strategy_structured_checkpoint_cache_skips_inner_model(
+    fast_agent_adapter: types.ModuleType,
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    agent = FakeAgent(name=f"fast_agent_structured_{uuid4().hex[:8]}")
+    runner = fast_agent_adapter.KitaruFastAgent(FakeFastAgent(FakeApp(agent)))
+
+    @flow
+    def fast_agent_structured_flow(prompt: str, nonce: str) -> tuple[str, str, int]:
+        _ = nonce
+
+        async def exercise() -> tuple[str, str, int]:
+            async with runner.run():
+                return await agent.llm.structured(prompt, dict)
+
+        return asyncio.run(exercise())
+
+    first = fast_agent_structured_flow.run("stable prompt", "first")
+    first_hydrated = _wait_for_hydrated_run(first.exec_id)
+    assert any("structured_model_call" in name for name in _step_names(first_hydrated))
+    assert agent.llm.original_llm.structured_calls == 1
+
+    second = fast_agent_structured_flow.run("stable prompt", "second")
+    _wait_for_hydrated_run(second.exec_id)
+    assert agent.llm.original_llm.structured_calls == 1
+
+    third = fast_agent_structured_flow.run("different prompt", "third")
+    _wait_for_hydrated_run(third.exec_id)
+    assert agent.llm.original_llm.structured_calls == 2
+
+
+def test_calls_strategy_structured_schema_checkpoint_cache_skips_inner_model(
+    fast_agent_adapter: types.ModuleType,
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    agent = FakeAgent(name=f"fast_agent_schema_{uuid4().hex[:8]}")
+    runner = fast_agent_adapter.KitaruFastAgent(FakeFastAgent(FakeApp(agent)))
+
+    @flow
+    def fast_agent_schema_flow(
+        prompt: str,
+        nonce: str,
+    ) -> tuple[dict[str, Any], str, int]:
+        _ = nonce
+
+        async def exercise() -> tuple[dict[str, Any], str, int]:
+            async with runner.run():
+                return await agent.llm.structured_schema(
+                    prompt,
+                    {"type": "object", "properties": {"answer": {"type": "string"}}},
+                )
+
+        return asyncio.run(exercise())
+
+    first = fast_agent_schema_flow.run("stable prompt", "first")
+    first_hydrated = _wait_for_hydrated_run(first.exec_id)
+    assert any(
+        "structured_schema_model_call" in name for name in _step_names(first_hydrated)
+    )
+    assert agent.llm.original_llm.structured_schema_calls == 1
+
+    second = fast_agent_schema_flow.run("stable prompt", "second")
+    _wait_for_hydrated_run(second.exec_id)
+    assert agent.llm.original_llm.structured_schema_calls == 1
+
+    third = fast_agent_schema_flow.run("different prompt", "third")
+    _wait_for_hydrated_run(third.exec_id)
+    assert agent.llm.original_llm.structured_schema_calls == 2
+
+
 def test_checkpoint_identity_uses_public_logical_inputs_not_object_identity(
     fast_agent_adapter: types.ModuleType,
 ) -> None:
@@ -205,6 +295,16 @@ def test_checkpoint_identity_uses_public_logical_inputs_not_object_identity(
     assert checkpoint_cache_key(first) == checkpoint_cache_key(second)
     assert "object at 0x" not in repr(first)
     assert "object at 0x" not in repr(second)
+
+
+def test_checkpoint_config_rejects_isolated_runtime(
+    fast_agent_adapter: types.ModuleType,
+) -> None:
+    with pytest.raises(KitaruUsageError, match="runtime='isolated'"):
+        fast_agent_adapter.KitaruFastAgent(
+            FakeFastAgent(FakeApp(FakeAgent("researcher"))),
+            model_checkpoint_config={"runtime": "isolated"},
+        )
 
 
 def test_checkpoint_identity_rejects_opaque_objects_without_stable_fields(

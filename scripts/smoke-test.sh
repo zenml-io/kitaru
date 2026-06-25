@@ -49,6 +49,7 @@ EOF
 
 PY="3.12"
 UV_RUN="uv run --python $PY"
+FAST_AGENT_PY="3.13.5"
 DASHBOARD_URL="http://127.0.0.1:8383"
 
 KEEP_SERVER=false
@@ -684,7 +685,14 @@ section_header "Install from source"
 
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
+    skip_test "uv sync --python $FAST_AGENT_PY --extra fast-agent --no-dev" "skipped via --skip-install"
 else
+    # fast-agent currently requires Python >=3.13.5,<3.14 and has a narrow upstream
+    # dependency range, so prove its public extra in a dedicated environment
+    # instead of mixing it into the default Python 3.12 local-server smoke env.
+    run_test "uv sync --python $FAST_AGENT_PY --extra fast-agent --no-dev" \
+        uv sync --python "$FAST_AGENT_PY" --extra fast-agent --no-dev
+
     UV_SYNC_EXTRAS=(
         --extra local
         --extra llm
@@ -717,6 +725,8 @@ run_test "Claude Agent SDK sandbox MCP API imports" \
     $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS, KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME, create_kitaru_sandbox_mcp_server; assert callable(create_kitaru_sandbox_mcp_server); assert DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS > 0; assert KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME == "mcp__kitaru__run_command"'
 run_test "OpenAI Agents stream API imports" \
     $UV_RUN python -c 'from kitaru.adapters.openai_agents import OPENAI_STREAM_COMPLETED, OPENAI_STREAM_EVENT, OPENAI_STREAM_EVENT_KINDS, OPENAI_STREAM_FAILED, OPENAI_STREAM_STARTED, OPENAI_STREAM_TERMINAL_EVENT_KINDS, KitaruRunner; assert hasattr(KitaruRunner, "run_stream"); assert hasattr(KitaruRunner, "run_stream_sync"); assert OPENAI_STREAM_STARTED == "openai_agents.stream.started"; assert OPENAI_STREAM_EVENT == "openai_agents.stream.event"; assert OPENAI_STREAM_COMPLETED == "openai_agents.stream.completed"; assert OPENAI_STREAM_FAILED == "openai_agents.stream.failed"; assert OPENAI_STREAM_EVENT_KINDS == (OPENAI_STREAM_STARTED, OPENAI_STREAM_EVENT, OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED); assert OPENAI_STREAM_TERMINAL_EVENT_KINDS == (OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED)'
+run_test "fast-agent adapter API imports" \
+    uv run --python "$FAST_AGENT_PY" --extra fast-agent --no-dev python -c 'from kitaru.adapters.fast_agent import FastAgentCall, FastAgentCallRecorder, KitaruFastAgent, KitaruFastAgentCallRecorder, kitaru_call_recorder; assert callable(KitaruFastAgent); assert callable(kitaru_call_recorder); assert FastAgentCall.__name__ == "FastAgentCall"; assert KitaruFastAgentCallRecorder.__name__ == "KitaruFastAgentCallRecorder"'
 
 # ---------------------------------------------------------------------------
 # Clear state
@@ -914,6 +924,20 @@ if [[ "$HAS_OPENAI" == true ]]; then
 else
     skip_test "examples/integrations/langgraph_agent/langgraph_adapter.py --strategy calls" "OPENAI_API_KEY not set" "openai" "OPENAI_API_KEY"
 fi
+
+section_header "fast-agent adapter"
+
+FAST_AGENT_SMOKE_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-fast-agent-smoke.XXXXXX")
+run_test "examples/integrations/fast_agent_agent/fast_agent_adapter.py" \
+    timed 120 env \
+        -u ZENML_SERVER \
+        -u ZENML_ACTIVE_PROJECT_ID \
+        -u ZENML_ACTIVE_STACK_ID \
+        -u ZENML_LOCAL_STORES_PATH \
+        ZENML_CONFIG_PATH="$FAST_AGENT_SMOKE_CONFIG" \
+        ZENML_REPOSITORY_PATH="$PWD" \
+        ZENML_ANALYTICS_OPT_IN=false \
+        uv run --python "$FAST_AGENT_PY" --extra fast-agent --no-dev python examples/integrations/fast_agent_agent/fast_agent_adapter.py
 
 section_header "OpenAI Agents adapter"
 

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal, cast
 
+from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
 from ._utils import CheckpointConfig, validate_checkpoint_config
@@ -64,6 +65,21 @@ class KitaruFastAgent:
             )
             if call_recorder is _DEFAULT_CALL_RECORDER
             else cast(FastAgentCallRecorder | None, call_recorder)
+        )
+        track(
+            AnalyticsEvent.FAST_AGENT_WRAPPED,
+            {
+                "checkpoint_strategy": self._checkpoint_strategy,
+                "call_recorder": (
+                    "default"
+                    if call_recorder is _DEFAULT_CALL_RECORDER
+                    else "passthrough"
+                    if call_recorder is None
+                    else "custom"
+                ),
+                "has_model_checkpoint_config": model_checkpoint_config is not None,
+                "has_tool_checkpoint_config": tool_checkpoint_config is not None,
+            },
         )
 
     @property

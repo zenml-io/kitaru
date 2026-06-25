@@ -94,6 +94,7 @@ class AnalyticsEvent(StrEnum):
     LANGGRAPH_WRAPPED = "Kitaru LangGraph wrapped"
     LANGGRAPH_RUN_COMPLETED = "Kitaru LangGraph run completed"
     LANGGRAPH_INTERRUPTED = "Kitaru LangGraph interrupted"
+    FAST_AGENT_WRAPPED = "Kitaru fast-agent wrapped"
 
 
 def set_source(suffix_or_source: str) -> None:
