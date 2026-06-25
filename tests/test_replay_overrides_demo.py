@@ -75,6 +75,14 @@ def test_demo_uses_unified_client_replay_api_only() -> None:
     assert "replay_many" not in source
 
 
+def test_demo_waits_on_handles_for_terminal_usage_rollup() -> None:
+    source = DEMO.read_text(encoding="utf-8")
+
+    assert "handle.wait()" in source
+    assert "row.handle.wait()" in source
+    assert "client.executions.get(exec_id)" in source
+
+
 def test_scenarios_fixture_is_batch_ready() -> None:
     import json
 

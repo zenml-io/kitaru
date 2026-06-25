@@ -36,6 +36,7 @@ from utils import decision_summary, diff_decisions, load_support_decision, write
 
 from kitaru import FlowHandle, KitaruClient, ReplaySubmission, diff
 from kitaru.diff import diff_matrix, serialize_diff_matrix, serialize_execution_diff
+from kitaru.replay import ReplayResultRow
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES = ROOT / "fixtures"
@@ -95,19 +96,19 @@ def _write_lines(path: Path, values: list[str]) -> None:
 
 
 def _wait_for_flow_completion(handle: FlowHandle) -> None:
-    """Wait for a flow without asking Kitaru to extract its return value."""
-    while True:
+    """Wait for a flow and let Kitaru persist terminal execution metadata."""
+    try:
+        handle.wait()
+    except Exception as exc:
         status = handle.status
-        if not status.is_finished:
-            time.sleep(1)
-            continue
-        if not status.is_successful:
-            raise RuntimeError(f"Execution {handle.exec_id} finished with {status}.")
-        return
+        if status.is_successful:
+            return
+        message = f"Execution {handle.exec_id} finished with {status}."
+        raise RuntimeError(message) from exc
 
 
-def _wait_for_execution_completion(client: KitaruClient, exec_id: str) -> str:
-    """Wait for an execution and return the replay row status string."""
+def _wait_for_execution_status(client: KitaruClient, exec_id: str) -> str:
+    """Poll an execution ID and return the replay row status string."""
     while True:
         run = client.executions.get(exec_id)
         status = run.status
@@ -119,15 +120,27 @@ def _wait_for_execution_completion(client: KitaruClient, exec_id: str) -> str:
         return "failed"
 
 
+def _wait_for_execution_completion(client: KitaruClient, row: ReplayResultRow) -> str:
+    """Wait for a replay row and return the replay row status string."""
+    if row.handle is not None:
+        try:
+            row.handle.wait()
+            return "completed"
+        except Exception:
+            return _wait_for_execution_status(client, row.replay_exec_id)
+
+    return _wait_for_execution_status(client, row.replay_exec_id)
+
+
 def _wait_for_submission(
     client: KitaruClient,
     submission: ReplaySubmission,
 ) -> ReplaySubmission:
-    """Wait for submitted replay rows without using flow-handle result extraction."""
+    """Wait for submitted replay rows and publish terminal usage metadata."""
     updated_results = [
         replace(
             row,
-            status=_wait_for_execution_completion(client, row.replay_exec_id),
+            status=_wait_for_execution_completion(client, row),
             handle=None,
         )
         for row in submission.results
