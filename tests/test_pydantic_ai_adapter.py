@@ -1107,6 +1107,85 @@ class TestCachedCallsStrategyModelCheckpoints:
         assert beta_id.endswith("_tool_call_3")
 
     @pytest.mark.anyio
+    async def test_replay_model_override_routes_executed_checkpoint_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.messages import ModelResponse, TextPart
+        from pydantic_ai.models.function import FunctionModel
+
+        from kitaru.adapters.pydantic_ai import _model as model_module
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.replay_context import (
+            KITARU_REPLAY_CONTEXT_ENV,
+            ReplayRuntimeContext,
+            get_replay_runtime_context,
+        )
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        original_calls: list[str] = []
+        override_calls: list[str] = []
+        cache_key_payloads: list[dict[str, Any]] = []
+
+        def original_model(_messages: list[Any], _info: Any) -> ModelResponse:
+            original_calls.append("called")
+            return ModelResponse(parts=[TextPart(content="original")])
+
+        def override_model(_messages: list[Any], _info: Any) -> ModelResponse:
+            override_calls.append("called")
+            return ModelResponse(parts=[TextPart(content="override")])
+
+        def fake_infer_model(model_name: str) -> FunctionModel:
+            assert model_name == "test/replacement"
+            return FunctionModel(override_model, model_name="replacement-model")
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "llm_call"),
+            ):
+                return await kwargs["body"]()
+
+        def fake_checkpoint_cache_key(payload: dict[str, Any]) -> str:
+            cache_key_payloads.append(payload)
+            return "cache-key"
+
+        context = ReplayRuntimeContext(
+            at="override_agent_model_request",
+            model_overrides={"override_agent_model_request": "test/replacement"},
+        )
+        monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+        get_replay_runtime_context.cache_clear()
+        monkeypatch.setattr(model_module, "infer_model", fake_infer_model)
+        monkeypatch.setattr(model_module, "run_async_in_checkpoint", fake_checkpoint)
+        monkeypatch.setattr(
+            model_module,
+            "checkpoint_cache_key",
+            fake_checkpoint_cache_key,
+        )
+
+        model = KitaruModel(
+            FunctionModel(original_model, model_name="original-model"),
+            capture=CapturePolicy(
+                save_prompts=False,
+                save_responses=False,
+                correlate_otel_spans=False,
+            ),
+            agent_name="override_agent",
+            checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="override_flow"):
+            response = await model.request([], None, self._model_request_parameters())
+
+        assert response.model_name == "replacement-model"
+        assert original_calls == []
+        assert override_calls == ["called"]
+        assert cache_key_payloads[0]["replay_model_override"] == "test/replacement"
+        get_replay_runtime_context.cache_clear()
+
+    @pytest.mark.anyio
     async def test_calls_strategy_model_checkpoint_uses_structural_io_refs(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -749,12 +749,25 @@ def _is_llm_checkpoint(checkpoint: _Checkpoint) -> bool:
     return str(checkpoint.checkpoint_type or "").lower() == "llm_call"
 
 
+def _is_tool_checkpoint(checkpoint: _Checkpoint) -> bool:
+    return str(checkpoint.checkpoint_type or "").lower() == "tool_call"
+
+
 def _validate_model_override(checkpoint: _Checkpoint) -> None:
     if _is_llm_checkpoint(checkpoint):
         return
     raise KitaruUsageError(
         f"Model override target '{checkpoint.invocation_id}' is not an LLM "
         "checkpoint and cannot honor a model swap."
+    )
+
+
+def _validate_code_override(checkpoint: _Checkpoint) -> None:
+    if _is_tool_checkpoint(checkpoint):
+        return
+    raise KitaruUsageError(
+        f"Code override target '{checkpoint.invocation_id}' is not a tool "
+        "checkpoint and cannot honor a code swap."
     )
 
 
@@ -807,14 +820,17 @@ def _build_effective_overrides(
         _put_target_override(effective, checkpoint, entry)
 
     for invocation_id, entry in effective.items():
-        if "model" not in entry:
+        if "model" not in entry and "code" not in entry:
             continue
         checkpoint = next(
             checkpoint
             for checkpoint in checkpoints
             if checkpoint.invocation_id == invocation_id
         )
-        _validate_model_override(checkpoint)
+        if "model" in entry:
+            _validate_model_override(checkpoint)
+        if "code" in entry:
+            _validate_code_override(checkpoint)
 
     document = ReplayPlanDocument(
         checkpoint_overrides={

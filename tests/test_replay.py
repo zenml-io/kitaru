@@ -468,6 +468,21 @@ def test_model_override_rejects_non_llm_checkpoint() -> None:
         )
 
 
+def test_code_override_rejects_non_tool_checkpoint() -> None:
+    step = _step(
+        name="summarize",
+        invocation_id="summarize",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="checkpoint",
+    )
+    with pytest.raises(KitaruUsageError, match="not a tool checkpoint"):
+        build_replay_plan(
+            run=_run(step),
+            at="summarize",
+            invocation_overrides={"summarize": {"code": "mocks.summarize"}},
+        )
+
+
 def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
     monkeypatch,
 ) -> None:
