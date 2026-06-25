@@ -474,7 +474,27 @@ Capture policy is observability-only — it never changes tool execution.
 
 When `emit_child_events=True` (the default) and the wrapped model runs inside a Kitaru checkpoint, the adapter records each observed Pydantic AI model request as a canonical `llm_usage_v1` record. The record uses the model event ID as its stable identity and includes the Pydantic AI `RequestUsage` payload when the model response exposes one.
 
-The Pydantic AI adapter does not run a separate cost calculator and does not receive provider-reported dollar cost through this path. In practice, these records are usually token records with empty cost fields. If a model response has no usage payload, Kitaru can still record that the model request happened; the token fields simply remain empty.
+The Pydantic AI adapter does not receive provider-reported dollar cost through this path. Without a user calculator, Kitaru estimates with `genai-prices` for each model event when Pydantic AI exposes a supported provider, model name, and priceable token counts. If a model response has no usage payload, Kitaru can still record that the model request happened; the token fields simply remain empty.
+
+If you know the pricing you want to apply, pass `cost_calculator=` to `KitaruAgent`. Kitaru calls it with a `PydanticAIUsageSummary` containing the model name, provider name when Pydantic AI exposes it, and normalized token counts. A non-negative return value is recorded as `estimated_cost_usd`, and user calculators take priority over the built-in estimate.
+
+```python
+from kitaru.adapters.pydantic_ai import KitaruAgent, PydanticAIUsageSummary
+
+
+def calculate_agent_cost(usage: PydanticAIUsageSummary) -> float | None:
+    if usage.input_tokens is None or usage.output_tokens is None:
+        return None
+    # Replace these example rates with your own contract or billing source.
+    return (usage.input_tokens / 1_000_000 * 1.25) + (
+        usage.output_tokens / 1_000_000 * 10.0
+    )
+
+
+durable_agent = KitaruAgent(agent, cost_calculator=calculate_agent_cost)
+```
+
+If Kitaru cannot identify the provider/model for a model event, or `genai-prices` cannot price it, the usage record keeps the tokens and leaves cost empty. Disable automatic estimates with `KITARU_LLM_ESTIMATED_COSTS=off` when you want token-only adapter records unless a user calculator is configured.
 
 In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded as `reused_not_incurred`, so replay and cache hits do not look like fresh spend in the execution summary. The canonical records roll up after `FlowHandle.wait()` or `FlowHandle.get()` observes the terminal execution. Setting `emit_child_events=False` disables the model/tool event tracking that produces these per-model usage records.
 

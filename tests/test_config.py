@@ -28,6 +28,7 @@ from kitaru.config import (
     KITARU_CONFIG_PATH_ENV,
     KITARU_DEFAULT_MODEL_ENV,
     KITARU_IMAGE_ENV,
+    KITARU_LLM_ESTIMATED_COSTS_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_MODEL_REGISTRY_ENV,
@@ -3657,6 +3658,7 @@ def test_configure_sets_runtime_execution_defaults() -> None:
         stack="gpu-prod",
         cache=False,
         retries=2,
+        llm_estimated_costs="off",
         image={
             "base_image": "python:3.12-slim",
             "environment": {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
@@ -3666,6 +3668,7 @@ def test_configure_sets_runtime_execution_defaults() -> None:
     assert snapshot.stack == "gpu-prod"
     assert snapshot.cache is False
     assert snapshot.retries == 2
+    assert snapshot.llm_estimated_costs == "off"
     assert snapshot.image is not None
     assert snapshot.image.base_image == "python:3.12-slim"
     assert snapshot.image.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
@@ -3673,13 +3676,20 @@ def test_configure_sets_runtime_execution_defaults() -> None:
 
 def test_configure_can_clear_runtime_override_fields() -> None:
     """configure should allow clearing previously set runtime overrides."""
-    configure(stack="gpu-prod", cache=False, retries=2)
+    configure(stack="gpu-prod", cache=False, retries=2, llm_estimated_costs="off")
 
-    snapshot = configure(stack=None, cache=None, retries=None, image=None)
+    snapshot = configure(
+        stack=None,
+        cache=None,
+        retries=None,
+        image=None,
+        llm_estimated_costs=None,
+    )
 
     assert snapshot.stack is None
     assert snapshot.cache is None
     assert snapshot.retries is None
+    assert snapshot.llm_estimated_costs is None
     assert snapshot.image is None
 
 
@@ -3879,6 +3889,7 @@ def test_resolve_execution_config_applies_phase10_precedence(
 stack = "project-stack"
 cache = false
 retries = 1
+llm_estimated_costs = "off"
 
 [tool.kitaru.image]
 base_image = "python:3.12"
@@ -3892,6 +3903,7 @@ SHARED = "project"
     monkeypatch.setenv(KITARU_STACK_ENV, "env-stack")
     monkeypatch.setenv(KITARU_CACHE_ENV, "true")
     monkeypatch.setenv(KITARU_RETRIES_ENV, "3")
+    monkeypatch.setenv(KITARU_LLM_ESTIMATED_COSTS_ENV, "auto")
     monkeypatch.setenv(
         KITARU_IMAGE_ENV,
         (
@@ -3914,6 +3926,7 @@ SHARED = "project"
             decorator_overrides=KitaruConfig(
                 cache=True,
                 retries=5,
+                llm_estimated_costs="off",
                 image=ImageSettings(
                     environment={"FROM_DECORATOR": "1", "SHARED": "decorator"}
                 ),
@@ -3921,6 +3934,7 @@ SHARED = "project"
             invocation_overrides=KitaruConfig(
                 stack="invocation-stack",
                 retries=6,
+                llm_estimated_costs="auto",
                 image=ImageSettings(
                     environment={"FROM_INVOCATION": "1", "SHARED": "invocation"}
                 ),
@@ -3932,6 +3946,7 @@ SHARED = "project"
     assert resolved.stack_source == "invocation"
     assert resolved.cache is True
     assert resolved.retries == 6
+    assert resolved.llm_estimated_costs == "auto"
     assert resolved.image is not None
     assert resolved.image.base_image == "python:3.13"
     assert resolved.image.environment == {

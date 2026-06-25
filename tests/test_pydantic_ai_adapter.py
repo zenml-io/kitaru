@@ -32,6 +32,153 @@ from kitaru.adapters.pydantic_ai._utils import (
     with_default_type,
 )
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
+
+
+def test_pydantic_ai_tracker_records_model_call_estimated_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.usage import RequestUsage
+
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+    from kitaru.adapters.pydantic_ai import _tracking
+
+    logged: dict[str, Any] = {}
+
+    def fake_log(**metadata: Any) -> None:
+        logged.update(metadata)
+
+    def calculate_cost(usage: object) -> float:
+        summary = _tracking.PydanticAIUsageSummary.model_validate(usage)
+        assert summary.adapter_name == "pydantic_ai"
+        assert summary.provider == "test-provider"
+        assert summary.model_name == "test-model"
+        assert summary.input_tokens == 3
+        assert summary.output_tokens == 4
+        assert summary.total_tokens == 7
+        return 0.34
+
+    monkeypatch.setattr(_tracking.kitaru, "log", fake_log)
+
+    tracker = _tracking.EventTracker(
+        agent_name="agent",
+        cost_calculator=calculate_cost,
+    )
+    event_id, context = tracker.start_model_event()
+    tracker.record_model_event(
+        event_id,
+        context,
+        status="completed",
+        duration_ms=1.0,
+        artifacts={},
+        model_name="test-model",
+        provider_name="test-provider",
+        usage=RequestUsage(input_tokens=3, output_tokens=4),
+    )
+
+    tracker.persist()
+
+    usage_records = logged[LLM_USAGE_METADATA_KEY]
+    assert len(usage_records) == 1
+    record = next(iter(usage_records.values()))
+    assert record["model"] == "test-model"
+    assert record["provider"] == "test-provider"
+    assert record["usage"]["input_tokens"] == 3
+    assert record["usage"]["output_tokens"] == 4
+    assert record["usage"]["total_tokens"] == 7
+    assert record["cost"]["actual_cost_usd"] is None
+    assert record["cost"]["estimated_cost_usd"] == 0.34
+    assert record["cost"]["source"] == "calculator"
+    assert record["cost"]["source_label"] == "pydantic_ai.cost_calculator"
+
+
+def test_pydantic_ai_tracker_records_default_genai_prices_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.usage import RequestUsage
+
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+    from kitaru.adapters.pydantic_ai import _tracking
+
+    logged: dict[str, Any] = {}
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.45)
+
+    def fake_log(**metadata: Any) -> None:
+        logged.update(metadata)
+
+    monkeypatch.setattr(_tracking.kitaru, "log", fake_log)
+
+    tracker = _tracking.EventTracker(agent_name="agent")
+    event_id, context = tracker.start_model_event()
+    tracker.record_model_event(
+        event_id,
+        context,
+        status="completed",
+        duration_ms=1.0,
+        artifacts={},
+        model_name="gpt-4o-mini",
+        provider_name="openai",
+        usage=RequestUsage(input_tokens=3, output_tokens=4),
+    )
+
+    tracker.persist()
+
+    record = next(iter(logged[LLM_USAGE_METADATA_KEY].values()))
+    assert record["cost"]["estimated_cost_usd"] == 0.45
+    assert record["cost"]["source"] == "calculator"
+    assert record["cost"]["source_label"] == "genai-prices"
+    assert record["cost"]["pricing_version"].startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+            "model_ref": "gpt-4o-mini",
+            "provider_id": "openai",
+        }
+    ]
+
+
+def test_pydantic_ai_tracker_cost_calculator_failure_records_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai.usage import RequestUsage
+
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+    from kitaru.adapters.pydantic_ai import _tracking
+
+    logged: dict[str, Any] = {}
+
+    def fake_log(**metadata: Any) -> None:
+        logged.update(metadata)
+
+    def fail_cost(_usage: object) -> float:
+        raise RuntimeError("pricing down")
+
+    monkeypatch.setattr(_tracking.kitaru, "log", fake_log)
+
+    tracker = _tracking.EventTracker(agent_name="agent", cost_calculator=fail_cost)
+    event_id, context = tracker.start_model_event()
+    tracker.record_model_event(
+        event_id,
+        context,
+        status="completed",
+        duration_ms=1.0,
+        artifacts={},
+        model_name="test-model",
+        usage=RequestUsage(input_tokens=1, output_tokens=2),
+    )
+
+    tracker.persist()
+
+    record = next(iter(logged[LLM_USAGE_METADATA_KEY].values()))
+    assert record["cost"]["source"] == "calculator_error"
+    assert record["cost"]["source_label"] == "pydantic_ai.cost_calculator"
+    assert record["cost"]["estimated_cost_usd"] is None
+    assert any("cost calculator failed" in warning for warning in record["warnings"])
 
 
 def test_pydantic_ai_tracker_records_model_call_without_usage(
@@ -67,6 +214,7 @@ def test_pydantic_ai_tracker_records_model_call_without_usage(
     assert record["model"] == "test-model"
     assert record["usage"]["total_tokens"] is None
     assert record["cost"]["source"] == "none"
+    assert record["cost"]["source_label"] is None
 
 
 def test_synthetic_checkpoint_marks_flow_result_non_candidate(

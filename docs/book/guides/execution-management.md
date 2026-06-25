@@ -137,7 +137,11 @@ kitaru executions statistics --group-by status
 kitaru executions statistics --group-by status --metric duration_avg:duration:avg
 
 # Daily execution health, script-friendly JSON
-kitaru executions statistics --group-by time:day --group-by status -o json
+kitaru executions statistics --group-by time:day --group-by status --output json
+kitaru executions statistics --group-by status -o json
+
+# Second page of grouped status results
+kitaru executions statistics --group-by status --page 2 --size 20
 
 # Sum a numeric execution metadata key by flow
 kitaru executions statistics \
@@ -171,6 +175,12 @@ completed   12           43.2
 failed      2            18.7
 running     1
 ```
+
+Statistics JSON output uses the shared `--output json` / `-o json` option.
+When `--page` or `--size` is used, `group_count` is the number of groups in the
+current response page. Like other Kitaru CLI JSON outputs, statistics JSON does
+not include separate pagination metadata. `--max-groups` limits the total groups
+returned by the statistics query before CLI pagination is applied.
 
 Supported groupings are:
 
@@ -232,16 +242,66 @@ writes two execution-level views:
 
 Cost fields are intentionally split:
 
-- `actual_cost_usd` means the provider reported a cost. Claude Agent SDK exposes
-  this via `total_cost_usd`.
-- `estimated_cost_usd` means Kitaru used an adapter cost calculator. OpenAI
-  Agents and LangGraph can report this when you configure their calculator hook.
+- `actual_cost_usd` means the provider reported a final cost for this exact
+  call. Treat this as observability, not as a billing invoice.
+- `estimated_cost_usd` means Kitaru or an SDK calculated a cost from token counts
+  and pricing data. Direct `kitaru.llm()` calls and framework adapters write this
+  field automatically when Kitaru has reliable provider, model, and token data
+  that `genai-prices` can price. Claude Agent SDK `total_cost_usd` is also
+  recorded here because it is an SDK-side estimate, not a provider invoice line.
+  Adapter-level user calculators also write this field.
 - `display_cost_usd` uses actual cost for a record when present, otherwise
   estimated cost. Treat it as observability, not as a billing invoice.
 
-Direct `kitaru.llm()` records token counts and latency, but it does not invent a
-cost number. If the provider call does not return a real cost source, cost stays
-empty and the execution summary increments `records_without_cost_count`.
+Automatic `genai-prices` cost estimates are on by default. After the provider
+or adapter call succeeds, Kitaru sends the known provider, model name, and token
+usage to [`genai-prices`](https://github.com/pydantic/genai-prices), stores the
+returned value as `estimated_cost_usd`, and records provenance like this:
+
+```text
+cost.source = "calculator"
+cost.source_label = "genai-prices"
+cost.pricing_version = "genai-prices:<installed package version>"
+actual_cost_usd = null
+estimated_cost_usd = <calculated USD estimate>
+```
+
+The provider or adapter call always comes first. If `genai-prices` is missing,
+cannot price the model, returns an invalid value, or cannot read its price data,
+Kitaru still returns the model response and records the token counts. The
+`llm_usage_v1` record gets a warning and no estimated cost, so the execution
+summary increments `records_without_cost_count` for that record.
+
+Kitaru does not guess when a usage record combines multiple models or lacks a
+trusted provider/model identity. In that case it records tokens only. User
+`cost_calculator=` hooks still take priority over the built-in estimate; if a
+user calculator fails, Kitaru records that calculator error instead of hiding it
+with a fallback estimate.
+
+To disable automatic `genai-prices` estimates for a process, set:
+
+```bash
+export KITARU_LLM_ESTIMATED_COSTS=off
+```
+
+You can also set the runtime policy from Python:
+
+```python
+import kitaru
+
+kitaru.configure(llm_estimated_costs="off")  # or "auto" to enable again
+```
+
+Use `[tool.kitaru] llm_estimated_costs = "off"` in `pyproject.toml` when you want
+a repository default. The environment variable and `kitaru.configure(...)` are
+useful for temporary opt-out without editing the project file.
+
+{% hint style="warning" %}
+`estimated_cost_usd` is not an invoice. It depends on the installed
+`genai-prices` package and its price data. Providers can change prices, apply
+account-specific discounts, or round bills differently. Use the estimate for
+observability and trend analysis, not financial reconciliation.
+{% endhint %}
 
 Useful statistics queries:
 

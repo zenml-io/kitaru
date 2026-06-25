@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-25
+
+### Added
+- Added adapter-owned cost calculator inputs for Claude Agent SDK, Gemini Interactions, and Pydantic AI, so adapter users can record estimated LLM costs with their own calculator hooks.
+- Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
+- Added estimated-cost recording for direct `kitaru.llm()` calls when provider usage includes token counts and `genai-prices` has pricing for the model, with config and environment controls to leave estimation on automatic or opt out. Cost estimation is best effort: a pricing-lookup miss never turns a successful LLM call into a failure.
+- Added `--page` and `--size` pagination options to `kitaru executions statistics`.
+
+### Changed
+- Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
+
 ### Fixed
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
 

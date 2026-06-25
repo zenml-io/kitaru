@@ -2,7 +2,7 @@
 
 import asyncio
 import weakref
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from contextlib import suppress
 from dataclasses import replace
 from functools import partial
@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from kitaru._llm_usage import (
     build_usage_record,
-    estimate_calculated_cost_usd,
+    calculated_or_genai_cost_metadata,
     log_usage_record,
 )
 from kitaru.adapters._result_identity import canonicalize_result_model
@@ -80,6 +80,32 @@ _AGENT_BEHAVIOR_CACHE_ATTRIBUTES = (
     "mcp_servers",
     "mcp_config",
 )
+
+
+def _single_openai_usage_model(usage: OpenAIUsageSummary | None) -> str | None:
+    """Return a model only when runner usage is known to describe one model."""
+    if usage is None:
+        return None
+    model_names: set[str] = set()
+    raw = usage.raw or {}
+    for key in ("model", "model_name"):
+        value = raw.get(key)
+        if isinstance(value, str) and value:
+            model_names.add(value)
+    for key in ("models", "model_names"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            model_names.update(item for item in value if isinstance(item, str) and item)
+    for key in ("model_usage", "model_usages"):
+        value = raw.get(key)
+        if isinstance(value, Mapping):
+            model_names.update(item for item in value if isinstance(item, str) and item)
+    if len(model_names) != 1:
+        return None
+    model_name = next(iter(model_names))
+    if usage.model_name is not None and usage.model_name != model_name:
+        return None
+    return model_name
 
 
 def _is_openai_agent(value: Any) -> bool:
@@ -945,7 +971,12 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
+            return self._build_and_finalize_run_result(
+                sdk_result,
+                agent=agent,
+                run_config=run_config,
+                tracker=tracker,
+            )
 
     def _run_sdk_sync(
         self,
@@ -964,7 +995,12 @@ class KitaruRunner:
                 run_config=run_config,
                 context=context,
             )
-            return self._build_and_finalize_run_result(sdk_result, tracker=tracker)
+            return self._build_and_finalize_run_result(
+                sdk_result,
+                agent=agent,
+                run_config=run_config,
+                tracker=tracker,
+            )
 
     async def _run_sdk_stream_async(
         self,
@@ -992,6 +1028,8 @@ class KitaruRunner:
                 )
                 result = self._build_and_finalize_run_result(
                     sdk_result,
+                    agent=agent,
+                    run_config=run_config,
                     tracker=tracker,
                 )
             except Exception as exc:
@@ -1026,6 +1064,8 @@ class KitaruRunner:
                 )
                 result = self._build_and_finalize_run_result(
                     sdk_result,
+                    agent=agent,
+                    run_config=run_config,
                     tracker=tracker,
                 )
             except Exception as exc:
@@ -1064,12 +1104,16 @@ class KitaruRunner:
         self,
         sdk_result: Any,
         *,
+        agent: Any,
+        run_config: Any,
         tracker: Any,
     ) -> OpenAIRunResult:
         return self._finalize_run_result(
             build_run_result(
                 sdk_result,
                 strict_sdk_version=self._strict_sdk_version,
+                agent=agent,
+                run_config=run_config,
                 context_serializer=self._context_serializer,
                 strict_context=self._strict_context,
                 save_interruption_payloads=self._capture.save_interruption_payloads,
@@ -1097,14 +1141,21 @@ class KitaruRunner:
             if result.usage is not None
             else None
         )
-        estimated_cost = estimate_calculated_cost_usd(
+        usage_payload = (
+            usage_summary.model_dump(mode="json") if usage_summary is not None else None
+        )
+        cost_metadata = calculated_or_genai_cost_metadata(
             calculator=self._cost_calculator,
-            usage=usage_summary,
+            calculator_usage=usage_summary,
+            genai_provider="openai",
+            genai_model=_single_openai_usage_model(usage_summary),
+            genai_usage=usage_payload,
             warnings=warnings,
             adapter_name="OpenAI Agents",
+            calculator_source_label="openai_agents.cost_calculator",
         )
         updates["warnings"] = warnings
-        updates["estimated_cost_usd"] = estimated_cost
+        updates["estimated_cost_usd"] = cost_metadata.estimated_cost_usd
         finalized = result.model_copy(update=updates)
         if self._capture.save_usage:
             usage_record = build_usage_record(
@@ -1115,11 +1166,10 @@ class KitaruRunner:
                 record_id=tracker.run_label,
                 usage=finalized.usage,
                 model=usage_summary.model_name if usage_summary is not None else None,
-                estimated_cost_usd=finalized.estimated_cost_usd,
-                cost_source=(
-                    "calculator" if finalized.estimated_cost_usd is not None else "none"
-                ),
-                cost_source_label="openai_agents.cost_calculator",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 status=finalized.status,
                 billing_effect="incurred"
                 if finalized.status == "completed"

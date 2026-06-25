@@ -32,7 +32,11 @@ from ._streaming import (
     CLAUDE_STREAM_STARTED,
     CLAUDE_STREAM_TERMINAL_EVENT_KINDS,
 )
-from ._types import ClaudeRunRequest, ClaudeRunResult
+from ._types import (
+    ClaudeRunRequest,
+    ClaudeRunResult,
+    ClaudeUsageSummary,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointRuntime,
@@ -58,6 +62,7 @@ __all__ = [
     "ClaudeRunEvent",
     "ClaudeRunRequest",
     "ClaudeRunResult",
+    "ClaudeUsageSummary",
     "KitaruClaudeRunner",
     "allowed_tool_name",
     "create_kitaru_sandbox_mcp_server",

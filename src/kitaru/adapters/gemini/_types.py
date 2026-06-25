@@ -552,6 +552,24 @@ class GeminiInteractionFunctionCall(BaseModel):
         )
 
 
+class GeminiUsageSummary(BaseModel):
+    """Kitaru-owned usage input for Gemini Interactions cost calculators."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter_name: Literal["gemini_interactions"] = "gemini_interactions"
+    provider: str | None = "google_gemini"
+    model_name: str | None = None
+    requested_model: str | None = None
+    resolved_model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    raw_usage: dict[str, Any] | None = None
+
+
 class GeminiInteractionResult(BaseModel):
     """Serializable output from one stable Gemini interaction boundary."""
 
@@ -567,6 +585,7 @@ class GeminiInteractionResult(BaseModel):
     environment_id: str | None = None
     steps: list[GeminiInteractionStepSummary] = Field(default_factory=list)
     usage: dict[str, Any] | None = None
+    estimated_cost_usd: float | None = None
     duration_ms: float | None = None
     poll_count: int = 0
     sdk_version: str = "unknown"

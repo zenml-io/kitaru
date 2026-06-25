@@ -9,8 +9,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from kitaru._llm_usage import (
+    CalculatedCostMetadata,
     add_optional_token_count,
     build_usage_record,
+    calculated_or_genai_cost_metadata,
+    coerce_cost_usd,
     log_usage_record,
     token_usage_from_mapping,
 )
@@ -34,7 +37,11 @@ from ._tracking import (
     EventTracker,
     tracker_scope,
 )
-from ._types import ClaudeRunRequest, ClaudeRunResult
+from ._types import (
+    ClaudeRunRequest,
+    ClaudeRunResult,
+    ClaudeUsageSummary,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointStrategy,
@@ -60,6 +67,70 @@ def _partial_messages_unavailable_warning() -> str:
         "caller-provided options or because the installed Claude Agent SDK does "
         "not expose partial-message options. The invocation will still run, but "
         "live events may be coarse until the SDK yields complete messages."
+    )
+
+
+def _single_model_name(model_usage: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(model_usage, Mapping):
+        return None
+    names = [str(name) for name in model_usage if isinstance(name, str) and name]
+    return names[0] if len(names) == 1 else None
+
+
+def _usage_summary_from_payload(
+    payload: ClaudeInvocationPayload,
+    canonical_usage: Mapping[str, Any] | None,
+) -> ClaudeUsageSummary | None:
+    if canonical_usage is None and payload.model_usage is None:
+        return None
+    token_usage = token_usage_from_mapping(canonical_usage)
+    return ClaudeUsageSummary(
+        model_name=_single_model_name(payload.model_usage),
+        input_tokens=token_usage["input_tokens"],
+        output_tokens=token_usage["output_tokens"],
+        total_tokens=token_usage["total_tokens"],
+        cached_input_tokens=token_usage["cached_input_tokens"],
+        reasoning_tokens=token_usage["reasoning_tokens"],
+        raw_usage=token_usage["raw"],
+        raw_model_usage=payload.model_usage,
+    )
+
+
+def _usage_summary_has_token_counts(usage: ClaudeUsageSummary | None) -> bool:
+    if usage is None:
+        return False
+    return any(
+        value is not None
+        for value in (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.total_tokens,
+            usage.cached_input_tokens,
+            usage.reasoning_tokens,
+        )
+    )
+
+
+def _sdk_cost_metadata(
+    raw_cost: float | None,
+    usage: ClaudeUsageSummary | None,
+    warnings: list[str],
+) -> CalculatedCostMetadata | None:
+    if raw_cost is None:
+        return None
+    estimated_cost = coerce_cost_usd(raw_cost)
+    if estimated_cost is None:
+        warnings.append(
+            "Claude Agent SDK returned an invalid total_cost_usd; falling back "
+            "to the configured cost calculator or genai-prices."
+        )
+        return None
+    if estimated_cost == 0.0 and _usage_summary_has_token_counts(usage):
+        return None
+    return CalculatedCostMetadata(
+        estimated_cost_usd=estimated_cost,
+        cost_source="calculator",
+        cost_source_label="claude_agent_sdk.total_cost_usd",
     )
 
 
@@ -192,6 +263,7 @@ class KitaruClaudeRunner:
         capture: ClaudeCapturePolicy | None = None,
         checkpoint_config: CheckpointConfig | None = None,
         allow_direct_execution_inside_checkpoint: bool = False,
+        cost_calculator: Callable[[ClaudeUsageSummary], float | None] | None = None,
     ) -> None:
         if not isinstance(name, str) or not name.strip():
             raise KitaruUsageError("KitaruClaudeRunner requires a stable `name`.")
@@ -212,6 +284,7 @@ class KitaruClaudeRunner:
         self._allow_direct_execution_inside_checkpoint = (
             allow_direct_execution_inside_checkpoint
         )
+        self._cost_calculator = cost_calculator
         self._checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             checkpoint_config,
             context="checkpoint_config",
@@ -225,6 +298,7 @@ class KitaruClaudeRunner:
                 "allow_direct_execution_inside_checkpoint": (
                     self._allow_direct_execution_inside_checkpoint
                 ),
+                "has_cost_calculator": cost_calculator is not None,
             },
         )
 
@@ -534,6 +608,21 @@ class KitaruClaudeRunner:
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
         canonical_usage = _canonical_usage_payload(payload)
+        usage_summary = _usage_summary_from_payload(payload, canonical_usage)
+        cost_metadata = _sdk_cost_metadata(payload.cost_usd, usage_summary, warnings)
+        if cost_metadata is None:
+            cost_metadata = calculated_or_genai_cost_metadata(
+                calculator=self._cost_calculator,
+                calculator_usage=usage_summary,
+                genai_provider="anthropic",
+                genai_model=usage_summary.model_name
+                if usage_summary is not None
+                else None,
+                genai_usage=canonical_usage,
+                warnings=warnings,
+                adapter_name="Claude Agent SDK",
+                calculator_source_label="claude_agent_sdk.cost_calculator",
+            )
         if self._capture.save_usage:
             usage_record = build_usage_record(
                 adapter="claude_agent_sdk",
@@ -542,11 +631,14 @@ class KitaruClaudeRunner:
                 event_id=tracker.run_label,
                 record_id=tracker.run_label,
                 usage=canonical_usage,
-                actual_cost_usd=payload.cost_usd,
-                cost_source=(
-                    "provider_reported" if payload.cost_usd is not None else "none"
-                ),
-                cost_source_label="claude_agent_sdk.total_cost_usd",
+                model=usage_summary.model_name if usage_summary is not None else None,
+                provider=usage_summary.provider
+                if usage_summary is not None
+                else "anthropic",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 latency_ms=payload.duration_api_ms or payload.duration_ms,
                 status="completed",
                 billing_effect="incurred",

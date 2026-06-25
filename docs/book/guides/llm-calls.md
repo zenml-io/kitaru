@@ -5,7 +5,12 @@ icon: robot
 
 # Tracked LLM Calls
 
-`kitaru.llm()` makes a single model call and records it as a durable boundary: prompt, response, token usage, and latency are all captured automatically. That capture is the enabler for replay — once a call is recorded, you can reproduce the run faithfully and replay it with one input changed (a different model, a different prompt) to diff the effect of your change.
+`kitaru.llm()` makes a single model call and records it as a durable boundary. That capture is the enabler for replay — once a call is recorded, you can reproduce the run faithfully and replay it with one input changed (a different model, a different prompt) to diff the effect of your change. Each call captures automatically:
+
+- prompt artifact capture
+- response artifact capture
+- usage/latency metadata logging
+- automatic estimated-cost metadata for direct OpenAI and Anthropic calls
 
 {% hint style="info" %}
 If you want the full setup path from stored credentials to an actual flow run,
@@ -72,6 +77,31 @@ Built-in runtime support covers:
 
 Ollama and OpenRouter use the OpenAI-compatible API, so they share the
 `kitaru[openai]` extra — no additional packages needed.
+
+## Usage and estimated costs
+
+Each successful direct `kitaru.llm()` call records one `llm_usage_v1` metadata
+record with token counts, latency, model information, and cost fields. For
+OpenAI and Anthropic models, estimated cost tracking is on by default and uses
+[`genai-prices`](https://github.com/pydantic/genai-prices).
+
+Kitaru stores that value as `estimated_cost_usd`, not `actual_cost_usd`. If
+pricing fails or the model cannot be priced, the LLM call still succeeds and the
+usage record keeps the tokens plus a warning. The same setting also controls built-in `genai-prices` estimates for framework adapters. Disable automatic estimates with:
+
+```bash
+export KITARU_LLM_ESTIMATED_COSTS=off
+```
+
+or for the current Python process:
+
+```python
+kitaru.configure(llm_estimated_costs="off")
+```
+
+See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata)
+for how checkpoint-level records roll up into execution summaries and
+statistics.
 
 ## Credential resolution order
 

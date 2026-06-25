@@ -10,7 +10,7 @@ from typing import Any, Literal, cast, overload
 from kitaru._llm_usage import (
     add_optional_token_count,
     build_usage_record,
-    estimate_calculated_cost_usd,
+    calculated_or_genai_cost_metadata,
     log_usage_record,
     token_usage_from_mapping,
 )
@@ -1005,15 +1005,16 @@ class KitaruGraphRunner:
         )
         if usage is None and self._capture.save_usage:
             usage = self._usage_from_output(output)
-        estimated_cost = (
-            estimate_calculated_cost_usd(
-                calculator=self._cost_calculator,
-                usage=usage,
-                warnings=warnings,
-                adapter_name="LangGraph",
-            )
-            if self._capture.save_usage
-            else None
+        usage_payload = usage.model_dump(mode="json") if usage is not None else None
+        cost_metadata = calculated_or_genai_cost_metadata(
+            calculator=self._cost_calculator,
+            calculator_usage=usage,
+            genai_provider=usage.provider_name if usage is not None else None,
+            genai_model=usage.model_name if usage is not None else None,
+            genai_usage=usage_payload,
+            warnings=warnings,
+            adapter_name="LangGraph",
+            calculator_source_label="langgraph.cost_calculator",
         )
         if self._capture.save_usage:
             usage_record = build_usage_record(
@@ -1022,11 +1023,12 @@ class KitaruGraphRunner:
                 call_name=self._name,
                 event_id=tracker.run_label,
                 record_id=tracker.run_label,
-                usage=usage.model_dump(mode="json") if usage is not None else None,
+                usage=usage_payload,
                 model=usage.model_name if usage is not None else None,
-                estimated_cost_usd=estimated_cost,
-                cost_source="calculator" if estimated_cost is not None else "none",
-                cost_source_label="langgraph.cost_calculator",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
                 status=status,
                 billing_effect="incurred" if status == "completed" else "unknown",
                 cache_status="executed",
@@ -1055,7 +1057,7 @@ class KitaruGraphRunner:
                 else None
             ),
             usage=usage,
-            estimated_cost_usd=estimated_cost,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             warnings=warnings,
         )
         return result
@@ -1903,6 +1905,7 @@ class KitaruGraphRunner:
     ) -> LangGraphUsageSummary | None:
         usages: list[Any] = []
         model_names: set[str] = set()
+        provider_names: set[str] = set()
         seen_event_ids: set[str] = set()
         for event in tracker.events:
             if event.kind != "model_call" or event.status != "completed":
@@ -1919,7 +1922,20 @@ class KitaruGraphRunner:
             metadata_model_name = event.metadata.get("model_name")
             if isinstance(metadata_model_name, str) and metadata_model_name:
                 model_names.add(metadata_model_name)
-        return _usage_summary_from_payloads(usages, model_names=model_names)
+            for provider_key in (
+                "model_provider",
+                "ls_provider",
+                "provider_name",
+                "provider",
+            ):
+                metadata_provider = event.metadata.get(provider_key)
+                if isinstance(metadata_provider, str) and metadata_provider.strip():
+                    provider_names.add(metadata_provider)
+        return _usage_summary_from_payloads(
+            usages,
+            model_names=model_names,
+            provider_names=provider_names,
+        )
 
     def _usage_from_output(self, output: Any) -> LangGraphUsageSummary | None:
         return _usage_summary_from_payloads(_find_usages(output, max_depth=6))
@@ -2173,6 +2189,7 @@ def _usage_summary_from_payloads(
     payloads: Sequence[Any],
     *,
     model_names: set[str] | None = None,
+    provider_names: set[str] | None = None,
 ) -> LangGraphUsageSummary | None:
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -2217,8 +2234,12 @@ def _usage_summary_from_payloads(
     model_name = None
     if model_names is not None and len(model_names) == 1:
         model_name = next(iter(model_names))
+    provider_name = None
+    if provider_names is not None and len(provider_names) == 1:
+        provider_name = next(iter(provider_names))
     return LangGraphUsageSummary(
         model_name=model_name,
+        provider_name=provider_name,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
