@@ -1,19 +1,23 @@
-"""Provider-free fast-agent + Kitaru adapter example.
+"""OpenAI-backed fast-agent + Kitaru adapter example.
 
 Run:
     uv sync --extra fast-agent --no-dev
     uv run kitaru init
+    export OPENAI_API_KEY='sk-...'
     uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py
 
 The example uses real fast-agent AgentApp/ToolAgent objects, a local Python
-``uppercase`` tool, and an in-memory LLM. No provider API key is needed.
+``uppercase`` tool, and OpenAI's inexpensive ``gpt-5-nano`` model by default.
+Use ``--provider memory`` for a no-network deterministic variant.
 """
 
+import argparse
 import asyncio
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from fast_agent.agents.agent_types import AgentConfig
 from fast_agent.agents.tool_agent import ToolAgent
@@ -34,6 +38,9 @@ from kitaru.client import KitaruClient
 
 if not hasattr(prompt_message_extended_module, "PromptMessageExtended"):
     prompt_message_extended_module.PromptMessageExtended = PromptMessageExtended
+
+DEFAULT_OPENAI_MODEL = "gpt-5-nano?reasoning=low"
+DemoProvider = Literal["openai", "memory"]
 
 
 @dataclass
@@ -79,7 +86,9 @@ class FastAgentDemoResult:
     model_reply: str
     app_tool_reply: str
     direct_tool_reply: str
-    model_generate_calls: int
+    model_generate_calls: int | None
+    provider: str
+    model: str
     note: str
 
 
@@ -87,17 +96,27 @@ class ManualFastAgentRun:
     """Tiny stand-in for ``FastAgent.run()`` around a prepared AgentApp.
 
     The public adapter wraps objects yielded by a fast-agent run context. This
-    class keeps the example provider-free while preserving that same shape:
-    ``KitaruFastAgent`` still receives an object with an async ``run()`` context
-    manager, and that context manager still yields a real ``AgentApp``.
+    class preserves that shape for the example: ``KitaruFastAgent`` still
+    receives an object with an async ``run()`` context manager, and that context
+    manager still yields a real ``AgentApp``.
     """
 
-    def __init__(self, app: AgentApp) -> None:
+    def __init__(
+        self,
+        app: AgentApp,
+        *,
+        cleanup: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._app = app
+        self._cleanup = cleanup
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[AgentApp]:
-        yield self._app
+        try:
+            yield self._app
+        finally:
+            if self._cleanup is not None:
+                await self._cleanup()
 
 
 class MemoryLLM:
@@ -211,7 +230,7 @@ def _wordish_count(text: str) -> int:
 
 
 def uppercase(text: str) -> str:
-    """Local fast-agent tool used by the memory LLM."""
+    """Local fast-agent tool used by the demo."""
     return text.upper()
 
 
@@ -230,18 +249,96 @@ async def _attach_memory_llm(agent: ToolAgent, llm: MemoryLLM) -> None:
     await agent.attach_llm(llm_factory)
 
 
-async def _build_demo_app() -> tuple[ManualFastAgentRun, ToolAgent, MemoryLLM]:
+def _require_openai_api_key() -> None:
+    if os.getenv("OPENAI_API_KEY"):
+        return
+    raise SystemExit(
+        "Missing OPENAI_API_KEY.\n"
+        "Set it first, then rerun:\n"
+        "  export OPENAI_API_KEY='sk-...'\n"
+        "For the no-network test variant, run:\n"
+        "  uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py "
+        "--provider memory"
+    )
+
+
+def _openai_model_name(model: str | None = None) -> str:
+    return model or os.getenv("FAST_AGENT_DEMO_MODEL", DEFAULT_OPENAI_MODEL)
+
+
+async def _build_memory_demo_app() -> tuple[
+    ManualFastAgentRun, ToolAgent, Any, str, str
+]:
     agent = ToolAgent(
         config=AgentConfig(name="fast_agent_demo", use_history=True),
         tools=[uppercase],
     )
     llm = MemoryLLM()
     await _attach_memory_llm(agent, llm)
-    return ManualFastAgentRun(AgentApp({"fast_agent_demo": agent})), agent, llm
+    return (
+        ManualFastAgentRun(AgentApp({"fast_agent_demo": agent})),
+        agent,
+        llm,
+        "memory",
+        llm.model_name,
+    )
 
 
-async def _run_agent_turns(prompt: str) -> FastAgentDemoResult:
-    fast_agent_run, agent, llm = await _build_demo_app()
+async def _build_openai_demo_app(
+    model: str | None = None,
+) -> tuple[ManualFastAgentRun, ToolAgent, Any, str, str]:
+    _require_openai_api_key()
+    from fast_agent.core import Core
+    from fast_agent.llm.model_factory import ModelFactory
+
+    model_name = _openai_model_name(model)
+    core = Core()
+    await core.initialize()
+    agent = ToolAgent(
+        config=AgentConfig(
+            name="fast_agent_demo",
+            model=model_name,
+            instruction=(
+                "You are a concise demo agent. Keep answers under one sentence. "
+                "When asked to uppercase text, use the uppercase tool."
+            ),
+            use_history=True,
+        ),
+        tools=[uppercase],
+        context=core.context,
+    )
+    llm = await agent.attach_llm(ModelFactory.create_factory(model_name))
+    return (
+        ManualFastAgentRun(
+            AgentApp({"fast_agent_demo": agent}),
+            cleanup=core.cleanup,
+        ),
+        agent,
+        llm,
+        "openai",
+        model_name,
+    )
+
+
+async def _build_demo_app(
+    provider: DemoProvider = "openai",
+    model: str | None = None,
+) -> tuple[ManualFastAgentRun, ToolAgent, Any, str, str]:
+    if provider == "memory":
+        return await _build_memory_demo_app()
+    return await _build_openai_demo_app(model=model)
+
+
+async def _run_agent_turns(
+    prompt: str,
+    *,
+    provider: DemoProvider = "openai",
+    model: str | None = None,
+) -> FastAgentDemoResult:
+    fast_agent_run, agent, llm, provider_name, model_name = await _build_demo_app(
+        provider=provider,
+        model=model,
+    )
     runner = KitaruFastAgent(
         fast_agent_run,
         model_checkpoint_config={"cache": True},
@@ -252,9 +349,10 @@ async def _run_agent_turns(prompt: str) -> FastAgentDemoResult:
         agent.force_non_streaming_next_turn(reason="deterministic Kitaru example")
         model_reply = await app.send(prompt, agent_name="fast_agent_demo")
 
-        llm.request_tool_call_once()
+        if provider == "memory" and isinstance(llm, MemoryLLM):
+            llm.request_tool_call_once()
         app_tool_reply = await app.send(
-            "please uppercase kitaru",
+            "Use the uppercase tool with text 'kitaru', then reply with the result.",
             agent_name="fast_agent_demo",
         )
 
@@ -264,7 +362,9 @@ async def _run_agent_turns(prompt: str) -> FastAgentDemoResult:
         model_reply=model_reply,
         app_tool_reply=app_tool_reply,
         direct_tool_reply=_content_text(direct_tool_result),
-        model_generate_calls=llm.generate_calls,
+        model_generate_calls=getattr(llm, "generate_calls", None),
+        provider=provider_name,
+        model=model_name,
         note=(
             "Kitaru wrapped the AgentApp after run() yielded, then recorded "
             "reachable generate and call_tool calls as checkpoints."
@@ -272,15 +372,21 @@ async def _run_agent_turns(prompt: str) -> FastAgentDemoResult:
     )
 
 
-@flow
-def fast_agent_demo_flow(prompt: str = "hello from fast-agent") -> dict[str, Any]:
-    """Run the provider-free fast-agent demo inside a Kitaru flow."""
-    result = asyncio.run(_run_agent_turns(prompt))
+@flow(cache=False)
+def fast_agent_demo_flow(
+    prompt: str = "hello from fast-agent",
+    provider: DemoProvider = "openai",
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Run the fast-agent demo inside a Kitaru flow."""
+    result = asyncio.run(_run_agent_turns(prompt, provider=provider, model=model))
     summary = {
         "model_reply": result.model_reply,
         "app_tool_reply": result.app_tool_reply,
         "direct_tool_reply": result.direct_tool_reply,
         "model_generate_calls": result.model_generate_calls,
+        "provider": result.provider,
+        "model": result.model,
         "note": result.note,
     }
     _print_summary(summary)
@@ -289,21 +395,36 @@ def fast_agent_demo_flow(prompt: str = "hello from fast-agent") -> dict[str, Any
 
 def _print_summary(result: dict[str, Any]) -> None:
     print("\nfast-agent adapter demo summary:")
+    print(f"- provider: {result['provider']}")
+    print(f"- model: {result['model']}")
     print(f"- model_reply: {result['model_reply']}")
     print(f"- app_tool_reply: {result['app_tool_reply']}")
     print(f"- direct_tool_reply: {result['direct_tool_reply']}")
-    print(f"- model_generate_calls: {result['model_generate_calls']}")
+    if result["model_generate_calls"] is not None:
+        print(f"- model_generate_calls: {result['model_generate_calls']}")
     print(f"- note: {result['note']}")
 
 
-def run_demo(prompt: str = "hello from fast-agent") -> str:
+def run_demo(
+    prompt: str = "hello from fast-agent",
+    *,
+    provider: DemoProvider = "openai",
+    model: str | None = None,
+) -> str:
     """Submit the demo flow and return the Kitaru execution ID.
 
     Calls-mode adapter checkpoints are separate terminal steps, so this example
     does not call ``handle.wait()``. The flow prints the user-facing summary
     before it finishes, and the saved checkpoints are visible on the execution.
     """
-    handle = fast_agent_demo_flow.run(prompt, cache=False)
+    if provider == "openai":
+        _require_openai_api_key()
+    handle = fast_agent_demo_flow.run(
+        prompt,
+        provider=provider,
+        model=model,
+        cache=False,
+    )
     execution = KitaruClient().executions.get(handle.exec_id)
     if execution.status != ExecutionStatus.COMPLETED:
         raise RuntimeError(
@@ -313,11 +434,37 @@ def run_demo(prompt: str = "hello from fast-agent") -> str:
     return handle.exec_id
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the fast-agent adapter example. The default uses OpenAI "
+            "gpt-5-nano so checkpoint usage includes real cost estimates."
+        )
+    )
+    parser.add_argument("prompt", nargs="?", default="hello from fast-agent")
+    parser.add_argument(
+        "--provider",
+        choices=("openai", "memory"),
+        default="openai",
+        help="Use OpenAI by default, or memory for a no-network deterministic run.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "OpenAI model spec for fast-agent. Defaults to FAST_AGENT_DEMO_MODEL "
+            f"or {DEFAULT_OPENAI_MODEL}."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    run_demo()
+    args = _parse_args()
+    run_demo(args.prompt, provider=args.provider, model=args.model)
     print("\nInspect the execution in the Kitaru UI or with:")
     print("  uv run kitaru executions list")
-    print("  uv run kitaru executions get <execution-id>")
+    print("  uv run kitaru executions get <execution-id> --output json")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -153,7 +154,7 @@ def _log_fast_agent_usage(
         adapter="fast_agent",
         surface="model_call",
         call_name=call_name,
-        record_id=call_name,
+        record_id=f"{call_name}-{uuid.uuid4().hex}",
         model=extracted.model_name,
         provider=extracted.provider,
         usage=usage_payload,

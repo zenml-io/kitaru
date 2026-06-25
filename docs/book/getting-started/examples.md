@@ -118,7 +118,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network previews, streaming mode, and an Antigravity managed-agent path | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
 | `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](../adapters/langgraph.md) |
 | `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](../adapters/langgraph.md#graph-call-streaming) |
-| `integrations/fast_agent_agent/fast_agent_adapter.py` | Wrap a real fast-agent `AgentApp` with an in-memory LLM and local tool, no provider key required | [fast-agent Adapter](../adapters/fast-agent.md) |
+| `integrations/fast_agent_agent/fast_agent_adapter.py` | Wrap a real fast-agent `AgentApp` with OpenAI gpt-5-nano and a local tool, including checkpoint-level usage/cost metadata | [fast-agent Adapter](../adapters/fast-agent.md) |
 
 | `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](../guides/llm-calls.md) |
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](examples.md) |

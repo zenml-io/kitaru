@@ -1,4 +1,4 @@
-"""Provider-free fast-agent adapter example tests."""
+"""fast-agent adapter example tests."""
 
 from __future__ import annotations
 
@@ -66,13 +66,17 @@ def test_fast_agent_provider_free_example_runs(primed_zenml: None) -> None:
         fast_agent_demo_flow,
     )
 
-    direct_result = asyncio.run(_run_agent_turns("hello from pytest"))
+    direct_result = asyncio.run(
+        _run_agent_turns("hello from pytest", provider="memory")
+    )
     assert direct_result.model_reply == "memory reply to hello from pytest"
     assert direct_result.app_tool_reply == "memory tool loop complete"
     assert "REPLAY" in direct_result.direct_tool_reply
     assert direct_result.model_generate_calls == 3
 
-    handle = fast_agent_demo_flow.run("hello from pytest", cache=False)
+    handle = fast_agent_demo_flow.run(
+        "hello from pytest", provider="memory", cache=False
+    )
     hydrated_run = _wait_for_hydrated_run(handle.exec_id)
     step_names = _step_names(hydrated_run)
 
@@ -80,15 +84,31 @@ def test_fast_agent_provider_free_example_runs(primed_zenml: None) -> None:
     assert any("uppercase_tool_call" in name for name in step_names)
 
 
-def test_fast_agent_example_builds_real_app_without_provider_credentials() -> None:
+def test_fast_agent_example_builds_memory_app_without_provider_credentials() -> None:
     _import_real_fast_agent()
 
     from examples.integrations.fast_agent_agent.fast_agent_adapter import (
         _build_demo_app,
     )
 
-    fast_agent_run, agent, llm = asyncio.run(_build_demo_app())
+    fast_agent_run, agent, llm, provider, model = asyncio.run(
+        _build_demo_app(provider="memory")
+    )
 
     assert fast_agent_run is not None
     assert agent.config.name == "fast_agent_demo"
     assert llm.model_name == "memory-fast-agent-demo"
+    assert provider == "memory"
+    assert model == "memory-fast-agent-demo"
+
+
+def test_fast_agent_example_openai_path_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _import_real_fast_agent()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    from examples.integrations.fast_agent_agent.fast_agent_adapter import run_demo
+
+    with pytest.raises(SystemExit, match="Missing OPENAI_API_KEY"):
+        run_demo()

@@ -1,14 +1,14 @@
 # fast-agent adapter example
 
 This directory shows Kitaru wrapping a real
-[fast-agent](https://github.com/evalstate/fast-agent) app without calling any
-model provider.
+[fast-agent](https://github.com/evalstate/fast-agent) app while it calls
+OpenAI's inexpensive `gpt-5-nano` model.
 
 The example builds:
 
 1. a real fast-agent `ToolAgent`,
 2. a local Python `uppercase` tool,
-3. an in-memory LLM that returns real fast-agent message objects, and
+3. a real OpenAI-backed fast-agent LLM, and
 4. a `KitaruFastAgent` wrapper around the app run context.
 
 When the flow runs, fast-agent still decides how to send messages and call the
@@ -24,6 +24,7 @@ The current preview extra is narrow: it installs the known-good
 cd examples/integrations/fast_agent_agent
 uv sync --extra fast-agent --no-dev
 uv run kitaru init
+export OPENAI_API_KEY='sk-...'
 uv run python fast_agent_adapter.py
 ```
 
@@ -32,12 +33,23 @@ If you are running from the repository root instead, use:
 ```bash
 uv sync --extra fast-agent --no-dev
 uv run kitaru init
+export OPENAI_API_KEY='sk-...'
 uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py
 ```
 
-No provider key is needed. The LLM is a local `MemoryLLM` class in the example.
-It also records deterministic local word counts through a small usage accumulator,
-so Kitaru can show `llm_usage_v1` metadata without calling a paid provider.
+The default model is `gpt-5-nano?reasoning=low`. Override it with
+`FAST_AGENT_DEMO_MODEL` or `--model` if you want to test another fast-agent
+OpenAI model spec.
+
+For a no-network deterministic run, use:
+
+```bash
+uv run python fast_agent_adapter.py --provider memory
+```
+
+That memory path exists for local tests. The normal example uses OpenAI so the
+checkpoint metadata can include real token counts and `genai-prices` cost
+estimates.
 
 ## What to look for
 
@@ -45,8 +57,10 @@ The script prints a short summary:
 
 ```text
 fast-agent adapter demo summary:
-- model_reply: memory reply to hello from fast-agent
-- app_tool_reply: memory tool loop complete
+- provider: openai
+- model: gpt-5-nano?reasoning=low
+- model_reply: ...
+- app_tool_reply: ...
 - direct_tool_reply: REPLAY
 ```
 
@@ -55,10 +69,11 @@ In Kitaru, inspect the execution and look for checkpoints with names like:
 - `fast_agent_demo_generate_model_call`
 - `fast_agent_demo_uppercase_tool_call`
 
-The model-call checkpoints should also include `llm_usage_v1` metadata. In this
-provider-free example the provider is `memory`, the model is
-`memory-fast-agent-demo`, and the usage numbers are local word counts rather
-than provider-billed tokens.
+The model-call checkpoints should also include `llm_usage_v1` metadata. In the
+default OpenAI run, the record should have provider/model information that
+`genai-prices` can price, so the cost block should include an estimated USD
+cost. If you run `--provider memory`, the usage numbers are local word counts
+and the cost source is `none` because the fake memory model is not priceable.
 
 The concrete story is:
 

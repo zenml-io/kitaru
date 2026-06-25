@@ -239,24 +239,32 @@ when it cannot build a stable identity.
 
 ## Runnable example
 
-The included example uses real fast-agent objects but no provider key. It builds
-a real `ToolAgent`, attaches an in-memory LLM, registers a local `uppercase`
-tool, and runs both app-driven and direct tool calls. The in-memory LLM appends a
-small local usage turn after each fake model response, so you can inspect
-`llm_usage_v1` records without paying a provider.
+The included example uses real fast-agent objects and OpenAI's inexpensive
+`gpt-5-nano` model by default. It builds a real `ToolAgent`, registers a local
+`uppercase` tool, and runs both app-driven and direct tool calls. Because the
+default path calls a real provider, the model-call checkpoints can show both
+token usage and `genai-prices` cost estimates.
 
 ```bash
 uv sync --extra fast-agent --no-dev
 uv run kitaru init
+export OPENAI_API_KEY='sk-...'
 uv run python examples/integrations/fast_agent_agent/fast_agent_adapter.py
 ```
+
+The default fast-agent model spec is `gpt-5-nano?reasoning=low`. You can set
+`FAST_AGENT_DEMO_MODEL` or pass `--model` to try another OpenAI model. For a
+no-network deterministic run, use `--provider memory`; that path records local
+word counts but no estimated dollar cost.
 
 You should see output like:
 
 ```text
 fast-agent adapter demo summary:
-- model_reply: memory reply to hello from fast-agent
-- app_tool_reply: memory tool loop complete
+- provider: openai
+- model: gpt-5-nano?reasoning=low
+- model_reply: ...
+- app_tool_reply: ...
 - direct_tool_reply: REPLAY
 
 Submitted Kitaru execution: <execution-id>
@@ -268,9 +276,11 @@ Inspect the execution in Kitaru and look for checkpoints named like:
 - `fast_agent_demo_uppercase_tool_call`
 
 The `fast_agent_demo_generate_model_call` checkpoints should also include
-`llm_usage_v1` metadata with provider `memory` and model
-`memory-fast-agent-demo`. The example usage numbers are deterministic local word
-counts, not provider-billed tokens.
+`llm_usage_v1` metadata. In the default OpenAI run, the usage record should be
+priceable and include an estimated USD cost. In the memory fallback, the
+provider is `memory`, the model is `memory-fast-agent-demo`, and cost is not
+estimated because those are deterministic local word counts rather than
+provider-billed tokens.
 
 For the broader catalog, see [Examples](../getting-started/examples.md).
 
@@ -278,6 +288,9 @@ For the broader catalog, see [Examples](../getting-started/examples.md).
 
 - **"requires optional dependency `fast-agent-mcp`"** — install with
   `uv sync --extra fast-agent --no-dev` or `pip install 'kitaru[fast-agent]'`.
+- **"Missing OPENAI_API_KEY"** — set `OPENAI_API_KEY` before running the default
+  OpenAI example. Use `--provider memory` only when you need a no-network local
+  check.
 - **Python version resolution fails** — the preview extra currently requires
   `Python >=3.13.5,<3.14` because this adapter is pinned to a narrow
   fast-agent range.
