@@ -53,6 +53,7 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
 
 
 class _BrokenGlobalConfig:
@@ -123,6 +124,35 @@ def _execution_stub(
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
         llm_usage_records=[],
+    )
+
+
+def _replay_submission_stub(
+    *,
+    at: str = "write_summary",
+    wait: bool = True,
+    tag: str | None = None,
+    results: list[ReplayResultRow] | None = None,
+    compare_url: str | None = None,
+) -> ReplaySubmission:
+    """Build a lightweight ReplaySubmission for CLI tests."""
+    return ReplaySubmission.create(
+        tag=tag,
+        at=at,
+        wait=wait,
+        plan=ReplayPlanDocument(),
+        results=results
+        or [
+            ReplayResultRow(
+                original_exec_ref="kr-111",
+                original_exec_id="kr-111",
+                replay_exec_id="kr-222",
+                status="submitted",
+                compare_url="http://localhost:8237/compare?executions=kr-111,kr-222",
+            )
+        ],
+        compare_url=compare_url,
+        submission_id="rs-test",
     )
 
 
@@ -3790,22 +3820,12 @@ def test_executions_input_multiple_waits_non_interactive_errors(
     assert "multiple pending waits" in err.lower() or "--interactive" in err
 
 
-def test_executions_replay_parses_json_and_reports_success(
+def test_executions_replay_parses_unified_overrides_and_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions replay` should parse JSON and call replay API."""
+    """`kitaru executions replay` should parse new override flags."""
     fake_client = Mock()
-    fake_client._client.return_value.zen_store.url = "http://localhost:8237"
-    fake_client.executions.get.return_value = _execution_stub(
-        exec_id="kr-111",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.COMPLETED,
-    )
-    fake_client.executions.replay.return_value = _execution_stub(
-        exec_id="kr-222",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.RUNNING,
-    )
+    fake_client.executions.replay.return_value = _replay_submission_stub()
 
     with (
         patch("kitaru.cli.KitaruClient", return_value=fake_client),
@@ -3818,35 +3838,141 @@ def test_executions_replay_parses_json_and_reports_success(
                 "kr-111",
                 "--at",
                 "write_summary",
-                "--args",
+                "--flow-overrides",
                 '{"topic":"new topic"}',
-                "--mock-output",
-                '{"research":"edited"}',
+                "--checkpoint-overrides",
+                '{"research":{"output":"edited"}}',
+                "--invocation-overrides",
+                '{"call-1":{"model":"gpt-5-nano"}}',
+                "--skip",
+                "lookup_policy_tool,write_draft",
+                "--tag",
+                "best-replay-june",
+                "--wait",
+                "--on-error",
+                "fail",
             ]
         )
 
     assert exc_info.value.code == 0
     fake_client.executions.replay.assert_called_once_with(
-        "kr-111",
+        ["kr-111"],
         at="write_summary",
-        input=None,
-        output={"research": "edited"},
-        tool=None,
-        llm_model=None,
-        skip=None,
-        topic="new topic",
+        flow_overrides={"topic": "new topic"},
+        checkpoint_overrides={"research": {"output": "edited"}},
+        invocation_overrides={"call-1": {"model": "gpt-5-nano"}},
+        skip=["lookup_policy_tool", "write_draft"],
+        tag="best-replay-june",
+        wait=True,
+        on_error="fail",
     )
     output = capsys.readouterr().out
     assert "Replayed execution: kr-222" in output
-    assert "Status: running" in output
+    assert "Status: submitted" in output
     assert "Compare original vs replay:" in output
     assert "compare?executions=kr-111,kr-222" in output
 
 
-def test_executions_replay_rejects_invalid_mock_output_json(
+def test_executions_replay_multiple_ids_json_envelope(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions replay` should fail when `--mock-output` is invalid JSON."""
+    """Multiple parent IDs should pass as a list and emit ReplaySubmission JSON."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _replay_submission_stub(
+        at="lookup_policy_tool",
+        wait=False,
+        results=[
+            ReplayResultRow(
+                original_exec_ref="kr-a",
+                original_exec_id="kr-a",
+                replay_exec_id="kr-a-replay",
+                status="submitted",
+            ),
+            ReplayResultRow(
+                original_exec_ref="kr-b",
+                original_exec_id="kr-b",
+                replay_exec_id="kr-b-replay",
+                status="submitted",
+            ),
+        ],
+        compare_url="http://localhost:8237/compare?executions=kr-a,kr-a-replay,kr-b,kr-b-replay",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-a",
+                "kr-b",
+                "--at",
+                "lookup_policy_tool",
+                "--no-wait",
+                "--on-error",
+                "collect",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay.assert_called_once_with(
+        ["kr-a", "kr-b"],
+        at="lookup_policy_tool",
+        flow_overrides=None,
+        checkpoint_overrides=None,
+        invocation_overrides=None,
+        skip=None,
+        tag=None,
+        wait=False,
+        on_error="collect",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "executions.replay"
+    assert payload["item"]["submission_id"] == "rs-test"
+    assert payload["item"]["summary"] == {
+        "submitted": 2,
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert payload["item"]["results"][0]["replay_exec_id"] == "kr-a-replay"
+
+
+def test_executions_replay_omitted_wait_forwards_none(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Omitting wait should let the SDK choose the single/batch default."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _replay_submission_stub()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "replay", "kr-111", "--at", "write_summary"])
+
+    assert exc_info.value.code == 0
+    assert fake_client.executions.replay.call_args.kwargs["wait"] is None
+
+
+@pytest.mark.parametrize(
+    ("flag", "option_name"),
+    [
+        ("--flow-overrides", "--flow-overrides"),
+        ("--checkpoint-overrides", "--checkpoint-overrides"),
+        ("--invocation-overrides", "--invocation-overrides"),
+    ],
+)
+def test_executions_replay_rejects_invalid_override_json(
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    option_name: str,
+) -> None:
+    """Override JSON parse errors should name the exact failed option."""
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
@@ -3855,33 +3981,23 @@ def test_executions_replay_rejects_invalid_mock_output_json(
                 "kr-111",
                 "--at",
                 "write_summary",
-                "--mock-output",
+                flag,
                 "{invalid",
             ]
         )
 
     assert exc_info.value.code == 1
-    assert "Invalid JSON for `--mock-output`" in capsys.readouterr().err
+    assert f"Invalid JSON for `{option_name}`" in capsys.readouterr().err
 
 
-def test_executions_replay_many_loads_exec_ids_from_cohort_file(
-    capsys: pytest.CaptureFixture[str],
+def test_executions_replay_loads_exec_ids_from_file(
     tmp_path: Path,
 ) -> None:
-    """`executions replay-many --cohort-file` should read exec ids from cohort JSON."""
-    cohort_path = tmp_path / "cohort.json"
-    cohort_path.write_text(
-        '{"command":"executions.cohort","item":{"exec_ids":["kr-a","kr-b"]}}'
-    )
-
+    """`--ids-file` should accept a JSON object with exec_ids."""
+    ids_path = tmp_path / "ids.json"
+    ids_path.write_text('{"exec_ids":["kr-a","kr-b"]}')
     fake_client = Mock()
-    fake_result = Mock()
-    fake_result.at = "lookup_policy_tool"
-    fake_result.successes = []
-    fake_result.failures = []
-    fake_result.skipped = []
-    fake_result.cohort = None
-    fake_client.executions.replay_many.return_value = fake_result
+    fake_client.executions.replay.return_value = _replay_submission_stub()
 
     with (
         patch("kitaru.cli.KitaruClient", return_value=fake_client),
@@ -3890,58 +4006,115 @@ def test_executions_replay_many_loads_exec_ids_from_cohort_file(
         app(
             [
                 "executions",
-                "replay-many",
-                "--cohort-file",
-                str(cohort_path),
+                "replay",
+                "--ids-file",
+                str(ids_path),
                 "--at",
                 "lookup_policy_tool",
             ]
         )
 
     assert exc_info.value.code == 0
-    fake_client.executions.replay_many.assert_called_once()
-    assert fake_client.executions.replay_many.call_args.args[0] == ["kr-a", "kr-b"]
+    assert fake_client.executions.replay.call_args.args[0] == ["kr-a", "kr-b"]
 
 
-def test_executions_replay_many_selects_cohort_by_flow(
+def test_executions_replay_ids_file_rejects_non_string_ids(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`executions replay-many --flow` should resolve and replay in one step."""
-    fake_client = Mock()
-    fake_result = Mock()
-    fake_result.at = "lookup_policy_tool"
-    fake_result.successes = []
-    fake_result.failures = []
-    fake_result.skipped = []
-    fake_result.cohort = Mock(to_json=lambda: {"matched": 2})
-    fake_client.executions.replay_many.return_value = fake_result
+    """`--ids-file` should fail clearly for malformed execution ID lists."""
+    ids_path = tmp_path / "ids.json"
+    ids_path.write_text('{"exec_ids":[{"bad":"shape"}]}')
 
-    with (
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
+    with pytest.raises(SystemExit) as exc_info:
         app(
             [
                 "executions",
-                "replay-many",
-                "--flow",
-                "support_copilot_flow",
+                "replay",
+                "--ids-file",
+                str(ids_path),
                 "--at",
                 "lookup_policy_tool",
-                "--order-by=-display_cost_usd",
-                "--limit",
-                "10",
             ]
         )
 
+    assert exc_info.value.code == 1
+    assert "must contain only string execution IDs" in capsys.readouterr().err
+
+
+def test_executions_replay_help_hides_old_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Prototype replay flags should no longer be public CLI options."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "replay", "--help"])
+
     assert exc_info.value.code == 0
-    fake_client.executions.replay_many.assert_called_once()
-    kwargs = fake_client.executions.replay_many.call_args.kwargs
-    assert kwargs["flow"] == "support_copilot_flow"
-    assert kwargs["at"] == "lookup_policy_tool"
-    assert kwargs["order_by"] == "-display_cost_usd"
-    assert kwargs["limit"] == 10
-    assert fake_client.executions.replay_many.call_args.args == ()
+    output = capsys.readouterr().out
+    for old_flag in ("--args", "--input", "--mock-output", "--tool", "--llm-model"):
+        assert old_flag not in output
+
+
+def test_executions_replay_rejects_old_args_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Old replay flags should not be accepted by the command parser."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--at",
+                "write_summary",
+                "--args",
+                '{}',
+            ]
+        )
+
+    assert exc_info.value.code != 0
+    assert "--args" in capsys.readouterr().err
+
+
+def test_executions_replay_many_is_not_registered(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`executions replay-many` should be removed from the public CLI."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "replay-many" not in capsys.readouterr().out
+
+
+def test_executions_diff_matrix_json_uses_new_command_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`executions diff-matrix` should replace the old diff-cohort command."""
+    with (
+        patch("kitaru.diff.diff_cohort", return_value=object()) as diff_cohort,
+        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": []}),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff-matrix", "kr-a", "kr-b", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    diff_cohort.assert_called_once_with(["kr-a", "kr-b"])
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.diff_matrix",
+        "item": {"rows": []},
+    }
+
+
+def test_executions_diff_cohort_is_not_registered(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The old diff-cohort public alias should be gone."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "diff-cohort" not in capsys.readouterr().out
 
 
 def test_executions_resume_reports_success(
