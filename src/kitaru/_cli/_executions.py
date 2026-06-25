@@ -1622,16 +1622,57 @@ def replay_many_(
         Parameter(help="Original execution IDs to replay."),
     ] = None,
     *,
+    flow: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Flow name for cohort selection. Selects originals containing "
+                "`--at`, ordered by `--order-by`, up to `--limit`."
+            ),
+        ),
+    ] = None,
     cohort_file: Annotated[
         str | None,
         Parameter(
-            help="Path to cohort JSON (CLI `executions cohort -o json` or export).",
+            help="Path to a saved cohort JSON export (legacy; prefer `--flow`).",
         ),
     ] = None,
     at: Annotated[
         str,
         Parameter(help="Checkpoint selector for the replay cut."),
     ],
+    deployment: Annotated[
+        str | None,
+        Parameter(help="Deployment tag pin when using `--flow`."),
+    ] = None,
+    deployment_version: Annotated[
+        int | None,
+        Parameter(help="Deployment version pin when using `--flow`."),
+    ] = None,
+    order_by: Annotated[
+        str,
+        Parameter(help="Sort field when using `--flow`; prefix with '-' for descending."),
+    ] = "-started_at",
+    limit: Annotated[
+        int,
+        Parameter(help="Maximum executions to replay when using `--flow`."),
+    ] = 50,
+    since: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/after this ISO date/time."),
+    ] = None,
+    until: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/before this ISO date/time."),
+    ] = None,
+    max_scan: Annotated[
+        int,
+        Parameter(help="Maximum executions to inspect while resolving `--flow`."),
+    ] = 500,
+    include_failed: Annotated[
+        bool,
+        Parameter(help="Include failed executions when using `--flow`."),
+    ] = False,
     args: Annotated[
         str | None,
         Parameter(help="Flow input overrides as a JSON object."),
@@ -1674,15 +1715,23 @@ def replay_many_(
     output_format = _resolve_output_format(output)
 
     def _replay_many() -> dict[str, Any]:
-        resolved_ids = list(exec_ids or [])
-        if cohort_file:
-            if resolved_ids:
-                raise KitaruUsageError("Pass execution IDs or --cohort-file, not both.")
-            resolved_ids = _load_cohort_exec_ids(cohort_file)
-        if not resolved_ids:
+        selection_modes = sum(
+            1
+            for enabled in (exec_ids, cohort_file, flow)
+            if enabled
+        )
+        if selection_modes > 1:
             raise KitaruUsageError(
-                "Provide at least one execution ID or --cohort-file."
+                "Pass execution IDs, `--flow`, or `--cohort-file`, not more than one."
             )
+        if selection_modes == 0:
+            raise KitaruUsageError(
+                "Provide execution IDs or `--flow` for cohort selection."
+            )
+
+        status_filter: str | list[str] = (
+            ["completed", "failed"] if include_failed else "completed"
+        )
         flow_inputs = _parse_json_object(args, option_name="--args")
         parsed_input = _parse_json_object(input, option_name="--input")
         parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
@@ -1690,11 +1739,11 @@ def replay_many_(
         parsed_skip = (
             [item.strip() for item in skip.split(",") if item.strip()] if skip else None
         )
-        result = (
-            cli_dependencies()
-            .kitaru_client()
-            .executions.replay_many(
-                resolved_ids,
+
+        client = cli_dependencies().kitaru_client()
+        if cohort_file:
+            result = client.executions.replay_many(
+                _load_cohort_exec_ids(cohort_file),
                 at=at,
                 input=parsed_input or None,
                 output=parsed_output or None,
@@ -1705,8 +1754,42 @@ def replay_many_(
                 on_error=on_error,
                 **flow_inputs,
             )
-        )
-        return {
+        elif flow:
+            result = client.executions.replay_many(
+                at=at,
+                flow=flow,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                max_scan=max_scan,
+                status=status_filter,
+                input=parsed_input or None,
+                output=parsed_output or None,
+                tool=parsed_tool or None,
+                llm_model=llm_model,
+                skip=parsed_skip,
+                wait=wait,
+                on_error=on_error,
+                **flow_inputs,
+            )
+        else:
+            result = client.executions.replay_many(
+                list(exec_ids or []),
+                at=at,
+                input=parsed_input or None,
+                output=parsed_output or None,
+                tool=parsed_tool or None,
+                llm_model=llm_model,
+                skip=parsed_skip,
+                wait=wait,
+                on_error=on_error,
+                **flow_inputs,
+            )
+
+        payload: dict[str, Any] = {
             "at": result.at,
             "successes": [
                 {
@@ -1724,6 +1807,9 @@ def replay_many_(
                 for original_exec_id, reason in result.skipped
             ],
         }
+        if result.cohort is not None:
+            payload["cohort"] = result.cohort.to_json()
+        return payload
 
     payload = run_with_cli_error_boundary(
         _replay_many,
@@ -1737,14 +1823,17 @@ def replay_many_(
         return
 
     success_count = len(payload.get("successes", []))
-    _print_success(
-        "Batch replay complete",
-        detail=(
-            f"{success_count} succeeded, "
-            f"{len(payload.get('failures', []))} failed, "
-            f"{len(payload.get('skipped', []))} skipped."
-        ),
+    cohort_payload = payload.get("cohort")
+    detail = (
+        f"{success_count} succeeded, "
+        f"{len(payload.get('failures', []))} failed, "
+        f"{len(payload.get('skipped', []))} skipped."
     )
+    if isinstance(cohort_payload, dict):
+        detail = (
+            f"Selected {cohort_payload.get('matched', 0)} execution(s); {detail}"
+        )
+    _print_success("Batch replay complete", detail=detail)
 
 
 @executions_app.command
@@ -1784,44 +1873,12 @@ def cohort_(
         bool,
         Parameter(help="Include failed executions in addition to completed."),
     ] = False,
-    replay: Annotated[
-        bool,
-        Parameter(help="Replay the resolved cohort with the same replay plan."),
-    ] = False,
-    args: Annotated[
-        str | None,
-        Parameter(help="Flow input overrides when --replay is set."),
-    ] = None,
-    input: Annotated[
-        str | None,
-        Parameter(help="Checkpoint input overrides when --replay is set."),
-    ] = None,
-    mock_output: Annotated[
-        str | None,
-        Parameter(
-            help="Checkpoint output mocks when --replay is set.",
-            alias=["--mock-output"],
-        ),
-    ] = None,
-    tool: Annotated[
-        str | None,
-        Parameter(help="Tool overrides when --replay is set."),
-    ] = None,
-    llm_model: Annotated[
-        str | None,
-        Parameter(help="LLM model alias when --replay is set."),
-    ] = None,
-    skip: Annotated[
-        str | None,
-        Parameter(help="Skip selectors when --replay is set."),
-    ] = None,
-    wait: Annotated[
-        bool,
-        Parameter(help="Wait for replays when --replay is set."),
-    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Resolve a cohort of original executions for batch replay experiments."""
+    """Resolve a cohort of original executions (dry-run selection only).
+
+    Use ``executions replay-many --flow ...`` to select and replay in one step.
+    """
     command = "executions.cohort"
     output_format = _resolve_output_format(output)
     status_filter: str | list[str] = (
@@ -1845,52 +1902,7 @@ def cohort_(
             )
             .resolve(max_scan=max_scan)
         )
-        payload = cohort_result.to_json()
-        if not replay:
-            return payload
-
-        flow_inputs = _parse_json_object(args, option_name="--args")
-        parsed_input = _parse_json_object(input, option_name="--input")
-        parsed_output = _parse_json_object(mock_output, option_name="--mock-output")
-        parsed_tool = _parse_json_object(tool, option_name="--tool")
-        parsed_skip = (
-            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
-        )
-        replay_result = (
-            cli_dependencies()
-            .kitaru_client()
-            .executions.replay_many(
-                cohort_result,
-                at=at,
-                input=parsed_input or None,
-                output=parsed_output or None,
-                tool=parsed_tool or None,
-                llm_model=llm_model,
-                skip=parsed_skip,
-                wait=wait,
-                on_error="collect",
-                **flow_inputs,
-            )
-        )
-        payload["replay"] = {
-            "at": replay_result.at,
-            "successes": [
-                {
-                    "original_exec_id": original_exec_id,
-                    "replay_exec_id": getattr(handle, "exec_id", None),
-                }
-                for original_exec_id, handle in replay_result.successes
-            ],
-            "failures": [
-                {"original_exec_id": original_exec_id, "error": error}
-                for original_exec_id, error in replay_result.failures
-            ],
-            "skipped": [
-                {"original_exec_id": original_exec_id, "reason": reason}
-                for original_exec_id, reason in replay_result.skipped
-            ],
-        }
-        return payload
+        return cohort_result.to_json()
 
     payload = run_with_cli_error_boundary(
         _resolve_cohort,
@@ -1910,10 +1922,3 @@ def cohort_(
             f"{matched} execution(s) selected (scanned {payload.get('scanned', 0)})."
         ),
     )
-    if replay:
-        replay_payload = payload.get("replay", {})
-        print(
-            f"  replay: {len(replay_payload.get('successes', []))} succeeded, "
-            f"{len(replay_payload.get('failures', []))} failed, "
-            f"{len(replay_payload.get('skipped', []))} skipped."
-        )

@@ -32,7 +32,7 @@ uv run python demo.py seed
 ```
 
 **Cohort prep (10 distinct originals):** run ten different support requests so
-`executions cohort --limit 10` has enough matches locally:
+`executions replay-many --flow ... --limit 10` has enough matches locally:
 
 ```bash
 uv run python demo.py seed-cohort --count 10
@@ -62,8 +62,6 @@ export AT=lookup_policy_tool
 | 6 | Export cohort JSON → Claude Code + MCP recommendation | **JSON + MCP** |
 
 ---
-
-# Track A — CLI first
 
 ## Act 1 — Original prod run in the UI
 
@@ -138,32 +136,25 @@ Open that link in the browser.
 
 ## Act 5 — Cohort: same model change on top 10 expensive prod runs
 
-**Step 1 — resolve the cohort (read-only).** This only queries and returns exec IDs; it does not replay anything unless you pass `--replay`.
-
-
-For a **local trial** after `demo.py seed-cohort --count 10` (no deployment tag),
-omit `--deployment` or filter by flow only:
+After `demo.py seed-cohort --count 10`, replay the variant on every matching original
+in one command. `replay-many --flow` selects originals that contain the replay anchor
+(`lookup_policy_tool`), filters out runs missing that checkpoint, orders by cost, and
+replays up to `--limit`:
 
 ```bash
-kitaru executions cohort \
+kitaru executions replay-many \
   --flow support_copilot_flow \
   --at lookup_policy_tool \
   --order-by=-display_cost_usd \
   --limit 10 \
-  -o json | tee fixtures/cohort.json
-```
-
-Inspect `fixtures/cohort.json` — you should see `exec_ids`, `matched`, `scanned`, and filter counts.
-
-**Step 2 — replay the variant on every member:**
-
-```bash
-kitaru executions replay-many \
-  --cohort-file fixtures/cohort.json \
-  --at lookup_policy_tool \
   --args '{"model": "openai:gpt-5-nano", "prompt_profile": "trimmed_permissions"}' \
   --wait -o json
 ```
+
+JSON output includes a `cohort` object with selection metadata (`matched`, `scanned`,
+`filtered`) plus replay results.
+
+Use `kitaru executions cohort` only when you want a dry-run selection without replaying.
 
 **Demo shortcut** (resolve, replay, metrics, HTML + JSON report):
 
@@ -207,99 +198,6 @@ MCP tools available today:
 | `kitaru_executions_diff` | Original vs one replay |
 | `kitaru_executions_diff_cohort` | Many originals (auto-discovers replays — prefer explicit ids from JSON) |
 | `kitaru_executions_replay_many` | Batch replay with same plan |
-
----
-
-# Track B — SDK first
-
-Same story; stay in Python until Act 6.
-
-## Setup
-
-```python
-import kitaru
-from support_agent import REPLAY_POINT, support_copilot_flow
-from kitaru import KitaruClient, diff, build_compare_url
-
-client = KitaruClient()
-PROD_ID = open("fixtures/prod_exec_id").read().strip()
-```
-
-## Act 2 — Replay with model change
-
-```python
-handle = support_copilot_flow.replay(
-    PROD_ID,
-    at=REPLAY_POINT,
-    cache=False,
-    model="openai:gpt-5-nano",
-    prompt_profile="trimmed_permissions",
-)
-handle.wait()
-REPLAY_MODEL_ID = handle.exec_id
-
-execution_diff = diff(PROD_ID, REPLAY_MODEL_ID)
-for url in execution_diff.urls:
-    print("compare:", url)
-```
-
-## Act 3 — Replay with tool mock
-
-```python
-tool_handle = support_copilot_flow.replay(
-    PROD_ID,
-    at=REPLAY_POINT,
-    cache=False,
-    tool={"lookup_policy": "mocks.lookup_policy"},
-)
-tool_handle.wait()
-REPLAY_TOOL_ID = tool_handle.exec_id
-
-print(diff(PROD_ID, REPLAY_TOOL_ID).urls)
-```
-
-## Act 4 — Three-way compare
-
-```python
-three_way_url = kitaru.compare_url_for_executions(
-    [PROD_ID, REPLAY_MODEL_ID, REPLAY_TOOL_ID]
-)
-print(three_way_url)
-
-three_way = diff(PROD_ID, REPLAY_MODEL_ID, REPLAY_TOOL_ID)
-assert three_way.urls[0] == three_way_url
-for replay_id, checkpoint_diffs in three_way.compared:
-    print(replay_id, [c.name for c in checkpoint_diffs if not c.status_match])
-```
-
-## Act 5 — Cohort
-
-```python
-cohort = kitaru.cohort(
-    flow="support_copilot_flow",
-    at=REPLAY_POINT,
-    deployment=os.environ.get("COHORT_DEPLOYMENT"),
-    order_by="-display_cost_usd",
-    limit=10,
-).resolve()
-
-from utils.cohort import run_cohort
-
-report = run_cohort(
-    list(cohort.exec_ids),
-    baseline_model="openai:gpt-5-mini",
-    variant_model="openai:gpt-5-nano",
-    variant_prompt_profile="trimmed_permissions",
-    metrics=[cost, latency],
-)
-report.to_json("reports/cohort_report.json", cohort=cohort.to_json())
-```
-
-## Act 6 — Export JSON
-
-```python
-report.to_json("reports/cohort_report.json", cohort=cohort.to_json())
-```
 
 ---
 

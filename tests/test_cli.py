@@ -3880,6 +3880,7 @@ def test_executions_replay_many_loads_exec_ids_from_cohort_file(
     fake_result.successes = []
     fake_result.failures = []
     fake_result.skipped = []
+    fake_result.cohort = None
     fake_client.executions.replay_many.return_value = fake_result
 
     with (
@@ -3900,6 +3901,47 @@ def test_executions_replay_many_loads_exec_ids_from_cohort_file(
     assert exc_info.value.code == 0
     fake_client.executions.replay_many.assert_called_once()
     assert fake_client.executions.replay_many.call_args.args[0] == ["kr-a", "kr-b"]
+
+
+def test_executions_replay_many_selects_cohort_by_flow(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`executions replay-many --flow` should resolve and replay in one step."""
+    fake_client = Mock()
+    fake_result = Mock()
+    fake_result.at = "lookup_policy_tool"
+    fake_result.successes = []
+    fake_result.failures = []
+    fake_result.skipped = []
+    fake_result.cohort = Mock(to_json=lambda: {"matched": 2})
+    fake_client.executions.replay_many.return_value = fake_result
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay-many",
+                "--flow",
+                "support_copilot_flow",
+                "--at",
+                "lookup_policy_tool",
+                "--order-by=-display_cost_usd",
+                "--limit",
+                "10",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay_many.assert_called_once()
+    kwargs = fake_client.executions.replay_many.call_args.kwargs
+    assert kwargs["flow"] == "support_copilot_flow"
+    assert kwargs["at"] == "lookup_policy_tool"
+    assert kwargs["order_by"] == "-display_cost_usd"
+    assert kwargs["limit"] == 10
+    assert fake_client.executions.replay_many.call_args.args == ()
 
 
 def test_executions_resume_reports_success(

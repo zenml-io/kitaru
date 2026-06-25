@@ -62,7 +62,33 @@ for exec_id, reason in result.skipped:
 
 Parents whose checkpoint history does not contain `at` land in `ReplayManyResult.skipped`. Load or replay errors are collected in `failures` unless `on_error="fail"`.
 
-`KitaruClient().executions.replay_many(...)` resolves the source flow from the first parent execution and delegates to the same planner.
+`KitaruClient().executions.replay_many(...)` resolves the source flow from the first parent execution and delegates to the same planner. Pass `flow=` to select originals by cohort query (filtering out runs missing `at`) before replaying:
+
+```python
+result = kitaru.KitaruClient().executions.replay_many(
+    at="write_draft",
+    flow="content_pipeline",
+    order_by="-display_cost_usd",
+    limit=10,
+    model="openai:gpt-5-nano",
+    wait=True,
+)
+print(result.cohort.matched if result.cohort else 0)
+```
+
+CLI:
+
+```bash
+kitaru executions replay-many \
+  --flow content_pipeline \
+  --at write_draft \
+  --order-by=-display_cost_usd \
+  --limit 10 \
+  --args '{"model":"openai:gpt-5-nano"}' \
+  --wait
+```
+
+Use `kitaru executions cohort` when you only need the selection snapshot without replaying.
 
 ## CLI replay
 

@@ -60,6 +60,7 @@ class ReplayManyResult:
     successes: list[tuple[str, Any]]
     failures: list[tuple[str, str]]
     skipped: list[tuple[str, str]]
+    cohort: Any | None = None
 
     def wait(self) -> ReplayManyResult:
         """Block until every successful replay handle completes."""

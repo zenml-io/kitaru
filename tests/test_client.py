@@ -5001,6 +5001,75 @@ def test_replay_client_awaits_handle_before_returning_execution() -> None:
     handle.wait.assert_called_once()
 
 
+def test_replay_many_resolves_flow_cohort_before_replay() -> None:
+    cohort_result = SimpleNamespace(
+        exec_ids=["kr-a", "kr-b"],
+        to_json=lambda: {"exec_ids": ["kr-a", "kr-b"], "matched": 2},
+    )
+    cohort_query = Mock()
+    cohort_query.resolve.return_value = cohort_result
+    batch_result = SimpleNamespace(
+        at="lookup_policy_tool",
+        successes=[("kr-a", Mock(exec_id="replay-a"))],
+        failures=[],
+        skipped=[],
+    )
+    replay_flow = Mock()
+    replay_flow.replay_many.return_value = batch_result
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            return_value=replay_flow,
+        ),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(
+            _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="sample_flow")
+        )
+        client = KitaruClient()
+        client.executions.cohort = Mock(return_value=cohort_query)
+        result = client.executions.replay_many(
+            at="lookup_policy_tool",
+            flow="sample_flow",
+            order_by="-display_cost_usd",
+            limit=10,
+            model="openai:gpt-5-nano",
+        )
+
+    client.executions.cohort.assert_called_once_with(
+        flow="sample_flow",
+        at="lookup_policy_tool",
+        deployment=None,
+        deployment_version=None,
+        order_by="-display_cost_usd",
+        limit=10,
+        since=None,
+        until=None,
+        status="completed",
+    )
+    cohort_query.resolve.assert_called_once_with(max_scan=500)
+    replay_flow.replay_many.assert_called_once_with(
+        ["kr-a", "kr-b"],
+        at="lookup_policy_tool",
+        input=None,
+        output=None,
+        tool=None,
+        llm_model=None,
+        skip=None,
+        wait=False,
+        on_error="collect",
+        model="openai:gpt-5-nano",
+    )
+    assert result.cohort is cohort_result
+    assert result.successes == batch_result.successes
+
+
 def test_replay_stops_when_source_module_dependency_is_missing() -> None:
     source_run = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,

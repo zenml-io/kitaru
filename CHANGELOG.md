@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `flow.replay_many(executions, *, at=..., ...)` and `KitaruClient().executions.replay_many(...)` for batch replay across many parent executions. Parents missing the `at` checkpoint are skipped and recorded in `ReplayManyResult.skipped`.
 - Added `kitaru.diff_cohort(exec_ids)` to diff many originals against their auto-discovered replays.
 - Added CLI commands `kitaru executions diff`, `kitaru executions diff-cohort`, and MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_cohort`, `kitaru_executions_replay_many`.
-- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort`, MCP `kitaru_executions_cohort`, and CLI `kitaru executions replay-many` (including `--cohort-file` for saved resolve output).
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), MCP `kitaru_executions_cohort`, and unified batch replay via `kitaru executions replay-many --flow ...` (select + replay in one step; `--cohort-file` remains for saved exports).
 - `kitaru executions replay` now prints UI compare URLs (and includes `compare_urls` in JSON output) for the original execution vs the new replay.
 - Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
 - `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.

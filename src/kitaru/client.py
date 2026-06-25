@@ -485,9 +485,18 @@ class _ReplayFlowLike(Protocol):
 
     def replay_many(
         self,
-        executions: Sequence[str],
+        executions: Sequence[str] | Any | None = None,
         *,
         at: str,
+        flow: str | None = None,
+        deployment: str | None = None,
+        deployment_version: int | None = None,
+        order_by: str = "-started_at",
+        limit: int = 50,
+        since: Any = None,
+        until: Any = None,
+        max_scan: int = 500,
+        status: str | Sequence[str] = "completed",
         input: dict[str, Any] | None = None,
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
@@ -1559,9 +1568,18 @@ class _ExecutionsAPI:
 
     def replay_many(
         self,
-        executions: Sequence[str] | Any,
+        executions: Sequence[str] | Any | None = None,
         *,
         at: str,
+        flow: str | None = None,
+        deployment: str | None = None,
+        deployment_version: int | None = None,
+        order_by: str = "-started_at",
+        limit: int = 50,
+        since: Any = None,
+        until: Any = None,
+        max_scan: int = 500,
+        status: str | Sequence[str] = "completed",
         input: dict[str, Any] | None = None,
         output: dict[str, Any] | None = None,
         tool: dict[str, str] | None = None,
@@ -1571,21 +1589,50 @@ class _ExecutionsAPI:
         on_error: Literal["collect", "fail"] = "collect",
         **flow_inputs: Any,
     ) -> ReplayManyResult:
-        """Replay many executions through the resolved source flow wrapper."""
-        from kitaru.cohort import coerce_exec_ids
+        """Replay many executions, optionally selecting them by flow cohort query.
 
-        exec_ids = coerce_exec_ids(executions)
+        Pass explicit ``executions`` IDs, or set ``flow`` to select originals that
+        contain the replay anchor ``at``. Cohort selection filters out executions
+        missing ``at`` before replay starts; ``flow.replay_many`` still records any
+        per-parent skips during replay itself.
+        """
+        from kitaru.cohort import CohortResult, coerce_exec_ids
+
+        cohort_result: CohortResult | None = None
+        exec_ids = coerce_exec_ids(executions) if executions is not None else []
+
+        if flow is not None:
+            if exec_ids:
+                raise KitaruUsageError(
+                    "Pass execution IDs or cohort selectors (`flow=`), not both."
+                )
+            cohort_result = (
+                self.cohort(
+                    flow=flow,
+                    at=at,
+                    deployment=deployment,
+                    deployment_version=deployment_version,
+                    order_by=order_by,
+                    limit=limit,
+                    since=since,
+                    until=until,
+                    status=status,
+                ).resolve(max_scan=max_scan)
+            )
+            exec_ids = list(cohort_result.exec_ids)
+
         if not exec_ids:
             return ReplayManyResult(
                 at=at,
                 successes=[],
                 failures=[],
                 skipped=[],
+                cohort=cohort_result,
             )
 
         source_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
         replay_flow = _resolve_flow_for_replay(source_run)
-        return replay_flow.replay_many(
+        batch_result = replay_flow.replay_many(
             exec_ids,
             at=at,
             input=input,
@@ -1596,6 +1643,15 @@ class _ExecutionsAPI:
             wait=wait,
             on_error=on_error,
             **flow_inputs,
+        )
+        if cohort_result is None:
+            return batch_result
+        return ReplayManyResult(
+            at=batch_result.at,
+            successes=batch_result.successes,
+            failures=batch_result.failures,
+            skipped=batch_result.skipped,
+            cohort=cohort_result,
         )
 
     def cohort(
