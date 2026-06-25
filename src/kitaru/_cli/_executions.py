@@ -1373,8 +1373,7 @@ def replay_(
         Parameter(
             name=["--checkpoint-overrides"],
             help=(
-                "Checkpoint-scope overrides as a JSON object keyed by "
-                "checkpoint name."
+                "Checkpoint-scope overrides as a JSON object keyed by checkpoint name."
             ),
         ),
     ] = None,

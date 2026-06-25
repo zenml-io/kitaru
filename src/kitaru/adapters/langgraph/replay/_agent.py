@@ -12,10 +12,11 @@ Public contract::
 ``reconstruct`` builds a mirror @flow (one checkpoint per graph node) and runs
 it in *playback* mode, returning recorded node outputs from the trace with zero
 live calls.  ``replay`` re-executes the tail of that seed run *live* with
-``flow.replay(at=cut, cache=False, playback=False)`` — the head (skipped,
-upstream of the cut) reuses the seed's recorded outputs, the tail runs the real
-node callables.  ``fork`` rebuilds the flow with edits/variant and replays the
-same seed run, so the forked tail re-executes under the edited configuration.
+``flow.replay(at=cut, flow_overrides={"playback": False})`` — the head
+(skipped, upstream of the cut) reuses the seed's recorded outputs, the tail runs
+the real node callables.  ``fork`` rebuilds the flow with edits/variant and
+replays the same seed run, so the forked tail re-executes under the edited
+configuration.
 
 Drift semantics:
 
@@ -125,7 +126,15 @@ class KitaruReplayAgent:
     def replay(self, seed_exec_id: str, *, at: str) -> _ReplayResult:
         if self._flow_def is None:
             raise RuntimeError("reconstruct() must be called before replay().")
-        handle = self._flow_def.replay(seed_exec_id, at=at, cache=False, playback=False)
+        handle = _single_replay_handle(
+            self._flow_def.replay(
+                seed_exec_id,
+                at=at,
+                cache=False,
+                flow_overrides={"playback": False},
+                wait=False,
+            )
+        )
         node_outputs = handle.wait()
         return _ReplayResult(handle.exec_id, _as_mapping(node_outputs))
 
@@ -158,7 +167,15 @@ class KitaruReplayAgent:
             root_state=dict(self._seed_ctx.root_state),
         )
         fork_flow = build_replay_flow(fork_ctx)
-        handle = fork_flow.replay(seed_exec_id, at=at, cache=False, playback=False)
+        handle = _single_replay_handle(
+            fork_flow.replay(
+                seed_exec_id,
+                at=at,
+                cache=False,
+                flow_overrides={"playback": False},
+                wait=False,
+            )
+        )
         node_outputs = handle.wait()
         return _ReplayResult(handle.exec_id, _as_mapping(node_outputs))
 
@@ -187,6 +204,38 @@ class KitaruReplayAgent:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
+
+def _single_replay_handle(submission: Any) -> Any:
+    """Return the handle from a single-row replay submission.
+
+    The public LangGraph replay adapter still exposes replay/fork as immediate
+    run objects, but Kitaru's unified replay API now returns a ReplaySubmission.
+    The adapter always submits one seed execution at a time and asks for
+    ``wait=False``, so a successful submission should contain exactly one result
+    row with a live FlowHandle attached.
+    """
+    if getattr(submission, "failures", None):
+        reason = submission.failures[0].reason
+        raise RuntimeError(f"LangGraph replay submission failed: {reason}")
+    if getattr(submission, "skipped", None):
+        reason = submission.skipped[0].reason
+        raise RuntimeError(f"LangGraph replay submission was skipped: {reason}")
+
+    results = list(getattr(submission, "results", []))
+    if len(results) != 1:
+        raise RuntimeError(
+            "LangGraph replay expected exactly one replay result row; "
+            f"got {len(results)}."
+        )
+    handle = getattr(results[0], "handle", None)
+    if handle is None:
+        raise RuntimeError(
+            "LangGraph replay expected a FlowHandle on the replay result row. "
+            "Call replay with wait=False so the adapter can wait for and read "
+            "the terminal node-output artifact."
+        )
+    return handle
 
 
 def _recorded_by_node(case: ImportedReplayCase) -> dict[str, list[RecordedCall]]:

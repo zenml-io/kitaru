@@ -55,14 +55,15 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, str, str]:
     replayed = client.executions.replay(
         source_handle.exec_id,
         at="write_draft",
-        output={"research": edited_notes},
+        checkpoint_overrides={"research": {"output": edited_notes}},
     )
-    print(f"Replay execution started: {replayed.exec_id}")
+    replay_exec_id = replayed.results[0].replay_exec_id
+    print(f"Replay execution started: {replay_exec_id}")
 
     # Poll until the replay execution reaches a terminal state.
     deadline = time.time() + 120
     while time.time() <= deadline:
-        execution = client.executions.get(replayed.exec_id)
+        execution = client.executions.get(replay_exec_id)
         if execution.status in {
             ExecutionStatus.COMPLETED,
             ExecutionStatus.FAILED,
@@ -84,7 +85,7 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, str, str]:
     replay_output = str(publish_output.load())
     print(f"Replay output:  {replay_output}")
 
-    return source_handle.exec_id, replayed.exec_id, original_result, replay_output
+    return source_handle.exec_id, replay_exec_id, original_result, replay_output
 
 
 def main() -> None:

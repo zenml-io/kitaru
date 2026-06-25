@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from zenml.models import PipelineRunResponse, StepRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate, StepRunResponse
 
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
@@ -216,7 +216,6 @@ class ReplaySubmission:
         }
 
 
-
 def safe_compare_url_for_executions(exec_ids: Sequence[str]) -> str | None:
     """Build a compare URL without letting URL lookup break replay results."""
     try:
@@ -238,21 +237,26 @@ def _safe_apply_replay_tag(replay_exec_id: str, tag: str | None) -> None:
         client = Client()
         update_run = getattr(getattr(client, "zen_store", None), "update_run", None)
         if callable(update_run):
-            # Prefer ZenML's store-level run update when this backend accepts a
-            # tag update mapping; older backends may reject that shape.
+            # Prefer ZenML's store-level run update; it expects a model, not a
+            # plain dict, so that backend code can read fields such as add_tags.
             try:
                 update_run(
                     run_id=replay_exec_id,
-                    run_update={"add_tags": [tag]},
+                    run_update=PipelineRunUpdate(add_tags=[tag]),
                 )
                 return
             except Exception:
-                logger.debug("ZenML run tag update via mapping failed.", exc_info=True)
+                logger.debug("ZenML run tag update failed.", exc_info=True)
         add_run_tags = getattr(client, "add_run_tags", None)
         if callable(add_run_tags):
             add_run_tags(replay_exec_id, [tag])
     except Exception:
-        logger.debug("Failed to apply replay tag %s to %s.", tag, replay_exec_id, exc_info=True)
+        logger.debug(
+            "Failed to apply replay tag %s to %s.",
+            tag,
+            replay_exec_id,
+            exc_info=True,
+        )
 
 
 def safe_persist_replay_submission_metadata(
@@ -387,7 +391,11 @@ def replay_at_skip_reason(*, run: PipelineRunResponse, at: str) -> str:
         )
     call_ids = ", ".join(
         sorted(
-            {checkpoint.call_id for checkpoint in _checkpoints(run) if at in checkpoint.target_keys}
+            {
+                checkpoint.call_id
+                for checkpoint in _checkpoints(run)
+                if at in checkpoint.target_keys
+            }
         )
     )
     return (
@@ -400,7 +408,9 @@ def _resolve_checkpoint_selector(
     selector: str,
     checkpoints: Sequence[_Checkpoint],
 ) -> _Checkpoint:
-    matches = [checkpoint for checkpoint in checkpoints if selector in checkpoint.target_keys]
+    matches = [
+        checkpoint for checkpoint in checkpoints if selector in checkpoint.target_keys
+    ]
 
     if len(matches) == 1:
         return matches[0]
@@ -756,11 +766,13 @@ def _put_target_override(
     target = effective.setdefault(checkpoint.invocation_id, {})
     if "input" in entry and "output" in target:
         raise KitaruUsageError(
-            f"Replay target '{checkpoint.invocation_id}' cannot combine input and output."
+            f"Replay target '{checkpoint.invocation_id}' cannot combine input "
+            "and output."
         )
     if "output" in entry and "input" in target:
         raise KitaruUsageError(
-            f"Replay target '{checkpoint.invocation_id}' cannot combine input and output."
+            f"Replay target '{checkpoint.invocation_id}' cannot combine input "
+            "and output."
         )
     target.update(entry)
 
@@ -805,8 +817,12 @@ def _build_effective_overrides(
         _validate_model_override(checkpoint)
 
     document = ReplayPlanDocument(
-        checkpoint_overrides={key: dict(value) for key, value in checkpoint_entries.items()},
-        invocation_overrides={key: dict(value) for key, value in invocation_entries.items()},
+        checkpoint_overrides={
+            key: dict(value) for key, value in checkpoint_entries.items()
+        },
+        invocation_overrides={
+            key: dict(value) for key, value in invocation_entries.items()
+        },
         matched_targets=matched_targets,
     )
     return effective, document
@@ -820,7 +836,9 @@ def _runtime_override_keys(checkpoint: _Checkpoint) -> set[str]:
 
 
 def _has_runtime_only_overrides(plan: ReplayPlan) -> bool:
-    return bool(plan.runtime_context.code_overrides or plan.runtime_context.model_overrides)
+    return bool(
+        plan.runtime_context.code_overrides or plan.runtime_context.model_overrides
+    )
 
 
 def plan_requires_runtime_transport(plan: ReplayPlan) -> bool:
@@ -872,7 +890,7 @@ def build_replay_plan(
     if skip_overlap:
         joined = ", ".join(sorted(skip_overlap))
         raise KitaruUsageError(
-            "Cannot skip and override the same replay target: " f"{joined}."
+            f"Cannot skip and override the same replay target: {joined}."
         )
 
     live = _compute_live_steps(
@@ -933,9 +951,9 @@ def build_replay_plan(
                 roots={consumer_invocation_id},
                 children_by_invocation=children_by_invocation,
             )
-            step_input_overrides.setdefault(consumer_invocation_id, {})[
-                input_name
-            ] = value
+            step_input_overrides.setdefault(consumer_invocation_id, {})[input_name] = (
+                value
+            )
         for key in _runtime_override_keys(source):
             output_mocks[key] = value
 
@@ -984,10 +1002,10 @@ __all__ = [
     "ReplaySummary",
     "build_replay_plan",
     "build_replay_request_document",
-    "safe_compare_url_for_executions",
-    "safe_persist_replay_submission_metadata",
     "new_replay_submission_id",
     "plan_requires_runtime_transport",
     "replay_at_skip_reason",
     "replay_at_status",
+    "safe_compare_url_for_executions",
+    "safe_persist_replay_submission_metadata",
 ]

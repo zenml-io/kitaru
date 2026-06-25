@@ -23,7 +23,7 @@ def collect_evidence_with_llm_tools(
         raise SystemExit(
             "Missing LangChain dependency. Run trace generation with:\n"
             "  uv run --extra langgraph-openai --with langfuse "
-            "examples/end_to_end/replay_verify_reference_agent/generate_traces.py"
+            "examples/end_to_end/replay_fork_demo/demo.py create-trace"
         ) from error
 
     model = _chat_model(variant.model).bind_tools(
@@ -188,7 +188,7 @@ def _chat_model(model_name: str) -> Any:
             "Missing LangChain OpenAI provider.\n"
             "Run trace generation with:\n"
             "  uv run --extra langgraph-openai --with langfuse "
-            "examples/end_to_end/replay_verify_reference_agent/generate_traces.py"
+            "examples/end_to_end/replay_fork_demo/demo.py create-trace"
         ) from error
     return ChatOpenAI(
         model=model_name,

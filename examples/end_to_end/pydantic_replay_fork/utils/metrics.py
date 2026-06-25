@@ -318,7 +318,8 @@ def load_support_decision_from_execution(client: KitaruClient, exec_id: str) -> 
 
     raise RuntimeError(
         f"Could not extract a SupportDecision from execution {exec_id!r}. "
-        f"Searched checkpoints: {[FINAL_DECISION_CHECKPOINT, *model_checkpoint_names]}. "
+        "Searched checkpoints: "
+        f"{[FINAL_DECISION_CHECKPOINT, *model_checkpoint_names]}. "
         f"Checkpoints present: {[c.name for c in run.checkpoints]}. "
         "Ensure the flow completed successfully and produced either the "
         "publish_support_decision checkpoint or a support_copilot_model_request "

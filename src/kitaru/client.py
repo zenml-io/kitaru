@@ -746,7 +746,6 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
     return pipeline_obj
 
 
-
 def _raise_if_running_source(run: PipelineRunResponse, execution: str) -> None:
     run_status_value = _run_status_value(run)
     if run_status_value in _RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING]:
@@ -754,6 +753,7 @@ def _raise_if_running_source(run: PipelineRunResponse, execution: str) -> None:
             "Replay requires a non-running source execution. "
             f"Execution '{execution}' is currently '{run_status_value}'."
         )
+
 
 def _run_status_value(run: PipelineRunResponse) -> str:
     """Return a pipeline run status as a plain string."""
@@ -1435,9 +1435,9 @@ class _ExecutionsAPI:
         """Block until a replay finishes and roll up terminal LLM usage metadata."""
         from kitaru.flow import FlowHandle
 
-        if isinstance(handle_or_run, FlowHandle):
-            handle = handle_or_run
-        elif callable(getattr(handle_or_run, "wait", None)):
+        if isinstance(handle_or_run, FlowHandle) or callable(
+            getattr(handle_or_run, "wait", None)
+        ):
             handle = handle_or_run
         else:
             handle = FlowHandle(handle_or_run)
@@ -1460,7 +1460,9 @@ class _ExecutionsAPI:
         """Replay one or more explicit executions from a checkpoint cut point."""
         from kitaru.cohort import coerce_exec_ids
 
-        exec_ids = [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        exec_ids = (
+            [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        )
         if not exec_ids:
             raise KitaruUsageError("Pass at least one execution ID to replay.")
         resolved_wait = (len(exec_ids) == 1) if wait is None else wait
@@ -1494,7 +1496,11 @@ class _ExecutionsAPI:
             if isinstance(result, ReplaySubmission):
                 return result
             # Compatibility with any locally imported old flow wrapper.
-            replay_exec_id = self._await_replay_completion(result) if resolved_wait else str(result.exec_id)
+            replay_exec_id = (
+                self._await_replay_completion(result)
+                if resolved_wait
+                else str(result.exec_id)
+            )
             execution_obj = self.get(replay_exec_id) if resolved_wait else None
             return ReplaySubmission.create(
                 tag=tag,
@@ -1506,8 +1512,12 @@ class _ExecutionsAPI:
                         original_exec_ref=exec_ids[0],
                         original_exec_id=str(first_run.id),
                         replay_exec_id=replay_exec_id,
-                        status="completed" if execution_obj is not None else "submitted",
-                        compare_url=safe_compare_url_for_executions([str(first_run.id), replay_exec_id]),
+                        status=(
+                            "completed" if execution_obj is not None else "submitted"
+                        ),
+                        compare_url=safe_compare_url_for_executions(
+                            [str(first_run.id), replay_exec_id]
+                        ),
                         handle=None if resolved_wait else result,
                     )
                 ],
@@ -1559,7 +1569,9 @@ class _ExecutionsAPI:
             try:
                 source_run = (prefetched_runs or {}).get(exec_ref)
                 if source_run is None:
-                    source_run = self._client_ref._get_pipeline_run(exec_ref, hydrate=True)
+                    source_run = self._client_ref._get_pipeline_run(
+                        exec_ref, hydrate=True
+                    )
                 _raise_if_running_source(source_run, exec_ref)
                 original_id = str(source_run.id)
                 if on_error == "collect":
@@ -1631,7 +1643,8 @@ class _ExecutionsAPI:
                     )
                     if failure_origin == FailureOrigin.DIVERGENCE:
                         raise execution_error_from_failure(
-                            f"Replay divergence detected for execution '{exec_ref}': {exc}",
+                            "Replay divergence detected for execution "
+                            f"'{exec_ref}': {exc}",
                             exec_id=str(source_run.id),
                             status="failed",
                             origin=failure_origin,
@@ -1650,9 +1663,14 @@ class _ExecutionsAPI:
                             "failure_origin": FailureOrigin.RUNTIME.value,
                         },
                     )
-                    raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
+                    raise KitaruRuntimeError(
+                        "Replay did not produce a pipeline run ID."
+                    )
 
-                track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
+                track(
+                    AnalyticsEvent.FLOW_REPLAYED,
+                    {"replay_path": "pipeline_fallback"},
+                )
                 row_status: Literal["submitted", "completed", "failed"] = "submitted"
                 if wait:
                     replayed_exec_id = self._await_replay_completion(replayed_run)
@@ -1670,7 +1688,9 @@ class _ExecutionsAPI:
                         original_exec_id=original_id,
                         replay_exec_id=replayed_exec_id,
                         status=row_status,
-                        compare_url=safe_compare_url_for_executions([original_id, replayed_exec_id]),
+                        compare_url=safe_compare_url_for_executions(
+                            [original_id, replayed_exec_id]
+                        ),
                         handle=None if wait else replayed_run,
                     )
                 )

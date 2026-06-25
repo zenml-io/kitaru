@@ -8,7 +8,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from zenml.models import PipelineRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate
 
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import (
@@ -17,6 +17,7 @@ from kitaru.replay import (
     ReplaySubmission,
     build_replay_plan,
     replay_at_status,
+    safe_persist_replay_submission_metadata,
 )
 
 
@@ -204,7 +205,11 @@ def test_replay_at_branch_leaf_skips_unrelated_branch() -> None:
 def test_replay_at_includes_linear_tail_without_upstream_edges() -> None:
     """Adapter call checkpoints may lack DAG edges; time-ordered tail still re-runs."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    model_1 = _step(name="support_copilot_model_request", invocation_id="m1", started_at=t0)
+    model_1 = _step(
+        name="support_copilot_model_request",
+        invocation_id="m1",
+        started_at=t0,
+    )
     gather = _step(
         name="gather_context_tool",
         invocation_id="gather",
@@ -262,9 +267,7 @@ def test_output_scoped_to_at_when_tool_key_matches_cut() -> None:
     plan = build_replay_plan(
         run=_run(policy, decide),
         at="lookup_policy_tool",
-        checkpoint_overrides={
-            "lookup_policy": {"output": {"policy_label": "mock"}}
-        },
+        checkpoint_overrides={"lookup_policy": {"output": {"policy_label": "mock"}}},
     )
 
     assert "lookup_policy_tool" in plan.steps_to_skip
@@ -340,9 +343,7 @@ def test_runtime_context_carries_targeted_code_and_model_overrides() -> None:
     plan = build_replay_plan(
         run=_run(tool_step, llm_step),
         at="lookup_policy_tool",
-        checkpoint_overrides={
-            "lookup_policy": {"code": "mocks.lookup_policy"}
-        },
+        checkpoint_overrides={"lookup_policy": {"code": "mocks.lookup_policy"}},
         invocation_overrides={
             "support_copilot_model_request_2": {"model": "openai/gpt-5-nano"}
         },
@@ -351,9 +352,10 @@ def test_runtime_context_carries_targeted_code_and_model_overrides() -> None:
     assert plan.runtime_context.code_overrides["lookup_policy_tool"] == (
         "mocks.lookup_policy"
     )
-    assert plan.runtime_context.model_overrides[
-        "support_copilot_model_request_2"
-    ] == "openai/gpt-5-nano"
+    assert (
+        plan.runtime_context.model_overrides["support_copilot_model_request_2"]
+        == "openai/gpt-5-nano"
+    )
 
 
 def test_explicit_skip_forces_playback_in_live_tail() -> None:
@@ -404,6 +406,7 @@ def test_explicit_skip_conflicts_with_input_override() -> None:
             skip=["fetch"],
             invocation_overrides={"fetch": {"input": {"tool_args": {"topic": "new"}}}},
         )
+
 
 def test_invocation_override_wins_over_checkpoint_override() -> None:
     step = _step(
@@ -463,6 +466,33 @@ def test_model_override_rejects_non_llm_checkpoint() -> None:
             at="lookup_policy_tool",
             invocation_overrides={"lookup_policy_tool": {"model": "openai/gpt-5-nano"}},
         )
+
+
+def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
+    monkeypatch,
+) -> None:
+    calls: dict[str, Any] = {}
+
+    class _Store:
+        def update_run(self, **kwargs: Any) -> None:
+            calls.update(kwargs)
+
+    class _Client:
+        zen_store = _Store()
+
+    monkeypatch.setattr("zenml.client.Client", lambda: _Client())
+    monkeypatch.setattr("kitaru.logging.log_to_execution", lambda *_, **__: None)
+
+    safe_persist_replay_submission_metadata(
+        replay_exec_id="replay-a",
+        original_exec_id="orig-a",
+        submission_id="rs-test",
+        tag="batch-eval",
+    )
+
+    assert calls["run_id"] == "replay-a"
+    assert isinstance(calls["run_update"], PipelineRunUpdate)
+    assert calls["run_update"].add_tags == ["batch-eval"]
 
 
 def test_replay_submission_to_json_excludes_handles() -> None:

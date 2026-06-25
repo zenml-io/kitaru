@@ -281,11 +281,12 @@ def test_stage2_replay_from_checkpoint_completes_independently(
         first_handle.exec_id,
         at="check_insurance",
     )
-    assert replayed.exec_id != first_handle.exec_id
+    replay_exec_id = replayed.results[0].replay_exec_id
+    assert replay_exec_id != first_handle.exec_id
 
     deadline = time.time() + 120
     while True:
-        execution = client.executions.get(replayed.exec_id)
+        execution = client.executions.get(replay_exec_id)
         if execution.status in {
             ExecutionStatus.COMPLETED,
             ExecutionStatus.FAILED,

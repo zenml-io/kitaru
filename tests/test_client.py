@@ -5922,7 +5922,7 @@ def _immediate_replay_completion(_self: object, handle_or_run: object) -> str:
         if callable(wait):
             wait()
         return str(exec_id)
-    return str(getattr(handle_or_run, "id"))
+    return str(cast(Any, handle_or_run).id)
 
 
 def test_replay_fallback_emits_requested_and_replayed_events() -> None:
@@ -6815,13 +6815,21 @@ def test_replay_fallback_rejects_runtime_only_overrides_before_submit() -> None:
     )
 
     with (
-        patch("kitaru.client.resolve_connection_config", return_value=_resolved_connection()),
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
         patch("kitaru.client.Client") as client_cls,
-        patch("kitaru.client._resolve_flow_for_replay", side_effect=KitaruRuntimeError("no wrapper")),
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no wrapper"),
+        ),
         patch("kitaru.client.importlib.import_module", return_value=replay_module),
         pytest.raises(KitaruRuntimeError, match="runtime-only overrides"),
     ):
-        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(
+            source_run
+        )
         KitaruClient().executions.replay(
             str(source_run.id),
             at="lookup_policy_tool",

@@ -14,9 +14,7 @@ from kitaru.replay_context import (
 def test_resolve_tool_override_imports_registered_target(monkeypatch) -> None:
     context = ReplayRuntimeContext(
         at="lookup_policy_tool",
-        code_overrides={
-            "lookup_policy_tool": "tests._replay_tool_stub.lookup_policy"
-        },
+        code_overrides={"lookup_policy_tool": "tests._replay_tool_stub.lookup_policy"},
     )
     monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
     get_replay_runtime_context.cache_clear()
@@ -50,8 +48,7 @@ def test_resolve_model_override_matches_only_target(monkeypatch) -> None:
     get_replay_runtime_context.cache_clear()
 
     assert (
-        resolve_model_override("support_copilot_model_request_2")
-        == "openai/gpt-5-nano"
+        resolve_model_override("support_copilot_model_request_2") == "openai/gpt-5-nano"
     )
     assert resolve_model_override("support_copilot_model_request_1") is None
     get_replay_runtime_context.cache_clear()

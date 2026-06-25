@@ -555,7 +555,7 @@ class Execution:
         tag: str | None = None,
         wait: bool | None = None,
         on_error: Literal["collect", "fail"] | None = None,
-    ) -> "ReplaySubmission":
+    ) -> ReplaySubmission:
         """Replay this execution from a checkpoint cut point."""
         return self._client.executions.replay(
             self.exec_id,

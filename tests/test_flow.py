@@ -2447,7 +2447,12 @@ def test_replay_forwards_secret_environment_from_to_with_options() -> None:
         client_instance.get_pipeline_run.return_value = source_run
 
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), at="write", flow_overrides={"topic": "t"}, wait=False)
+        wrapped.replay(
+            str(source_run.id),
+            at="write",
+            flow_overrides={"topic": "t"},
+            wait=False,
+        )
 
     call_kwargs = base_pipeline.with_options.call_args.kwargs
     assert call_kwargs["secrets"] == ["openai-creds"]
@@ -2495,7 +2500,12 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
         client_instance.get_pipeline_run.return_value = source_run
 
         wrapped = flow(stack="decorator-stack")(lambda topic: topic)
-        wrapped.replay(str(source_run.id), at="write", stack="invocation-stack", wait=False)
+        wrapped.replay(
+            str(source_run.id),
+            at="write",
+            stack="invocation-stack",
+            wait=False,
+        )
 
     resolve_call = resolve_execution_config_mock.call_args.kwargs
     assert resolve_call["decorator_overrides"].stack == "decorator-stack"
@@ -4267,14 +4277,22 @@ def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None
     wrapped = kitaru.flow(lambda topic: topic)
     with (
         patch("kitaru.flow.Client") as client_cls,
-        patch.object(wrapped, "_replay_one_handle", return_value=(handle, run_with_at, plan)),
+        patch.object(
+            wrapped,
+            "_replay_one_handle",
+            return_value=(handle, run_with_at, plan),
+        ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.safe_persist_replay_submission_metadata"),
     ):
-        client_cls.return_value.get_pipeline_run.side_effect = lambda name_id_or_prefix, **_: {
-            "exec-with": run_with_at,
-            "exec-without": run_without_at,
-        }[name_id_or_prefix]
+
+        def _get_pipeline_run(name_id_or_prefix, **_):
+            return {
+                "exec-with": run_with_at,
+                "exec-without": run_without_at,
+            }[name_id_or_prefix]
+
+        client_cls.return_value.get_pipeline_run.side_effect = _get_pipeline_run
         submission = wrapped.replay(["exec-with", "exec-without"], at="write")
 
     handle.wait.assert_not_called()

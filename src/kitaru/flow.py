@@ -1833,7 +1833,9 @@ class _FlowDefinition:
         """Replay one or more explicit executions with unified overrides."""
         from kitaru.cohort import coerce_exec_ids
 
-        exec_ids = [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        exec_ids = (
+            [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        )
         if not exec_ids:
             raise KitaruUsageError("Pass at least one execution ID to replay.")
         resolved_wait = (len(exec_ids) == 1) if wait is None else wait

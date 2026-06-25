@@ -4068,7 +4068,7 @@ def test_executions_replay_rejects_old_args_flag(
                 "--at",
                 "write_summary",
                 "--args",
-                '{}',
+                "{}",
             ]
         )
 
