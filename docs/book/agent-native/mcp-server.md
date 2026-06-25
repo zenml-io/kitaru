@@ -248,6 +248,14 @@ Example payloads:
 
 ```json
 {
+  "group_by": ["flow"],
+  "metrics": ["llm_display_cost", "llm_total_tokens"],
+  "max_groups": 20
+}
+```
+
+```json
+{
   "group_by": ["metadata:customer_tier", "status"],
   "tags": ["customer-facing"],
   "max_groups": 100
@@ -278,7 +286,9 @@ The result shape is:
 Supported groupings are `status`, `flow`, `stack`, `tag`, `time:hour`,
 `time:day`, `time:week`, `time:month`, and `metadata:<key>`. `flow` and
 `stack` groupings return IDs as `flow_id` and `stack_id`; filters can still use
-names. Optional metrics use the same string format as the CLI:
+names. Optional metrics use the same strings as the CLI and SDK. For common LLM
+totals, use shortcuts such as `llm_display_cost`, `llm_estimated_cost`,
+`llm_total_tokens`, and `llm_incurred_tokens`. For other metrics, use
 `<name>:<source>:<avg|sum|min|max>` for built-in numeric sources such as
 `duration`, or `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for numeric
 execution metadata. The tool does not yet filter by time range or metadata

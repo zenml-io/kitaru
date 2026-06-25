@@ -16,6 +16,10 @@ from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru._cli._executions import _execution_statistics_table
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._statistics import (
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
+    normalize_execution_statistics_metrics,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     ActiveConfigSelectionProvenance,
@@ -2554,6 +2558,143 @@ def test_executions_statistics_forwards_filters_and_repeatable_options() -> None
         tags=["nightly", "customer-facing"],
         max_groups=25,
     )
+
+
+def test_executions_statistics_forwards_llm_shortcuts_and_emits_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """LLM shortcut metric strings should pass through to the SDK unchanged."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-123"},
+                execution_count=3,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--flow",
+                "my_flow",
+                "--group-by",
+                "flow",
+                "--metric",
+                "llm_display_cost",
+                "--metric",
+                "llm_total_tokens",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["flow"],
+        metrics=["llm_display_cost", "llm_total_tokens"],
+        flow="my_flow",
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"]["groups"] == [
+        {
+            "keys": {"flow_id": "flow-123"},
+            "execution_count": 3,
+            "metrics": {"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+        }
+    ]
+
+
+def test_executions_statistics_text_orders_llm_shortcut_columns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text metric columns should follow requested shortcut order."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=3,
+                metrics={"llm_total_tokens": 128.0, "llm_display_cost": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--metric",
+                "llm_display_cost",
+                "--metric",
+                "llm_total_tokens",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert output.index("Llm Display Cost") < output.index("Llm Total Tokens")
+    assert "0.42" in output
+    assert "128.0" in output
+
+
+def test_executions_statistics_rejects_invalid_llm_shortcut_like_metric(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid shortcut-like metrics should use the normal CLI error path."""
+    fake_client = Mock()
+
+    def _statistics(**kwargs: Any) -> ExecutionStatistics:
+        normalize_execution_statistics_metrics(kwargs["metrics"])
+        raise AssertionError("invalid metric should fail before statistics return")
+
+    fake_client.executions.statistics.side_effect = _statistics
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--metric", "llm_not_a_real_shortcut"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        "Unsupported execution statistics metric 'llm_not_a_real_shortcut'"
+        in captured.err
+    )
+
+
+def test_executions_statistics_metric_help_lists_llm_shortcuts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The metric help text should advertise the common LLM shortcuts."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    for shortcut in LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY.split(", "):
+        assert shortcut in output
 
 
 def test_executions_statistics_accepts_pagination_without_forwarding_it() -> None:

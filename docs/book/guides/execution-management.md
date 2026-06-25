@@ -231,10 +231,11 @@ writes two execution-level views:
   happened in one execution. Its `usage_record_count`,
   `incurred_usage_record_count`, and `reused_usage_record_count` fields count
   Kitaru usage records, not raw provider API calls.
-- Flat numeric metadata keys such as `kitaru_llm_display_cost_usd_v1` and
-  `kitaru_llm_total_tokens_v1` are the statistics view. Kitaru execution
-  statistics can sum or average these because they are top-level numbers, not
-  nested objects.
+- Common LLM totals are available as execution-statistics shortcuts:
+  `llm_display_cost`, `llm_estimated_cost`, `llm_total_tokens`, and
+  `llm_incurred_tokens`. These shortcuts read the flat execution-level numeric
+  metadata that Kitaru writes for statistics, so users do not need to spell the
+  internal `_v1` metadata keys for common cost and token totals.
 
 Cost fields are intentionally split:
 
@@ -302,21 +303,28 @@ observability and trend analysis, not financial reconciliation.
 Useful statistics queries:
 
 ```bash
-# Sum display cost by flow. This is an observability number, not an invoice.
+# Sum display cost and total token volume for one flow.
+# Display cost is an observability number, not an invoice.
+kitaru executions statistics \
+  --flow content_pipeline \
+  --metric llm_display_cost \
+  --metric llm_total_tokens
+
+# Sum estimated cost by flow.
 kitaru executions statistics \
   --group-by flow \
-  --metric llm_display_cost_sum:metadata:kitaru_llm_display_cost_usd_v1:sum
+  --metric llm_estimated_cost
 
 # Sum incurred token volume by day.
 kitaru executions statistics \
   --group-by time:day \
-  --metric llm_tokens_sum:metadata:kitaru_llm_incurred_total_tokens_v1:sum
-
-# Count usage records that reused checkpoint metadata instead of incurring new usage.
-kitaru executions statistics \
-  --group-by flow \
-  --metric llm_reused_usage_records:metadata:kitaru_llm_reused_usage_record_count_v1:sum
+  --metric llm_incurred_tokens
 ```
+
+The shortcut names above mean "sum this common LLM total". The raw
+`<name>:metadata:<metadata_key>:<avg|sum|min|max>` form still exists for custom
+numeric execution metadata and for advanced internal debugging, but you should
+not need `kitaru_llm_*_v1` keys for common LLM cost and token totals.
 
 {% hint style="warning" %}
 In v1, terminal LLM summaries are written when the SDK observes completion via

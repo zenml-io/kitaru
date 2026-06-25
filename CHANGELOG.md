@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+
 ## [0.18.0] - 2026-06-25
 
 ### Added

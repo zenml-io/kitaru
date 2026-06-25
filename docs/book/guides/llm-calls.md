@@ -95,7 +95,9 @@ kitaru.configure(llm_estimated_costs="off")
 
 See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata)
 for how checkpoint-level records roll up into execution summaries and
-statistics.
+statistics. Common LLM totals can be queried through execution-statistics
+shortcuts such as `llm_display_cost`, `llm_estimated_cost`, `llm_total_tokens`,
+and `llm_incurred_tokens`.
 
 ## Credential resolution order
 
