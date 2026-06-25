@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal, Protocol
+
+from kitaru.runtime import _is_inside_checkpoint as is_inside_checkpoint
+from kitaru.runtime import _is_inside_flow as is_inside_flow
+
+from ._utils import (
+    CheckpointConfig,
+    checkpoint_cache_key,
+    checkpoint_input_value,
+    run_async_in_checkpoint,
+    run_sync_in_checkpoint,
+    safe_step_name,
+    with_default_type,
+)
 
 FastAgentCallKind = Literal["model", "tool"]
 
@@ -23,6 +39,7 @@ class FastAgentCall:
     tool_name: str | None = None
     model_name: str | None = None
     provider: str | None = None
+    is_async: bool = False
 
 
 class FastAgentCallRecorder(Protocol):
@@ -41,6 +58,88 @@ def passthrough_call_recorder(
 ) -> Any:
     """Run the original fast-agent call without recording anything."""
     return proceed()
+
+
+class KitaruFastAgentCallRecorder:
+    """Record fast-agent model and tool calls as Kitaru checkpoints."""
+
+    def __init__(
+        self,
+        *,
+        model_checkpoint_config: CheckpointConfig | None = None,
+        tool_checkpoint_config: CheckpointConfig | None = None,
+    ) -> None:
+        self._model_checkpoint_config = model_checkpoint_config or {}
+        self._tool_checkpoint_config = tool_checkpoint_config or {}
+
+    def __call__(
+        self,
+        call: FastAgentCall,
+        proceed: Callable[[], Any],
+    ) -> Any:
+        if not is_inside_flow() or is_inside_checkpoint():
+            return proceed()
+
+        call_input = _checkpoint_call_input(call)
+        cache_key = checkpoint_cache_key(call_input)
+        checkpoint_inputs = {"call_input": call_input}
+        step_name = _checkpoint_step_name(call)
+        config = with_default_type(
+            self._checkpoint_config(call),
+            "llm_call" if call.kind == "model" else "tool_call",
+        )
+
+        if call.is_async:
+
+            async def async_body() -> Any:
+                result = proceed()
+                if inspect.isawaitable(result):
+                    return await result
+                return result
+
+            return run_async_in_checkpoint(
+                config=config,
+                step_name=step_name,
+                body=async_body,
+                cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+            )
+
+        def sync_body() -> Any:
+            result = proceed()
+            if inspect.isawaitable(result):
+                raise TypeError(
+                    "fast-agent call was marked sync but returned an awaitable."
+                )
+            return result
+
+        return run_sync_in_checkpoint(
+            config=config,
+            step_name=step_name,
+            body=sync_body,
+            cache_key=cache_key,
+            checkpoint_inputs=checkpoint_inputs,
+        )
+
+    def _checkpoint_config(self, call: FastAgentCall) -> CheckpointConfig:
+        config = (
+            self._model_checkpoint_config
+            if call.kind == "model"
+            else self._tool_checkpoint_config
+        )
+        return dict(config)
+
+
+def kitaru_call_recorder(
+    *,
+    model_checkpoint_config: CheckpointConfig | None = None,
+    tool_checkpoint_config: CheckpointConfig | None = None,
+) -> KitaruFastAgentCallRecorder:
+    """Return the default Kitaru checkpoint recorder for calls-mode wrapping."""
+    return KitaruFastAgentCallRecorder(
+        model_checkpoint_config=model_checkpoint_config,
+        tool_checkpoint_config=tool_checkpoint_config,
+    )
 
 
 class _FastAgentLLMWrapper:
@@ -74,6 +173,7 @@ class _FastAgentLLMWrapper:
         kwargs: dict[str, Any],
     ) -> Any:
         llm = self._kitaru_fast_agent_original_llm
+        method = getattr(llm, operation)
         call = FastAgentCall(
             agent_name=self._kitaru_fast_agent_agent_name,
             kind="model",
@@ -82,10 +182,10 @@ class _FastAgentLLMWrapper:
             kwargs=dict(kwargs),
             model_name=_optional_str(getattr(llm, "model_name", None)),
             provider=_optional_str(getattr(llm, "provider", None)),
+            is_async=_is_async_callable(method),
         )
 
         def proceed() -> Any:
-            method = getattr(llm, operation)
             return method(*args, **kwargs)
 
         return self._kitaru_fast_agent_recorder(call, proceed)
@@ -159,6 +259,7 @@ def _wrap_call_tool(
             args=args,
             kwargs=dict(kwargs),
             tool_name=tool_name,
+            is_async=_is_async_callable(call_tool),
         )
         return recorder(call, lambda: call_tool(*args, **kwargs))
 
@@ -215,6 +316,49 @@ def _tool_name_from_call(
         return args[0]
     name = kwargs.get("name")
     return name if isinstance(name, str) else None
+
+
+def _is_async_callable(value: Any) -> bool:
+    unwrapped = value
+    while isinstance(unwrapped, partial):
+        unwrapped = unwrapped.func
+    with suppress(ValueError):
+        unwrapped = inspect.unwrap(unwrapped)
+    if inspect.iscoroutinefunction(unwrapped):
+        return True
+    if inspect.isfunction(unwrapped) or inspect.ismethod(unwrapped):
+        return False
+    if not callable(unwrapped):
+        return False
+    call = unwrapped.__call__
+    with suppress(ValueError):
+        call = inspect.unwrap(call)
+    return inspect.iscoroutinefunction(call)
+
+
+def _checkpoint_call_input(call: FastAgentCall) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "agent_name": call.agent_name,
+        "kind": call.kind,
+        "operation": call.operation,
+        "args": checkpoint_input_value(call.args),
+        "kwargs": checkpoint_input_value(call.kwargs),
+    }
+    if call.tool_name is not None:
+        payload["tool_name"] = call.tool_name
+    if call.model_name is not None:
+        payload["model_name"] = call.model_name
+    if call.provider is not None:
+        payload["provider"] = call.provider
+    return payload
+
+
+def _checkpoint_step_name(call: FastAgentCall) -> str:
+    if call.kind == "tool":
+        operation = f"{call.tool_name or call.operation}_tool_call"
+    else:
+        operation = f"{call.operation}_model_call"
+    return safe_step_name(f"{call.agent_name}_{operation}")
 
 
 def _optional_str(value: Any) -> str | None:

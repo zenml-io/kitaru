@@ -8,9 +8,17 @@ from typing import Any, Literal, cast
 
 from kitaru.errors import KitaruUsageError
 
-from ._wrapping import FastAgentCallRecorder, wrap_fast_agent_app
+from ._utils import CheckpointConfig, validate_checkpoint_config
+from ._wrapping import FastAgentCallRecorder, kitaru_call_recorder, wrap_fast_agent_app
 
 FastAgentCheckpointStrategy = Literal["calls"]
+
+
+class _DefaultCallRecorder:
+    pass
+
+
+_DEFAULT_CALL_RECORDER = _DefaultCallRecorder()
 
 
 def validate_checkpoint_strategy(value: str) -> FastAgentCheckpointStrategy:
@@ -35,11 +43,28 @@ class KitaruFastAgent:
         fast_agent: Any,
         *,
         checkpoint_strategy: FastAgentCheckpointStrategy = "calls",
-        call_recorder: FastAgentCallRecorder | None = None,
+        call_recorder: FastAgentCallRecorder | None | _DefaultCallRecorder = (
+            _DEFAULT_CALL_RECORDER
+        ),
+        model_checkpoint_config: CheckpointConfig | None = None,
+        tool_checkpoint_config: CheckpointConfig | None = None,
     ) -> None:
         self._fast_agent = fast_agent
         self._checkpoint_strategy = validate_checkpoint_strategy(checkpoint_strategy)
-        self._call_recorder = call_recorder
+        self._call_recorder = (
+            kitaru_call_recorder(
+                model_checkpoint_config=validate_checkpoint_config(
+                    model_checkpoint_config,
+                    context="model_checkpoint_config",
+                ),
+                tool_checkpoint_config=validate_checkpoint_config(
+                    tool_checkpoint_config,
+                    context="tool_checkpoint_config",
+                ),
+            )
+            if call_recorder is _DEFAULT_CALL_RECORDER
+            else cast(FastAgentCallRecorder | None, call_recorder)
+        )
 
     @property
     def fast_agent(self) -> Any:

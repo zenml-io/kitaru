@@ -13,18 +13,24 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
     ) from exc
 
 from ._agent import KitaruFastAgent
+from ._utils import CheckpointConfig
 from ._wrapping import (
     FastAgentCall,
     FastAgentCallRecorder,
+    KitaruFastAgentCallRecorder,
+    kitaru_call_recorder,
     passthrough_call_recorder,
     wrap_fast_agent_agent,
     wrap_fast_agent_app,
 )
 
 __all__ = [
+    "CheckpointConfig",
     "FastAgentCall",
     "FastAgentCallRecorder",
     "KitaruFastAgent",
+    "KitaruFastAgentCallRecorder",
+    "kitaru_call_recorder",
     "passthrough_call_recorder",
     "wrap_fast_agent_agent",
     "wrap_fast_agent_app",
