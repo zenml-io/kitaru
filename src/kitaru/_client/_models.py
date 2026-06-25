@@ -20,6 +20,7 @@ from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
+    from kitaru.replay import ReplaySubmission
 
 
 def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
@@ -547,23 +548,25 @@ class Execution:
         self,
         *,
         at: str,
-        input: dict[str, Any] | None = None,
-        output: dict[str, Any] | None = None,
-        tool: dict[str, str] | None = None,
-        llm_model: str | None = None,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
         skip: Sequence[str] | None = None,
-        **flow_inputs: Any,
-    ) -> Execution:
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+    ) -> "ReplaySubmission":
         """Replay this execution from a checkpoint cut point."""
         return self._client.executions.replay(
             self.exec_id,
             at=at,
-            input=input,
-            output=output,
-            tool=tool,
-            llm_model=llm_model,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
             skip=skip,
-            **flow_inputs,
+            tag=tag,
+            wait=wait,
+            on_error=on_error,
         )
 
     def list_checkpoints(self) -> list[CheckpointCall]:

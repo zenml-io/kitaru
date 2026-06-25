@@ -160,7 +160,20 @@ from kitaru.errors import (
     classify_failure_origin,
     execution_error_from_failure,
 )
-from kitaru.replay import ReplayManyResult, build_replay_plan
+from kitaru.replay import (
+    ReplayFailureRow,
+    ReplayResultRow,
+    ReplaySkippedRow,
+    ReplaySubmission,
+    build_replay_plan,
+    build_replay_request_document,
+    new_replay_submission_id,
+    plan_requires_runtime_transport,
+    replay_at_skip_reason,
+    replay_at_status,
+    safe_compare_url_for_executions,
+    safe_persist_replay_submission_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -472,39 +485,16 @@ class _ReplayFlowLike(Protocol):
 
     def replay(
         self,
-        execution: str,
+        execution: str | Sequence[str],
         *,
         at: str,
-        input: dict[str, Any] | None = None,
-        output: dict[str, Any] | None = None,
-        tool: dict[str, str] | None = None,
-        llm_model: str | None = None,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
         skip: Sequence[str] | None = None,
-        **flow_inputs: Any,
-    ) -> Any: ...
-
-    def replay_many(
-        self,
-        executions: Sequence[str] | Any | None = None,
-        *,
-        at: str,
-        flow: str | None = None,
-        deployment: str | None = None,
-        deployment_version: int | None = None,
-        order_by: str = "-started_at",
-        limit: int = 50,
-        since: Any = None,
-        until: Any = None,
-        max_scan: int = 500,
-        status: str | Sequence[str] = "completed",
-        input: dict[str, Any] | None = None,
-        output: dict[str, Any] | None = None,
-        tool: dict[str, str] | None = None,
-        llm_model: str | None = None,
-        skip: Sequence[str] | None = None,
-        wait: bool = False,
-        on_error: Literal["collect", "fail"] = "collect",
-        **flow_inputs: Any,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
     ) -> Any: ...
 
 
@@ -755,6 +745,15 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
         )
     return pipeline_obj
 
+
+
+def _raise_if_running_source(run: PipelineRunResponse, execution: str) -> None:
+    run_status_value = _run_status_value(run)
+    if run_status_value in _RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING]:
+        raise KitaruStateError(
+            "Replay requires a non-running source execution. "
+            f"Execution '{execution}' is currently '{run_status_value}'."
+        )
 
 def _run_status_value(run: PipelineRunResponse) -> str:
     """Return a pipeline run status as a plain string."""
@@ -1447,211 +1446,255 @@ class _ExecutionsAPI:
 
     def replay(
         self,
-        execution: str,
+        execution: str | Sequence[str],
         *,
         at: str,
-        input: dict[str, Any] | None = None,
-        output: dict[str, Any] | None = None,
-        tool: dict[str, str] | None = None,
-        llm_model: str | None = None,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
         skip: Sequence[str] | None = None,
-        **flow_inputs: Any,
-    ) -> Execution:
-        """Replay an execution from a checkpoint cut point.
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+    ) -> ReplaySubmission:
+        """Replay one or more explicit executions from a checkpoint cut point."""
+        from kitaru.cohort import coerce_exec_ids
 
-        Blocks until the replay finishes and writes terminal LLM usage
-        aggregation metadata before returning the replayed execution.
-        """
-        source_run = self._client_ref._get_pipeline_run(execution, hydrate=True)
+        exec_ids = [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        if not exec_ids:
+            raise KitaruUsageError("Pass at least one execution ID to replay.")
+        resolved_wait = (len(exec_ids) == 1) if wait is None else wait
+        resolved_on_error = on_error or ("fail" if len(exec_ids) == 1 else "collect")
+        if resolved_on_error not in {"collect", "fail"}:
+            raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
 
-        run_status_value = _run_status_value(source_run)
-        if run_status_value in {
-            "initializing",
-            "provisioning",
-            "running",
-            "retrying",
-            "stopping",
-        }:
-            raise KitaruStateError(
-                "Replay requires a non-running source execution. "
-                f"Execution '{execution}' is currently '{run_status_value}'."
-            )
+        first_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
+        _raise_if_running_source(first_run, exec_ids[0])
 
         replay_flow: _ReplayFlowLike | None = None
         try:
-            replay_flow = _resolve_flow_for_replay(source_run)
+            replay_flow = _resolve_flow_for_replay(first_run)
         except _ReplayImportDependencyError:
             raise
         except KitaruRuntimeError:
             replay_flow = None
 
         if replay_flow is not None:
-            handle = replay_flow.replay(
-                execution,
+            result = replay_flow.replay(
+                exec_ids[0] if len(exec_ids) == 1 else exec_ids,
                 at=at,
-                input=input,
-                output=output,
-                tool=tool,
-                llm_model=llm_model,
+                flow_overrides=flow_overrides,
+                checkpoint_overrides=checkpoint_overrides,
+                invocation_overrides=invocation_overrides,
                 skip=skip,
-                **flow_inputs,
+                tag=tag,
+                wait=resolved_wait,
+                on_error=resolved_on_error,
             )
-            replay_exec_id = self._await_replay_completion(handle)
-            return self.get(replay_exec_id)
-
-        replay_pipeline = _resolve_pipeline_for_replay(source_run)
-        replay_plan = build_replay_plan(
-            run=source_run,
-            at=at,
-            input=input,
-            output=output,
-            tool=tool,
-            llm_model=llm_model,
-            skip=skip,
-            flow_inputs=flow_inputs,
-        )
-
-        replay_metadata: dict[str, Any] = {
-            "at_checkpoint": at,
-            "replay_path": "pipeline_fallback",
-        }
-        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
-
-        try:
-            replayed_run = replay_pipeline.replay(
-                pipeline_run=source_run.id,
-                skip=replay_plan.steps_to_skip,
-                skip_successful_steps=False,
-                input_overrides=replay_plan.input_overrides or None,
-                step_input_overrides=replay_plan.step_input_overrides or None,
-            )
-        except Exception as exc:
-            failure_origin = classify_failure_origin(
-                status_reason=str(exc),
-                traceback=None,
-                default=FailureOrigin.BACKEND,
-            )
-            track(
-                AnalyticsEvent.REPLAY_FAILED,
-                {
-                    **replay_metadata,
-                    "error_type": type(exc).__name__,
-                    "failure_origin": failure_origin.value,
-                },
-            )
-            if failure_origin == FailureOrigin.DIVERGENCE:
-                raise execution_error_from_failure(
-                    f"Replay divergence detected for execution '{execution}': {exc}",
-                    exec_id=str(source_run.id),
-                    status="failed",
-                    origin=failure_origin,
-                ) from exc
-            raise KitaruBackendError(
-                f"Failed to replay execution '{execution}': {exc}"
-            ) from exc
-
-        replayed_exec_id = str(getattr(replayed_run, "id", ""))
-        if not replayed_exec_id:
-            track(
-                AnalyticsEvent.REPLAY_FAILED,
-                {
-                    **replay_metadata,
-                    "error_type": "KitaruRuntimeError",
-                    "failure_origin": FailureOrigin.RUNTIME.value,
-                },
-            )
-            raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
-
-        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
-        replay_exec_id = self._await_replay_completion(replayed_run)
-        return self.get(replay_exec_id)
-
-    def replay_many(
-        self,
-        executions: Sequence[str] | Any | None = None,
-        *,
-        at: str,
-        flow: str | None = None,
-        deployment: str | None = None,
-        deployment_version: int | None = None,
-        order_by: str = "-started_at",
-        limit: int = 50,
-        since: Any = None,
-        until: Any = None,
-        max_scan: int = 500,
-        status: str | Sequence[str] = "completed",
-        input: dict[str, Any] | None = None,
-        output: dict[str, Any] | None = None,
-        tool: dict[str, str] | None = None,
-        llm_model: str | None = None,
-        skip: Sequence[str] | None = None,
-        wait: bool = False,
-        on_error: Literal["collect", "fail"] = "collect",
-        **flow_inputs: Any,
-    ) -> ReplayManyResult:
-        """Replay many executions, optionally selecting them by flow cohort query.
-
-        Pass explicit ``executions`` IDs, or set ``flow`` to select originals that
-        contain the replay anchor ``at``. Cohort selection filters out executions
-        missing ``at`` before replay starts; ``flow.replay_many`` still records any
-        per-parent skips during replay itself.
-        """
-        from kitaru.cohort import CohortResult, coerce_exec_ids
-
-        cohort_result: CohortResult | None = None
-        exec_ids = coerce_exec_ids(executions) if executions is not None else []
-
-        if flow is not None:
-            if exec_ids:
-                raise KitaruUsageError(
-                    "Pass execution IDs or cohort selectors (`flow=`), not both."
-                )
-            cohort_result = (
-                self.cohort(
-                    flow=flow,
-                    at=at,
-                    deployment=deployment,
-                    deployment_version=deployment_version,
-                    order_by=order_by,
-                    limit=limit,
-                    since=since,
-                    until=until,
-                    status=status,
-                ).resolve(max_scan=max_scan)
-            )
-            exec_ids = list(cohort_result.exec_ids)
-
-        if not exec_ids:
-            return ReplayManyResult(
+            if isinstance(result, ReplaySubmission):
+                return result
+            # Compatibility with any locally imported old flow wrapper.
+            replay_exec_id = self._await_replay_completion(result) if resolved_wait else str(result.exec_id)
+            execution_obj = self.get(replay_exec_id) if resolved_wait else None
+            return ReplaySubmission.create(
+                tag=tag,
                 at=at,
-                successes=[],
-                failures=[],
-                skipped=[],
-                cohort=cohort_result,
+                wait=resolved_wait,
+                plan=build_replay_request_document(flow_overrides=flow_overrides),
+                results=[
+                    ReplayResultRow(
+                        original_exec_ref=exec_ids[0],
+                        original_exec_id=str(first_run.id),
+                        replay_exec_id=replay_exec_id,
+                        status="completed" if execution_obj is not None else "submitted",
+                        compare_url=safe_compare_url_for_executions([str(first_run.id), replay_exec_id]),
+                        handle=None if resolved_wait else result,
+                    )
+                ],
             )
 
-        source_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
-        replay_flow = _resolve_flow_for_replay(source_run)
-        batch_result = replay_flow.replay_many(
+        return self._replay_via_pipeline_fallback(
             exec_ids,
             at=at,
-            input=input,
-            output=output,
-            tool=tool,
-            llm_model=llm_model,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
             skip=skip,
-            wait=wait,
-            on_error=on_error,
-            **flow_inputs,
+            tag=tag,
+            wait=resolved_wait,
+            on_error=resolved_on_error,
+            prefetched_runs={exec_ids[0]: first_run},
         )
-        if cohort_result is None:
-            return batch_result
-        return ReplayManyResult(
-            at=batch_result.at,
-            successes=batch_result.successes,
-            failures=batch_result.failures,
-            skipped=batch_result.skipped,
-            cohort=cohort_result,
+
+    def _replay_via_pipeline_fallback(
+        self,
+        executions: Sequence[str],
+        *,
+        at: str,
+        flow_overrides: Mapping[str, Any] | None,
+        checkpoint_overrides: Mapping[str, Any] | None,
+        invocation_overrides: Mapping[str, Any] | None,
+        skip: Sequence[str] | None,
+        tag: str | None,
+        wait: bool,
+        on_error: Literal["collect", "fail"],
+        prefetched_runs: Mapping[str, PipelineRunResponse] | None = None,
+    ) -> ReplaySubmission:
+        """Replay through ZenML pipeline fallback when no Kitaru flow wrapper exists."""
+        submission_id = new_replay_submission_id()
+        request_document = build_replay_request_document(
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+        )
+        plan_document = request_document
+        results: list[ReplayResultRow] = []
+        failures: list[ReplayFailureRow] = []
+        skipped_rows: list[ReplaySkippedRow] = []
+        compare_ids: list[str] = []
+
+        for exec_ref in executions:
+            original_id: str | None = None
+            try:
+                source_run = (prefetched_runs or {}).get(exec_ref)
+                if source_run is None:
+                    source_run = self._client_ref._get_pipeline_run(exec_ref, hydrate=True)
+                _raise_if_running_source(source_run, exec_ref)
+                original_id = str(source_run.id)
+                if on_error == "collect":
+                    at_status = replay_at_status(run=source_run, at=at)
+                    if at_status in {"missing", "no_checkpoints"}:
+                        skipped_rows.append(
+                            ReplaySkippedRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=source_run, at=at),
+                            )
+                        )
+                        continue
+                    if at_status == "ambiguous":
+                        failures.append(
+                            ReplayFailureRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=source_run, at=at),
+                            )
+                        )
+                        continue
+
+                replay_pipeline = _resolve_pipeline_for_replay(source_run)
+                replay_plan = build_replay_plan(
+                    run=source_run,
+                    at=at,
+                    flow_overrides=flow_overrides,
+                    checkpoint_overrides=checkpoint_overrides,
+                    invocation_overrides=invocation_overrides,
+                    skip=skip,
+                )
+                if plan_requires_runtime_transport(replay_plan):
+                    raise KitaruRuntimeError(
+                        "Replay request includes runtime-only overrides (`code` or "
+                        "targeted `model`), but Kitaru could not resolve the flow "
+                        "wrapper needed to transport KITARU_REPLAY_CONTEXT. Run "
+                        "replay from the project directory or remove those overrides."
+                    )
+                plan_document = replay_plan.document
+
+                replay_metadata: dict[str, Any] = {
+                    "at_checkpoint": at,
+                    "replay_path": "pipeline_fallback",
+                }
+                track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
+                try:
+                    replayed_run = replay_pipeline.replay(
+                        pipeline_run=source_run.id,
+                        skip=replay_plan.steps_to_skip,
+                        skip_successful_steps=False,
+                        input_overrides=replay_plan.input_overrides or None,
+                        step_input_overrides=replay_plan.step_input_overrides or None,
+                    )
+                except Exception as exc:
+                    failure_origin = classify_failure_origin(
+                        status_reason=str(exc),
+                        traceback=None,
+                        default=FailureOrigin.BACKEND,
+                    )
+                    track(
+                        AnalyticsEvent.REPLAY_FAILED,
+                        {
+                            **replay_metadata,
+                            "error_type": type(exc).__name__,
+                            "failure_origin": failure_origin.value,
+                        },
+                    )
+                    if failure_origin == FailureOrigin.DIVERGENCE:
+                        raise execution_error_from_failure(
+                            f"Replay divergence detected for execution '{exec_ref}': {exc}",
+                            exec_id=str(source_run.id),
+                            status="failed",
+                            origin=failure_origin,
+                        ) from exc
+                    raise KitaruBackendError(
+                        f"Failed to replay execution '{exec_ref}': {exc}"
+                    ) from exc
+
+                replayed_exec_id = str(getattr(replayed_run, "id", ""))
+                if not replayed_exec_id:
+                    track(
+                        AnalyticsEvent.REPLAY_FAILED,
+                        {
+                            **replay_metadata,
+                            "error_type": "KitaruRuntimeError",
+                            "failure_origin": FailureOrigin.RUNTIME.value,
+                        },
+                    )
+                    raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
+
+                track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
+                row_status: Literal["submitted", "completed", "failed"] = "submitted"
+                if wait:
+                    replayed_exec_id = self._await_replay_completion(replayed_run)
+                    row_status = "completed"
+                safe_persist_replay_submission_metadata(
+                    replay_exec_id=replayed_exec_id,
+                    original_exec_id=original_id,
+                    submission_id=submission_id,
+                    tag=tag,
+                )
+                compare_ids.extend([original_id, replayed_exec_id])
+                results.append(
+                    ReplayResultRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        replay_exec_id=replayed_exec_id,
+                        status=row_status,
+                        compare_url=safe_compare_url_for_executions([original_id, replayed_exec_id]),
+                        handle=None if wait else replayed_run,
+                    )
+                )
+            except Exception as exc:
+                if on_error == "fail":
+                    raise
+                failures.append(
+                    ReplayFailureRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        reason=str(exc),
+                    )
+                )
+
+        return ReplaySubmission.create(
+            submission_id=submission_id,
+            tag=tag,
+            at=at,
+            wait=wait,
+            plan=plan_document,
+            results=results,
+            failures=failures,
+            skipped=skipped_rows,
+            compare_url=safe_compare_url_for_executions(compare_ids),
         )
 
     def cohort(

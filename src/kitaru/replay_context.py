@@ -8,29 +8,45 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
+from kitaru._source_aliases import normalize_checkpoint_name
+
 KITARU_REPLAY_CONTEXT_ENV = "KITARU_REPLAY_CONTEXT"
 
 
 @dataclass(frozen=True)
 class ReplayRuntimeContext:
-    """Runtime replay overrides read by checkpoints during a replay run."""
+    """Runtime replay overrides read by checkpoints during a replay run.
+
+    ``code_overrides`` and ``model_overrides`` are keyed by the effective replay
+    target identities resolved during planning: invocation ID, checkpoint call ID,
+    and checkpoint name when available. Runtime consumers then look up the most
+    specific identity they know instead of applying one global override to every
+    tool or LLM call.
+    """
 
     at: str
     output_mocks: dict[str, Any] = field(default_factory=dict)
+    code_overrides: dict[str, str] = field(default_factory=dict)
+    model_overrides: dict[str, str] = field(default_factory=dict)
+    input_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     tool_overrides: dict[str, str] = field(default_factory=dict)
     llm_model: str | None = None
     llm_model_at: str | None = None
-    input_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_json(self) -> str:
         payload = {
             "at": self.at,
             "output_mocks": self.output_mocks,
-            "tool_overrides": self.tool_overrides,
-            "llm_model": self.llm_model,
-            "llm_model_at": self.llm_model_at,
+            "code_overrides": self.code_overrides,
+            "model_overrides": self.model_overrides,
             "input_overrides": self.input_overrides,
         }
+        if self.tool_overrides:
+            payload["tool_overrides"] = self.tool_overrides
+        if self.llm_model:
+            payload["llm_model"] = self.llm_model
+        if self.llm_model_at:
+            payload["llm_model_at"] = self.llm_model_at
         return json.dumps(payload, default=str)
 
     @classmethod
@@ -38,13 +54,25 @@ class ReplayRuntimeContext:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise ValueError("Replay context payload must be a JSON object.")
+        tool_overrides = dict(payload.get("tool_overrides") or {})
+        code_overrides = dict(payload.get("code_overrides") or {})
+        if tool_overrides:
+            # Older serialized payloads stored code swaps under this key.
+            code_overrides = {**tool_overrides, **code_overrides}
+        llm_model = payload.get("llm_model")
+        model_overrides = dict(payload.get("model_overrides") or {})
+        llm_model_at = payload.get("llm_model_at")
+        if llm_model and llm_model_at and llm_model_at not in model_overrides:
+            model_overrides[str(llm_model_at)] = str(llm_model)
         return cls(
             at=str(payload.get("at") or ""),
             output_mocks=dict(payload.get("output_mocks") or {}),
-            tool_overrides=dict(payload.get("tool_overrides") or {}),
-            llm_model=payload.get("llm_model"),
-            llm_model_at=payload.get("llm_model_at"),
+            code_overrides=code_overrides,
+            model_overrides=model_overrides,
             input_overrides=dict(payload.get("input_overrides") or {}),
+            tool_overrides=tool_overrides,
+            llm_model=llm_model,
+            llm_model_at=llm_model_at,
         )
 
 
@@ -60,15 +88,27 @@ def get_replay_runtime_context() -> ReplayRuntimeContext | None:
         return None
 
 
-def resolve_tool_override(name: str) -> Any | None:
-    """Import and return a tool override callable, if configured."""
+def _lookup_override(mapping: dict[str, str], *keys: str | None) -> str | None:
+    for key in keys:
+        if not key:
+            continue
+        if key in mapping:
+            return mapping[key]
+        normalized = normalize_checkpoint_name(key)
+        if normalized in mapping:
+            return mapping[normalized]
+        base = normalized.removesuffix("_tool")
+        if base in mapping:
+            return mapping[base]
+    return None
+
+
+def resolve_tool_override(name: str, *, target: str | None = None) -> Any | None:
+    """Import and return a targeted tool code override callable, if configured."""
     context = get_replay_runtime_context()
     if context is None:
         return None
-    import_path = context.tool_overrides.get(name)
-    if not import_path:
-        base = name.removesuffix("_tool")
-        import_path = context.tool_overrides.get(base)
+    import_path = _lookup_override(context.code_overrides, target, name)
     if not import_path:
         return None
     module_path, _, attr = str(import_path).rpartition(".")
@@ -81,9 +121,18 @@ def resolve_tool_override(name: str) -> Any | None:
     return resolved
 
 
+def resolve_model_override(*targets: str | None) -> str | None:
+    """Return a targeted model override for the current LLM checkpoint, if any."""
+    context = get_replay_runtime_context()
+    if context is None:
+        return None
+    return _lookup_override(context.model_overrides, *targets)
+
+
 __all__ = [
     "KITARU_REPLAY_CONTEXT_ENV",
     "ReplayRuntimeContext",
     "get_replay_runtime_context",
+    "resolve_model_override",
     "resolve_tool_override",
 ]

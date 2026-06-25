@@ -4942,10 +4942,7 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
 
     replay_handle = MagicMock()
     replay_handle.exec_id = str(replayed_run.id)
-    replay_flow = SimpleNamespace(
-        replay=MagicMock(return_value=replay_handle),
-        replay_many=MagicMock(),
-    )
+    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
     replay_module = SimpleNamespace(
         sample_flow=replay_flow,
         __kitaru_pipeline_source_sample_flow=object(),
@@ -4967,24 +4964,25 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
         client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
 
         client = KitaruClient()
-        execution = client.executions.replay(
+        submission = client.executions.replay(
             str(source_run.id),
             at="write_summary",
-            topic="new topic",
+            flow_overrides={"topic": "new topic"},
         )
 
     replay_flow.replay.assert_called_once_with(
         str(source_run.id),
         at="write_summary",
-        input=None,
-        output=None,
-        tool=None,
-        llm_model=None,
+        flow_overrides={"topic": "new topic"},
+        checkpoint_overrides=None,
+        invocation_overrides=None,
         skip=None,
-        topic="new topic",
+        tag=None,
+        wait=True,
+        on_error="fail",
     )
     replay_handle.wait.assert_called_once()
-    assert execution.exec_id == str(replayed_run.id)
+    assert submission.results[0].replay_exec_id == str(replayed_run.id)
 
 
 def test_replay_client_awaits_handle_before_returning_execution() -> None:
@@ -5001,73 +4999,10 @@ def test_replay_client_awaits_handle_before_returning_execution() -> None:
     handle.wait.assert_called_once()
 
 
-def test_replay_many_resolves_flow_cohort_before_replay() -> None:
-    cohort_result = SimpleNamespace(
-        exec_ids=["kr-a", "kr-b"],
-        to_json=lambda: {"exec_ids": ["kr-a", "kr-b"], "matched": 2},
-    )
-    cohort_query = Mock()
-    cohort_query.resolve.return_value = cohort_result
-    batch_result = SimpleNamespace(
-        at="lookup_policy_tool",
-        successes=[("kr-a", Mock(exec_id="replay-a"))],
-        failures=[],
-        skipped=[],
-    )
-    replay_flow = Mock()
-    replay_flow.replay_many.return_value = batch_result
+def test_executions_client_does_not_expose_replay_many() -> None:
+    client = KitaruClient()
 
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client.Client") as client_cls,
-        patch(
-            "kitaru.client._resolve_flow_for_replay",
-            return_value=replay_flow,
-        ),
-    ):
-        client_mock = client_cls.return_value
-        client_mock.get_pipeline_run.return_value = _as_pipeline_run(
-            _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="sample_flow")
-        )
-        client = KitaruClient()
-        client.executions.cohort = Mock(return_value=cohort_query)
-        result = client.executions.replay_many(
-            at="lookup_policy_tool",
-            flow="sample_flow",
-            order_by="-display_cost_usd",
-            limit=10,
-            model="openai:gpt-5-nano",
-        )
-
-    client.executions.cohort.assert_called_once_with(
-        flow="sample_flow",
-        at="lookup_policy_tool",
-        deployment=None,
-        deployment_version=None,
-        order_by="-display_cost_usd",
-        limit=10,
-        since=None,
-        until=None,
-        status="completed",
-    )
-    cohort_query.resolve.assert_called_once_with(max_scan=500)
-    replay_flow.replay_many.assert_called_once_with(
-        ["kr-a", "kr-b"],
-        at="lookup_policy_tool",
-        input=None,
-        output=None,
-        tool=None,
-        llm_model=None,
-        skip=None,
-        wait=False,
-        on_error="collect",
-        model="openai:gpt-5-nano",
-    )
-    assert result.cohort is cohort_result
-    assert result.successes == batch_result.successes
+    assert not hasattr(client.executions, "replay_many")
 
 
 def test_replay_stops_when_source_module_dependency_is_missing() -> None:
@@ -5324,8 +5259,6 @@ def test_resolve_flow_for_replay_imports_standalone_module_from_cwd(
     module_path.write_text(
         "class ReplayFlow:\n"
         "    def replay(self, *args, **kwargs):\n"
-        "        return None\n"
-        "    def replay_many(self, *args, **kwargs):\n"
         "        return None\n\n"
         "sample_flow = ReplayFlow()\n"
         "__kitaru_pipeline_source_sample_flow = object()\n"
@@ -5543,7 +5476,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
 
         client = KitaruClient()
-        execution = client.executions.replay(
+        submission = client.executions.replay(
             str(source_run.id),
             at="write",
         )
@@ -5552,7 +5485,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     replay_kwargs = replay_pipeline.replay.call_args.kwargs
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
-    assert execution.exec_id == str(replayed_run.id)
+    assert submission.results[0].replay_exec_id == str(replayed_run.id)
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:
@@ -6174,10 +6107,7 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
 
     replay_handle = MagicMock()
     replay_handle.exec_id = str(replayed_run.id)
-    replay_flow = SimpleNamespace(
-        replay=MagicMock(return_value=replay_handle),
-        replay_many=MagicMock(),
-    )
+    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
     replay_module = SimpleNamespace(
         sample_flow=replay_flow,
         __kitaru_pipeline_source_sample_flow=object(),
@@ -6852,3 +6782,50 @@ def test_abort_wait_rejects_duplicate_pending_wait_names() -> None:
 def test_zenml_status_finished_contract_for_retry_resume() -> None:
     assert ZenMLExecutionStatus.FAILED.is_finished is True
     assert ZenMLExecutionStatus.RESUMING.is_finished is False
+
+
+def test_replay_fallback_rejects_runtime_only_overrides_before_submit() -> None:
+    tool_step = _DummyStep(
+        name="lookup_policy_tool",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+        step_type="tool_call",
+    )
+    tool_step.spec = SimpleNamespace(
+        invocation_id="lookup_policy_tool",
+        upstream_steps=[],
+        inputs_v2={},
+    )
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        steps={tool_step.name: tool_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replay_pipeline = SimpleNamespace(replay=MagicMock())
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+
+    with (
+        patch("kitaru.client.resolve_connection_config", return_value=_resolved_connection()),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._resolve_flow_for_replay", side_effect=KitaruRuntimeError("no wrapper")),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+        pytest.raises(KitaruRuntimeError, match="runtime-only overrides"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+        KitaruClient().executions.replay(
+            str(source_run.id),
+            at="lookup_policy_tool",
+            checkpoint_overrides={"lookup_policy": {"code": "mocks.lookup_policy"}},
+        )
+
+    replay_pipeline.replay.assert_not_called()

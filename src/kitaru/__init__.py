@@ -124,7 +124,7 @@ from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
-from kitaru.replay import ReplayManyResult
+from kitaru.replay import ReplaySubmission
 from kitaru.runtime import current_execution_id
 from kitaru.secrets import (
     Secret,
@@ -174,7 +174,7 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
-    "ReplayManyResult",
+    "ReplaySubmission",
     "SandboxCommandResult",
     "Secret",
     "SecretSummary",
