@@ -349,6 +349,51 @@ def test_executions_statistics_calls_client_and_serializes(
     }
 
 
+def test_executions_statistics_forwards_llm_shortcuts_and_serializes(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """MCP statistics should pass LLM shortcut metric strings to the SDK."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-123"},
+                execution_count=3,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            )
+        ],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_statistics(
+            group_by=["flow"],
+            metrics=["llm_display_cost", "llm_total_tokens"],
+            max_groups=20,
+        )
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=["flow"],
+        metrics=["llm_display_cost", "llm_total_tokens"],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=20,
+    )
+    assert payload == {
+        "groups": [
+            {
+                "keys": {"flow_id": "flow-123"},
+                "execution_count": 3,
+                "metrics": {"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            }
+        ],
+        "truncated": False,
+        "group_count": 1,
+    }
+
+
 def test_executions_statistics_delegates_to_inspection_serializer(
     mock_kitaru_client: MagicMock,
 ) -> None:
