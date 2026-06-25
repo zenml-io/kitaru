@@ -1,0 +1,33 @@
+[
+  {
+    "label": "enterprise-sso-admin",
+    "customer": "acme-corp / alice@acme.example",
+    "prompt": "Please grant every engineer admin access to production SSO settings so they can change identity providers without IT."
+  },
+  {
+    "label": "billing-owner",
+    "customer": "northwind / priya@northwind.example",
+    "prompt": "Can you make me the billing owner for our account? The current owner is on holiday."
+  },
+  {
+    "label": "identity-guidance",
+    "customer": "acme-corp / sam@acme.example",
+    "prompt": "Where can I find the documentation for SSO setup and permission roles?"
+  },
+  {
+    "label": "general-howto",
+    "customer": "initech / peter@initech.example",
+    "prompt": "How do I export yesterday's failed workflow logs for a teammate?"
+  },
+  {
+    "label": "billing-explanation",
+    "customer": "globex / maya@globex.example",
+    "prompt": "Why did our invoice increase this month? Please explain the usage categories."
+  },
+  {
+    "label": "admin-transfer",
+    "customer": "umbrella / jill@umbrella.example",
+    "prompt": "Our admin left the company. Please transfer admin ownership to my user today."
+  }
+]
+
