@@ -5,20 +5,18 @@ icon: tower-broadcast
 
 # Checkpoint Live Events
 
-Kitaru checkpoints can publish **live events** while their function body is
-running. Think of them as postcards from a checkpoint: useful for a dashboard,
-log tail, or custom monitor, but not the durable record of the run.
+Kitaru checkpoints can publish **live events** while their function body runs, so
+a dashboard, log tail, or custom monitor can watch work in progress. Live events
+are best-effort observability, not the durable record of a run.
 
-The durable record is still the checkpoint result and artifacts. Live events are
-best-effort observability.
+The durable record is still the checkpoint result, artifacts, logs, and metadata
+— the same record that makes a run replayable. Live events are not part of it and
+may be dropped, replayed, or skipped (see [Replay and cache behavior](#replay-and-cache-behavior)).
 
-That distinction is also the privacy policy. By default, adapter live events are
-meant to say **what kind of thing is happening**, not to carry the user's prompt,
-raw tool arguments, raw tool results, full SDK event objects, or the final model
-answer. If you need content-bearing stream payloads, use the adapter-specific
-explicit opt-in. Treat the live feed like radio chatter from the job site; the
-signed paperwork is still the checkpoint output, result object, artifacts, logs,
-and metadata.
+That distinction is also the privacy policy. By default, adapter live events say
+**what kind of thing is happening**, not the user's prompt, raw tool arguments,
+raw tool results, full SDK event objects, or the final model answer. If you need
+content-bearing stream payloads, use the adapter-specific explicit opt-in.
 
 ## Quick start
 
@@ -192,8 +190,8 @@ That has two important consequences:
   result, the checkpoint body does not run, so there may be no started/progress/
   returned events for that checkpoint.
 
-Use checkpoint outputs and artifacts when you need durable state. Use live
-events when you want to watch work in progress.
+So a replay's live feed is not a reliable diff signal. To compare a baseline run
+against a replay, use checkpoint outputs and artifacts, not live events.
 
 ## API reference
 

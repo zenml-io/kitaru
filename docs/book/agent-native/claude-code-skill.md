@@ -6,14 +6,18 @@ icon: wand-magic-sparkles
 # Agent Skills
 
 The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
-package contains eight reusable Markdown agent skills for discovering, designing,
-migrating, and building durable Kitaru workflows.
+package teaches your coding agent how to build and operate Kitaru flows. It is
+eight reusable Markdown agent skills for scoping, authoring, migrating, and
+running durable workflows. Pair them with the [MCP server](mcp-server.md) so a
+coding agent (Claude Code, Codex, Cursor) can both write the flow and drive the
+run → replay → improve loop against it.
 
-Think of the package as a field guide for your coding agent. The skills do not
-add a new runtime product to Kitaru. They are Markdown procedures that Claude
-Code and other skill-aware agent hosts can read so they know the current Kitaru
-patterns: where to put checkpoints, where waits are safe, which adapter boundary
-is honest, and which side effects need extra care.
+The skills do not add a new runtime product to Kitaru. They are Markdown
+procedures that Claude Code and other skill-aware agent hosts read so they know
+the current Kitaru patterns: where to put checkpoints, where waits are safe,
+which adapter boundary is honest, and which side effects need extra care. The
+MCP server gives the agent the tools to execute and replay; the skills give it
+the judgment to author correctly.
 
 ## Skill inventory
 

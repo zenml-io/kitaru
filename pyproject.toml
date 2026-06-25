@@ -1,7 +1,7 @@
 [project]
 name = "kitaru"
 version = "0.18.0"
-description = "Durable execution for AI agents, built on ZenML"
+description = "Record, replay, and improve AI agents in production, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"

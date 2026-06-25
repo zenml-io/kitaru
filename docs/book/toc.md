@@ -9,10 +9,6 @@
 * [Examples](getting-started/examples.md)
 * [Troubleshooting](getting-started/troubleshooting.md)
 
-## Agent Harness Platform
-
-* [Overview](agent-harness-platform/README.md)
-
 ## Core Concepts
 
 * [Overview](concepts/README.md)
@@ -24,32 +20,32 @@
 * [Wait, Input, and Resume](concepts/wait-and-input.md)
 * [Logging and Metadata](concepts/logging.md)
 
+## Adapters
+
+* [Overview](adapters/README.md)
+* [Choose an Adapter](guides/choose-an-adapter.md)
+* [Pydantic AI](adapters/pydantic-ai.md)
+* [OpenAI Agents](adapters/openai-agents.md)
+* [Claude Agent SDK](adapters/claude-agent-sdk.md)
+* [Gemini Interactions](adapters/gemini-interactions.md)
+* [LangGraph](adapters/langgraph.md)
+
 ## Guides
 
+* [Replay and Overrides](guides/replay-and-overrides.md)
+* [Execution Management](guides/execution-management.md)
 * [Configuration](guides/configuration.md)
 * [Authentication](guides/authentication.md)
 * [Deploy and Invoke Flows](guides/deployments.md)
 * [Containerization](guides/containerization.md)
-* [Execution Management](guides/execution-management.md)
 * [View Execution Runtime Logs](guides/execution-logs.md)
 * [Checkpoint Live Events](guides/checkpoint-streaming.md)
-* [Replay and Overrides](guides/replay-and-overrides.md)
 * [Wait, Input, and Resume](guides/wait-and-resume.md)
 * [Artifacts](guides/artifacts.md)
 * [Error Handling](guides/error-handling.md)
 * [Tracked LLM Calls](guides/llm-calls.md)
 * [Secrets and Model Registration](guides/secrets-and-model-registration.md)
 * [Secrets](guides/secrets.md)
-* [Choose an Adapter](guides/choose-an-adapter.md)
-
-## Adapters
-
-* [Overview](adapters/README.md)
-* [Pydantic AI](adapters/pydantic-ai.md)
-* [OpenAI Agents](adapters/openai-agents.md)
-* [Claude Agent SDK](adapters/claude-agent-sdk.md)
-* [Gemini Interactions](adapters/gemini-interactions.md)
-* [LangGraph](adapters/langgraph.md)
 
 ## Server Deployment
 
@@ -68,7 +64,7 @@
 ## Agent Native
 
 * [MCP Server](agent-native/mcp-server.md)
-* [Claude Code Skill](agent-native/claude-code-skill.md)
+* [Agent Skills](agent-native/claude-code-skill.md)
 
 ## Project
 

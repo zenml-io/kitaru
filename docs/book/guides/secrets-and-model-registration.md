@@ -5,14 +5,18 @@ icon: key
 
 # Secrets + Model Registration
 
-This walkthrough shows the full setup path for tracked LLM calls in Kitaru:
+A model alias decouples your flow code from a specific provider/model and its
+credentials. That matters for replay: when the model is an alias resolved at
+runtime, you can swap it on a replay (`flow.replay(exec_id, model="...")`)
+without touching code, run the variant against a faithful baseline, and diff the
+two. This walkthrough shows the full setup path:
 
 1. store provider credentials in a secret
 2. register a model alias that points at that secret
 3. call `kitaru.llm()` inside a flow using the alias
 
-This is the most reusable setup because your flow code can stay stable while you
-change credentials or swap the underlying model later.
+Your flow code stays stable while you rotate credentials or swap the underlying
+model later.
 
 ## 1) Store provider credentials in a secret
 

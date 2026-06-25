@@ -5,25 +5,21 @@ icon: dharmachakra
 
 # Kubernetes
 
-This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: create one, inspect it, decide whether it should become your default, and clean it up safely when you are done.
+A Kubernetes stack gives your flows a remote runner on your own cluster, so a flow you run, replay, and diff locally executes the same way against production infrastructure. This guide covers the full lifecycle: create a stack, inspect it, set it as your default, and delete it safely.
 
-Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Stacks](README.md), which also covers Vertex, SageMaker, and AzureML.
+Kubernetes is one shipped remote-stack path. For the broader stack model or a managed-runner option without `--cluster`, start with [Stacks](README.md), which also covers Vertex, SageMaker, and AzureML.
 
-Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](https://sdkdocs.kitaru.ai), [`kitaru stack show`](https://sdkdocs.kitaru.ai), and [`kitaru stack delete`](https://sdkdocs.kitaru.ai).
+Use this page for the workflow and the happy path. For exact flag syntax and every supported option, see the generated CLI reference for [`kitaru stack create`](https://sdkdocs.kitaru.ai), [`kitaru stack show`](https://sdkdocs.kitaru.ai), and [`kitaru stack delete`](https://sdkdocs.kitaru.ai).
 
 ## Before you start
 
-This guide assumes you already have the infrastructure pieces in place.
-
-You should have:
+Kitaru assembles the stack for you, but it does not create the bucket, registry, or cluster — those must exist first. You need:
 
 - a Kitaru environment you can already use locally
 - a Kubernetes cluster you want Kitaru to run against
 - an artifact store URI such as `s3://...` or `gs://...`
 - a container registry URI that your cluster can pull from
-- cloud credentials available if your setup needs them
-
-In story form: Kitaru can assemble the stack for you, but it does not create the bucket, registry, or cluster itself. Those need to exist first.
+- cloud credentials, if your setup needs them
 
 ## Fast path: create a Kubernetes stack from flags
 
@@ -89,7 +85,7 @@ kitaru stack create prod-k8s \
   --extra orchestrator.pod_settings.tolerations='[{key: gpu, operator: Exists}]'
 ```
 
-In story form: the front-door flags still say *which* cluster and namespace to use; `--extra` lets you tuck extra instructions into the orchestrator's backpack before Kitaru hands it to the runtime.
+The named flags say *which* cluster and namespace to use; `--extra` passes additional orchestrator configuration through to the runtime.
 
 You can keep the same advanced defaults in YAML too:
 
@@ -115,7 +111,7 @@ For the full list of Kubernetes orchestrator fields available to `--extra`, see 
 
 ## Inspect what Kitaru created
 
-Once the stack exists, these three commands tell slightly different stories:
+Once the stack exists, three commands give you different views:
 
 ### Show one stack in detail
 
@@ -184,11 +180,11 @@ kitaru stack create prod-k8s-staging \
   --no-activate
 ```
 
-In story form: think of the YAML file as your saved baseline, and the CLI flags as the sticky notes you place on top for this one run.
+Treat the YAML file as your saved baseline and the CLI flags as per-run overrides.
 
 ## Use the stack permanently vs temporarily
 
-There are two different moves here, and it helps to keep them separate.
+There are two distinct moves here. Keep them separate.
 
 ### Make it your persisted default
 
@@ -204,9 +200,9 @@ This changes the stack Kitaru falls back to when no higher-precedence override i
 my_flow.run(stack="prod-k8s")
 ```
 
-This uses `prod-k8s` for that one execution only.
+This uses `prod-k8s` for that one execution only — useful when you want a single run or replay on remote infrastructure without changing your persisted default.
 
-The important distinction is:
+The distinction:
 
 - `kitaru stack use ...` changes your persisted fallback stack
 - `.run(stack=...)` changes only that one execution

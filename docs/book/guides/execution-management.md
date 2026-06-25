@@ -5,8 +5,12 @@ icon: list-check
 
 # Manage Executions with KitaruClient and CLI
 
-`KitaruClient` is the programmatic API for managing and inspecting executions
-outside your flow functions.
+`KitaruClient` is the programmatic API for inspecting and acting on executions
+outside your flow functions. It is how you look up a real run by its `exec_id`,
+read its checkpoints and cost, resolve waits, and drive the run/replay/improve
+loop, replaying a recorded execution from a checkpoint with one input changed.
+The same surface is exposed over the CLI and the MCP server, so a coding agent
+can do all of this too.
 
 {% hint style="info" %}
 `KitaruClient` and the CLI use your current Kitaru connection context. If you
@@ -66,13 +70,13 @@ latest = client.executions.latest(flow="content_pipeline")
 
 ## Execution statistics
 
-Use execution statistics when you want counts, trends, or health checks without
-fetching every individual execution first. This is the difference between asking
-"show me the last 20 executions" and asking "how many executions failed this
-week?" Kitaru sends the aggregate question to the active Kitaru runtime and
-returns a small grouped result. Each group always includes an execution count.
-You can also ask for numeric metrics, such as average duration or the sum of a
-numeric execution metadata key.
+Use execution statistics when you want counts, trends, or health checks across a
+cohort without fetching every execution first, the difference between "show me
+the last 20 executions" and "how many failed this week?" Kitaru runs the
+aggregate query on the active runtime and returns a small grouped result. Each
+group includes an execution count; you can also request numeric metrics such as
+average duration or the sum of a numeric metadata key (e.g. cost per flow), which
+is how you compare a cohort before and after a change.
 
 ```python
 from kitaru import KitaruClient
@@ -396,13 +400,18 @@ runner already exited), call `resume(...)`:
 execution = client.executions.resume(exec_id)
 ```
 
-## Retry, replay, and cancel
+## Replay, retry, and cancel
+
+Replay is the core of the improve loop: it re-executes a recorded run into a
+**new** execution from a checkpoint boundary, optionally with inputs changed.
+Replaying with no overrides reproduces the baseline; replaying with one thing
+changed (a different model or prompt) lets you diff the two and attribute the
+difference to your change. Retry, by contrast, resumes the **same** failed
+execution in place.
 
 ```python
-# Same-execution retry (failed executions only)
-retried = client.executions.retry(exec_id)
-
-# Replay into a new execution from a checkpoint boundary
+# Replay into a new execution from a checkpoint boundary.
+# Override flow inputs (e.g. topic) and prior checkpoint outputs.
 replayed = client.executions.replay(
     exec_id,
     from_="write_draft",
@@ -410,9 +419,15 @@ replayed = client.executions.replay(
     topic="New topic",
 )
 
+# Same-execution retry (failed executions only)
+retried = client.executions.retry(exec_id)
+
 # Cancel a running execution
 cancelled = client.executions.cancel(exec_id)
 ```
+
+For the full replay/diff workflow, see the
+[ZenML Learn Agents guide](https://docs.zenml.io/user-guides/agents-guide).
 
 ## Execution convenience methods
 

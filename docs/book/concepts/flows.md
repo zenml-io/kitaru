@@ -5,11 +5,17 @@ icon: diagram-project
 
 # Flows
 
-A **flow** is the outer durable boundary in Kitaru — the unit of work your
-platform invokes and the runner executes. Everything inside the flow is tracked
-at checkpoint boundaries: persisted outputs, retry, replay, resume, and wait.
-Your harness (Pydantic AI, LangGraph, Claude Agent SDK, raw Python) lives inside
-the checkpoints. Your platform sits in front of the flow's invocation API. See
+A **flow** is the durable boundary for one agent run — the unit your platform
+invokes and the runner executes. It matters because the flow is what you can
+later **replay**: every model call and tool call inside it is recorded at
+[checkpoint](checkpoints.md) boundaries, so a finished run can be reproduced
+faithfully and rerun with one input changed. A flow is a dynamic ZenML pipeline;
+it runs on the same stacks, server, and dashboard as your ZenML pipelines.
+
+Everything inside the flow is tracked at checkpoint boundaries: persisted
+outputs, retry, replay, resume, and wait. Your harness (Pydantic AI, LangGraph,
+Claude Agent SDK, raw Python) lives inside the checkpoints. Your platform sits in
+front of the flow's invocation API. See
 [Harness, Runtime, Platform](harness-runtime-platform.md) for the bigger
 picture.
 
@@ -66,6 +72,32 @@ To target a remote stack for one execution, pass `stack=`:
 ```python
 handle = my_agent.run(url="https://example.com", stack="production")
 ```
+
+## Why the boundary matters: replay
+
+Because the flow recorded every checkpoint, you can re-execute a finished run
+from a checkpoint with `flow.replay(...)`. Keep the `exec_id` a run returns —
+that's the handle into replay.
+
+```python
+handle = my_agent.run(url="https://example.com").wait()
+exec_id = handle.exec_id
+
+# Faithful rerun with no change = the control/baseline.
+baseline = my_agent.replay(exec_id, from_="fetch_data")
+
+# Replay again with one flow input changed (a different model).
+variant = my_agent.replay(exec_id, from_="fetch_data", model="claude-opus-4-8")
+```
+
+Keyword arguments to `replay` override the flow's **inputs** (for example `model`
+or `prompt_profile`); `from_` selects the checkpoint to re-execute from. Because
+the baseline reproduces the original run, a diff between baseline and variant
+isolates your change rather than replay noise. This re-executes the real run with
+one input swapped — it is not re-scoring stored outputs like an eval.
+
+See [Replay and Overrides](../guides/replay-and-overrides.md) for selector rules,
+checkpoint-level overrides, and the CLI/MCP entry points.
 
 ## Deploying and invoking flows
 

@@ -5,10 +5,14 @@ icon: rocket
 
 # Deployments
 
-A **deployment** is a reusable, versioned entrypoint for a Kitaru flow. Think of
-it like pinning a recipe card to the wall: the flow source is the recipe, a
-deployment version is one saved copy of that recipe, and an invocation starts a
-fresh execution from that saved copy.
+A **deployment** is a versioned, remotely invocable entrypoint for a Kitaru flow.
+It lets a producer publish a flow once and consumers run it from anywhere by name
+— without importing the source or owning a long-lived service. Each invocation
+starts a fresh durable execution from a saved snapshot, so every deployed run is
+recorded, replayable, and improvable like any other Kitaru flow run.
+
+The flow source is the recipe, a deployment version is one immutable saved copy
+of it, and an invocation starts a fresh execution from that copy.
 
 You can create deployments from three surfaces:
 
@@ -212,9 +216,11 @@ handle = KitaruClient().deployments.invoke(
 
 ## Serverless routing
 
-Deployment invocation starts a new Kitaru execution from a saved deployment
-version. It does **not** call a long-lived Python process owned by the producer,
-and it does **not** create a separate always-on service for each version.
+Invoking a deployment starts a new durable Kitaru execution from a saved version.
+It does **not** call a long-lived Python process owned by the producer, and it
+does **not** create a separate always-on service for each version. The resulting
+run records checkpoints exactly like a locally launched flow, so you can replay
+and diff it later.
 
 The route is just: **flow name + tag/version selector**.
 

@@ -12,8 +12,9 @@ _UNKNOWN_VERSION = "unknown"
 app = cyclopts.App(
     name="kitaru",
     help=(
-        "Durable execution for AI agents. Create deployments with `kitaru "
-        "deploy`; inspect existing deployments with `kitaru flow`."
+        "Record, replay, and improve AI agents in production. Create "
+        "deployments with `kitaru deploy`; inspect existing deployments "
+        "with `kitaru flow`."
     ),
     version=_UNKNOWN_VERSION,
     version_flags=["-V"],

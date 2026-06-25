@@ -5,9 +5,11 @@ icon: gear
 
 # Configuration
 
-This guide covers Kitaru's configuration system: where settings live on disk,
-how to set execution defaults, how headless environments are bootstrapped, and
-how precedence is resolved.
+This page is the reference for how Kitaru is configured: where settings live on
+disk, how to set execution defaults, the `KITARU_*` environment variables, and
+how all of these are resolved by precedence. Configuration is also what keeps
+runs reproducible — at flow start Kitaru freezes a fully resolved execution spec,
+so a [replay](replay-and-overrides.md) reruns under the same config it recorded.
 
 ## Config directory
 
@@ -132,15 +134,10 @@ service-account API key created with `kitaru auth service-accounts ...` and
 `kitaru auth api-keys ...`. See [Authentication](authentication.md) for
 the full service-account/API-key flow.
 
-For normal interactive use:
-
-- `kitaru login` starts and connects to a local server
-- `kitaru login <server>` connects to a remote server
-
-The `KITARU_*` connection variables are mainly for Docker, CI, and other
-headless environments.
-
-Use them together for Docker, CI, or any other headless environment:
+For normal interactive use, prefer `kitaru login` (starts and connects to a
+local server) or `kitaru login <server>` (connects to a remote server). The
+`KITARU_*` connection variables are for Docker, CI, and other headless
+environments. Set them together:
 
 ```bash
 export KITARU_SERVER_URL=https://my-server.example.com

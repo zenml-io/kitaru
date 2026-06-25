@@ -5,18 +5,37 @@ icon: shuffle
 
 # Choose an Adapter
 
-Kitaru does not require one agent framework. Pick the boundary that matches the
-code you already have.
+An adapter wraps an existing agent harness so each model call and tool call lands
+as a Kitaru checkpoint, with no rewrite of your agent. The boundary you pick
+decides how fine-grained your checkpoints are, which in turn sets how precisely
+you can replay: per-call checkpoints let you reproduce a run and replay it from
+the exact call you changed, while a single coarse checkpoint only lets you replay
+the whole turn. Pick the boundary that matches the code you already have, then go
+as granular as your replay needs require.
 
 ## Decision table
 
-| You have... | Use this | Replay boundary | First page |
+The **replay boundary** column is the unit you can replay from: a finer boundary
+means `flow.replay(exec_id, from_="<checkpoint>", ...)` can re-execute from a
+single model or tool call instead of re-running the entire turn.
+
+| You have... | Use this | Replay boundary (finest available) | First page |
 |---|---|---|---|
-| Plain Python functions | `@flow` + `@checkpoint` | Your function boundaries | [Quickstart](../getting-started/quickstart.md) |
-| PydanticAI agent | `KitaruAgent` | model/tool/MCP calls by default, or one turn checkpoint | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
-| OpenAI Agents SDK agent | `KitaruRunner` | per-call checkpoints or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
-| Claude Agent SDK invocation | `KitaruClaudeRunner` | one completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
-| LangGraph graph | `KitaruGraphRunner` | one graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+| Plain Python functions | `@flow` + `@checkpoint` | Your function boundaries — you choose them | [Quickstart](../getting-started/quickstart.md) |
+| PydanticAI agent | `KitaruAgent` | **Per model/tool/MCP call** by default, or one turn checkpoint | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
+| OpenAI Agents SDK agent | `KitaruRunner` | **Per call**, or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
+| Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
+| LangGraph graph | `KitaruGraphRunner` | One graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+
+{% hint style="info" %}
+**Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI
+Agents SDK (`KitaruRunner`) adapters.** Both can record every model and tool call
+as its own checkpoint, so replay can target an individual call. The Claude Agent
+SDK adapter currently checkpoints at the invocation boundary, and LangGraph's
+per-call granularity depends on middleware wrapping the model/tool calls. If
+call-level replay fidelity is your priority, prefer PydanticAI or OpenAI calls
+mode.
+{% endhint %}
 
 ## Pick by goal
 
@@ -26,8 +45,8 @@ code you already have.
 
 | Strategy | Best for | Trade-off |
 |---|---|---|
-| Coarse checkpoint | Fast migration, easy `.wait()` return value, low adapter complexity | Replay reruns the whole agent turn if it fails inside the turn |
-| Granular checkpoints | Expensive LLM/tool chains where partial replay matters | More checkpoint rows and stricter rules around waits/nesting |
+| Coarse checkpoint | Fast migration, clean `.wait()` return value, low adapter complexity | Replay can only re-run the whole turn — you cannot replay from a single call |
+| Granular (per-call) checkpoints | Expensive LLM/tool chains where you want to replay from one call with one input changed | More checkpoint rows and stricter rules around waits/nesting |
 | Explicit raw checkpoints | Maximum control and framework independence | You decide every durable boundary yourself |
 
 ## Human-in-the-loop rule

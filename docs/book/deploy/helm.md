@@ -5,12 +5,17 @@ icon: ship
 
 # Helm
 
+Run a self-hosted Kitaru server on Kubernetes. This is where your agent flows
+record checkpoints, where replays re-execute from those checkpoints, and where
+the dashboard surfaces cross-run diffs — the same server that runs ZenML
+pipelines.
+
 The Kitaru Helm chart wraps the
 [ZenML Helm chart](https://artifacthub.io/packages/helm/zenml/zenml) as a
 dependency, overriding defaults to use the Kitaru server image and
-Kitaru-specific environment variables. All ZenML server features — database
-migrations, secrets encryption, ingress, autoscaling — are available through
-the subchart. Server configuration goes under the `kitaru.server` key in your
+Kitaru-specific environment variables. Every ZenML server feature (database
+migrations, secrets encryption, ingress, autoscaling) is available through the
+subchart. Server configuration goes under the `kitaru.server` key in your
 values file.
 
 ## Prerequisites

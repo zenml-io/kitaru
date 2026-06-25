@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">The runtime layer underneath your agent stack.</h3>
+<h3 align="center">Every agent run, recorded and replayable.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru adds durable execution: checkpoints, replay, resume, <code>wait()</code>, versioned deployments, and isolated runtimes, running on your own infrastructure.
+  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru records every step of every run — each model call, tool call, and decision — as a replayable checkpoint, so you can diagnose failures, replay runs with a different model or input, and ship agent updates with confidence. All on your own infrastructure.
 </p>
 
 <p align="center">
@@ -39,25 +39,40 @@ Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 |---|---|---|
 | **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
 | **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
-| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
+| **Runtime (Kitaru)** | How the agent's runs are *recorded, replayed, and improved over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
-policy, and Kitaru gives you the durable execution layer in between.
+policy, and Kitaru gives you the execution record — and the replay loop — in
+between.
 
 If you're *buying* an agent platform, Kitaru may feel low-level. If you're
 *building* one, that's the point.
 
-Platform teams get the durable execution layer they'd otherwise build
-themselves — run lifecycle, checkpoint boundaries, replay, invocation
-routing, and self-hosted execution — without mandating which harness
-application teams use on top.
+Platform teams get the execution layer they'd otherwise build themselves —
+run lifecycle, checkpoint recording, replay, invocation routing, and
+self-hosted execution — without mandating which harness application teams
+use on top.
 
 ## 🎯 Why Kitaru?
 
-### Durable execution
+### Record, replay, improve
 
-- **Durable execution.** A crash, pod eviction, or timeout doesn't send the run
+- **Every step recorded.** Each checkpoint output — model call, tool call,
+  decision — is written to your object store as a typed, versioned artifact.
+  Step through any run, diff artifacts across runs, and trace a bad output
+  back to the exact step that produced it.
+- **Replay with overrides.** Re-run any execution from any checkpoint, and
+  override what you want to test: swap the model, change a parameter, inject
+  a different tool output — and see what would have happened before you ship
+  the change.
+- **Compare and decide.** `kitaru.llm()` tracks prompt, response, tokens, and
+  latency per call, so comparing runs answers questions like "would a smaller
+  model have done this cheaper?" with evidence instead of vibes.
+
+### Production mechanics
+
+- **Crash recovery.** A crash, pod eviction, or timeout doesn't send the run
   back to zero. Fix the bug, replay, and the completed checkpoints return cached
   output instead of re-burning tokens.
 - **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
@@ -66,9 +81,6 @@ application teams use on top.
 - **Versioned deployments.** `flow.deploy()` freezes a flow as an immutable
   snapshot consumers invoke by name. Tag to roll out, re-tag to roll back.
   Nothing that *calls* the agent redeploys when a new version ships.
-- **Artifact lineage.** Every checkpoint output is written to your object store
-  as a typed, versioned artifact. Step through any run, diff artifacts across
-  runs, and trace a bad output back to the step that produced it.
 - **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
   step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
   steps stay isolated; orchestration stays inline.
@@ -212,15 +224,26 @@ print(result)  # SOME DATA
 python agent.py
 ```
 
-Every checkpoint's output is persisted automatically. You can inspect what
-happened, replay from any checkpoint, or resume a waiting flow:
+Every step is recorded automatically. Inspect any run, then replay it from a
+checkpoint — a faithful rerun, or a fork with one input changed (a different
+model or parameter) so you can see what *would* have happened before you ship
+the change:
 
 ```bash
 kitaru executions list
 kitaru executions get <EXECUTION_ID>
 kitaru executions logs <EXECUTION_ID>
+
+# Reproduce a run faithfully from a checkpoint
 kitaru executions replay <EXECUTION_ID> --from process_data
+
+# Fork the same run with one input changed
+kitaru executions replay <EXECUTION_ID> --from fetch_data \
+  --args '{"url": "https://other.example.com"}'
 ```
+
+See [Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides)
+for the full reproduce → fork → diff loop.
 
 ### Deploy it
 
@@ -253,7 +276,7 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://docs.zenml.io/kitaru) | Complete reference and guides |
-| [Agent Harness Platform](https://docs.zenml.io/user-guides/agents-guide) | Build a durable agent harness platform stage by stage |
+| [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 

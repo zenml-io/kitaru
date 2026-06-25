@@ -1,11 +1,11 @@
 ---
-description: Make any PydanticAI agent replayable, resumable, and observable by wrapping it once with KitaruAgent
+description: Wrap any PydanticAI agent once with KitaruAgent so every run is recorded as durable checkpoints you can replay
 icon: cube
 ---
 
 # PydanticAI Adapter
 
-Kitaru's PydanticAI adapter makes any [PydanticAI](https://ai.pydantic.dev) agent durable without changing its code: wrap the agent once with `KitaruAgent`, and every model request, tool call, MCP invocation, and human-in-the-loop wait is persisted under a Kitaru flow.
+The PydanticAI adapter makes any [PydanticAI](https://ai.pydantic.dev) agent a Kitaru flow without changing its code. Wrap the agent once with `KitaruAgent` and every model request, tool call, MCP invocation, and human-in-the-loop wait becomes a durable checkpoint — so you can reproduce a run faithfully, [replay it with one input changed](../guides/replay-and-overrides.md) (a different model or prompt), and diff the two.
 
 ```python
 from pydantic_ai import Agent
@@ -18,7 +18,7 @@ result = durable_agent.run_sync("Summarize quantum error correction.")
 print(result.output)
 ```
 
-No flow decorator, no checkpoint annotations. When called outside a flow, `KitaruAgent` auto-opens one for you. By default, `checkpoint_strategy="calls"` persists model, tool, and MCP calls as separate checkpoints. The dashboard shows the run, tool calls, model responses, and wait points.
+No flow decorator, no checkpoint annotations. When called outside a flow, `KitaruAgent` auto-opens one for you. By default, `checkpoint_strategy="calls"` persists model, tool, and MCP calls as separate checkpoints — the boundaries you replay from later. Agents run on the same stacks, server, and dashboard as your ZenML pipelines; the dashboard shows the run, tool calls, model responses, and wait points.
 
 ## Install
 
@@ -97,7 +97,7 @@ handle = research.run("quantum error correction")
 print(handle.wait())
 ```
 
-Replay the flow with the original run ID to serve cached outputs for completed checkpoints and re-execute only what changed. See [Replay and overrides](../guides/replay-and-overrides.md).
+Replay the flow from a checkpoint with `flow.replay(exec_id, from_="ask", **overrides)` to re-execute the real run with one input changed — a different model or prompt — while completed checkpoints before that boundary are reused. See [Replay and overrides](../guides/replay-and-overrides.md).
 
 {% hint style="warning" %}
 This pattern checkpoints the whole agent turn. If the agent calls a tool, Kitaru stores that tool activity under the `ask` checkpoint as adapter events/artifacts; it does not create nested checkpoints such as `search_tool` or `lookup_price_tool`. To see ordinary PydanticAI model/tool calls as separate checkpoint rows, call the agent directly from flow scope:

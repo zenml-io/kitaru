@@ -5,6 +5,8 @@ icon: download
 
 # Installation
 
+Install Kitaru to run, replay, and improve agents from your own environment. One package gives you the SDK, the CLI, and an optional local server and UI, all running on the same stacks and dashboard as ZenML pipelines.
+
 Kitaru requires **Python 3.11 or newer**.
 
 You can verify your interpreter with:
@@ -44,8 +46,9 @@ uv add "kitaru[mcp,pydantic-ai,local]"
 
 If you use Claude Code or another MCP-capable assistant, install
 `kitaru[mcp]` so your assistant can query executions, inspect logs and
-artifacts, provide input to waiting runs, and start replays through structured
-tool calls. See [MCP Server](../agent-native/mcp-server.md) for setup.
+artifacts, provide input to waiting runs, and drive replays and diffs through
+structured tool calls. This is what lets a coding agent hill-climb on your
+runs. See [MCP Server](../agent-native/mcp-server.md) for setup.
 
 ## Verify Installation
 
