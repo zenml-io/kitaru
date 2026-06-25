@@ -860,7 +860,6 @@ examples:
     public_docs:
       - examples/README.md
       - docs/book/getting-started/examples.md
-      - docs/book/agent-harness-platform/README.md
     owner_area: staged internal agent harness platform starter kit
     coverage:
       deterministic_pytest:
