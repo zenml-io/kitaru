@@ -1,28 +1,28 @@
 # Reference LangGraph support copilot
 
-This directory contains the small fictional support copilot used by the parent `replay_fork_demo`.
+This directory contains the fictional support copilot used by the parent `replay_fork_demo`.
 
-The parent demo uses this agent to tell a replay/regression story:
+The parent demo uses this agent for a replay/regression workflow:
 
 ```text
 recorded Langfuse trace
-  → Kitaru import and validation
-    → unchanged replay from a LangGraph node
-      → edited candidate fork from the same node
+  -> Kitaru import and validation
+  -> unchanged replay from a LangGraph node
+  -> edited candidate fork from the same node
 ```
 
-This nested README documents the agent itself. To run replay and produce the HTML comparison report, start with `../README.md` and `../demo.py`.
+This README explains the agent. To run replay and produce the HTML comparison report, start with `../README.md` and `../demo.py`.
 
 ## What the agent does
 
-The agent receives a support request, asks an OpenAI model which local tools to call, executes those local tools, summarizes the evidence, and returns a structured support decision.
+The agent receives a support request, asks an OpenAI model which local tools to call, executes those tools, summarizes the evidence, and returns a structured support decision.
 
-The concrete flow is:
+A typical run looks like this:
 
-1. A user asks for something: for example, “exports are failing; open a ticket if there is an outage.”
-2. The model chooses local tools such as customer lookup, service status, usage, billing, or knowledge-base search.
+1. A user asks for something, such as "exports are failing; open a ticket if there is an outage."
+2. The model chooses local tools: customer lookup, service status, usage, billing, or knowledge-base search.
 3. The LangGraph graph executes the requested tools. Some tools only read. Other tools write local SQLite rows, such as support tickets or audit-log entries.
-4. Guardrails still apply: forbidden tools, dry-run writes, and `max_tool_calls` can block requested calls before local state changes.
+4. Guardrails can block forbidden tools, dry-run writes, or calls beyond `max_tool_calls` before local state changes.
 5. The model summarizes evidence such as `customer_id`, `account_tier`, `permission_role`, `incident_id`, and knowledge document ids.
 6. The model returns a `SupportDecision` with policy label, risk status, required action, summary, evidence ids, and tool names.
 7. Langfuse records the run, including scenario and variant metadata.
@@ -50,12 +50,12 @@ examples/end_to_end/replay_fork_demo/reference_agent/
 ## Variants
 
 - `baseline`: `gpt-5-mini`, full permission prompt, normal tool budget.
-- `nano_trimmed_permissions`: `gpt-5-nano`, weakened permission prompt and policy. This variant is allowed to request the dangerous local setting-update tool, so permission-sensitive traces can show a visible regression when the model chooses it.
+- `nano_trimmed_permissions`: `gpt-5-nano`, weakened permission prompt and policy. This variant can request the dangerous local setting-update tool, so permission-sensitive traces can show a visible regression when the model chooses it.
 - `mini_tool_budget_2`: `gpt-5-mini`, full permission prompt, but `max_tool_calls=2`. This can miss evidence when the model asks for more than two local tools.
 
 ## Local validation and bundled fixtures
 
-Most replay/fork development uses the bundled fixture in `fixtures/langfuse_rich_observations.jsonl`. Import validation reads that file without OpenAI or Langfuse credentials. Replay and fork commands still run the live LangGraph tail, so they need the model credentials used by the reference agent.
+Most replay/fork development uses `fixtures/langfuse_rich_observations.jsonl`. Import validation reads that file without OpenAI or Langfuse credentials. Replay and fork commands still run the live LangGraph tail, so they need the model credentials used by the reference agent.
 
 From the parent directory:
 

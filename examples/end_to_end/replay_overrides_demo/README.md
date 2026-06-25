@@ -1,29 +1,29 @@
 # Replay overrides demo
 
-This example is a live, end-to-end operator demo for Kitaru replay overrides.
+This is the main demo for Kitaru's replay override API. It runs a small support copilot once, then replays that execution from `lookup_policy_tool` while changing different parts of the run.
 
-The story is concrete: a support copilot answers account-administration
-requests. The original production-like run uses `openai:gpt-5-mini` and the
-careful baseline prompt. Then you replay the same execution from
-`lookup_policy_tool` with different override scopes:
+The baseline run uses `openai:gpt-5-mini` with the careful prompt. The replay runs try changes such as a cheaper model, a different prompt profile, an injected checkpoint result, and a replacement policy lookup function.
 
 ```text
-support_copilot_model_request → gather_context_tool → lookup_policy_tool → support_copilot_model_request_2 → publish_support_decision → record_replay_observation
-                                                      ↑ replay starts here
+support_copilot_model_request
+  -> gather_context_tool
+  -> lookup_policy_tool                 replay starts here
+  -> support_copilot_model_request_2
+  -> publish_support_decision
+  -> record_replay_observation
 ```
 
-## What this demonstrates
+Use this demo when you want to understand the public replay API: SDK, CLI, and JSON result shapes.
 
-- **Flow overrides** change flow inputs for the replay run, such as `model` and
-  `prompt_profile`.
-- **Checkpoint overrides** target every invocation of a checkpoint name. The demo
-  uses this to swap the policy lookup callable with `mocks.lookup_policy`.
-- **Invocation overrides** target one recorded invocation. The demo injects one
-  `publish_support_decision` output and separately targets
-  `support_copilot_model_request_2` with `openai:gpt-5-nano`.
-- **Explicit skip** asks replay to keep a checkpoint result from the source run.
-- **Tagged batch replay** sends several explicit execution IDs through the same
-  replay request and writes a diff-matrix report.
+## What this demo covers
+
+- `flow_overrides`: change flow inputs for the replay run, such as `model` and `prompt_profile`.
+- `checkpoint_overrides`: target every invocation of a checkpoint name. The demo uses this to replace `lookup_policy_tool` with `mocks.lookup_policy`.
+- `invocation_overrides`: target one recorded invocation. The demo injects one `publish_support_decision` output and separately changes `support_copilot_model_request_2` to `openai:gpt-5-nano`.
+- `skip`: keep a checkpoint result from the source run instead of recomputing it.
+- tagged batch replay: send several explicit execution IDs through the same replay request and write a diff-matrix report.
+
+The point is scope. A flow override changes the replayed flow inputs. A checkpoint override changes every matching checkpoint name. An invocation override changes one recorded call.
 
 ## Requirements
 
@@ -33,8 +33,7 @@ From the repository root:
 uv sync --extra local --extra pydantic-ai
 ```
 
-Then connect to the Kitaru server you want to use and make sure the OpenAI key is
-available to the process:
+Connect to the Kitaru server you want to use and make sure the OpenAI key is available to the process:
 
 ```bash
 kitaru status
@@ -70,8 +69,7 @@ Or run the whole sequence:
 uv run python demo.py run-all
 ```
 
-The demo writes execution IDs under `fixtures/` and JSON reports under
-`reports/`. Those generated files are ignored by git.
+The demo writes execution IDs under `fixtures/` and JSON reports under `reports/`. Git ignores those generated files.
 
 ## CLI equivalents
 
