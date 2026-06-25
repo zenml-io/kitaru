@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://kitaru.ai">
-    <img src="https://kitaru.ai/kitaru-logo.svg" alt="Kitaru" width="240">
+    <img src="assets/kitaru_logo.png" alt="Kitaru" width="240">
   </a>
 </p>
 
