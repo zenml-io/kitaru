@@ -341,6 +341,10 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
 
 
 def serialize_cohort_diff(item: CohortDiff) -> dict[str, Any]:
+    return serialize_diff_matrix(item)
+
+
+def serialize_diff_matrix(item: CohortDiff) -> dict[str, Any]:
     return {
         "rows": [serialize_execution_diff(row) for row in item.rows],
     }
@@ -444,6 +448,11 @@ def diff_cohort(
     return CohortDiff(rows=[_diff_impl(exec_id) for exec_id in resolved_ids])
 
 
+def diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
+    """Compare many original executions against their discovered replays."""
+    return diff_cohort(exec_ids)
+
+
 __all__ = [
     "DEFAULT_COMPARE_FLOW_VERSION",
     "CheckpointDiff",
@@ -456,7 +465,9 @@ __all__ = [
     "compare_urls_for_replay",
     "diff",
     "diff_cohort",
+    "diff_matrix",
     "serialize_checkpoint_diff",
     "serialize_cohort_diff",
+    "serialize_diff_matrix",
     "serialize_execution_diff",
 ]
