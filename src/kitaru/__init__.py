@@ -102,6 +102,7 @@ from kitaru.diff import (
     compare_url_for_executions,
     diff,
     diff_cohort,
+    diff_matrix,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -195,6 +196,7 @@ __all__ = [
     "delete_stack",
     "diff",
     "diff_cohort",
+    "diff_matrix",
     "events",
     "flow",
     "get_secret",

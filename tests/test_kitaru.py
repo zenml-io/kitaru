@@ -135,6 +135,7 @@ class TestPublicExports:
             "delete_stack",
             "diff",
             "diff_cohort",
+            "diff_matrix",
             "events",
             "flow",
             "get_secret",
