@@ -5,7 +5,9 @@ icon: database
 
 # Configure Runtime Log Storage
 
-This guide shows how to configure Kitaru's preferred runtime log backend.
+The log store is where Kitaru sends the raw runtime logs of a flow run. Set it once to route those logs to your own observability backend (for example, Datadog) instead of the default `artifact-store`.
+
+These logs sit alongside the durable checkpoints of a run: checkpoints make a run replayable, the log store gives you the human-readable trace of what happened while it ran.
 
 ## What this controls
 

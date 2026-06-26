@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 from cyclopts import Parameter
 
 from kitaru._client._statistics import (
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
     normalize_execution_statistics_metrics,
     validate_statistics_max_groups,
 )
@@ -768,7 +769,9 @@ def statistics(
                 "Metric to compute. Repeat for multiple metrics. Use "
                 "<name>:<source>:<avg|sum|min|max> for built-in sources "
                 "(duration, step_count, cached_step_count, output_artifact_count) "
-                "or <name>:metadata:<metadata_key>:<avg|sum|min|max>."
+                "or <name>:metadata:<metadata_key>:<avg|sum|min|max>. "
+                "Common LLM shortcuts: "
+                f"{LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY}."
             ),
         ),
     ] = None,

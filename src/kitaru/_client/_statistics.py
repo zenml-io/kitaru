@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -24,6 +25,12 @@ from kitaru._client._models import (
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
 )
+from kitaru._llm_usage import (
+    LLM_FLAT_DISPLAY_COST_USD_KEY,
+    LLM_FLAT_ESTIMATED_COST_USD_KEY,
+    LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+    LLM_FLAT_TOTAL_TOKENS_KEY,
+)
 from kitaru.errors import (
     KitaruBackendError,
     KitaruFeatureNotAvailableError,
@@ -36,6 +43,17 @@ if TYPE_CHECKING:
 JsonScalar = str | int | float | bool | None
 GroupMergeKey = tuple[tuple[str, JsonScalar], ...]
 GroupEntry = tuple[dict[str, Any], int, dict[str, float | None]]
+LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS = MappingProxyType(
+    {
+        "llm_display_cost": LLM_FLAT_DISPLAY_COST_USD_KEY,
+        "llm_estimated_cost": LLM_FLAT_ESTIMATED_COST_USD_KEY,
+        "llm_total_tokens": LLM_FLAT_TOTAL_TOKENS_KEY,
+        "llm_incurred_tokens": LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+    }
+)
+LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY = ", ".join(
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS
+)
 
 
 @dataclass(frozen=True)
@@ -346,6 +364,15 @@ def coerce_execution_statistics_metric(
     if not token:
         raise KitaruUsageError("Execution statistics metric tokens cannot be empty.")
 
+    shortcut_metadata_key = LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS.get(token)
+    if shortcut_metadata_key is not None:
+        return ExecutionStatisticsMetric(
+            name=token,
+            source=ExecutionStatisticsMetricSource.METADATA,
+            aggregation=ExecutionStatisticsMetricAggregation.SUM,
+            metadata_key=shortcut_metadata_key,
+        )
+
     parts = [part.strip() for part in token.split(":")]
     if len(parts) == 3:
         name, source, aggregation = parts
@@ -365,8 +392,10 @@ def coerce_execution_statistics_metric(
 
     raise KitaruUsageError(
         f"Unsupported execution statistics metric {metric!r}. Expected "
-        "<name>:<source>:<avg|sum|min|max> for built-in sources or "
-        "<name>:metadata:<metadata_key>:<avg|sum|min|max> for metadata."
+        "<name>:<source>:<avg|sum|min|max> for built-in sources, "
+        "<name>:metadata:<metadata_key>:<avg|sum|min|max> for metadata, "
+        "or one of these LLM shortcuts: "
+        f"{LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY}."
     )
 
 

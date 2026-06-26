@@ -5,8 +5,11 @@ icon: lock
 
 # Manage Secrets
 
-Use `kitaru secrets ...` or the Python SDK helpers to manage credentials and
-other sensitive values.
+Secrets are the credentials your flows need at runtime — provider API keys for
+`kitaru.llm()`, tokens for the external services your tools call. Storing them
+centrally keeps keys out of code and lets a run reproduce later from the same
+checkpoint without you re-supplying them. Manage them with `kitaru secrets ...`
+or the Python SDK helpers.
 
 {% hint style="info" %}
 If you want the full LLM setup story — secret, model alias, and

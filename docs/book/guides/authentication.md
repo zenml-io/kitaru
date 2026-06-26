@@ -5,8 +5,8 @@ icon: key
 
 # Authentication
 
-Kitaru has two different server-auth concepts that fit together like a
-front-door key and a temporary visitor badge:
+To run flows, replay executions, and call the API from CI or a container, your
+non-human callers need credentials. Kitaru has two server-auth concepts:
 
 1. **Service-account API keys** are the long-lived automation credentials you
    create for CI, scripts, containers, and other non-human callers.
@@ -36,12 +36,10 @@ Concretely:
    exchanges the active API-key-backed connection for a short-lived bearer
    token.
 
-That final bearer token is useful for curl snippets, but it is not the
-long-lived secret you store in CI.
-
-In automation, `KITARU_AUTH_TOKEN` is usually set to the long-lived
-service-account API key; `kitaru auth token` exchanges that active connection
-for a short-lived bearer token when a raw HTTP call needs one.
+In automation, `KITARU_AUTH_TOKEN` holds the long-lived service-account API key;
+`kitaru auth token` exchanges that active connection for a short-lived bearer
+token when a raw HTTP call needs one. The bearer token is useful for curl
+snippets, but it is not the long-lived secret you store in CI.
 
 ## Create a service account and API key
 

@@ -5,9 +5,9 @@ icon: google
 
 # GCP (Vertex AI)
 
-A Vertex AI stack runs each Kitaru execution as a managed Vertex AI job and stores checkpoint outputs in GCS.
+A Vertex AI stack runs each Kitaru execution as a managed Vertex AI job and stores checkpoint outputs in GCS. This is where your flow runs, replays, and improvement experiments execute when you want Google-managed compute instead of a Kubernetes cluster.
 
-Use this page when your team wants Google-managed compute rather than a Kubernetes cluster. If you want the broader stack model first, start with [Stacks](README.md).
+Use this page to stand up a Vertex stack. For the broader stack model first, start with [Stacks](README.md).
 
 ## Prerequisites
 

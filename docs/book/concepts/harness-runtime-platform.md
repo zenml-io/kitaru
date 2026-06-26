@@ -5,8 +5,13 @@ icon: layer-group
 
 # Harness, Runtime, Platform
 
-Agent tooling spans four layers. Confusion between them is where most "is Kitaru
-a competitor to X?" questions come from.
+Kitaru is the **runtime layer** of an agent stack — the layer that records every
+run as durable checkpoints so you can replay it, change one input, and diff the
+result. It is not a harness (how an agent reasons) and not a platform (how your
+org governs). Knowing which layer is which is where most "is Kitaru a competitor
+to X?" questions get answered.
+
+Agent tooling spans four layers.
 
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/harness-runtime-platform.png" alt="The four layers of an agent stack: model, harness, runtime, and platform."><figcaption></figcaption></figure>
 
@@ -16,18 +21,20 @@ a competitor to X?" questions come from.
 * **Harness layer** — the loop around the model. Prompts, tools, model loop,
   context management, structured outputs, in-turn memory. Picked per-agent or
   per-team.
-* **Runtime layer** — how the agent survives and executes over time. Checkpoints,
-  replay, resume, wait states, versioned deployments, invocation routing,
-  artifact + state handling, execution placement.
+* **Runtime layer** — how the agent survives, executes, and improves over time.
+  Durable checkpoints, faithful replay, cross-run diff, resume, wait states,
+  versioned deployments, invocation routing, artifact + state handling, execution
+  placement.
 * **Platform layer** — how the organization governs. Auth, entitlements,
   interceptors, observability, product UI, policy. Usually lives in your existing
   stack.
 
 {% hint style="info" %}
 **Kitaru sits in the runtime layer.** It is not a harness and it is not a
-packaged platform. It gives platform teams the durable execution primitives they
-attach to the harness their app teams picked and the platform their org already
-runs.
+packaged platform. It gives platform teams the durable execution primitives —
+record, replay, diff — that attach to the harness their app teams picked and the
+platform their org already runs. Durability is the enabler; faithful replay and
+cross-run diff are what you do with it.
 {% endhint %}
 
 ## Where Kitaru is — and isn't
@@ -70,8 +77,8 @@ Harness-first
     → agent logic → tools → state → deployment
 
 Runtime-first (Kitaru)
-  "Agent work is long-running infrastructure work"
-    → runtime → checkpoints → execution targets → harness integration
+  "Agent work is long-running infrastructure you run, replay, and improve"
+    → runtime → checkpoints → replay + diff → execution targets → harness integration
 ```
 
 Neither is universally better. They optimize for different buyers.
@@ -85,7 +92,7 @@ Kitaru actually takes responsibility for:
 
 | Concern | Kitaru owns? | Kitaru's stance |
 |---|---|---|
-| Checkpoint / replay / resume | Yes | Core product |
+| Checkpoint / faithful replay / cross-run diff / resume | Yes | Core product — the run/replay/improve loop |
 | Flow versioning and invocation routing | Yes | Core product |
 | Execution placement per checkpoint | Yes, as config | `@checkpoint(runtime="isolated")` today; richer policy evolving |
 | Sandbox implementation | No | Provide adapters; don't mandate a vendor |
@@ -132,8 +139,10 @@ def research_agent(question: str) -> str:
 ```
 
 * **Harness** decides how `plan`, `retrieve`, `synthesize` reason.
-* **Kitaru runtime** decides what is durable, what can replay, what waits, where
-  each checkpoint runs.
+* **Kitaru runtime** decides what is durable, what waits, and where each
+  checkpoint runs — so you can replay a real run from any checkpoint with one
+  input changed (a different model, a different prompt) and diff it against the
+  baseline.
 * **Your platform** decides who can invoke `research_agent`, which stack it runs
   on, and what gets logged where.
 
@@ -160,13 +169,13 @@ def research_agent(question: str) -> str:
 
 ## Shorthand
 
-> **Harnesses define behavior. Kitaru defines durable execution. Platforms define
-> governance.**
+> **Harnesses define behavior. Kitaru runs, replays, and improves it. Platforms
+> define governance.**
 
 Or the even shorter version:
 
 > Use a harness to build the agent. Use Kitaru when that agent becomes a durable,
-> versioned, self-hosted production workload.
+> versioned production workload you need to replay and improve.
 
 ## Related
 

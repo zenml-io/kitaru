@@ -1,9 +1,50 @@
 ---
-description: What runs where when you execute a Kitaru flow — server, runner, execution targets, and the contract between them.
+description: The Kitaru mental model — a flow is a dynamic pipeline, a checkpoint is a step, and the record → replay → improve loop runs on top.
 icon: gears
 ---
 
 # How It Works
+
+Kitaru is the runtime for production AI agents: **run** them durably, **replay**
+them faithfully, **improve** them with evidence. This page is the mental model
+that ties those three together, and the architecture that makes them work.
+
+## The mental model
+
+A **Kitaru flow is a dynamic ZenML pipeline**, and a **checkpoint is like a
+step**. Your agent runs on the same stacks, the same server, and the same
+dashboard as your ZenML pipelines — there is no separate agent runtime to
+operate.
+
+The difference from a classical pipeline is that a flow's shape is decided at
+runtime by the agent, not fixed in advance. Each `@checkpoint` you cross records
+its inputs and output as a durable unit. That recording is what the rest of
+Kitaru is built on.
+
+The loop:
+
+1. **Run (record).** Every model call and tool call is recorded as a durable
+   checkpoint. This is the enabler, not the headline.
+2. **Replay (the point).** Re-execute a real run from a checkpoint with exactly
+   one input changed — a different model, a different prompt. Compare it against a
+   faithful baseline rerun (the same run with nothing changed). Because the
+   baseline reproduces, the diff is your change, not noise. See
+   [Replay and overrides](../guides/replay-and-overrides.md).
+3. **Improve.** Apply the winning change across a cohort of recent runs, measure
+   cost / latency / quality, keep what wins.
+
+{% hint style="info" %}
+**Durable execution is the _how_, replay is the _why_.** Recording every
+checkpoint is what lets Kitaru reconstruct a run's exact starting state and
+re-execute it with one input swapped. Without durable checkpoints you can
+re-score outputs (an eval); you cannot faithfully re-run the agent. Replay
+re-executes the real run — it is not output re-scoring.
+{% endhint %}
+
+The rest of this page is the architecture that makes recording (and therefore
+replay) durable.
+
+## Components
 
 When you call `.run()` on a flow, three things work together to make it durable:
 the **Kitaru server** (shared metadata, auth, deployment registry), the
@@ -151,13 +192,15 @@ Because the retrieval checkpoint's failure is persisted as a typed artifact, a
 downstream consumer has several real options:
 
 * Retry the same checkpoint with the same input
-* Replay with a modified input (e.g. a corrected document id)
+* [Replay](../guides/replay-and-overrides.md) the run from a checkpoint with one
+  input overridden (e.g. a corrected document id or a different model)
 * Replay with modified code (e.g. a new retrieval strategy)
 * Feed the error artifact back into the agent loop so it can self-correct
 * Wait for a human to provide a correction via `kitaru.wait()`, then resume
 
 This is what "agent-native error handling" means in practice: failures become
-data, and durable state survives them.
+data, durable state survives them, and the same recorded run can be re-executed
+with one thing changed.
 
 ## How deep do you integrate?
 

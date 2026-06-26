@@ -5,7 +5,7 @@ icon: robot
 
 # Tracked LLM Calls
 
-`kitaru.llm()` lets you make a single tracked model call with automatic:
+`kitaru.llm()` makes a single model call and records it as a durable boundary. That capture is the enabler for replay — once a call is recorded, you can reproduce the run faithfully and replay it with one input changed (a different model, a different prompt) to diff the effect of your change. Each call captures automatically:
 
 - prompt artifact capture
 - response artifact capture
@@ -30,10 +30,16 @@ If `KITARU_DEFAULT_MODEL` matches a registered alias, Kitaru resolves that
 alias. Otherwise it treats the value as a raw provider/model string.
 
 When you submit or replay a flow, Kitaru automatically transports your local
-model registry into the execution environment. That means remote runs can still
-resolve aliases with `kitaru.llm()` and `kitaru model list`. If
+model registry into the execution environment. Remote runs resolve aliases with
+`kitaru.llm()` and `kitaru model list` just like local ones. If
 `KITARU_MODEL_REGISTRY` is already set in the runtime environment, its aliases
 and default alias take precedence over matching local entries.
+
+This makes model selection replay-friendly. If your flow takes the model as an
+input and passes it to `kitaru.llm(..., model=model)`, you can swap it on replay
+with `flow.replay(exec_id, from_="...", model="other-alias")` and diff the result
+against the faithful baseline — the change is the only difference. See
+[Replay and overrides](replay-and-overrides.md) for the full loop.
 
 ## Register a model alias
 
@@ -95,7 +101,9 @@ kitaru.configure(llm_estimated_costs="off")
 
 See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata)
 for how checkpoint-level records roll up into execution summaries and
-statistics.
+statistics. Common LLM totals can be queried through execution-statistics
+shortcuts such as `llm_display_cost`, `llm_estimated_cost`, `llm_total_tokens`,
+and `llm_incurred_tokens`.
 
 ## Credential resolution order
 
@@ -245,13 +253,9 @@ these patterns.
 
 ## What Kitaru records
 
-Each `kitaru.llm()` call records:
-
-- prompt artifacts
-- response artifacts
-- token usage
-- latency
-- credential source metadata (`environment` or `secret`)
+Each call records prompt artifacts, response artifacts, token usage, latency,
+and credential source metadata (`environment` or `secret`). This is the durable
+record that replay reconstructs from.
 
 ## Example in this repository
 

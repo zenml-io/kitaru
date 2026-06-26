@@ -1,23 +1,42 @@
 ---
-description: The runtime layer underneath your agent stack.
+description: The runtime for production AI agents. Run, replay, improve.
 icon: hand-wave
 ---
 
 # Welcome to Kitaru
 
-Kitaru is the runtime layer underneath your agent stack. It gives you durable
-execution for Python agents — checkpoints, replay, resume, `wait()`, versioned
-deployments — while the harness you already picked (Pydantic AI, Deep Agents,
-LangGraph, Claude Agent SDK, raw Python) keeps owning how the agent thinks, and
-your existing platform keeps owning auth, observability, and policy.
+Kitaru is the runtime for production AI agents: **run, replay, improve**. It
+records every model call and tool call as a durable checkpoint, then lets you
+re-execute a real run faithfully with one thing changed — a different model, a
+different prompt — and diff the result against the original. Because the baseline
+reproduces, the difference you see is your change, not replay noise.
+
+The harness you already picked (PydanticAI, OpenAI Agents SDK, LangGraph, Claude
+Agent SDK, raw Python) keeps owning how the agent thinks. Kitaru owns the run
+record and the replay loop. A Kitaru flow is a dynamic ZenML pipeline, so agents
+run on the same [stacks](stacks/README.md), server, and dashboard as your ZenML
+pipelines.
+
+## Run, replay, improve
+
+* **Run (durable).** Every `@checkpoint` is a durable unit of work; its output is
+  persisted automatically, and every model and tool call is recorded. If a flow
+  fails partway, replaying it reuses recorded results instead of re-running
+  expensive work.
+* **Replay (the differentiator).** Re-execute a recorded run from any checkpoint.
+  A plain rerun with no change reproduces the original — that is your baseline.
+  Replay again with one input overridden and diff the two. This re-executes the
+  real run from a checkpoint; it is not re-scoring saved outputs like an eval.
+* **Improve.** Apply the same change across a cohort of recent runs, measure
+  cost, latency, and quality, and keep the winner.
 
 Kitaru is self-host-first: a single-service server on your own Kubernetes,
 artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in the
 path of your agent's data. See
-[Harness, Runtime, Platform](concepts/harness-runtime-platform.md) for the full
-picture of where Kitaru fits.
+[Harness, Runtime, Platform](concepts/harness-runtime-platform.md) for where
+Kitaru fits.
 
-## Create a durable agent
+## The replay loop
 
 ```python
 import kitaru
@@ -37,26 +56,53 @@ def research_agent(topic: str) -> str:
     return draft_report(summary)
 
 if __name__ == "__main__":
-    research_agent.run(topic="Why do AI agents need durable execution?")
+    # Run, then replay from a checkpoint with one input changed.
+    run = research_agent.run(topic="Why do agents need durable execution?").wait()
+
+    baseline = research_agent.replay(run.exec_id, from_="draft_report")
+    variant = research_agent.replay(
+        run.exec_id, from_="draft_report", model="anthropic/claude-opus-4"
+    )
+    # baseline reproduces the original; diff variant against it to isolate your change.
 ```
 
-Each `@checkpoint` is a durable unit of work — its output is persisted
-automatically. If the flow fails at `draft_report`, replaying it skips `research`
-and reuses its recorded result. `kitaru.llm()` logs model calls with prompt,
-response, tokens, and latency per call.
+`run(...)` returns a handle; `.wait()` blocks for the result and exposes
+`.exec_id`. `replay(exec_id, from_="<checkpoint>", **overrides)` re-executes from
+that checkpoint, overriding flow inputs such as the model or prompt profile. The
+same loop is available over the [CLI](https://sdkdocs.kitaru.ai) and the
+[MCP server](agent-native/mcp-server.md) so a coding agent can drive it.
 
 See the [Quickstart](getting-started/quickstart.md) to install and run this
 yourself.
 
-## What your agent can do with Kitaru
+## Where ZenML fits
 
-These are the runtime primitives Kitaru adds on top of your existing Python agent
-code. You keep your harness and your control flow; Kitaru makes the run durable.
+Kitaru is built by the team behind [ZenML](https://docs.zenml.io), the
+open-source framework for production ML and LLM pipelines, and runs on the same
+foundations. Each project works on its own — you can use Kitaru without ever
+touching ZenML. If you use both, they compose rather than coexist: a Kitaru flow
+is a dynamic ZenML pipeline under the hood, so your agents and pipelines run on
+the same [stacks](stacks/README.md), persist artifacts to the same stores, and
+show up in the same server and dashboard. If your work is ML pipelines rather
+than agents, start with the [ZenML docs](https://docs.zenml.io) — and if you
+want the narrative tutorial for agents, the
+[Agents guide](https://docs.zenml.io/user-guides/agents-guide) sits alongside
+ZenML's Starter, Production, and LLMOps guides in the shared
+[Learn](https://docs.zenml.io/user-guides) section.
 
+## Runtime primitives
+
+These are the primitives Kitaru adds on top of your existing Python agent code.
+You keep your harness and your control flow; Kitaru records the run and makes it
+replayable.
+
+* **Replay and override:** Re-execute any run from any checkpoint — to recover
+  from a failure, or with [overrides](guides/replay-and-overrides.md) (a
+  different model or parameter) to isolate the effect of a change before you ship
+  it. Per-tool-call mocks (force a specific tool call to return a fake value or
+  fail) are on the roadmap, not yet shipped.
 * **Durable execution:** Wrap steps in [`@checkpoint`](concepts/checkpoints.md)
   and your agent picks up where it left off without re-running expensive work
-* **Replay from failure:** Re-run only the failed part of a flow by replaying
-  from a checkpoint instead of starting from scratch
 * **Wait and resume:** Add [`kitaru.wait()`](guides/wait-and-resume.md) and let
   agents pause for a human, another system, or later input; after the polling
   timeout, compute is released and the run resumes when input lands

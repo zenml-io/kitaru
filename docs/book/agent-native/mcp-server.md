@@ -5,9 +5,16 @@ icon: plug
 
 # MCP Server
 
-Kitaru ships an MCP server so assistants can query and manage executions,
-deployments, artifacts, stacks, and project context with structured tool calls
-instead of parsing CLI text output.
+Kitaru ships an MCP server so a coding agent (Claude Code, Codex, Cursor) can
+drive the run/replay/improve loop directly: run a flow, replay it from a
+checkpoint with one input changed, diff the two, and hill-climb on cost,
+latency, and quality. The agent calls structured tools instead of parsing CLI
+text, so it can read execution state, change one variable, and measure the
+result without a human in the loop.
+
+The same tools also cover the supporting surface: querying executions,
+publishing and invoking deployments, inspecting artifacts, and managing stacks
+and secrets.
 
 ## Install MCP support
 
@@ -206,6 +213,12 @@ Plan and run a replay:
 Replay the latest failed execution from the checkpoint before the failing one. Explain the replay plan before running it.
 ```
 
+Replay with one change and diff against a baseline (the hill-climb loop):
+
+```text
+Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_inputs setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
+```
+
 Inspect results from a completed execution:
 
 ```text
@@ -251,6 +264,14 @@ Example payloads:
 
 ```json
 {
+  "group_by": ["flow"],
+  "metrics": ["llm_display_cost", "llm_total_tokens"],
+  "max_groups": 20
+}
+```
+
+```json
+{
   "group_by": ["metadata:customer_tier", "status"],
   "tags": ["customer-facing"],
   "max_groups": 100
@@ -281,7 +302,9 @@ The result shape is:
 Supported groupings are `status`, `flow`, `stack`, `tag`, `time:hour`,
 `time:day`, `time:week`, `time:month`, and `metadata:<key>`. `flow` and
 `stack` groupings return IDs as `flow_id` and `stack_id`; filters can still use
-names. Optional metrics use the same string format as the CLI:
+names. Optional metrics use the same strings as the CLI and SDK. For common LLM
+totals, use shortcuts such as `llm_display_cost`, `llm_estimated_cost`,
+`llm_total_tokens`, and `llm_incurred_tokens`. For other metrics, use
 `<name>:<source>:<avg|sum|min|max>` for built-in numeric sources such as
 `duration`, or `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for numeric
 execution metadata. The tool does not yet filter by time range or metadata
@@ -445,13 +468,19 @@ workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 
 ## Replay behavior
 
+Replay is the tool an agent uses to test a change. A replay re-executes a real
+recorded run from a checkpoint. Rerun it with no overrides and you get a
+faithful baseline; rerun it again with one input changed (a different model, a
+different prompt profile) and the diff between the two is your change, not replay
+noise. This is the loop the agent hill-climbs.
+
 `kitaru_executions_replay` replays explicit source executions and returns the shared replay submission JSON.
 
 The tool accepts:
 
 - `exec_ids`: one or more execution IDs to replay;
 - `at`: the recorded checkpoint invocation, tool call, model call, or unambiguous checkpoint name where replay starts rerunning work;
-- `flow_overrides`: flow parameters for the replay run;
+- `flow_overrides`: flow parameters for the replay run (this is where you change the model or prompt profile);
 - `checkpoint_overrides`: overrides keyed by checkpoint name, applied to every matching invocation;
 - `invocation_overrides`: overrides keyed by one invocation ID or call ID;
 - `skip`: invocation IDs or call IDs that should reuse recorded outputs even though they are at or after `at`;

@@ -1,13 +1,31 @@
 ---
-description: Replay executions from checkpoints with flow, checkpoint, and invocation overrides
+description: Reproduce a real execution from a checkpoint, replay it with flow, checkpoint, and invocation overrides, and diff the two.
 icon: rotate-left
 ---
 
 # Replay and Overrides
 
-Replay creates a **new execution** from a previous one.
+Replay re-executes a real, recorded run from a checkpoint to produce a **new execution** — the same run, with the changes you specify. This is what makes Kitaru more than tracing: because every model call and tool call was recorded as a durable checkpoint, you can reproduce a run faithfully, fork it with one input changed, and attribute the difference to your change rather than to replay noise.
 
 The practical promise is simple: you keep the work that already succeeded, then rerun only the part you want to test or recover. If a flow researched a customer, called three tools, then failed while writing the final answer, replay can reuse the recorded research and tool results instead of paying for them again.
+
+The core loop is three steps:
+
+1. **Reproduce** — replay a run with nothing changed. A faithful rerun is your control/baseline.
+2. **Fork** — replay the same run again with exactly one input overridden (a different model, a different prompt).
+3. **Diff** — compare the two new executions. Because the baseline reproduced, the delta is your change.
+
+This is not re-scoring stored outputs like an eval. Replay re-executes the real run from a checkpoint forward, with one input swapped.
+
+## The three-way trust idea
+
+Replay gives you three comparable executions:
+
+- **Observed** — the original run as it happened, exactly as recorded.
+- **Reproduced** — a replay with no overrides. If it matches the observed run, replay is faithful and you can trust the next step.
+- **Forked** — a replay with one input changed.
+
+The reproduced run validates the harness; the forked run isolates the effect of your change. Always confirm the reproduced run matches before trusting a forked diff.
 
 ## What replay does, step by step
 
@@ -44,15 +62,29 @@ Checkpoint and invocation overrides can contain these fields:
 
 If a checkpoint override and an invocation override both target the same recorded call, the invocation override wins because it is more specific.
 
-## SDK replay
+## Reproduce a run
 
-Replay one execution with flow and checkpoint overrides:
+Replay with no overrides to get a faithful rerun. Use this as your baseline:
 
 ```python
 import kitaru
 
 client = kitaru.KitaruClient()
 
+baseline = client.executions.replay("kr-a8f3c2", at="write_draft")
+
+row = baseline.results[0]
+print(row.replay_exec_id)
+print(row.original_exec_id)  # points to the source execution
+```
+
+## Replay with one overridden input
+
+Override exactly one thing — a flow input, a checkpoint output, a single model call — while reproducing everything else. The forked run then differs from the baseline only by that change.
+
+Replay one execution with flow and checkpoint overrides:
+
+```python
 submission = client.executions.replay(
     "kr-a8f3c2",
     at="write_draft",
@@ -152,9 +184,20 @@ submission = client.executions.replay(
 
 ## CLI replay
 
+The CLI mirrors the SDK. Pass overrides as JSON blobs.
+
 Replay one execution:
 
 ```bash
+# Reproduce (baseline)
+kitaru executions replay kr-a8f3c2 --at write_draft
+
+# Fork with flow-input overrides
+kitaru executions replay kr-a8f3c2 \
+  --at write_draft \
+  --flow-overrides '{"model":"gpt-4o","prompt_profile":"concise"}'
+
+# Override a recorded checkpoint output
 kitaru executions replay kr-a8f3c2 \
   --at write_draft \
   --flow-overrides '{"topic":"New topic"}' \
@@ -205,6 +248,8 @@ or an object with an `exec_ids` list:
 - a checkpoint call ID.
 
 If the selector is missing or ambiguous, replay fails clearly before submitting the new execution.
+
+`at` always contributes one replay root. Each checkpoint override adds replay roots at the direct consumers of that checkpoint's output. Any checkpoint that is neither a replay root nor a downstream dependency is reused from the recorded run, which is what keeps the reproduced run faithful.
 
 Concrete example:
 
@@ -280,7 +325,9 @@ In this example, Kitaru reruns from `lookup_policy_tool`, but reuses the recorde
 
 You cannot both skip and override the same replay target. Kitaru fails validation rather than guessing which instruction you meant.
 
-## Diff
+## Diff the two runs
+
+Once you have a baseline and a forked execution, compare them to attribute the difference to your change.
 
 Compare an original execution against one or more replays:
 
@@ -318,6 +365,21 @@ Use `kitaru.build_compare_url_for_executions(...)`, `kitaru.compare_url_for_exec
 
 When the Kitaru frontend is hosted separately from the API server, set `KITARU_UI_URL` to the dashboard origin. Compare and execution links from `kitaru executions replay`, `kitaru.diff()`, and flow submission logs use that override; API traffic still uses `KITARU_SERVER_URL`.
 
+{% hint style="info" %}
+Cohort experiments — applying the same override across many recent runs and
+ranking the results by cost, latency, or a quality judge — are a pattern you
+build on top of replay, not a separate API: resolve a cohort of recent
+executions, replay each with the same override, and aggregate the metrics
+yourself.
+{% endhint %}
+
+{% hint style="warning" %}
+**Roadmap.** Overriding a *specific tool call* to return a fake value or raise
+an error (per-tool-call `output=` / `raise_=` mocks) is planned but not yet
+shipped. Today, replay overrides target flow inputs and checkpoint outputs, not
+individual tool-call results.
+{% endhint %}
+
 ## Waits during replay
 
 Replay does not support overriding or pre-populating wait results. If a replayed execution reaches a `wait()` during normal execution, resolve it through the normal wait input flow:
@@ -327,9 +389,17 @@ Replay does not support overriding or pre-populating wait results. If a replayed
 
 ## Divergence
 
-Replay can raise `KitaruDivergenceError` when the backend detects that the replayed call sequence is no longer compatible with the source execution.
+Replay can raise `KitaruDivergenceError` when the backend detects that the replayed call sequence is no longer compatible with the source execution. A divergence means the run can no longer be reproduced faithfully, so any diff from it is untrustworthy.
 
 A concrete example: the source execution recorded `research → write_draft → publish_answer`, but your current code now runs `research → classify_customer → write_draft → publish_answer`. Kitaru cannot safely pretend the old recorded values line up with the new call sequence, so it stops instead of producing a replay that looks valid but used the wrong checkpoint history.
+
+Also check the replayed execution's failure metadata:
+
+```python
+latest = client.executions.get(submission.results[0].replay_exec_id)
+if latest.failure:
+    print(latest.failure.origin, latest.failure.message)
+```
 
 ## Example in this repository
 

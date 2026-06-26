@@ -5,8 +5,12 @@ icon: list-check
 
 # Manage Executions with KitaruClient and CLI
 
-`KitaruClient` is the programmatic API for managing and inspecting executions
-outside your flow functions.
+`KitaruClient` is the programmatic API for inspecting and acting on executions
+outside your flow functions. It is how you look up a real run by its `exec_id`,
+read its checkpoints and cost, resolve waits, and drive the run/replay/improve
+loop, replaying a recorded execution from a checkpoint with one input changed.
+The same surface is exposed over the CLI and the MCP server, so a coding agent
+can do all of this too.
 
 {% hint style="info" %}
 `KitaruClient` and the CLI use your current Kitaru connection context. If you
@@ -66,13 +70,13 @@ latest = client.executions.latest(flow="content_pipeline")
 
 ## Execution statistics
 
-Use execution statistics when you want counts, trends, or health checks without
-fetching every individual execution first. This is the difference between asking
-"show me the last 20 executions" and asking "how many executions failed this
-week?" Kitaru sends the aggregate question to the active Kitaru runtime and
-returns a small grouped result. Each group always includes an execution count.
-You can also ask for numeric metrics, such as average duration or the sum of a
-numeric execution metadata key.
+Use execution statistics when you want counts, trends, or health checks across a
+cohort without fetching every execution first, the difference between "show me
+the last 20 executions" and "how many failed this week?" Kitaru runs the
+aggregate query on the active runtime and returns a small grouped result. Each
+group includes an execution count; you can also request numeric metrics such as
+average duration or the sum of a numeric metadata key (e.g. cost per flow), which
+is how you compare a cohort before and after a change.
 
 ```python
 from kitaru import KitaruClient
@@ -231,10 +235,11 @@ writes two execution-level views:
   happened in one execution. Its `usage_record_count`,
   `incurred_usage_record_count`, and `reused_usage_record_count` fields count
   Kitaru usage records, not raw provider API calls.
-- Flat numeric metadata keys such as `kitaru_llm_display_cost_usd_v1` and
-  `kitaru_llm_total_tokens_v1` are the statistics view. Kitaru execution
-  statistics can sum or average these because they are top-level numbers, not
-  nested objects.
+- Common LLM totals are available as execution-statistics shortcuts:
+  `llm_display_cost`, `llm_estimated_cost`, `llm_total_tokens`, and
+  `llm_incurred_tokens`. These shortcuts read the flat execution-level numeric
+  metadata that Kitaru writes for statistics, so users do not need to spell the
+  internal `_v1` metadata keys for common cost and token totals.
 
 Cost fields are intentionally split:
 
@@ -302,21 +307,28 @@ observability and trend analysis, not financial reconciliation.
 Useful statistics queries:
 
 ```bash
-# Sum display cost by flow. This is an observability number, not an invoice.
+# Sum display cost and total token volume for one flow.
+# Display cost is an observability number, not an invoice.
+kitaru executions statistics \
+  --flow content_pipeline \
+  --metric llm_display_cost \
+  --metric llm_total_tokens
+
+# Sum estimated cost by flow.
 kitaru executions statistics \
   --group-by flow \
-  --metric llm_display_cost_sum:metadata:kitaru_llm_display_cost_usd_v1:sum
+  --metric llm_estimated_cost
 
 # Sum incurred token volume by day.
 kitaru executions statistics \
   --group-by time:day \
-  --metric llm_tokens_sum:metadata:kitaru_llm_incurred_total_tokens_v1:sum
-
-# Count usage records that reused checkpoint metadata instead of incurring new usage.
-kitaru executions statistics \
-  --group-by flow \
-  --metric llm_reused_usage_records:metadata:kitaru_llm_reused_usage_record_count_v1:sum
+  --metric llm_incurred_tokens
 ```
+
+The shortcut names above mean "sum this common LLM total". The raw
+`<name>:metadata:<metadata_key>:<avg|sum|min|max>` form still exists for custom
+numeric execution metadata and for advanced internal debugging, but you should
+not need `kitaru_llm_*_v1` keys for common LLM cost and token totals.
 
 {% hint style="warning" %}
 In v1, terminal LLM summaries are written when the SDK observes completion via
@@ -388,13 +400,18 @@ runner already exited), call `resume(...)`:
 execution = client.executions.resume(exec_id)
 ```
 
-## Retry, replay, and cancel
+## Replay, retry, and cancel
+
+Replay is the core of the improve loop: it re-executes a recorded run into a
+**new** execution from a checkpoint boundary, optionally with inputs changed.
+Replaying with no overrides reproduces the baseline; replaying with one thing
+changed (a different model or prompt) lets you diff the two and attribute the
+difference to your change. Retry, by contrast, resumes the **same** failed
+execution in place.
 
 ```python
-# Same-execution retry (failed executions only)
-retried = client.executions.retry(exec_id)
-
-# Replay into a new execution from a checkpoint boundary
+# Replay into a new execution from a checkpoint boundary.
+# Override flow inputs (e.g. topic) and prior checkpoint outputs.
 replayed = client.executions.replay(
     exec_id,
     at="write_draft",
@@ -402,9 +419,15 @@ replayed = client.executions.replay(
     topic="New topic",
 )
 
+# Same-execution retry (failed executions only)
+retried = client.executions.retry(exec_id)
+
 # Cancel a running execution
 cancelled = client.executions.cancel(exec_id)
 ```
+
+For the full replay/diff workflow, see the
+[ZenML Learn Agents guide](https://docs.zenml.io/user-guides/agents-guide).
 
 ## Execution convenience methods
 

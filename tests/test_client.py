@@ -40,12 +40,20 @@ from kitaru._client._mappers import (
     _to_public_status,
 )
 from kitaru._client._statistics import (
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
     build_run_statistics_request,
+    coerce_execution_statistics_metric,
     map_run_statistics_response,
     normalize_execution_statistics_groupings,
     normalize_execution_statistics_metrics,
 )
 from kitaru._interface_deployments import Deployment
+from kitaru._llm_usage import (
+    LLM_FLAT_DISPLAY_COST_USD_KEY,
+    LLM_FLAT_ESTIMATED_COST_USD_KEY,
+    LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+    LLM_FLAT_TOTAL_TOKENS_KEY,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.client import (
     _RESUME_RESUMING_REASON,
@@ -555,6 +563,65 @@ def test_execution_statistics_metric_parser_rejects_duplicates() -> None:
         normalize_execution_statistics_metrics(
             ["duration_avg:duration:avg", "duration_avg:step_count:sum"]
         )
+
+
+@pytest.mark.parametrize(
+    ("shortcut", "metadata_key"),
+    [
+        ("llm_display_cost", LLM_FLAT_DISPLAY_COST_USD_KEY),
+        ("llm_estimated_cost", LLM_FLAT_ESTIMATED_COST_USD_KEY),
+        ("llm_total_tokens", LLM_FLAT_TOTAL_TOKENS_KEY),
+        ("llm_incurred_tokens", LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY),
+    ],
+)
+def test_execution_statistics_metric_parser_normalizes_llm_shortcuts(
+    shortcut: str,
+    metadata_key: str,
+) -> None:
+    metric = coerce_execution_statistics_metric(shortcut)
+
+    assert metric == ExecutionStatisticsMetric(
+        name=shortcut,
+        source=ExecutionStatisticsMetricSource.METADATA,
+        aggregation=ExecutionStatisticsMetricAggregation.SUM,
+        metadata_key=metadata_key,
+    )
+
+
+def test_execution_statistics_metric_parser_keeps_llm_shortcuts_sum_only() -> None:
+    metric = coerce_execution_statistics_metric(" llm_display_cost ")
+
+    assert metric.name == "llm_display_cost"
+    assert metric.source is ExecutionStatisticsMetricSource.METADATA
+    assert metric.aggregation is ExecutionStatisticsMetricAggregation.SUM
+    assert metric.metadata_key == LLM_FLAT_DISPLAY_COST_USD_KEY
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        ["llm_total_tokens", "llm_total_tokens"],
+        [
+            "llm_total_tokens",
+            f"llm_total_tokens:metadata:{LLM_FLAT_TOTAL_TOKENS_KEY}:sum",
+        ],
+    ],
+)
+def test_execution_statistics_metric_parser_rejects_duplicate_llm_shortcut_names(
+    metrics: list[str],
+) -> None:
+    with pytest.raises(KitaruUsageError, match="Duplicate"):
+        normalize_execution_statistics_metrics(metrics)
+
+
+def test_execution_statistics_metric_parser_rejects_unknown_plain_strings() -> None:
+    with pytest.raises(KitaruUsageError) as exc_info:
+        coerce_execution_statistics_metric("llm_not_a_real_shortcut")
+
+    message = str(exc_info.value)
+    assert "Unsupported execution statistics metric" in message
+    assert "or one of these LLM shortcuts" in message
+    assert LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY in message
 
 
 def test_execution_status_mapping_covers_zenml_execution_status_values() -> None:
@@ -3326,6 +3393,30 @@ def test_statistics_delegates_to_internal_helper_and_tracks_safe_payload() -> No
     assert "private_key" not in repr(metadata)
 
 
+def test_statistics_tracks_llm_shortcut_metrics_without_metric_names() -> None:
+    result = ExecutionStatistics(groups=[], truncated=False)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.get_execution_statistics", return_value=result),
+        patch("kitaru.client.track") as track_mock,
+    ):
+        client = KitaruClient()
+        statistics = client.executions.statistics(metrics=["llm_display_cost"])
+
+    assert statistics is result
+    track_mock.assert_called_once()
+    event, metadata = track_mock.call_args.args
+    assert event is AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
+    assert metadata["metric_count"] == 1
+    assert metadata["has_metadata_metric"] is True
+    assert "llm_display_cost" not in repr(metadata)
+    assert LLM_FLAT_DISPLAY_COST_USD_KEY not in repr(metadata)
+
+
 def test_statistics_fetches_global_count_from_zen_store() -> None:
     response = SimpleNamespace(
         groups=[SimpleNamespace(group_keys={}, run_count=18)],
@@ -3428,6 +3519,53 @@ def test_statistics_fetches_metrics_from_zen_store() -> None:
                 keys={"flow_id": "flow-a"},
                 execution_count=2,
                 metrics={"duration_avg": 11.0, "cost_sum": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+
+def test_statistics_maps_llm_shortcuts_to_metadata_metrics() -> None:
+    response = SimpleNamespace(
+        groups=[
+            SimpleNamespace(
+                group_keys={"flow_id": "flow-a"},
+                run_count=2,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track"),
+    ):
+        zen_store = SimpleNamespace(get_run_statistics=Mock(return_value=response))
+        client_cls.return_value.zen_store = zen_store
+
+        client = KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=["flow"],
+            metrics=["llm_display_cost", "llm_total_tokens"],
+        )
+
+    request = zen_store.get_run_statistics.call_args.args[0]
+    assert [(metric.name, metric.metadata_key) for metric in request.metrics] == [
+        ("llm_display_cost", LLM_FLAT_DISPLAY_COST_USD_KEY),
+        ("llm_total_tokens", LLM_FLAT_TOTAL_TOKENS_KEY),
+    ]
+    assert [metric.aggregation.value for metric in request.metrics] == ["sum", "sum"]
+    assert statistics == ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-a"},
+                execution_count=2,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
             )
         ],
         truncated=False,

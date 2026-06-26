@@ -8,8 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+
+## [0.18.0] - 2026-06-25
+
+### Added
 - Added adapter-owned cost calculator inputs for Claude Agent SDK, Gemini Interactions, and Pydantic AI, so adapter users can record estimated LLM costs with their own calculator hooks.
 - Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
+- Added estimated-cost recording for direct `kitaru.llm()` calls when provider usage includes token counts and `genai-prices` has pricing for the model, with config and environment controls to leave estimation on automatic or opt out. Cost estimation is best effort: a pricing-lookup miss never turns a successful LLM call into a failure.
 - Added `--page` and `--size` pagination options to `kitaru executions statistics`.
 - Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
 - Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
@@ -37,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added a LangGraph runner convenience API so fresh `invoke`, `ainvoke`, `stream`, and `astream` calls can pass raw graph input with `thread_id=...` instead of manually building `LangGraphRunRequest.start(...)`, while keeping request objects as the resume and advanced path. (#455)
+
+### Changed
+- Repositioned user-facing messaging (README, PyPI description, CLI `--help`, docs welcome page) around recording, replaying, and improving agents in production; durable execution is now described as the underlying mechanism rather than the headline.
 
 ### Fixed
 - Fixed LangGraph calls-mode checkpoints so tool calls survive model-call materialization and LangGraph routes to tools correctly. (#458)
