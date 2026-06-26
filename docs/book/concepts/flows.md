@@ -136,9 +136,9 @@ execution:
 
 {% hint style="info" %}
 `handle.get()` does **not** wait. If the execution is still running, it raises a
-`KitaruStateError`. Use `handle.wait()` when you want to block. For current runs
-that return a value, both methods read the saved run output; Kitaru only falls
-back to terminal-checkpoint result inference for older or no-output runs.
+`KitaruStateError`. Use `handle.wait()` when you want to block. For flows
+that explicitly return a value, both methods return the saved run output. For
+flows that do not return a value, inspect the persisted artifacts instead.
 {% endhint %}
 
 ### How errors surface

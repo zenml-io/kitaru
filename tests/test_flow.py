@@ -1505,22 +1505,48 @@ def test_flow_result_extraction_rejects_unexpected_tuple_metadata_role() -> None
         _extract_flow_result(_as_pipeline_run(run))
 
 
-def test_flow_result_extraction_rejects_malformed_tuple_metadata() -> None:
-    """Reserved tuple metadata artifacts must contain valid marker payloads."""
-    run = _DummyRun(
+def _run_with_reserved_tuple_metadata_artifact(
+    metadata_value: Mapping[str, object],
+) -> _DummyRun:
+    """Build a run whose final output is Kitaru's reserved tuple metadata artifact."""
+    return _DummyRun(
         status=ExecutionStatus.COMPLETED,
         outputs=[
             ("step", "output_0", "value"),
             _DummyOutput(
                 step_name="step",
                 output_name="output_1",
-                value={"kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER},
+                value=metadata_value,
                 artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
                 run_metadata={
                     _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
                 },
             ),
         ],
+    )
+
+
+def test_flow_result_extraction_rejects_malformed_tuple_metadata() -> None:
+    """Reserved tuple metadata artifacts must contain valid marker payloads."""
+    run = _run_with_reserved_tuple_metadata_artifact(
+        {"kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER}
+    )
+
+    with pytest.raises(KitaruRuntimeError, match="valid Kitaru tuple metadata"):
+        _extract_flow_result(_as_pipeline_run(run))
+
+
+@pytest.mark.parametrize("length", [True, 0, -1])
+def test_flow_result_extraction_rejects_invalid_tuple_metadata_lengths(
+    length: object,
+) -> None:
+    """Reserved tuple metadata artifacts must contain a positive integer length."""
+    run = _run_with_reserved_tuple_metadata_artifact(
+        {
+            "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+            "version": 1,
+            "length": length,
+        }
     )
 
     with pytest.raises(KitaruRuntimeError, match="valid Kitaru tuple metadata"):

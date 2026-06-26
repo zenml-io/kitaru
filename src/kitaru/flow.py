@@ -323,11 +323,16 @@ def _flow_result_tuple_metadata(length: int) -> dict[str, Any]:
 
 def _is_flow_result_tuple_metadata(value: Any) -> bool:
     """Return whether a loaded output value is Kitaru tuple metadata."""
+    if not isinstance(value, Mapping):
+        return False
+
+    length = value.get("length")
     return (
-        isinstance(value, Mapping)
-        and value.get("kitaru_artifact_type") == _FLOW_RESULT_TUPLE_METADATA_MARKER
+        value.get("kitaru_artifact_type") == _FLOW_RESULT_TUPLE_METADATA_MARKER
         and value.get("version") == 1
-        and isinstance(value.get("length"), int)
+        and isinstance(length, int)
+        and not isinstance(length, bool)
+        and length > 0
     )
 
 
@@ -772,6 +777,8 @@ def _extract_outputs_from_run_outputs(
         return []
 
     outputs: list[_FlowResultOutput] = []
+    # ZenML hydrates PipelineRunResponse.outputs in output_index order, so the
+    # mapping iteration order is the persisted flow return order.
     for output_name, artifact in run_outputs.items():
         if artifact is None:
             raise KitaruRuntimeError(

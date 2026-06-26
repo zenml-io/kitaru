@@ -179,11 +179,11 @@ The per-call checkpoints are siblings under the flow, but a flow that explicitly
 returns a value still has one persisted run output. In that common shape,
 `flow.run(...).wait()` returns the flow's output after completion while the
 per-checkpoint artifacts remain visible in the Kitaru UI and retrievable via
-`KitaruClient`. Ambiguity remains only for legacy or no-output runs where Kitaru
-has to infer a result from terminal checkpoint artifacts. Wrapping the
-`runner.run_sync()` call in your own `@checkpoint` is **not** a workaround for
-changing per-call placement — the adapter guards against it and will raise,
-because per-call checkpoints cannot be nested inside another Kitaru checkpoint.
+`KitaruClient`. If your flow does not return a value, inspect those artifacts
+instead. Wrapping the `runner.run_sync()` call in your own `@checkpoint` is
+**not** a workaround for changing per-call placement — the adapter guards against
+it and will raise, because per-call checkpoints cannot be nested inside another
+Kitaru checkpoint.
 
 ## Sandbox command tool
 
@@ -542,7 +542,7 @@ When `save_usage=True` (the default), each completed or interrupted runner call 
 
 If you pass a `cost_calculator=` to `KitaruRunner`, Kitaru stores the returned value as `estimated_cost_usd`. Calculator failures are non-fatal: the runner still returns the OpenAI result, adds a warning, and leaves the estimated cost empty. Without a user calculator, Kitaru estimates with `genai-prices` when the SDK usage summary names a single OpenAI model and includes priceable token counts. If the run does not expose a reliable model name, Kitaru records tokens only rather than pricing a multi-model or handoff run with the wrong model. OpenAI Agents records do not store provider-reported actual cost in this adapter path, so `actual_cost_usd` is normally empty.
 
-These records normally roll up into the execution-level LLM usage summary from Kitaru's run-end hook. `FlowHandle.wait()` and `FlowHandle.get()` keep the same aggregation as a fallback when they observe a terminal run that does not already have a complete summary. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
+Kitaru normally rolls these records into the execution-level LLM usage summary when the execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
 
 Two privacy switches are worth calling out:
 

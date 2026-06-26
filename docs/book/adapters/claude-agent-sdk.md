@@ -488,7 +488,7 @@ Some Claude SDK results expose `model_usage` instead of the top-level `usage` pa
 
 The canonical record is independent of the durable adapter event log. Turning `emit_events=False` suppresses the invocation event and run summary artifacts, but it does not stop the lightweight LLM usage metadata record. Set `save_usage=False` when you do not want Claude usage persisted; that disables both the separate usage artifact and the canonical invocation record used for execution-level LLM summaries.
 
-These records normally roll up from Kitaru's run-end hook; `FlowHandle.wait()` and `FlowHandle.get()` keep the same aggregation as a fallback. If Claude reports usage but not cost, the usage record keeps token counts and leaves cost fields empty unless you pass a calculator.
+Kitaru normally rolls these records into the execution-level usage summary when the execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. If Claude reports usage but not cost, the usage record keeps token counts and leaves cost fields empty unless you pass a calculator.
 
 You can reduce what is stored with `ClaudeCapturePolicy`:
 

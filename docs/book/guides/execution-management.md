@@ -226,9 +226,9 @@ When an execution makes LLM calls through `kitaru.llm()` or the supported agent
 adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
 that made or reused the provider work. One usage record usually means one
 provider interaction or one adapter-level graph/agent invocation, depending on
-which adapter produced it. At run end, Kitaru reads those checkpoint records and
-writes two execution-level views. `FlowHandle.wait()` and `FlowHandle.get()` keep
-the same aggregation as a fallback for older runs or unexpected hook failures:
+which adapter produced it. When the execution finishes, Kitaru reads those
+checkpoint records and writes two execution-level views. `FlowHandle.wait()` and
+`FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written:
 
 - `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
   Python client parse it into `execution.llm_usage_summary`. It tells you what
@@ -331,11 +331,10 @@ numeric execution metadata and for advanced internal debugging, but you should
 not need `kitaru_llm_*_v1` keys for common LLM cost and token totals.
 
 {% hint style="info" %}
-Terminal LLM summaries are normally written by the Kitaru run-end hook, so a
+Kitaru normally writes terminal LLM summaries when executions finish, so a
 remote execution can get `llm_usage_summary_v1` and the flat `kitaru_llm_*_v1`
 statistics keys even if no local SDK process calls `.wait()` or `.get()`. Those
-methods still perform the same aggregation as an idempotent fallback when they
-observe a terminal run that does not already have a complete summary.
+methods can still populate missing summaries for older executions or terminal executions where the finish-time summary was not written.
 {% endhint %}
 
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
