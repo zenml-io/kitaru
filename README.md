@@ -235,11 +235,11 @@ kitaru executions get <EXECUTION_ID>
 kitaru executions logs <EXECUTION_ID>
 
 # Reproduce a run faithfully from a checkpoint
-kitaru executions replay <EXECUTION_ID> --from process_data
+kitaru executions replay <EXECUTION_ID> --at process_data
 
 # Fork the same run with one input changed
-kitaru executions replay <EXECUTION_ID> --from fetch_data \
-  --args '{"url": "https://other.example.com"}'
+kitaru executions replay <EXECUTION_ID> --at fetch_data \
+  --flow-overrides '{"url": "https://other.example.com"}'
 ```
 
 See [Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides)

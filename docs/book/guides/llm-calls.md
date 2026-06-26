@@ -37,9 +37,10 @@ and default alias take precedence over matching local entries.
 
 This makes model selection replay-friendly. If your flow takes the model as an
 input and passes it to `kitaru.llm(..., model=model)`, you can swap it on replay
-with `flow.replay(exec_id, from_="...", model="other-alias")` and diff the result
-against the faithful baseline — the change is the only difference. See
-[Replay and overrides](replay-and-overrides.md) for the full loop.
+with `flow.replay(exec_id, at="...", flow_overrides={"model": "other-alias"})`
+and diff the result against the faithful baseline — the change is the only
+difference. See [Replay and overrides](replay-and-overrides.md) for the full
+loop.
 
 ## Register a model alias
 

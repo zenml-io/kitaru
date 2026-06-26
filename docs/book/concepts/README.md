@@ -48,7 +48,7 @@ Kitaru's current release includes:
 * `@flow` — mark a function as a durable workflow
 * `@checkpoint` — mark a function as a persisted work unit
 * `flow.run(...).wait()` — run a flow to completion; the handle carries `.exec_id`
-* `flow.replay(exec_id, from_="<checkpoint>", **overrides)` — re-execute a recorded run from a checkpoint, optionally overriding flow inputs such as `model` or `prompt_profile`
+* `flow.replay(exec_id, at="<checkpoint>", flow_overrides={...})` — re-execute a recorded run from a checkpoint, optionally overriding flow inputs such as `model` or `prompt_profile`
 * `kitaru.log()` — attach structured metadata to the current scope
 * `kitaru.wait()` — pause a flow until external input is supplied
 * `kitaru.llm()` — make tracked model calls with prompt/response capture
@@ -60,8 +60,8 @@ Kitaru's current release includes:
 * `FlowHandle` — interact with a running or finished execution
 
 Replay and diff are also exposed over an MCP server and the `kitaru` CLI
-(`kitaru executions replay --from <checkpoint> <id> --args <json>`), so a coding
-agent can drive the run → replay → improve loop directly.
+(`kitaru executions replay <id> --at <checkpoint> --flow-overrides <json>`),
+so a coding agent can drive the run → replay → improve loop directly.
 
 {% hint style="info" %}
 All of the primitives listed here ship today. Some capabilities are

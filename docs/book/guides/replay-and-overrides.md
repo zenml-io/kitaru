@@ -373,13 +373,6 @@ executions, replay each with the same override, and aggregate the metrics
 yourself.
 {% endhint %}
 
-{% hint style="warning" %}
-**Roadmap.** Overriding a *specific tool call* to return a fake value or raise
-an error (per-tool-call `output=` / `raise_=` mocks) is planned but not yet
-shipped. Today, replay overrides target flow inputs and checkpoint outputs, not
-individual tool-call results.
-{% endhint %}
-
 ## Waits during replay
 
 Replay does not support overriding or pre-populating wait results. If a replayed execution reaches a `wait()` during normal execution, resolve it through the normal wait input flow:

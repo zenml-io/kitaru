@@ -84,17 +84,21 @@ handle = my_agent.run(url="https://example.com").wait()
 exec_id = handle.exec_id
 
 # Faithful rerun with no change = the control/baseline.
-baseline = my_agent.replay(exec_id, from_="fetch_data")
+baseline = my_agent.replay(exec_id, at="fetch_data")
 
 # Replay again with one flow input changed (a different model).
-variant = my_agent.replay(exec_id, from_="fetch_data", model="claude-opus-4-8")
+variant = my_agent.replay(
+    exec_id,
+    at="fetch_data",
+    flow_overrides={"model": "claude-opus-4-8"},
+)
 ```
 
-Keyword arguments to `replay` override the flow's **inputs** (for example `model`
-or `prompt_profile`); `from_` selects the checkpoint to re-execute from. Because
-the baseline reproduces the original run, a diff between baseline and variant
-isolates your change rather than replay noise. This re-executes the real run with
-one input swapped — it is not re-scoring stored outputs like an eval.
+`at` selects the checkpoint to re-execute from. `flow_overrides` changes the
+flow's **inputs** for the replay run (for example `model` or `prompt_profile`).
+Because the baseline reproduces the original run, a diff between baseline and
+variant isolates your change rather than replay noise. This re-executes the real
+run with one input swapped — it is not re-scoring stored outputs like an eval.
 
 See [Replay and Overrides](../guides/replay-and-overrides.md) for selector rules,
 checkpoint-level overrides, and the CLI/MCP entry points.

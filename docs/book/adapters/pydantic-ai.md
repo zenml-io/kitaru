@@ -97,7 +97,7 @@ handle = research.run("quantum error correction")
 print(handle.wait())
 ```
 
-Replay the flow from a checkpoint with `flow.replay(exec_id, from_="ask", **overrides)` to re-execute the real run with one input changed — a different model or prompt — while completed checkpoints before that boundary are reused. See [Replay and overrides](../guides/replay-and-overrides.md).
+Replay the flow from a checkpoint with `flow.replay(exec_id, at="ask", flow_overrides={...})` to re-execute the real run with one input changed — a different model or prompt — while completed checkpoints before that point are reused. See [Replay and overrides](../guides/replay-and-overrides.md).
 
 {% hint style="warning" %}
 This pattern checkpoints the whole agent turn. If the agent calls a tool, Kitaru stores that tool activity under the `ask` checkpoint as adapter events/artifacts; it does not create nested checkpoints such as `search_tool` or `lookup_price_tool`. To see ordinary PydanticAI model/tool calls as separate checkpoint rows, call the agent directly from flow scope:

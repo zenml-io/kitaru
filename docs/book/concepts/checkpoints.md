@@ -34,14 +34,14 @@ change — not replay noise.
 
 This is the foundation of the **run, replay, improve** loop: because checkpoints
 record the real run, you can replay it with one input changed (a different model
-or prompt via `flow.replay(exec_id, from_="<checkpoint>", **overrides)`) and diff
-the two runs. See [Replay and overrides](../guides/replay-and-overrides.md).
+or prompt via `flow.replay(exec_id, at="<checkpoint>", flow_overrides={...})`)
+and diff the two runs. See [Replay and overrides](../guides/replay-and-overrides.md).
 
 {% hint style="info" %}
-Replaying with **input overrides** (changing the flow inputs feeding a
-checkpoint, like the model or prompt profile) is shipped today. Overriding a
-**specific tool call's output** — forcing one recorded tool call to return a
-fake value or raise — is on the roadmap, not yet available.
+Replay now has three override levels. `flow_overrides` changes top-level flow
+inputs. `checkpoint_overrides` targets every recorded call with a checkpoint
+name. `invocation_overrides` targets one recorded checkpoint, tool, or model
+call by invocation ID or call ID.
 {% endhint %}
 
 ## Defining a checkpoint
