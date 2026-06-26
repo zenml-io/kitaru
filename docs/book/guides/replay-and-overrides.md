@@ -336,7 +336,6 @@ A concrete example: the source execution recorded `research → write_draft → 
 ```bash
 uv sync --extra local
 uv run python examples/features/replay/replay_with_overrides.py
-uv run python examples/end_to_end/pydantic_replay_fork/demo.py run-all
 uv run pytest tests/test_phase16_replay_example.py
 ```
 

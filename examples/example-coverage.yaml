@@ -221,44 +221,6 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
-  - id: pydantic-replay-fork
-    path: examples/end_to_end/pydantic_replay_fork/demo.py
-    public_docs:
-      [
-        examples/end_to_end/pydantic_replay_fork/README.md,
-        examples/end_to_end/pydantic_replay_fork/PLAYBOOK.md,
-        docs/book/getting-started/examples.md,
-      ]
-    owner_area: pydantic replay reproduce edit cohort diff
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_pydantic_replay_fork_demo.py
-      local_smoke:
-        status: manual_only
-        waiver:
-          reason: The replay cohort demo makes real OpenAI-backed PydanticAI calls and is too costly for unattended smoke.
-          reviewer_action: If this example changes, run demo.py run-all with OPENAI_API_KEY or record a release waiver.
-        command: uv run python examples/end_to_end/pydantic_replay_fork/demo.py run-all
-        requires_server: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 600
-      live_provider:
-        status: manual_only
-        waiver:
-          reason: The replay cohort demo makes real OpenAI-backed PydanticAI calls and is too costly for unattended release automation.
-          reviewer_action: If this example changes, run demo.py run-all with OPENAI_API_KEY or record a release waiver.
-        provider: openai
-        command: uv run python examples/end_to_end/pydantic_replay_fork/demo.py run-all
-        command_paths: [examples/end_to_end/pydantic_replay_fork/demo.py]
-        weekly_workflow: false
-        local_release_smoke: false
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 600
-        cost_class: medium
-    release_policy:
-      required_when_changed: true
   - id: replay-overrides-demo
     path: examples/end_to_end/replay_overrides_demo/demo.py
     public_docs:
