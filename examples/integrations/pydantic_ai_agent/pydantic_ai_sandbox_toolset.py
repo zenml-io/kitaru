@@ -159,13 +159,11 @@ def wait_for_completion(
     poll_seconds: float = 1.0,
     timeout_seconds: float = 300.0,
 ) -> ExecutionStatus:
-    """Wait for terminal execution status without extracting a flow result.
+    """Poll until the example flow reaches a terminal status.
 
-    This demo intentionally keeps per-call adapter checkpoints visible. In that
-    shape, ``FlowHandle.wait()`` is not the right API because result extraction
-    sees several terminal model/tool checkpoints and refuses to guess. Polling
-    ``handle.status`` waits for completion without asking Kitaru to choose one
-    output value.
+    The script's main path uses ``handle.wait()`` so it can print the persisted
+    run output. This helper remains available for tests and for callers that
+    only want terminal status without loading the result.
     """
     start = time.monotonic()
     last_status = handle.status
@@ -184,7 +182,7 @@ def wait_for_completion(
 
 
 def _raise_failed_execution_details(handle: Any, status: ExecutionStatus) -> None:
-    """Raise the execution failure while avoiding successful result extraction."""
+    """Raise the execution failure details for a terminal failed status."""
     try:
         handle.get()
     except KitaruExecutionError:
@@ -206,9 +204,7 @@ def main() -> None:
     try:
         handle = submit_sandbox_toolset_flow(model=model)
         print(f"Submitted sandbox toolset flow execution: {handle.exec_id}")
-        status = wait_for_completion(handle)
-        if status is not ExecutionStatus.COMPLETED:
-            _raise_failed_execution_details(handle, status)
+        final_answer = handle.wait()
     except (KitaruFeatureNotAvailableError, KitaruStateError) as error:
         raise SystemExit(
             "This example needs an active Kitaru stack with exactly one sandbox "
@@ -221,8 +217,6 @@ def main() -> None:
         ) from error
     except KitaruExecutionError as error:
         raise SystemExit(str(error)) from error
-    except TimeoutError as error:
-        raise SystemExit(str(error)) from error
 
     print("=== sandbox command checkpoints ===")
     print(f"Execution: {handle.exec_id}")
@@ -233,10 +227,10 @@ def main() -> None:
     print("  - run_sandbox_command_tool")
     print("  - publish_sandbox_answer")
     print(
-        "The final text is stored on the publish_sandbox_answer checkpoint. "
-        "This per-tool checkpoint demo does not use `.wait()` for the final answer "
-        "because adapter-created model/tool checkpoints are also terminal graph steps."
+        "The final text is stored on the publish_sandbox_answer checkpoint "
+        "and returned by `.wait()`:"
     )
+    print(final_answer)
 
 
 if __name__ == "__main__":

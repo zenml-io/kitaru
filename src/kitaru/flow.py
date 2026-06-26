@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from functools import update_wrapper, wraps
-from typing import Any, cast, overload
+from typing import Any, Literal, cast, overload
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -37,7 +37,7 @@ from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
-from kitaru._client._mappers import _list_checkpoint_attempts_for_run, _to_public_status
+from kitaru._client._mappers import _to_public_status
 from kitaru._client._models import ExecutionStatus
 from kitaru._config._active_context import (
     ActiveConfigSelectionProvenance,
@@ -51,22 +51,21 @@ from kitaru._interface_deployments import (
     resolve_deployment_selector,
     validate_deployment_selector,
 )
-from kitaru._llm_usage import (
-    cache_status_for_checkpoint_status,
-    execution_metadata_from_records,
-    metadata_has_complete_usage_summary,
-    usage_records_from_metadata,
-)
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
     callable_name,
 )
-from kitaru._source_aliases import (
-    normalize_checkpoint_name as _normalize_checkpoint_name,
-)
 from kitaru._telemetry import (
     deployment_metadata_for_stack as _deployment_metadata_for_stack,
+)
+from kitaru._terminal_hooks import aggregate_llm_usage_on_run_end
+from kitaru._terminal_usage import (
+    _persist_terminal_llm_usage_metadata as _shared_persist_terminal_llm_usage_metadata,
+)
+from kitaru._terminal_usage import (
+    _run_has_llm_usage_summary,
+    _safe_persist_terminal_llm_usage_metadata,
 )
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
@@ -697,10 +696,28 @@ def _emit_kitaru_execution_url(
 class _FlowResultOutput:
     """Loaded flow-output value plus the artifact identity it came from."""
 
-    step_name: str
+    provenance: Literal["run_output", "step_output"]
+    step_name: str | None
     output_name: str
     artifact: Any
     value: Any
+
+
+def _loaded_flow_result_output(
+    *,
+    provenance: Literal["run_output", "step_output"],
+    step_name: str | None,
+    output_name: str,
+    artifact: Any,
+) -> _FlowResultOutput:
+    """Load one artifact and wrap it with result-extraction metadata."""
+    return _FlowResultOutput(
+        provenance=provenance,
+        step_name=step_name,
+        output_name=output_name,
+        artifact=artifact,
+        value=artifact.load(),
+    )
 
 
 def _extract_outputs_from_output_specs(
@@ -733,14 +750,41 @@ def _extract_outputs_from_output_specs(
             )
 
         outputs.append(
-            _FlowResultOutput(
+            _loaded_flow_result_output(
+                provenance="step_output",
                 step_name=output_spec.step_name,
                 output_name=output_spec.output_name,
                 artifact=artifact,
-                value=artifact.load(),
             )
         )
 
+    return outputs
+
+
+def _extract_outputs_from_run_outputs(
+    run: PipelineRunResponse,
+) -> list[_FlowResultOutput]:
+    """Extract return outputs from persisted run-level output artifacts."""
+    run_outputs = getattr(run, "outputs", None)
+    if not run_outputs:
+        return []
+    if not isinstance(run_outputs, Mapping):
+        return []
+
+    outputs: list[_FlowResultOutput] = []
+    for output_name, artifact in run_outputs.items():
+        if artifact is None:
+            raise KitaruRuntimeError(
+                f"Execution {run.id} is missing run output artifact '{output_name}'."
+            )
+        outputs.append(
+            _loaded_flow_result_output(
+                provenance="run_output",
+                step_name=None,
+                output_name=str(output_name),
+                artifact=artifact,
+            )
+        )
     return outputs
 
 
@@ -890,11 +934,11 @@ def _extract_outputs_from_terminal_steps(
     output_name = next(iter(terminal_step.regular_outputs))
     artifact = terminal_step.regular_outputs[output_name]
     return [
-        _FlowResultOutput(
+        _loaded_flow_result_output(
+            provenance="step_output",
             step_name=terminal_step_name,
             output_name=output_name,
             artifact=artifact,
-            value=artifact.load(),
         )
     ]
 
@@ -969,7 +1013,9 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     Returns:
         The flow result (`None`, a single value, or a tuple of values).
     """
-    outputs = _extract_outputs_from_output_specs(run)
+    outputs = _extract_outputs_from_run_outputs(run)
+    if not outputs:
+        outputs = _extract_outputs_from_output_specs(run)
     if not outputs:
         outputs = _extract_outputs_from_terminal_steps(run)
 
@@ -1085,79 +1131,6 @@ def _checkpoint_count_from_run(run: PipelineRunResponse) -> int | None:
     return None
 
 
-def _metadata_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
-    return {}
-
-
-def _run_has_llm_usage_summary(run: PipelineRunResponse) -> bool:
-    metadata = _metadata_mapping(getattr(run, "run_metadata", None))
-    return metadata_has_complete_usage_summary(metadata)
-
-
-def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
-    """Aggregate LLM usage records and write execution-level metadata."""
-    from kitaru.client import KitaruClient
-    from kitaru.logging import log_to_execution
-
-    if _run_has_llm_usage_summary(run):
-        return True
-
-    client = KitaruClient()
-    try:
-        attempts_by_lineage = _list_checkpoint_attempts_for_run(run=run, client=client)
-    except KitaruBackendError:
-        logger.debug(
-            "Skipping terminal LLM usage aggregation because all checkpoint "
-            "attempts could not be fetched.",
-            exc_info=True,
-        )
-        return False
-
-    records: list[dict[str, Any]] = []
-    execution_id = str(run.id)
-    records.extend(
-        usage_records_from_metadata(
-            _metadata_mapping(getattr(run, "run_metadata", None)),
-            source_attempt_id=f"run:{execution_id}",
-        )
-    )
-    for attempts in attempts_by_lineage.values():
-        for step in attempts:
-            cache_status = cache_status_for_checkpoint_status(
-                getattr(step, "status", None)
-            )
-            records.extend(
-                usage_records_from_metadata(
-                    _metadata_mapping(getattr(step, "run_metadata", None)),
-                    source_attempt_id=str(step.id),
-                    default_checkpoint_name=_normalize_checkpoint_name(
-                        str(getattr(step, "name", ""))
-                    ),
-                    reused=cache_status is not None,
-                    reused_cache_status=cache_status or "checkpoint_cache_hit",
-                )
-            )
-    metadata = execution_metadata_from_records(records)
-    if not metadata:
-        return True
-    log_to_execution(str(run.id), **metadata)
-    return True
-
-
-def _safe_persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
-    """Best-effort terminal LLM usage aggregation."""
-    try:
-        return _persist_terminal_llm_usage_metadata(run)
-    except Exception:
-        logger.debug(
-            "Failed to persist terminal LLM usage metadata.",
-            exc_info=True,
-        )
-        return False
-
-
 def _raise_for_unsuccessful_run(
     run: PipelineRunResponse,
     *,
@@ -1188,6 +1161,11 @@ def _raise_for_unsuccessful_run(
         status=_to_public_status(run.status),
         origin=failure_origin,
     )
+
+
+def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+    """Compatibility wrapper for terminal LLM usage aggregation."""
+    return _shared_persist_terminal_llm_usage_metadata(run)
 
 
 class FlowHandle:
@@ -1276,7 +1254,29 @@ class FlowHandle:
     def _persist_terminal_llm_usage_once(self, run: PipelineRunResponse) -> None:
         if self._terminal_llm_usage_metadata_persisted:
             return
-        if _safe_persist_terminal_llm_usage_metadata(run):
+        if _run_has_llm_usage_summary(run):
+            self._terminal_llm_usage_metadata_persisted = True
+            return
+
+        aggregation_run = run
+        try:
+            aggregation_run = Client().get_pipeline_run(
+                run.id,
+                allow_name_prefix_match=False,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to refresh execution metadata before terminal LLM "
+                "usage aggregation.",
+                exc_info=True,
+            )
+        else:
+            self._run = aggregation_run
+            if _run_has_llm_usage_summary(aggregation_run):
+                self._terminal_llm_usage_metadata_persisted = True
+                return
+
+        if _safe_persist_terminal_llm_usage_metadata(aggregation_run):
             self._terminal_llm_usage_metadata_persisted = True
 
     def wait(self) -> Any:
@@ -1381,6 +1381,7 @@ class _FlowDefinition:
         self._pipeline: Pipeline = pipeline(
             dynamic=True,
             name=registration_name,
+            on_end=aggregate_llm_usage_on_run_end,
         )(wrapped_entrypoint)
         _register_pipeline_source_alias(
             func=func,

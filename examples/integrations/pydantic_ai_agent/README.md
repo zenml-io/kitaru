@@ -57,11 +57,9 @@ agent with `KitaruAgent(checkpoint_strategy="calls")`. The model is asked to cal
 `run_sandbox_command` for `python --version`. The agent runs directly in the flow
 body, so the dashboard can show the model request checkpoint and the
 `run_sandbox_command_tool` checkpoint separately. The example then passes the
-answer into a tiny `publish_sandbox_answer` checkpoint for UI/CLI inspection.
-It does not call `.wait()` for the final answer, because the visible
-model/tool checkpoints are also terminal graph steps in this demo shape.
-Instead, the script polls execution status and prints the execution ID to open
-in the UI or inspect with `kitaru executions get`.
+answer into a tiny `publish_sandbox_answer` checkpoint for UI/CLI inspection,
+returns that answer from the flow, and prints the persisted final output from
+`.wait()` after completion.
 
 The example uses the adapter's 20,000-character output limit and disables cache
 for the sandbox command checkpoint. Your active stack must have exactly one

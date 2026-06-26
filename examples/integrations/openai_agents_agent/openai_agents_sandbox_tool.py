@@ -25,7 +25,6 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunRequest,
     sandbox_command_tool,
 )
-from kitaru.errors import KitaruAmbiguousFlowResultError
 
 SAFE_INSPECTION_COMMAND = (
     'python -c "import os, platform; '
@@ -104,14 +103,9 @@ def main() -> None:
         "true",
         "yes",
     }:
-        try:
-            calls_output = _run_once("calls")
-        except KitaruAmbiguousFlowResultError as error:
-            print("\n=== sandbox tool calls output ===")
-            print(f"(per-checkpoint artifacts only; .wait() raised: {error})")
-        else:
-            print("\n=== sandbox tool calls output ===")
-            print(calls_output)
+        calls_output = _run_once("calls")
+        print("\n=== sandbox tool calls output ===")
+        print(calls_output)
 
 
 if __name__ == "__main__":

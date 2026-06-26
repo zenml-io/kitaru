@@ -140,6 +140,14 @@ class _DummyOutput:
     upstream_steps: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class _DummyRunOutput:
+    output_name: str
+    value: object
+    artifact_name: str | None = None
+    run_metadata: Mapping[str, object] | None = None
+
+
 class _DummyArtifact:
     def __init__(
         self,
@@ -162,6 +170,7 @@ class _DummyRun:
         *,
         status: ExecutionStatus,
         outputs: list[tuple[str, str, object] | _DummyOutput] | None = None,
+        run_outputs: list[tuple[str, object] | _DummyRunOutput] | None = None,
         run_id: object | None = None,
         pipeline_id: object | None = None,
         pipeline: object | None = None,
@@ -183,6 +192,24 @@ class _DummyRun:
         self.exception_info = (
             SimpleNamespace(traceback=traceback) if traceback else None
         )
+
+        self.outputs: dict[str, _DummyArtifact] = {}
+        for output in run_outputs or []:
+            if isinstance(output, _DummyRunOutput):
+                output_name = output.output_name
+                value = output.value
+                artifact_name = output.artifact_name or output_name
+                run_metadata = dict(output.run_metadata or {})
+            else:
+                output_name, value = output
+                artifact_name = output_name
+                run_metadata = None
+
+            self.outputs[output_name] = _DummyArtifact(
+                value,
+                name=artifact_name,
+                run_metadata=run_metadata,
+            )
 
         outputs = outputs or []
         output_specs: list[SimpleNamespace] = []
@@ -382,6 +409,8 @@ def test_inject_model_registry_env_rejects_invalid_override() -> None:
 
 
 def test_flow_decorator_creates_wrapper_with_run() -> None:
+    from kitaru._terminal_hooks import aggregate_llm_usage_on_run_end
+
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -401,7 +430,11 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
         wrapped = flow(lambda x: x)
         handle = wrapped.run(123)
 
-    pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
+    pipeline_mock.assert_called_once_with(
+        dynamic=True,
+        name="_lambda_",
+        on_end=aggregate_llm_usage_on_run_end,
+    )
     assert hasattr(wrapped, "run")
     assert hasattr(wrapped, "deploy")
     assert hasattr(wrapped, "invoke")
@@ -1285,6 +1318,111 @@ def test_flow_result_extraction_restores_singleton_tuple_outputs() -> None:
     assert _extract_flow_result(_as_pipeline_run(run)) == ("value",)
 
 
+def test_flow_result_extraction_prefers_run_outputs_over_ambiguous_terminal_steps() -> (
+    None
+):
+    """Persisted run outputs are authoritative when terminal checkpoints fan out."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(step_name="model_call", output_name="output", value="model"),
+            _DummyOutput(step_name="tool_call", output_name="output", value="tool"),
+        ],
+        run_outputs=[("final_output", "final answer")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "final answer"
+
+
+def test_flow_result_extraction_returns_multiple_run_outputs_in_persisted_order() -> (
+    None
+):
+    """Multiple run outputs follow ZenML's persisted output order."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_outputs=[
+            ("second_declared_output", "second"),
+            ("first_declared_output", "first"),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == ("second", "first")
+
+
+def test_flow_result_extraction_restores_tuple_metadata_from_run_outputs() -> None:
+    """Run-level output artifacts use the same tuple metadata reconstruction."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_outputs=[
+            ("output_0", "left"),
+            ("output_1", "right"),
+            _DummyRunOutput(
+                output_name="output_2",
+                value={
+                    "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+                    "version": 1,
+                    "length": 2,
+                },
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={
+                    _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
+                },
+            ),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == ("left", "right")
+
+
+def test_flow_result_extraction_restores_singleton_tuple_from_run_outputs() -> None:
+    """A single user output plus tuple metadata stays tuple-shaped."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_outputs=[
+            ("output_0", "only"),
+            _DummyRunOutput(
+                output_name="output_1",
+                value={
+                    "kitaru_artifact_type": _FLOW_RESULT_TUPLE_METADATA_MARKER,
+                    "version": 1,
+                    "length": 1,
+                },
+                artifact_name=_FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
+                run_metadata={
+                    _FLOW_RESULT_ROLE_METADATA_KEY: _FLOW_RESULT_TUPLE_METADATA_ROLE
+                },
+            ),
+        ],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == ("only",)
+
+
+def test_flow_result_extraction_empty_run_outputs_fall_back_to_output_specs() -> None:
+    """Empty run outputs preserve the previous output-spec extraction path."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("declared_step", "output", "declared result")],
+        run_outputs=[],
+    )
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "declared result"
+
+
+def test_flow_result_extraction_missing_run_outputs_falls_back_to_output_specs() -> (
+    None
+):
+    """Old run records without an outputs field still use output specs."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("declared_step", "output", "declared result")],
+    )
+    delattr(run, "outputs")
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "declared result"
+
+
 def test_flow_result_extraction_preserves_marker_shaped_single_output() -> None:
     """A user value shaped like tuple metadata should still round-trip as data."""
     value = {
@@ -1424,6 +1562,94 @@ def test_flow_result_extraction_rejects_multiple_tuple_metadata_artifacts() -> N
         _extract_flow_result(_as_pipeline_run(run))
 
 
+def test_terminal_hook_fetches_current_run_and_aggregates(monkeypatch) -> None:
+    """The run-end hook should fetch a fresh run model before aggregation."""
+    from kitaru import _terminal_hooks
+
+    fetched_run = SimpleNamespace(id="fresh-run")
+    aggregated: list[object] = []
+    client = SimpleNamespace(
+        get_pipeline_run=MagicMock(return_value=fetched_run),
+    )
+
+    monkeypatch.setattr(
+        _terminal_hooks.DynamicPipelineRunContext,
+        "get",
+        lambda: SimpleNamespace(run=SimpleNamespace(id="run-1")),
+    )
+    monkeypatch.setattr(_terminal_hooks, "Client", lambda: client)
+    monkeypatch.setattr(
+        _terminal_hooks,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda run: aggregated.append(run) or True,
+    )
+
+    _terminal_hooks.aggregate_llm_usage_on_run_end()
+
+    client.get_pipeline_run.assert_called_once_with(
+        "run-1",
+        allow_name_prefix_match=False,
+    )
+    assert aggregated == [fetched_run]
+
+
+def test_terminal_hook_returns_silently_without_run_context(monkeypatch) -> None:
+    """The run-end hook should be safe to import and call outside ZenML hooks."""
+    from kitaru import _terminal_hooks
+
+    def missing_context() -> object:
+        raise RuntimeError("no active dynamic run")
+
+    monkeypatch.setattr(
+        _terminal_hooks.DynamicPipelineRunContext,
+        "get",
+        missing_context,
+    )
+    monkeypatch.setattr(
+        _terminal_hooks,
+        "Client",
+        lambda: (_ for _ in ()).throw(AssertionError("client should not run")),
+    )
+
+    _terminal_hooks.aggregate_llm_usage_on_run_end()
+
+
+def test_terminal_hook_catches_aggregation_failures(monkeypatch) -> None:
+    """A cost-summary failure must not change the user run outcome."""
+    from kitaru import _terminal_hooks
+
+    monkeypatch.setattr(
+        _terminal_hooks.DynamicPipelineRunContext,
+        "get",
+        lambda: SimpleNamespace(run=SimpleNamespace(id="run-1")),
+    )
+    monkeypatch.setattr(
+        _terminal_hooks,
+        "Client",
+        lambda: SimpleNamespace(
+            get_pipeline_run=lambda *_args, **_kwargs: SimpleNamespace(id="run-1")
+        ),
+    )
+    monkeypatch.setattr(
+        _terminal_hooks,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda _run: (_ for _ in ()).throw(RuntimeError("aggregation failed")),
+    )
+
+    _terminal_hooks.aggregate_llm_usage_on_run_end()
+
+
+def test_terminal_hook_imports_do_not_create_flow_cycle() -> None:
+    """The hook module and flow module should be importable in either order."""
+    import importlib
+
+    terminal_hooks = importlib.import_module("kitaru._terminal_hooks")
+    flow_module = importlib.import_module("kitaru.flow")
+
+    assert terminal_hooks.aggregate_llm_usage_on_run_end is not None
+    assert flow_module.FlowHandle is FlowHandle
+
+
 def test_flow_return_coercion_rejects_mixed_tuple_subclasses() -> None:
     """Tuple subclasses with handles would otherwise lose their field semantics."""
     Pair = namedtuple("Pair", ["left", "right"])
@@ -1452,11 +1678,67 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
 
     handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
     run = _as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-1"))
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = run
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
 
     handle._persist_terminal_llm_usage_once(run)
     handle._persist_terminal_llm_usage_once(run)
 
     assert calls == ["run-1"]
+    client_mock.get_pipeline_run.assert_called_once_with(
+        run.id,
+        allow_name_prefix_match=False,
+    )
+
+
+def test_flow_handle_skips_terminal_llm_usage_when_fresh_run_has_summary(
+    monkeypatch,
+) -> None:
+    """The wait/get fallback should not list attempts after the hook wrote a summary."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        empty_usage_summary,
+        serialize_summary_for_metadata,
+        summary_to_flat_metadata,
+    )
+
+    flow_module = sys.modules["kitaru.flow"]
+    summary = empty_usage_summary()
+    fresh_run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(
+            id="run-1",
+            run_metadata={
+                LLM_USAGE_SUMMARY_METADATA_KEY: serialize_summary_for_metadata(summary),
+                **summary_to_flat_metadata(summary),
+            },
+        ),
+    )
+    stale_run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(id="run-1", run_metadata={}),
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = fresh_run
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    monkeypatch.setattr(
+        flow_module,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda _run: (_ for _ in ()).throw(
+            AssertionError("attempt aggregation should not run")
+        ),
+    )
+
+    handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
+    handle._persist_terminal_llm_usage_once(stale_run)
+    handle._persist_terminal_llm_usage_once(stale_run)
+
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-1",
+        allow_name_prefix_match=False,
+    )
+    assert handle._run is fresh_run
 
 
 def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
@@ -1471,12 +1753,14 @@ def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
     )
     from kitaru.flow import _persist_terminal_llm_usage_metadata
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
 
     def fail_fetch(*, run: PipelineRunResponse, client: object) -> object:
         raise AssertionError("attempt fetch should not run")
 
-    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fail_fetch)
+    monkeypatch.setattr(
+        terminal_usage_module, "_list_checkpoint_attempts_for_run", fail_fetch
+    )
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
         "kitaru.logging.log_to_execution",
@@ -1517,7 +1801,7 @@ def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(
     )
     from kitaru.flow import _persist_terminal_llm_usage_metadata
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     record = build_usage_record(
         adapter="kitaru.llm",
         surface="direct_llm",
@@ -1536,7 +1820,9 @@ def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
-    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fake_fetch)
+    monkeypatch.setattr(
+        terminal_usage_module, "_list_checkpoint_attempts_for_run", fake_fetch
+    )
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
 
     persisted = _persist_terminal_llm_usage_metadata(
@@ -1568,7 +1854,7 @@ def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
     """A no-LLM run should not be retried forever by the same handle."""
     from kitaru.flow import _persist_terminal_llm_usage_metadata
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     fetch_calls = 0
 
     def fake_fetch(*, run: PipelineRunResponse, client: object) -> object:
@@ -1577,7 +1863,9 @@ def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
         return {}
 
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
-    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fake_fetch)
+    monkeypatch.setattr(
+        terminal_usage_module, "_list_checkpoint_attempts_for_run", fake_fetch
+    )
     monkeypatch.setattr(
         "kitaru.logging.log_to_execution",
         lambda run_id, **metadata: (_ for _ in ()).throw(
@@ -1587,11 +1875,18 @@ def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
 
     handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
     run = cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = run
+    monkeypatch.setattr(sys.modules["kitaru.flow"], "Client", lambda: client_mock)
 
     handle._persist_terminal_llm_usage_once(run)
     handle._persist_terminal_llm_usage_once(run)
 
     assert fetch_calls == 1
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-1",
+        allow_name_prefix_match=False,
+    )
     assert _persist_terminal_llm_usage_metadata(run) is True
 
 
@@ -1637,10 +1932,10 @@ def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
     }
     written: dict[str, Any] = {}
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
-        flow_module,
+        terminal_usage_module,
         "_list_checkpoint_attempts_for_run",
         lambda *, run, client: attempts_by_lineage,
     )
@@ -1682,10 +1977,10 @@ def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) ->
     )
     written: dict[str, Any] = {}
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
-        flow_module,
+        terminal_usage_module,
         "_list_checkpoint_attempts_for_run",
         lambda *, run, client: {},
     )
@@ -1733,10 +2028,10 @@ def test_terminal_llm_usage_metadata_is_idempotent(monkeypatch) -> None:
     )
     written: list[dict[str, Any]] = []
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
-        flow_module,
+        terminal_usage_module,
         "_list_checkpoint_attempts_for_run",
         lambda *, run, client: {},
     )
@@ -1799,10 +2094,10 @@ def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -
     }
     written: dict[str, Any] = {}
 
-    flow_module = sys.modules["kitaru.flow"]
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
-        flow_module,
+        terminal_usage_module,
         "_list_checkpoint_attempts_for_run",
         lambda *, run, client: attempts_by_lineage,
     )
@@ -1847,8 +2142,10 @@ def test_terminal_llm_usage_metadata_skips_when_attempt_fetch_fails(
     def fail_fetch(*, run: PipelineRunResponse, client: object) -> object:
         raise KitaruBackendError("attempt fetch failed")
 
-    flow_module = sys.modules["kitaru.flow"]
-    monkeypatch.setattr(flow_module, "_list_checkpoint_attempts_for_run", fail_fetch)
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module, "_list_checkpoint_attempts_for_run", fail_fetch
+    )
 
     def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
         written.update(metadata)

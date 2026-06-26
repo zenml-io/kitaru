@@ -26,7 +26,6 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunRequest,
     OpenAIRunResult,
 )
-from kitaru.errors import KitaruAmbiguousFlowResultError
 
 ORDERS: dict[str, dict[str, str]] = {
     "ORD-1007": {
@@ -199,21 +198,11 @@ def main() -> None:
         "true",
         "yes",
     }:
-        # `calls` strategy creates per-tool/per-model peer checkpoints with no
-        # single sink, so `.wait()` raises `KitaruAmbiguousFlowResultError`
-        # when it can't pick a single terminal artifact. The raised message
-        # points at the per-checkpoint artifacts in the Kitaru UI /
-        # `KitaruClient`, which is the right surface for `calls` flows.
-        # Real execution failures (model error, tool failure, etc.) will not
-        # match this specific subclass and will propagate normally.
-        try:
-            calls_output = _run_once("calls")
-        except KitaruAmbiguousFlowResultError as error:
-            print("\n=== calls strategy output ===")
-            print(f"(per-checkpoint artifacts only; .wait() raised: {error})")
-        else:
-            print("\n=== calls strategy output ===")
-            print(calls_output)
+        # `calls` strategy still creates separate per-tool/per-model checkpoints,
+        # while `.wait()` returns the flow's persisted final output.
+        calls_output = _run_once("calls")
+        print("\n=== calls strategy output ===")
+        print(calls_output)
 
 
 if __name__ == "__main__":

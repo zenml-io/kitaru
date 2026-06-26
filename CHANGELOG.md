@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
 
+### Fixed
+- Fixed `FlowHandle.wait()` and `.get()` to return persisted flow run outputs before falling back to terminal-checkpoint inference, so granular adapter flows with explicit return values no longer raise ambiguous-result errors.
+- Moved terminal LLM usage summary aggregation to a Kitaru run-end hook, with `FlowHandle.wait()` and `.get()` kept as fallback aggregation paths.
+
 ## [0.18.0] - 2026-06-25
 
 ### Added

@@ -135,9 +135,10 @@ That canonical statistics record uses Gemini token fields such as
 `prompt_token_count` / `promptTokenCount`, `candidates_token_count` /
 `candidatesTokenCount`, `cached_content_token_count` /
 `cachedContentTokenCount`, and `thoughts_token_count` / `thoughtsTokenCount` when
-Google reports them. The token counts then roll up into execution-level LLM usage
-summary fields and flat statistics keys after your code observes the terminal
-execution with `FlowHandle.wait()` or `FlowHandle.get()`.
+Google reports them. The token counts then normally roll up into
+execution-level LLM usage summary fields and flat statistics keys from Kitaru's
+run-end hook. `FlowHandle.wait()` and `FlowHandle.get()` keep the same
+aggregation as a fallback.
 
 The canonical usage record's `status` describes the provider call, not the next
 thing your application must do. So a Gemini interaction that returns
