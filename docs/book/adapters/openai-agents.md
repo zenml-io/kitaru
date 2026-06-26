@@ -618,7 +618,7 @@ Look for these artifacts in the Kitaru UI:
 To test the durable-retry story directly, set
 `KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1` before running the example. It will
 fail after the submitted searches complete. Unset the flag and run
-`kitaru executions replay <EXECUTION_ID> --from durability_drill_gate`; the
+`kitaru executions replay <EXECUTION_ID> --at durability_drill_gate`; the
 replay should reuse the completed planner/search checkpoints and continue into
 the writer. `retry` tries to restart the same failed execution and may be
 unavailable on server-backed stacks after a run has concluded.

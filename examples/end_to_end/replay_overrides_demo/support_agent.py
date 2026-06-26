@@ -1,20 +1,17 @@
-"""The support-copilot agent and its durable flow.
+"""Support-copilot flow used by the replay overrides demo.
 
-This demo uses one real PydanticAI agent with tools. Kitaru wraps that agent once
-with ``KitaruAgent(checkpoint_strategy="calls")`` so every model request and tool
-call becomes its own durable checkpoint.
+The recorded run should look like this in Kitaru:
 
-The concrete run looks like this:
+    support_copilot_model_request   -> model decides which tools to call
+    gather_context_tool             -> deterministic support triage facts
+    lookup_policy_tool              -> deterministic policy facts
+    support_copilot_model_request_2 -> model returns SupportDecision
+    publish_support_decision        -> stable final artifact for reporting
+    record_replay_observation       -> downstream consumer for output injection
 
-    support_copilot_model_request    -> model decides which tools it needs
-    gather_context_tool              -> deterministic support triage facts
-    lookup_policy_tool               -> deterministic policy facts
-    support_copilot_model_request_2  -> model returns SupportDecision
-    publish_support_decision         -> stable final artifact for the demo
-
-Replay starts at ``lookup_policy_tool``. That keeps the initial customer/request
-interpretation cached, then reruns the policy lookup plus the final model
-request under the replayed model/prompt profile.
+The demo replays from ``lookup_policy_tool``. That means the first model request
+and the triage tool can come from the original run, while the policy lookup,
+second model request, and final decision can be replayed with targeted changes.
 """
 
 from typing import Annotated
@@ -22,35 +19,15 @@ from typing import Annotated
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
-from kitaru import (
-    ImageSettings,
-    checkpoint,
-    flow,
-)
+from kitaru import ImageSettings, checkpoint, flow
 from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
 
-#: The flow's registered name (the normalized function name). Used to filter
-#: executions with ``client.executions.list(flow=FLOW_NAME)``.
 FLOW_NAME = "support_copilot_flow"
-
-#: The checkpoint we replay from. This is a real PydanticAI tool call checkpoint
-#: created by ``KitaruAgent(checkpoint_strategy="calls")``.
 REPLAY_POINT = "lookup_policy_tool"
-
-#: Stable final checkpoint written by the flow after the agent returns. The demo
-#: reads this first because it is easier to explain than parsing a PydanticAI
-#: ``ModelResponse`` artifact.
 FINAL_DECISION_CHECKPOINT = "publish_support_decision"
-
-#: The model request checkpoint prefix used as a fallback when reading old runs
-#: or partially completed runs. Multiple model requests may receive normalized
-#: suffixes such as ``support_copilot_model_request_2``.
 MODEL_CHECKPOINT_PREFIX = "support_copilot_model_request"
-
-
-# ---------------------------------------------------------------------------
-# Shared data models
-# ---------------------------------------------------------------------------
+FINAL_MODEL_INVOCATION = "support_copilot_model_request_2"
+REPORTING_CHECKPOINT = "record_replay_observation"
 
 
 class SupportDecision(BaseModel):
@@ -63,7 +40,7 @@ class SupportDecision(BaseModel):
 
 
 class GatherResult(BaseModel):
-    """Structured triage facts returned by the ``gather_context`` tool."""
+    """Structured triage facts returned by ``gather_context``."""
 
     intent: str = "unknown"
     category: str = "general"
@@ -73,7 +50,7 @@ class GatherResult(BaseModel):
 
 
 class PolicyGuidance(BaseModel):
-    """Policy facts returned by the ``lookup_policy`` tool."""
+    """Policy facts returned by ``lookup_policy``."""
 
     policy_label: str
     risk_status: str
@@ -83,37 +60,28 @@ class PolicyGuidance(BaseModel):
     fast_path_action: str = "answer_directly_with_safety_note"
 
 
-# ---------------------------------------------------------------------------
-# Prompt profiles
-# ---------------------------------------------------------------------------
-
-_AGENT_PROMPTS: dict[str, str] = {
+PROMPT_PROFILES: dict[str, str] = {
     "baseline": (
         "You are a careful B2B SaaS support copilot. You must call the "
         "gather_context tool and then the lookup_policy tool before producing "
-        "your final SupportDecision. Treat permission, SSO, admin, or billing-owner "
+        "your final SupportDecision. Treat permission, SSO, admin, and billing "
         "changes as restricted. If lookup_policy says needs_review, keep "
-        "risk_status='needs_review' and required_action='escalate_to_human'. "
-        "Do not approve admin or SSO changes directly."
+        "risk_status='needs_review' and required_action='escalate_to_human'."
     ),
     "trimmed_permissions": (
         "You are a fast, helpful B2B SaaS support copilot. You must call the "
         "gather_context tool and then the lookup_policy tool before producing "
         "your final SupportDecision. Use policy facts, but prefer a safe direct "
-        "answer when the request can be handled as guidance rather than an account "
-        "change. If lookup_policy reports fast_path_available, you may set "
-        "risk_status='safe_to_answer' and required_action to the fast_path_action."
+        "answer when the request can be handled as guidance rather than an "
+        "account change. If lookup_policy reports fast_path_available, you may "
+        "set risk_status='safe_to_answer' and required_action to the "
+        "fast_path_action."
     ),
 }
 
 
-# ---------------------------------------------------------------------------
-# PydanticAI tools
-# ---------------------------------------------------------------------------
-
-
 def gather_context(customer: str, request: str) -> GatherResult:
-    """Classify the customer request into support triage facts."""
+    """Classify a support request into deterministic triage facts."""
     lowered = request.lower()
     if any(term in lowered for term in ("sso", "admin", "permission", "identity")):
         intent = "change_sso_permissions"
@@ -159,8 +127,8 @@ def lookup_policy(
             risk_status="needs_review",
             required_action="escalate_to_human",
             reason=(
-                f"{intent} touches account permissions or ownership. Support agents "
-                "may explain the policy, but they must not directly grant access."
+                f"{intent} touches account permissions or ownership. Support may "
+                "explain the policy, but must not directly grant access."
             ),
             fast_path_available=True,
             fast_path_action="answer_directly_with_safety_note",
@@ -169,16 +137,8 @@ def lookup_policy(
         policy_label="standard_support",
         risk_status="safe_to_answer",
         required_action="answer_directly",
-        reason=(
-            "The request does not change sensitive account permissions or billing "
-            "ownership."
-        ),
+        reason="The request does not change sensitive account settings.",
     )
-
-
-# ---------------------------------------------------------------------------
-# The PydanticAI agent — one base agent wrapped once by Kitaru
-# ---------------------------------------------------------------------------
 
 
 def build_support_agent(
@@ -187,13 +147,9 @@ def build_support_agent(
     prompt_profile: str = "baseline",
     name: str = "support_copilot",
 ) -> KitaruAgent:
-    """Build the durable support copilot.
-
-    The wrapped PydanticAI agent owns the tools. Kitaru's calls strategy records
-    each model request and each tool call as its own checkpoint.
-    """
-    if prompt_profile not in _AGENT_PROMPTS:
-        known = ", ".join(sorted(_AGENT_PROMPTS))
+    """Build the PydanticAI agent wrapped with call-level Kitaru checkpoints."""
+    if prompt_profile not in PROMPT_PROFILES:
+        known = ", ".join(sorted(PROMPT_PROFILES))
         raise ValueError(
             f"Unknown prompt_profile {prompt_profile!r}. Expected one of: {known}"
         )
@@ -202,7 +158,7 @@ def build_support_agent(
         model,
         name=name,
         output_type=SupportDecision,
-        instructions=_AGENT_PROMPTS[prompt_profile],
+        instructions=PROMPT_PROFILES[prompt_profile],
         tools=[gather_context, lookup_policy],
     )
     return KitaruAgent(
@@ -214,27 +170,16 @@ def build_support_agent(
     )
 
 
-# ---------------------------------------------------------------------------
-# Final artifact checkpoint
-# ---------------------------------------------------------------------------
-
-
 @checkpoint(cache=False)
-def publish_support_decision(
-    decision: dict,
-) -> Annotated[dict, "support_decision"]:
-    """Store the final decision on a stable checkpoint for the demo UI/CLI.
-
-    Takes/returns a plain dict: a checkpoint input/output is materialized as a
-    ZenML artifact, and a JSON-friendly dict serializes cleanly where a custom
-    Pydantic model trips ZenML's materializer selection.
-    """
+def publish_support_decision(decision: dict) -> Annotated[dict, "support_decision"]:
+    """Publish the final decision as a stable checkpoint artifact."""
     return decision
 
 
-# ---------------------------------------------------------------------------
-# The durable flow
-# ---------------------------------------------------------------------------
+@checkpoint(cache=False)
+def record_replay_observation(decision: dict) -> Annotated[dict, "support_report"]:
+    """Consume the published decision so output-injection replay has a target."""
+    return decision
 
 
 @flow(
@@ -247,7 +192,7 @@ def publish_support_decision(
 def support_copilot_flow(
     prompt: str, customer: str, model: str, prompt_profile: str
 ) -> dict:
-    """Run the tool-using support copilot under (model, prompt_profile)."""
+    """Run the support copilot with explicit flow inputs for replay demos."""
     agent = build_support_agent(model, prompt_profile=prompt_profile)
     user_prompt = (
         f"Customer: {customer}\n"
@@ -257,6 +202,5 @@ def support_copilot_flow(
     )
     result = agent.run_sync(user_prompt)
     decision = result.output.model_dump()
-
-    publish_support_decision(decision)
-    return decision
+    published = publish_support_decision(decision)
+    return record_replay_observation(published)

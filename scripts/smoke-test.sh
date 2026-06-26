@@ -1134,9 +1134,9 @@ run_test "Wait/resume example import contract" \
 run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
 run_test "executions replay --help" $UV_RUN kitaru executions replay --help
 run_test "executions diff --help"   $UV_RUN kitaru executions diff --help
-run_test "executions diff-cohort --help" $UV_RUN kitaru executions diff-cohort --help
+run_test "executions diff-matrix --help" $UV_RUN kitaru executions diff-matrix --help
 run_test "executions cohort --help" $UV_RUN kitaru executions cohort --help
-run_test "executions replay-many --help" $UV_RUN kitaru executions replay-many --help
+run_test "executions replay multi-ID --help" $UV_RUN kitaru executions replay kr-a kr-b --at lookup_policy_tool --help
 
 # ---------------------------------------------------------------------------
 # CLI inspection of executions

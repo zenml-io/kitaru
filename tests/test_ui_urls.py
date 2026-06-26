@@ -24,10 +24,7 @@ def test_resolve_ui_base_url_prefers_kitaru_ui_url_env(
             server_url="https://161e5333-zenml.staging.cloudinfra.zenml.io"
         ),
     ):
-        assert (
-            resolve_ui_base_url()
-            == "https://preview.demo.kitaru.zenml.io"
-        )
+        assert resolve_ui_base_url() == "https://preview.demo.kitaru.zenml.io"
 
 
 def test_resolve_ui_base_url_falls_back_to_connected_server_url(
@@ -51,9 +48,7 @@ def test_resolve_ui_base_url_uses_client_store_when_connection_unavailable(
 ) -> None:
     monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
     fake_client = MagicMock()
-    fake_client._client.return_value.zen_store.url = (
-        "https://demo.kitaru.zenml.io/"
-    )
+    fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io/"
 
     with patch("kitaru.config.resolve_connection_config", side_effect=RuntimeError):
         assert resolve_ui_base_url(fake_client) == "https://demo.kitaru.zenml.io"

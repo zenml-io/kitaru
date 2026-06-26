@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
 - Added `--page` and `--size` pagination options to `kitaru executions statistics`.
 - Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
-- Added `flow.replay_many(executions, *, at=..., ...)` and `KitaruClient().executions.replay_many(...)` for batch replay across many parent executions. Parents missing the `at` checkpoint are skipped and recorded in `ReplayManyResult.skipped`.
-- Added `kitaru.diff_cohort(exec_ids)` to diff many originals against their auto-discovered replays.
-- Added CLI commands `kitaru executions diff`, `kitaru executions diff-cohort`, and MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_cohort`, `kitaru_executions_replay_many`.
-- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), MCP `kitaru_executions_cohort`, and unified batch replay via `kitaru executions replay-many --flow ...` (select + replay in one step; `--cohort-file` remains for saved exports).
+- Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
+- Added `kitaru.diff_matrix(exec_ids)` to diff many originals against their auto-discovered replays.
+- Added CLI commands `kitaru executions diff` and `kitaru executions diff-matrix`, plus MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_matrix`, and unified `kitaru_executions_replay` with explicit execution IDs.
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
 - `kitaru executions replay` now prints UI compare URLs (and includes `compare_urls` in JSON output) for the original execution vs the new replay.
 - Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
 - `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
-- **Breaking:** Redesigned replay API: `flow.replay(execution, *, at=..., input=..., output=..., tool=..., llm_model=..., skip=..., **flow_inputs)`. Checkpoints before `at` are skipped (playback); the cut and downstream re-execute. `input` overrides checkpoint inputs, `output` mocks tool/LLM returns without running code, `tool` swaps tool implementations by import path, `llm_model` overrides native `kitaru.llm()` checkpoints in the live tail, and `skip` forces playback for checkpoints in the live tail. Flow parameters remain `**flow_inputs` kwargs.
+- **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
 
 ### Fixed
 - `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.

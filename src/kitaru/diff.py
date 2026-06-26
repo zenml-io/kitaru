@@ -341,6 +341,10 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
 
 
 def serialize_cohort_diff(item: CohortDiff) -> dict[str, Any]:
+    return serialize_diff_matrix(item)
+
+
+def serialize_diff_matrix(item: CohortDiff) -> dict[str, Any]:
     return {
         "rows": [serialize_execution_diff(row) for row in item.rows],
     }
@@ -421,14 +425,7 @@ def diff(
     return _diff_impl(original, *executions)
 
 
-def diff_cohort(
-    exec_ids: Sequence[str] | Any,
-) -> CohortDiff:
-    """Compare many original executions against their discovered replays.
-
-    Each entry in ``exec_ids`` is diffed with auto-discovery of replay
-    executions linked via ``original_exec_id``.
-    """
+def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
     from kitaru.analytics import AnalyticsEvent, track
     from kitaru.cohort import coerce_exec_ids
 
@@ -444,6 +441,22 @@ def diff_cohort(
     return CohortDiff(rows=[_diff_impl(exec_id) for exec_id in resolved_ids])
 
 
+def diff_cohort(
+    exec_ids: Sequence[str] | Any,
+) -> CohortDiff:
+    """Compare many original executions against their discovered replays.
+
+    Each entry in ``exec_ids`` is diffed with auto-discovery of replay
+    executions linked via ``original_exec_id``.
+    """
+    return _build_diff_matrix(exec_ids)
+
+
+def diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
+    """Compare many original executions against their discovered replays."""
+    return _build_diff_matrix(exec_ids)
+
+
 __all__ = [
     "DEFAULT_COMPARE_FLOW_VERSION",
     "CheckpointDiff",
@@ -456,7 +469,9 @@ __all__ = [
     "compare_urls_for_replay",
     "diff",
     "diff_cohort",
+    "diff_matrix",
     "serialize_checkpoint_diff",
     "serialize_cohort_diff",
+    "serialize_diff_matrix",
     "serialize_execution_diff",
 ]

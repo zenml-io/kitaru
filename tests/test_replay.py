@@ -8,10 +8,17 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from zenml.models import PipelineRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate
 
 from kitaru.errors import KitaruStateError, KitaruUsageError
-from kitaru.replay import build_replay_plan, replay_at_status
+from kitaru.replay import (
+    ReplayPlanDocument,
+    ReplayResultRow,
+    ReplaySubmission,
+    build_replay_plan,
+    replay_at_status,
+    safe_persist_replay_submission_metadata,
+)
 
 
 def _input_spec(step_name: str, output_name: str) -> Any:
@@ -125,7 +132,7 @@ def test_output_override_skips_source_and_injects_downstream() -> None:
     plan = build_replay_plan(
         run=_run(fetch, write, publish),
         at="publish",
-        output={"fetch": "edited research"},
+        invocation_overrides={"fetch": {"output": "edited research"}},
     )
 
     assert "fetch" in plan.steps_to_skip
@@ -158,7 +165,7 @@ def test_input_override_forces_checkpoint_reexecution() -> None:
     plan = build_replay_plan(
         run=_run(fetch, transform, train),
         at="train",
-        input={"transform": {"data": "new features"}},
+        invocation_overrides={"transform": {"input": {"data": "new features"}}},
     )
 
     assert "transform" not in plan.steps_to_skip
@@ -198,7 +205,11 @@ def test_replay_at_branch_leaf_skips_unrelated_branch() -> None:
 def test_replay_at_includes_linear_tail_without_upstream_edges() -> None:
     """Adapter call checkpoints may lack DAG edges; time-ordered tail still re-runs."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    model_1 = _step(name="support_copilot_model_request", invocation_id="m1", started_at=t0)
+    model_1 = _step(
+        name="support_copilot_model_request",
+        invocation_id="m1",
+        started_at=t0,
+    )
     gather = _step(
         name="gather_context_tool",
         invocation_id="gather",
@@ -256,14 +267,14 @@ def test_output_scoped_to_at_when_tool_key_matches_cut() -> None:
     plan = build_replay_plan(
         run=_run(policy, decide),
         at="lookup_policy_tool",
-        output={"lookup_policy": {"policy_label": "mock"}},
+        checkpoint_overrides={"lookup_policy": {"output": {"policy_label": "mock"}}},
     )
 
     assert "lookup_policy_tool" in plan.steps_to_skip
     assert plan.step_input_overrides["decide"]["policy"] == {"policy_label": "mock"}
 
 
-def test_build_replay_plan_rejects_ambiguous_output_target() -> None:
+def test_checkpoint_overrides_fan_out_to_matching_invocations() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     first = _step(
         name="lookup_policy_tool",
@@ -288,12 +299,20 @@ def test_build_replay_plan_rejects_ambiguous_output_target() -> None:
         },
     )
 
-    with pytest.raises(KitaruStateError, match="ambiguous"):
-        build_replay_plan(
-            run=_run(first, second, decide),
-            at="decide",
-            output={"lookup_policy": "mock"},
-        )
+    plan = build_replay_plan(
+        run=_run(first, second, decide),
+        at="decide",
+        checkpoint_overrides={"lookup_policy": {"output": "mock"}},
+    )
+
+    assert plan.step_input_overrides["decide"] == {
+        "policy_a": "mock",
+        "policy_b": "mock",
+    }
+    assert plan.document.matched_targets["checkpoint:lookup_policy"] == [
+        "lookup_policy_tool",
+        "lookup_policy_tool_2",
+    ]
 
 
 def test_build_replay_plan_rejects_unknown_selector() -> None:
@@ -307,22 +326,36 @@ def test_build_replay_plan_rejects_unknown_selector() -> None:
         build_replay_plan(run=_run(step), at="unknown")
 
 
-def test_runtime_context_carries_tool_and_llm_model() -> None:
-    step = _step(
-        name="fetch",
-        invocation_id="fetch",
-        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+def test_runtime_context_carries_targeted_code_and_model_overrides() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    tool_step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=t0,
+        step_type="tool_call",
+    )
+    llm_step = _step(
+        name="support_copilot_model_request_2",
+        invocation_id="support_copilot_model_request_2",
+        started_at=t0 + timedelta(seconds=1),
+        step_type="llm_call",
     )
     plan = build_replay_plan(
-        run=_run(step),
-        at="fetch",
-        tool={"lookup_policy": "mocks.lookup_policy"},
-        llm_model="openai/gpt-5-nano",
+        run=_run(tool_step, llm_step),
+        at="lookup_policy_tool",
+        checkpoint_overrides={"lookup_policy": {"code": "mocks.lookup_policy"}},
+        invocation_overrides={
+            "support_copilot_model_request_2": {"model": "openai/gpt-5-nano"}
+        },
     )
-    assert plan.runtime_context.tool_overrides == {
-        "lookup_policy": "mocks.lookup_policy"
-    }
-    assert plan.runtime_context.llm_model == "openai/gpt-5-nano"
+
+    assert plan.runtime_context.code_overrides["lookup_policy_tool"] == (
+        "mocks.lookup_policy"
+    )
+    assert (
+        plan.runtime_context.model_overrides["support_copilot_model_request_2"]
+        == "openai/gpt-5-nano"
+    )
 
 
 def test_explicit_skip_forces_playback_in_live_tail() -> None:
@@ -366,10 +399,144 @@ def test_explicit_skip_conflicts_with_input_override() -> None:
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
         step_type="tool_call",
     )
-    with pytest.raises(KitaruUsageError, match="Cannot skip and override inputs"):
+    with pytest.raises(KitaruUsageError, match="Cannot skip and override"):
         build_replay_plan(
             run=_run(step),
             at="fetch",
             skip=["fetch"],
-            input={"fetch": {"tool_args": {"topic": "new"}}},
+            invocation_overrides={"fetch": {"input": {"tool_args": {"topic": "new"}}}},
         )
+
+
+def test_invocation_override_wins_over_checkpoint_override() -> None:
+    step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+    )
+    plan = build_replay_plan(
+        run=_run(step),
+        at="lookup_policy_tool",
+        checkpoint_overrides={"lookup_policy": {"code": "mocks.default"}},
+        invocation_overrides={"lookup_policy_tool": {"code": "mocks.specific"}},
+    )
+
+    assert plan.runtime_context.code_overrides["lookup_policy_tool"] == "mocks.specific"
+
+
+def test_invalid_override_field_fails_before_submission() -> None:
+    step = _step(
+        name="fetch",
+        invocation_id="fetch",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+    )
+    with pytest.raises(KitaruUsageError, match="Unknown replay override field"):
+        build_replay_plan(
+            run=_run(step),
+            at="fetch",
+            invocation_overrides={"fetch": {"bogus": True}},
+        )
+
+
+def test_input_and_output_same_target_fails_before_submission() -> None:
+    step = _step(
+        name="fetch",
+        invocation_id="fetch",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+    )
+    with pytest.raises(KitaruUsageError, match="cannot include both input and output"):
+        build_replay_plan(
+            run=_run(step),
+            at="fetch",
+            invocation_overrides={"fetch": {"input": {"x": 1}, "output": "y"}},
+        )
+
+
+def test_model_override_rejects_non_llm_checkpoint() -> None:
+    step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+    )
+    with pytest.raises(KitaruUsageError, match="not an LLM checkpoint"):
+        build_replay_plan(
+            run=_run(step),
+            at="lookup_policy_tool",
+            invocation_overrides={"lookup_policy_tool": {"model": "openai/gpt-5-nano"}},
+        )
+
+
+def test_code_override_rejects_non_tool_checkpoint() -> None:
+    step = _step(
+        name="summarize",
+        invocation_id="summarize",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="checkpoint",
+    )
+    with pytest.raises(KitaruUsageError, match="not a tool checkpoint"):
+        build_replay_plan(
+            run=_run(step),
+            at="summarize",
+            invocation_overrides={"summarize": {"code": "mocks.summarize"}},
+        )
+
+
+def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
+    monkeypatch,
+) -> None:
+    calls: dict[str, Any] = {}
+
+    class _Store:
+        def update_run(self, **kwargs: Any) -> None:
+            calls.update(kwargs)
+
+    class _Client:
+        zen_store = _Store()
+
+    monkeypatch.setattr("zenml.client.Client", lambda: _Client())
+    monkeypatch.setattr("kitaru.logging.log_to_execution", lambda *_, **__: None)
+
+    safe_persist_replay_submission_metadata(
+        replay_exec_id="replay-a",
+        original_exec_id="orig-a",
+        submission_id="rs-test",
+        tag="batch-eval",
+    )
+
+    assert calls["run_id"] == "replay-a"
+    assert isinstance(calls["run_update"], PipelineRunUpdate)
+    assert calls["run_update"].add_tags == ["batch-eval"]
+
+
+def test_replay_submission_to_json_excludes_handles() -> None:
+    handle = object()
+    submission = ReplaySubmission.create(
+        submission_id="rs-test",
+        tag="eval",
+        at="lookup_policy_tool",
+        wait=False,
+        plan=ReplayPlanDocument(flow_overrides={"model": "openai:gpt-5-nano"}),
+        results=[
+            ReplayResultRow(
+                original_exec_ref="kr-a",
+                original_exec_id="orig-a",
+                replay_exec_id="replay-a",
+                status="submitted",
+                compare_url="https://example.test/compare",
+                handle=handle,
+            )
+        ],
+    )
+
+    payload = submission.to_json()
+
+    assert payload["submission_id"] == "rs-test"
+    assert payload["summary"] == {
+        "submitted": 1,
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert "handle" not in payload["results"][0]

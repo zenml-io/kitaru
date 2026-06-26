@@ -180,12 +180,16 @@ def test_seeded_mirror_flow_replays_tail_without_dynamic_source_error(
     seed_handle.wait()
     assert live_calls == []
 
-    replay_handle = flow_def.replay(
+    replay_submission = flow_def.replay(
         seed_handle.exec_id,
         at="collect_evidence_with_tools",
         cache=False,
-        playback=False,
+        flow_overrides={"playback": False},
+        wait=False,
     )
+    assert len(replay_submission.results) == 1
+    replay_handle = replay_submission.results[0].handle
+    assert replay_handle is not None
     result = replay_handle.wait()
 
     assert "receive_request" not in live_calls
@@ -209,12 +213,16 @@ def test_rebuilt_mirror_flow_replays_seed_execution_without_dynamic_source_error
     fork_live_calls: list[str] = []
     fork_ctx = _ctx(fork_live_calls, playback=False)
     fork_flow = build_replay_flow(fork_ctx)
-    fork_handle = fork_flow.replay(
+    fork_submission = fork_flow.replay(
         seed_handle.exec_id,
         at="collect_evidence_with_tools",
         cache=False,
-        playback=False,
+        flow_overrides={"playback": False},
+        wait=False,
     )
+    assert len(fork_submission.results) == 1
+    fork_handle = fork_submission.results[0].handle
+    assert fork_handle is not None
     result = fork_handle.wait()
 
     assert fork_live_calls == ["collect_evidence_with_tools", "decide_action"]

@@ -1,8 +1,8 @@
 """Mirror @flow with cached-or-live checkpoint bodies for LangGraph replay.
 
 One checkpoint per node; the seed run (playback=True) returns recorded outputs
-from the trace-keyed cache — zero live calls.  A later native replay with
-playback=False executes the real node callables live.
+from the trace-keyed cache — zero live calls.  A later native replay passes
+``flow_overrides={"playback": False}`` so the real node callables execute live.
 
 Result shape: ``{node_name: node_output_dict, ...}`` — one entry per node.
 

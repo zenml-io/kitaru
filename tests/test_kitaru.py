@@ -114,7 +114,7 @@ class TestPublicExports:
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
-            "ReplayManyResult",
+            "ReplaySubmission",
             "SandboxCommandResult",
             "Secret",
             "SecretSummary",
