@@ -292,7 +292,7 @@ def visible_tool_calls() -> str:
     return publish_final_answer(result.output)
 ```
 
-Here the agent runs directly in the flow body, so `checkpoint_strategy="calls"` can create rows such as `researcher_model_request` and `run_sandbox_command_tool`. In current file-based flows, those adapter-created model/tool checkpoints can still be terminal graph steps. If your flow keeps this per-tool shape, do not rely on `FlowHandle.wait()` to return the final answer; it may refuse to choose between several terminal checkpoint outputs. Poll `handle.status` until completion, then inspect the execution in the UI/CLI and read the final-answer checkpoint artifact.
+Here the agent runs directly in the flow body, so `checkpoint_strategy="calls"` can create rows such as `researcher_model_request` and `run_sandbox_command_tool`. Because the flow explicitly returns `publish_final_answer(...)`, `FlowHandle.wait()` returns that persisted run output after the execution completes. If your flow does not return a value, inspect the persisted artifacts instead.
 
 ```python
 @kitaru.checkpoint
@@ -496,7 +496,7 @@ durable_agent = KitaruAgent(agent, cost_calculator=calculate_agent_cost)
 
 If Kitaru cannot identify the provider/model for a model event, or `genai-prices` cannot price it, the usage record keeps the tokens and leaves cost empty. Disable automatic estimates with `KITARU_LLM_ESTIMATED_COSTS=off` when you want token-only adapter records unless a user calculator is configured.
 
-In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded as `reused_not_incurred`, so replay and cache hits do not look like fresh spend in the execution summary. The canonical records roll up after `FlowHandle.wait()` or `FlowHandle.get()` observes the terminal execution. Setting `emit_child_events=False` disables the model/tool event tracking that produces these per-model usage records.
+In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded as `reused_not_incurred`, so replay and cache hits do not look like fresh spend when Kitaru builds execution-level usage summaries. Kitaru normally writes those summaries when executions finish; `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. Setting `emit_child_events=False` disables the model/tool event tracking that produces these per-model usage records.
 
 ## Message history
 
@@ -609,9 +609,7 @@ Set `PYDANTIC_AI_MODEL` if you want to use a model other than the default
 `openai:gpt-5-nano`. The example runs the agent directly in the flow body so
 `run_sandbox_command_tool` is visible as its own checkpoint, then passes the
 answer into a small `publish_sandbox_answer` checkpoint for inspection. The
-script polls execution status instead of calling `.wait()`, because `.wait()`
-would try to pick one result from several terminal model/tool checkpoints in
-this per-tool demo shape.
+script calls `.wait()` and prints the persisted final run output.
 
 For the broader catalog, see [Examples](../getting-started/examples.md).
 

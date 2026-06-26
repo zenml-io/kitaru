@@ -749,7 +749,7 @@ def test_phase17_hitl_tool_still_reaches_wait(primed_zenml) -> None:
 
 
 def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
-    """Default granular mode should flush run metadata at flow scope."""
+    """Default granular mode should return final output and flush run metadata."""
     durable_agent = KitaruAgent(_make_test_agent(name_prefix="granular_agent"))
 
     @flow
@@ -757,8 +757,11 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
         return durable_agent.run_sync(prompt).output
 
     handle = granular_flow.run("use the add tool")
+    result = handle.wait()
     hydrated_run = _wait_for_hydrated_run(handle.exec_id)
 
+    assert isinstance(result, str)
+    assert result
     assert "pydantic_ai_run_summaries" in hydrated_run.run_metadata
     assert "pydantic_ai_events" in hydrated_run.run_metadata
 

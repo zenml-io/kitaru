@@ -1211,6 +1211,39 @@ def _valid_summary_number(value: Any, *, is_float: bool) -> bool:
     return number is not None and number >= 0
 
 
+def metadata_matches_usage_metadata(
+    metadata: Mapping[str, Any],
+    expected_metadata: Mapping[str, Any],
+) -> bool:
+    """Return whether stored usage metadata matches freshly generated metadata."""
+    if not metadata_has_complete_usage_summary(metadata):
+        return False
+
+    summary = parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+    expected_summary = parse_usage_summary(
+        expected_metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY)
+    )
+    if summary is None or expected_summary is None or summary != expected_summary:
+        return False
+
+    for metadata_key, summary_key, _coerce in _FLAT_METADATA_FIELDS:
+        is_float = summary_key in _SUMMARY_FLOAT_FIELDS
+        current = (
+            _float_or_none(metadata.get(metadata_key))
+            if is_float
+            else _int_or_none(metadata.get(metadata_key))
+        )
+        expected = (
+            _float_or_none(expected_metadata.get(metadata_key))
+            if is_float
+            else _int_or_none(expected_metadata.get(metadata_key))
+        )
+        if current is None or expected is None or current != expected:
+            return False
+
+    return True
+
+
 def metadata_has_complete_usage_summary(metadata: Mapping[str, Any]) -> bool:
     """Return whether terminal LLM aggregation metadata is complete enough to trust."""
     summary = parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))

@@ -104,24 +104,23 @@ adapter's `OpenAIRunResult` becomes the flow's terminal artifact and
 ## `calls` vs `runner_call` (plain-language version)
 
 - `runner_call`: Kitaru places one bigger checkpoint around the entire
-  `Runner.run(...)` call. Single terminal artifact, clean `.wait()` return.
+  `Runner.run(...)` call. This is useful when you want one coarse replay unit.
 - `calls`: Kitaru places smaller checkpoints around each supported model/tool
-  call. Finer replay units, but each call becomes a peer checkpoint with no
-  single sink — `.wait()` raises `KitaruAmbiguousFlowResultError` because
-  there is no "the" return value. The per-checkpoint artifacts are still
-  visible in the Kitaru UI.
+  call. You get finer replay units, and `.wait()` still returns the flow's
+  persisted final output when the flow has an explicit `return` value. The
+  per-checkpoint artifacts are still visible in the Kitaru UI.
 
 To see both side-by-side (the default `runner_call` run, then the `calls`
-run with the expected ambiguity error printed), use:
+run with the same final output plus finer checkpoint detail), use:
 
 ```bash
 OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_adapter.py
 ```
 
 In that mode you'll see the `runner_call` model output first, then a
-`=== calls strategy output ===` section showing the new actionable error
-that names the terminal checkpoints, gives the execution ID, and points at
-the Kitaru UI / `KitaruClient` for per-checkpoint artifact retrieval.
+`=== calls strategy output ===` section that prints the final answer from the
+persisted flow output. The `calls` run also produces finer-grained model/tool
+checkpoints that are visible in the Kitaru UI.
 
 ## Passing OpenAI Agents context
 
