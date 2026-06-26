@@ -226,9 +226,9 @@ When an execution makes LLM calls through `kitaru.llm()` or the supported agent
 adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
 that made or reused the provider work. One usage record usually means one
 provider interaction or one adapter-level graph/agent invocation, depending on
-which adapter produced it. When `FlowHandle.wait()` or `FlowHandle.get()`
-observes the execution finishing, Kitaru reads those checkpoint records and
-writes two execution-level views:
+which adapter produced it. When the execution finishes, Kitaru reads those
+checkpoint records and writes two execution-level views. `FlowHandle.wait()` and
+`FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written:
 
 - `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
   Python client parse it into `execution.llm_usage_summary`. It tells you what
@@ -330,13 +330,11 @@ The shortcut names above mean "sum this common LLM total". The raw
 numeric execution metadata and for advanced internal debugging, but you should
 not need `kitaru_llm_*_v1` keys for common LLM cost and token totals.
 
-{% hint style="warning" %}
-In v1, terminal LLM summaries are written when the SDK observes completion via
-`FlowHandle.wait()` or `FlowHandle.get()`. A remote execution that finishes but
-is never observed through those paths can still have per-checkpoint
-`llm_usage_v1` records, but it may not have `llm_usage_summary_v1` or the flat
-`kitaru_llm_*_v1` statistics keys yet. `executions.get` stays read-only and does
-not backfill missing summaries.
+{% hint style="info" %}
+Kitaru normally writes terminal LLM summaries when executions finish, so a
+remote execution can get `llm_usage_summary_v1` and the flat `kitaru_llm_*_v1`
+statistics keys even if no local SDK process calls `.wait()` or `.get()`. Those
+methods can still populate missing summaries for older executions or terminal executions where the finish-time summary was not written.
 {% endhint %}
 
 Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.

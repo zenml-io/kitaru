@@ -59,7 +59,8 @@ result = handle.wait()   # block until finished
 
 `.run()` submits the execution and immediately returns a `FlowHandle`. The flow
 runs in the background while your code continues. Call `handle.wait()` when you
-need the result.
+need the result: it waits for the execution to finish, then returns the persisted
+run output from the flow's `return` statement.
 
 For a synchronous one-liner, chain `.wait()`:
 
@@ -80,7 +81,8 @@ from a checkpoint with `flow.replay(...)`. Keep the `exec_id` a run returns —
 that's the handle into replay.
 
 ```python
-handle = my_agent.run(url="https://example.com").wait()
+handle = my_agent.run(url="https://example.com")
+result = handle.wait()
 exec_id = handle.exec_id
 
 # Faithful rerun with no change = the control/baseline.
@@ -133,12 +135,14 @@ execution:
 |---|---|
 | `handle.exec_id` | The unique execution identifier (a string you can store or log) |
 | `handle.status` | Current execution status (refreshed on each access) |
-| `handle.wait()` | Block until the execution finishes, then return the result |
-| `handle.get()` | Return the result immediately if finished, otherwise raise an error |
+| `handle.wait()` | Block until the execution finishes, then return the persisted run output |
+| `handle.get()` | Return the persisted run output immediately if finished, otherwise raise an error |
 
 {% hint style="info" %}
 `handle.get()` does **not** wait. If the execution is still running, it raises a
-`KitaruStateError`. Use `handle.wait()` when you want to block.
+`KitaruStateError`. Use `handle.wait()` when you want to block. For flows
+that explicitly return a value, both methods return the saved run output. For
+flows that do not return a value, inspect the persisted artifacts instead.
 {% endhint %}
 
 ### How errors surface

@@ -28,7 +28,6 @@ from examples.end_to_end.openai_research_bot.tools import _safe_error_message
 from pydantic import BaseModel
 
 from kitaru.client import KitaruClient
-from kitaru.errors import KitaruAmbiguousFlowResultError
 
 
 def test_example_imports_without_openai_api_key(monkeypatch) -> None:
@@ -279,8 +278,7 @@ def test_flow_keeps_final_report_artifact_available(
         search_tool_model="gpt-5-nano",
         fail_on_search_error=True,
     )
-    with pytest.raises(KitaruAmbiguousFlowResultError):
-        handle.wait()
+    assert handle.wait() == "# Durable agents\n\nReplay saves completed work."
 
     artifacts = KitaruClient().artifacts.list(
         handle.exec_id,

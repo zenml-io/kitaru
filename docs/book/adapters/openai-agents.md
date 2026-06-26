@@ -20,8 +20,10 @@ runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 ```
 
 The runtime default is `checkpoint_strategy="calls"` (per-call checkpoints —
-see below); pass `"runner_call"` whenever you want a single terminal
-checkpoint so `flow.run(...).wait()` returns the run result directly.
+see below). If your flow returns the runner result or a value derived from it,
+`flow.run(...).wait()` returns that persisted run output after completion. Pass
+`"runner_call"` when you want the OpenAI runner call itself to be one coarse
+checkpoint.
 
 You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
 `OpenAIRunRequest`.
@@ -155,7 +157,7 @@ you need Kitaru checkpoints there too.
 
 You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
 
-### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
+### `checkpoint_strategy="runner_call"`
 
 Kitaru places one checkpoint around the outer OpenAI `Runner.run(...)` call. That
 single checkpoint becomes the flow's terminal artifact, so
@@ -163,8 +165,7 @@ single checkpoint becomes the flow's terminal artifact, so
 `"runner_call"` is deliberately specific: it means Kitaru is wrapping the outer
 OpenAI runner call, not claiming to own every SDK-internal step.
 
-Use this when you want one coarse replay boundary for the whole agent run, or
-whenever you want a clean Python value back from `.wait()`.
+Use this when you want one coarse replay unit for the whole agent run.
 
 ### `checkpoint_strategy="calls"` (default)
 
@@ -174,15 +175,15 @@ checkpoints under the flow.
 Use this when you want finer replay units: if call 6 fails, calls 1–5 can come
 from cache, and you can replay from any individual call's checkpoint.
 
-Because the per-call checkpoints are siblings under the flow with no single
-sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises
-`KitaruAmbiguousFlowResultError`. The per-checkpoint artifacts are still
-fully visible in the Kitaru UI and retrievable via `KitaruClient` — the
-error message points at them. If you need a clean `.wait()` return value,
-switch to `checkpoint_strategy="runner_call"`. Wrapping the `runner.run_sync()`
-call in your own `@checkpoint` is **not** a workaround here — the adapter
-guards against it and will raise, because per-call checkpoints cannot be
-nested inside another Kitaru checkpoint.
+The per-call checkpoints are siblings under the flow, but a flow that explicitly
+returns a value still has one persisted run output. In that common shape,
+`flow.run(...).wait()` returns the flow's output after completion while the
+per-checkpoint artifacts remain visible in the Kitaru UI and retrievable via
+`KitaruClient`. If your flow does not return a value, inspect those artifacts
+instead. Wrapping the `runner.run_sync()` call in your own `@checkpoint` is
+**not** a workaround for changing per-call placement — the adapter guards against
+it and will raise, because per-call checkpoints cannot be nested inside another
+Kitaru checkpoint.
 
 ## Sandbox command tool
 
@@ -434,8 +435,8 @@ OpenAI Agents SDK structured outputs work through the adapter. If your agent is
 created with `Agent(output_type=...)`, Kitaru preserves the SDK result object and
 its typed `final_output` in both supported strategies:
 
-- `checkpoint_strategy="runner_call"` records the outer runner call and returns
-  the structured result from `.wait()` cleanly.
+- `checkpoint_strategy="runner_call"` records the outer runner call as one
+  checkpoint.
 - `checkpoint_strategy="calls"` records supported model and tool calls
   individually, while the SDK still produces the typed final output for your
   Python code.
@@ -541,7 +542,7 @@ When `save_usage=True` (the default), each completed or interrupted runner call 
 
 If you pass a `cost_calculator=` to `KitaruRunner`, Kitaru stores the returned value as `estimated_cost_usd`. Calculator failures are non-fatal: the runner still returns the OpenAI result, adds a warning, and leaves the estimated cost empty. Without a user calculator, Kitaru estimates with `genai-prices` when the SDK usage summary names a single OpenAI model and includes priceable token counts. If the run does not expose a reliable model name, Kitaru records tokens only rather than pricing a multi-model or handoff run with the wrong model. OpenAI Agents records do not store provider-reported actual cost in this adapter path, so `actual_cost_usd` is normally empty.
 
-These records roll up into the execution-level LLM usage summary after your code observes the terminal execution with `FlowHandle.wait()` or `FlowHandle.get()`. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
+Kitaru normally rolls these records into the execution-level LLM usage summary when the execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
 
 Two privacy switches are worth calling out:
 

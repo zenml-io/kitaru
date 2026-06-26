@@ -187,24 +187,25 @@ def _checkpoint_lineage_key(step: StepRunResponse) -> str:
     return str(step.id)
 
 
-def _list_checkpoint_attempts_for_run(
+def _list_checkpoint_attempts_for_run_with_zenml_client(
     *,
     run: PipelineRunResponse,
-    client: KitaruClient,
+    zenml_client: Any,
+    project: Any | None = None,
 ) -> dict[str, list[StepRunResponse]]:
-    """Fetch all step attempts for one execution, including retried runs."""
+    """Fetch all step attempts for one execution with a ZenML client."""
     grouped_attempts: defaultdict[str, list[StepRunResponse]] = defaultdict(list)
     page = 1
     page_size = 200
 
     try:
         while True:
-            step_page = client._client().list_run_steps(
+            step_page = zenml_client.list_run_steps(
                 sort_by="asc:created",
                 page=page,
                 size=page_size,
                 pipeline_run_id=run.id,
-                project=client._project,
+                project=project,
                 exclude_retried=False,
                 hydrate=True,
             )
@@ -224,6 +225,19 @@ def _list_checkpoint_attempts_for_run(
         ) from exc
 
     return dict(grouped_attempts)
+
+
+def _list_checkpoint_attempts_for_run(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+) -> dict[str, list[StepRunResponse]]:
+    """Fetch all step attempts for one execution, including retried runs."""
+    return _list_checkpoint_attempts_for_run_with_zenml_client(
+        run=run,
+        zenml_client=client._client(),
+        project=client._project,
+    )
 
 
 def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
