@@ -50,11 +50,12 @@ def aggregate_llm_usage_on_run_end(
         run_id = _current_dynamic_run_id()
         if run_id is None:
             return
-        run = Client().get_pipeline_run(
+        client = Client()
+        run = client.get_pipeline_run(
             run_id,
             allow_name_prefix_match=False,
         )
-        _safe_persist_terminal_llm_usage_metadata(run)
+        _safe_persist_terminal_llm_usage_metadata(run, zenml_client=client)
     except Exception:
         logger.debug(
             "Failed to aggregate terminal LLM usage metadata from run-end hook.",

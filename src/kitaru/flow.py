@@ -63,10 +63,7 @@ from kitaru._terminal_hooks import aggregate_llm_usage_on_run_end
 from kitaru._terminal_usage import (
     _persist_terminal_llm_usage_metadata as _shared_persist_terminal_llm_usage_metadata,
 )
-from kitaru._terminal_usage import (
-    _run_has_llm_usage_summary,
-    _safe_persist_terminal_llm_usage_metadata,
-)
+from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -1170,9 +1167,16 @@ def _raise_for_unsuccessful_run(
     )
 
 
-def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+def _persist_terminal_llm_usage_metadata(
+    run: PipelineRunResponse,
+    *,
+    zenml_client: Any | None = None,
+) -> bool:
     """Compatibility wrapper for terminal LLM usage aggregation."""
-    return _shared_persist_terminal_llm_usage_metadata(run)
+    return _shared_persist_terminal_llm_usage_metadata(
+        run,
+        zenml_client=zenml_client,
+    )
 
 
 class FlowHandle:
@@ -1261,13 +1265,12 @@ class FlowHandle:
     def _persist_terminal_llm_usage_once(self, run: PipelineRunResponse) -> None:
         if self._terminal_llm_usage_metadata_persisted:
             return
-        if _run_has_llm_usage_summary(run):
-            self._terminal_llm_usage_metadata_persisted = True
-            return
 
         aggregation_run = run
+        zenml_client: Client | None = None
         try:
-            aggregation_run = Client().get_pipeline_run(
+            zenml_client = Client()
+            aggregation_run = zenml_client.get_pipeline_run(
                 run.id,
                 allow_name_prefix_match=False,
             )
@@ -1279,11 +1282,11 @@ class FlowHandle:
             )
         else:
             self._run = aggregation_run
-            if _run_has_llm_usage_summary(aggregation_run):
-                self._terminal_llm_usage_metadata_persisted = True
-                return
 
-        if _safe_persist_terminal_llm_usage_metadata(aggregation_run):
+        if _safe_persist_terminal_llm_usage_metadata(
+            aggregation_run,
+            zenml_client=zenml_client,
+        ):
             self._terminal_llm_usage_metadata_persisted = True
 
     def wait(self) -> Any:

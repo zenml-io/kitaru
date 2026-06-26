@@ -1593,7 +1593,7 @@ def test_terminal_hook_fetches_current_run_and_aggregates(monkeypatch) -> None:
     from kitaru import _terminal_hooks
 
     fetched_run = SimpleNamespace(id="fresh-run")
-    aggregated: list[object] = []
+    aggregation_calls: list[tuple[object, object]] = []
     client = SimpleNamespace(
         get_pipeline_run=MagicMock(return_value=fetched_run),
     )
@@ -1607,7 +1607,9 @@ def test_terminal_hook_fetches_current_run_and_aggregates(monkeypatch) -> None:
     monkeypatch.setattr(
         _terminal_hooks,
         "_safe_persist_terminal_llm_usage_metadata",
-        lambda run: aggregated.append(run) or True,
+        lambda run, **kwargs: (
+            aggregation_calls.append((run, kwargs.get("zenml_client"))) or True
+        ),
     )
 
     _terminal_hooks.aggregate_llm_usage_on_run_end()
@@ -1616,7 +1618,7 @@ def test_terminal_hook_fetches_current_run_and_aggregates(monkeypatch) -> None:
         "run-1",
         allow_name_prefix_match=False,
     )
-    assert aggregated == [fetched_run]
+    assert aggregation_calls == [(fetched_run, client)]
 
 
 def test_terminal_hook_returns_silently_without_run_context(monkeypatch) -> None:
@@ -1659,7 +1661,9 @@ def test_terminal_hook_catches_aggregation_failures(monkeypatch) -> None:
     monkeypatch.setattr(
         _terminal_hooks,
         "_safe_persist_terminal_llm_usage_metadata",
-        lambda _run: (_ for _ in ()).throw(RuntimeError("aggregation failed")),
+        lambda _run, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("aggregation failed")
+        ),
     )
 
     _terminal_hooks.aggregate_llm_usage_on_run_end()
@@ -1694,7 +1698,7 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
     flow_module = sys.modules["kitaru.flow"]
     calls: list[str] = []
 
-    def fake_safe(run: PipelineRunResponse) -> bool:
+    def fake_safe(run: PipelineRunResponse, **_kwargs: object) -> bool:
         calls.append(str(run.id))
         return True
 
@@ -1718,10 +1722,10 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
     )
 
 
-def test_flow_handle_skips_terminal_llm_usage_when_fresh_run_has_summary(
+def test_flow_handle_aggregates_fresh_run_even_when_summary_exists(
     monkeypatch,
 ) -> None:
-    """The wait/get fallback should not list attempts after the hook wrote a summary."""
+    """A stale summary should not permanently block recomputation."""
     from kitaru._llm_usage import (
         LLM_USAGE_SUMMARY_METADATA_KEY,
         empty_usage_summary,
@@ -1748,12 +1752,16 @@ def test_flow_handle_skips_terminal_llm_usage_when_fresh_run_has_summary(
     client_mock = MagicMock()
     client_mock.get_pipeline_run.return_value = fresh_run
     monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    aggregation_calls: list[tuple[PipelineRunResponse, object]] = []
+
+    def fake_safe(run: PipelineRunResponse, **kwargs: object) -> bool:
+        aggregation_calls.append((run, kwargs.get("zenml_client")))
+        return True
+
     monkeypatch.setattr(
         flow_module,
         "_safe_persist_terminal_llm_usage_metadata",
-        lambda _run: (_ for _ in ()).throw(
-            AssertionError("attempt aggregation should not run")
-        ),
+        fake_safe,
     )
 
     handle = FlowHandle(_as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED)))
@@ -1765,12 +1773,13 @@ def test_flow_handle_skips_terminal_llm_usage_when_fresh_run_has_summary(
         allow_name_prefix_match=False,
     )
     assert handle._run is fresh_run
+    assert aggregation_calls == [(fresh_run, client_mock)]
 
 
-def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
+def test_terminal_llm_usage_metadata_skips_write_when_summary_count_matches(
     monkeypatch,
 ) -> None:
-    """A terminal run that already has a summary should not fetch attempts."""
+    """A matching existing summary should suppress only the metadata write."""
     from kitaru._llm_usage import (
         LLM_USAGE_SUMMARY_METADATA_KEY,
         empty_usage_summary,
@@ -1781,11 +1790,15 @@ def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
 
     terminal_usage_module = sys.modules["kitaru._terminal_usage"]
 
-    def fail_fetch(*, run: PipelineRunResponse, client: object) -> object:
-        raise AssertionError("attempt fetch should not run")
+    fetch_calls = 0
+
+    def fake_fetch(*, run: PipelineRunResponse, client: object) -> object:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return {}
 
     monkeypatch.setattr(
-        terminal_usage_module, "_list_checkpoint_attempts_for_run", fail_fetch
+        terminal_usage_module, "_list_checkpoint_attempts_for_run", fake_fetch
     )
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
     monkeypatch.setattr(
@@ -1812,6 +1825,205 @@ def test_terminal_llm_usage_metadata_skips_attempt_fetch_when_summary_exists(
     )
 
     assert persisted is True
+    assert fetch_calls == 1
+
+
+def test_terminal_llm_usage_metadata_uses_zenml_client_without_kitaru_auth(
+    monkeypatch,
+) -> None:
+    """Run-end aggregation must not construct the strict user-facing client."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="remote-env-call",
+        total_tokens=11,
+    )
+    written: dict[str, Any] = {}
+
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://kitaru.example.test")
+    monkeypatch.delenv("KITARU_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "kitaru.client.KitaruClient",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("terminal aggregation must not construct KitaruClient")
+        ),
+    )
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: {},
+    )
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        written.update(metadata)
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"call": record}},
+            ),
+        ),
+        zenml_client=SimpleNamespace(),
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert persisted is True
+    assert summary is not None
+    assert summary["usage_record_count"] == 1
+    assert summary["total_tokens"] == 11
+
+
+def test_terminal_llm_usage_metadata_rewrites_stale_complete_summary(
+    monkeypatch,
+) -> None:
+    """Visible attempt records should beat an old complete undercount."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_USAGE_RECORD_COUNT_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        execution_metadata_from_records,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    first = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="visible-call-1",
+        total_tokens=10,
+    )
+    second = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="visible-call-2",
+        total_tokens=15,
+    )
+    stale_metadata = execution_metadata_from_records([first])
+    attempts_by_lineage = {
+        "checkpoint": [
+            SimpleNamespace(
+                id="attempt-1",
+                name="checkpoint",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"first": first}},
+            ),
+            SimpleNamespace(
+                id="attempt-2",
+                name="checkpoint",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"second": second}},
+            ),
+        ]
+    }
+    written: dict[str, Any] = {}
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        written.update(metadata)
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(id="run-1", run_metadata=stale_metadata),
+        ),
+        zenml_client=SimpleNamespace(),
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert persisted is True
+    assert summary is not None
+    assert summary["usage_record_count"] == 2
+    assert summary["total_tokens"] == 25
+    assert written[LLM_FLAT_USAGE_RECORD_COUNT_KEY] == 2
+
+
+def test_terminal_llm_usage_metadata_rewrites_same_count_stale_summary(
+    monkeypatch,
+) -> None:
+    """A matching record count is not enough if totals changed."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_TOTAL_TOKENS_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        execution_metadata_from_records,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    stale_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="same-count-call",
+        total_tokens=10,
+    )
+    fresh_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="same-count-call",
+        total_tokens=2000,
+    )
+    stale_metadata = execution_metadata_from_records([stale_record])
+    attempts_by_lineage = {
+        "checkpoint": [
+            SimpleNamespace(
+                id="attempt-1",
+                name="checkpoint",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"fresh": fresh_record}},
+            )
+        ]
+    }
+    written: dict[str, Any] = {}
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        written.update(metadata)
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(id="run-1", run_metadata=stale_metadata),
+        ),
+        zenml_client=SimpleNamespace(),
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert persisted is True
+    assert summary is not None
+    assert summary["usage_record_count"] == 1
+    assert summary["total_tokens"] == 2000
+    assert written[LLM_FLAT_TOTAL_TOKENS_KEY] == 2000
 
 
 def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(

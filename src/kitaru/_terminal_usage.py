@@ -8,11 +8,15 @@ from typing import Any
 
 from zenml.models import PipelineRunResponse
 
-from kitaru._client._mappers import _list_checkpoint_attempts_for_run, _to_plain_dict
+from kitaru._client._mappers import (
+    _list_checkpoint_attempts_for_run_with_zenml_client,
+    _to_plain_dict,
+)
 from kitaru._llm_usage import (
     cache_status_for_checkpoint_status,
     execution_metadata_from_records,
     metadata_has_complete_usage_summary,
+    metadata_matches_usage_metadata,
     usage_records_from_metadata,
 )
 from kitaru._source_aliases import (
@@ -34,15 +38,30 @@ def _run_has_llm_usage_summary(run: PipelineRunResponse) -> bool:
     return metadata_has_complete_usage_summary(metadata)
 
 
-def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+def _list_checkpoint_attempts_for_run(
+    *,
+    run: PipelineRunResponse,
+    client: Any,
+) -> dict[str, list[Any]]:
+    """Fetch checkpoint attempts with the ZenML client valid in this context."""
+    return _list_checkpoint_attempts_for_run_with_zenml_client(
+        run=run,
+        zenml_client=client,
+    )
+
+
+def _persist_terminal_llm_usage_metadata(
+    run: PipelineRunResponse,
+    *,
+    zenml_client: Any | None = None,
+) -> bool:
     """Aggregate LLM usage records and write execution-level metadata."""
-    from kitaru.client import KitaruClient
+    from zenml.client import Client
+
     from kitaru.logging import log_to_execution
 
-    if _run_has_llm_usage_summary(run):
-        return True
-
-    client = KitaruClient()
+    run_metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    client = zenml_client or Client()
     try:
         attempts_by_lineage = _list_checkpoint_attempts_for_run(run=run, client=client)
     except KitaruBackendError:
@@ -57,7 +76,7 @@ def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
     execution_id = str(run.id)
     records.extend(
         usage_records_from_metadata(
-            _metadata_mapping(getattr(run, "run_metadata", None)),
+            run_metadata,
             source_attempt_id=f"run:{execution_id}",
         )
     )
@@ -80,14 +99,20 @@ def _persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
     metadata = execution_metadata_from_records(records)
     if not metadata:
         return True
+    if metadata_matches_usage_metadata(run_metadata, metadata):
+        return True
     log_to_execution(str(run.id), **metadata)
     return True
 
 
-def _safe_persist_terminal_llm_usage_metadata(run: PipelineRunResponse) -> bool:
+def _safe_persist_terminal_llm_usage_metadata(
+    run: PipelineRunResponse,
+    *,
+    zenml_client: Any | None = None,
+) -> bool:
     """Best-effort terminal LLM usage aggregation."""
     try:
-        return _persist_terminal_llm_usage_metadata(run)
+        return _persist_terminal_llm_usage_metadata(run, zenml_client=zenml_client)
     except Exception:
         logger.debug(
             "Failed to persist terminal LLM usage metadata.",
