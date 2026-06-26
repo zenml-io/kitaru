@@ -1,20 +1,20 @@
-"""Deterministic tests for the Replay Verify reference-agent example."""
+"""Deterministic tests for the replay fork demo reference agent."""
 
 import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from examples.end_to_end.replay_verify_reference_agent import db
-from examples.end_to_end.replay_verify_reference_agent.config import (
+from examples.end_to_end.replay_fork_demo.reference_agent import db
+from examples.end_to_end.replay_fork_demo.reference_agent.config import (
     FIXTURES_DIR,
     load_scenarios,
     load_variant,
     select_scenarios,
 )
-from examples.end_to_end.replay_verify_reference_agent.knowledge import search_kb
-from examples.end_to_end.replay_verify_reference_agent.mock_api import MockApiServer
-from examples.end_to_end.replay_verify_reference_agent.tools import SupportTools
+from examples.end_to_end.replay_fork_demo.reference_agent.knowledge import search_kb
+from examples.end_to_end.replay_fork_demo.reference_agent.mock_api import MockApiServer
+from examples.end_to_end.replay_fork_demo.reference_agent.tools import SupportTools
 
 
 def test_scenarios_and_variants_load() -> None:

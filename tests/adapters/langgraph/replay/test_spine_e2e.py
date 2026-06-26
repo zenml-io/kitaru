@@ -12,7 +12,7 @@ import pytest
 from kitaru.adapters.langgraph.replay import KitaruReplayAgent
 
 pytestmark = pytest.mark.skipif(
-    not Path("examples/end_to_end/replay_verify_reference_agent").exists(),
+    not Path("examples/end_to_end/replay_fork_demo/reference_agent").exists(),
     reason="reference agent fixtures required",
 )
 

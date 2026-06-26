@@ -28,7 +28,7 @@ from typing import Any
 
 import pytest
 
-EXAMPLE_ROOT = Path("examples/end_to_end/replay_verify_reference_agent")
+EXAMPLE_ROOT = Path("examples/end_to_end/replay_fork_demo/reference_agent")
 
 # Node names of the reference graph, in order.
 NODE_RECEIVE = "receive_request"
@@ -78,7 +78,7 @@ class _FakeChatModel:
     # --- structured-output path (decide_action) ---------------------------- #
 
     def with_structured_output(self, _schema: Any) -> _FakeStructuredRunnable:
-        from examples.end_to_end.replay_verify_reference_agent.config import (
+        from examples.end_to_end.replay_fork_demo.reference_agent.config import (
             SupportDecision,
         )
 
@@ -165,7 +165,7 @@ class _FakeChatModel:
 @pytest.fixture
 def _patched_chat_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace ``agent._chat_model`` with the deterministic fake factory."""
-    from examples.end_to_end.replay_verify_reference_agent import agent
+    from examples.end_to_end.replay_fork_demo.reference_agent import agent
 
     monkeypatch.setattr(
         agent, "_chat_model", lambda model_name: _FakeChatModel(model_name)
@@ -175,10 +175,10 @@ def _patched_chat_model(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def reference_graph(_patched_chat_model: None, tmp_path: Path) -> Any:
     """Build the reference graph with a fresh DB and the deterministic fake model."""
-    from examples.end_to_end.replay_verify_reference_agent import db
-    from examples.end_to_end.replay_verify_reference_agent.config import FIXTURES_DIR
-    from examples.end_to_end.replay_verify_reference_agent.graph import build_graph
-    from examples.end_to_end.replay_verify_reference_agent.tools import SupportTools
+    from examples.end_to_end.replay_fork_demo.reference_agent import db
+    from examples.end_to_end.replay_fork_demo.reference_agent.config import FIXTURES_DIR
+    from examples.end_to_end.replay_fork_demo.reference_agent.graph import build_graph
+    from examples.end_to_end.replay_fork_demo.reference_agent.tools import SupportTools
 
     db_path = tmp_path / "state.sqlite"
     db.reset_database(db_path=db_path)

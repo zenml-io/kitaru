@@ -2,7 +2,7 @@
 
 When a LangGraph node invokes an inner runnable with an EXPLICIT
 ``config={'metadata': ...}`` — exactly how the reference agent calls its model
-(examples/end_to_end/replay_verify_reference_agent/agent.py) — the inherited
+(examples/end_to_end/replay_fork_demo/reference_agent/agent.py) — the inherited
 ``langgraph_node`` does NOT reach that inner run's callback metadata. Only the
 node-level run carries it. Langfuse records each observation's own metadata, so
 the LLM/tool observations a real trace produces lack ``langgraph_node`` and the
