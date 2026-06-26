@@ -142,6 +142,7 @@ LLMAdapter = Literal[
     "claude_agent_sdk",
     "langgraph",
     "gemini_interactions",
+    "google_adk",
 ]
 LLMSurface = Literal[
     "direct_llm",
@@ -150,6 +151,7 @@ LLMSurface = Literal[
     "agent_invocation",
     "graph_call",
     "gemini_interaction",
+    "adk_turn",
 ]
 LLMCostSource = Literal[
     "provider_reported",

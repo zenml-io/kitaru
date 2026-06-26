@@ -85,6 +85,9 @@ claude-agent-sdk = [
 gemini = [
     "google-genai>=2.8.0,<3",
 ]
+google-adk = [
+    "google-adk>=2.3.0,<3",
+]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
 ]
@@ -118,6 +121,19 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 [tool.uv]
 exclude-newer = "3 days"
 exclude-newer-package = { zenml = false, aiohttp = false, langsmith = false, pydantic-settings = false }
+# google-adk 2.3.x currently requires FastAPI >=0.133, while the
+# local/dev ZenML server path pins FastAPI <0.121. Keep the optional ADK extra
+# installable on its own without making the normal dev environment unsolvable.
+conflicts = [
+    [
+        { extra = "google-adk" },
+        { extra = "local" },
+    ],
+    [
+        { extra = "google-adk" },
+        { group = "dev" },
+    ],
+]
 
 [dependency-groups]
 dev = [
