@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+- Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
+- Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
+- Added `kitaru.diff_matrix(exec_ids)` to diff many originals against their auto-discovered replays.
+- Added CLI commands `kitaru executions diff` and `kitaru executions diff-matrix`, plus MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_matrix`, and unified `kitaru_executions_replay` with explicit execution IDs.
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
+- Added a LangGraph replay and fork adapter (`kitaru.adapters.langgraph.replay`) that reconstructs a recorded LangGraph run as a directed graph from a captured trace and forks it for replay. Public surface includes `KitaruReplayAgent`, `KitaruAdapter`, `import_langgraph_trace` / `import_trace`, and graph `edit` helpers, with Langfuse and JSONL trace import sources.
+- `kitaru executions replay` now prints UI compare URLs (and includes `compare_url` in JSON output) for the original execution vs the new replay.
+- Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
+- `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
+- Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
+
+### Changed
+- **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
+
+### Fixed
+- `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
+- Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
+- `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
+- Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
+- `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 
 ## [0.18.0] - 2026-06-25
 
@@ -17,27 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
 - Added estimated-cost recording for direct `kitaru.llm()` calls when provider usage includes token counts and `genai-prices` has pricing for the model, with config and environment controls to leave estimation on automatic or opt out. Cost estimation is best effort: a pricing-lookup miss never turns a successful LLM call into a failure.
 - Added `--page` and `--size` pagination options to `kitaru executions statistics`.
-- Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
-- Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
-- Added `kitaru.diff_matrix(exec_ids)` to diff many originals against their auto-discovered replays.
-- Added CLI commands `kitaru executions diff` and `kitaru executions diff-matrix`, plus MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_matrix`, and unified `kitaru_executions_replay` with explicit execution IDs.
-- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
-- `kitaru executions replay` now prints UI compare URLs (and includes `compare_urls` in JSON output) for the original execution vs the new replay.
-- Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
-- `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
-- Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
 
 ### Changed
 - Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
-- **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
 
 ### Fixed
-- `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
 - Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
-- Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
-- `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
-- Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
-- `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 
 ## [0.17.1] - 2026-06-22
 

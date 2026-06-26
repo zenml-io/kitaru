@@ -172,6 +172,14 @@ Connection tools:
 - `kitaru_stacks_list`
 - `manage_stack`
 
+Diagnostics and maintenance tools:
+
+- `kitaru_info`
+- `kitaru_clean_preview`
+
+`kitaru_clean_preview` is strictly read-only: it returns what `kitaru clean
+<scope> --dry-run` would delete and never performs the cleanup itself.
+
 ## Copy-paste prompts
 
 Use prompts like these in an MCP-capable assistant after you configure the
@@ -216,7 +224,7 @@ Replay the latest failed execution from the checkpoint before the failing one. E
 Replay with one change and diff against a baseline (the hill-climb loop):
 
 ```text
-Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_inputs setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
+Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_overrides setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
 ```
 
 Inspect results from a completed execution:

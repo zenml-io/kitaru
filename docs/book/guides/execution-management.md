@@ -415,8 +415,8 @@ execution in place.
 replayed = client.executions.replay(
     exec_id,
     at="write_draft",
-    output={"research": "Edited notes"},
-    topic="New topic",
+    flow_overrides={"topic": "New topic"},
+    checkpoint_overrides={"research": {"output": "Edited notes"}},
 )
 
 # Same-execution retry (failed executions only)
@@ -441,14 +441,16 @@ fresh = execution.refresh()          # re-fetch latest state
 retried = execution.retry()          # retry a failed execution
 resumed = execution.resume()         # resume after wait input
 cancelled = execution.cancel()       # cancel a running execution
-replayed = execution.replay(at="write_draft", output={"research": "Edited notes"})
+replayed = execution.replay(at="write_draft", checkpoint_overrides={"research": {"output": "Edited notes"}})
 
 checkpoints = execution.list_checkpoints()
 artifacts = execution.list_artifacts()
 ```
 
-These are equivalent to calling `client.executions.retry(exec_id)` etc. — they
-return a new `Execution` snapshot rather than mutating the existing object.
+These are equivalent to calling `client.executions.retry(exec_id)` etc.
+`refresh`, `retry`, `resume`, and `cancel` return a new `Execution` snapshot
+rather than mutating the existing object; `replay` returns a `ReplaySubmission`
+describing the new replay execution(s).
 
 ## Inspect or abort waits programmatically
 

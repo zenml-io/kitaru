@@ -79,8 +79,8 @@ submission succeeds, divergence can surface later on the replayed execution as
 normal failure metadata:
 
 ```python
-replayed = client.executions.replay(exec_id, at="write_draft")
-latest = replayed.refresh()
+submission = client.executions.replay(exec_id, at="write_draft")
+latest = client.executions.get(submission.results[0].replay_exec_id)
 
 if latest.failure and latest.failure.origin == kitaru.FailureOrigin.DIVERGENCE:
     print("Replay divergence:", latest.failure.message)
