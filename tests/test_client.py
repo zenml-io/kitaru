@@ -4942,7 +4942,10 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
 
     replay_handle = MagicMock()
     replay_handle.exec_id = str(replayed_run.id)
-    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
+    replay_flow = SimpleNamespace(
+        replay=MagicMock(return_value=replay_handle),
+        _kitaru_replay_flow_wrapper=True,
+    )
     replay_module = SimpleNamespace(
         sample_flow=replay_flow,
         __kitaru_pipeline_source_sample_flow=object(),
@@ -6144,7 +6147,10 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
 
     replay_handle = MagicMock()
     replay_handle.exec_id = str(replayed_run.id)
-    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
+    replay_flow = SimpleNamespace(
+        replay=MagicMock(return_value=replay_handle),
+        _kitaru_replay_flow_wrapper=True,
+    )
     replay_module = SimpleNamespace(
         sample_flow=replay_flow,
         __kitaru_pipeline_source_sample_flow=object(),
