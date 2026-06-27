@@ -6,7 +6,7 @@ import importlib
 import inspect
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
@@ -22,6 +22,9 @@ from ._tracking import EventTracker, current_tracker
 from ._utils import checkpoint_cache_key, elapsed_ms, run_async_in_checkpoint
 
 _BaseTool: type[Any] = importlib.import_module("google.adk.tools.base_tool").BaseTool
+_NO_TOOL_CONTEXT_STATE = object()
+_TOOL_RESULT_ENVELOPE_KEY = "__kitaru_adk_tool_checkpoint_result__"
+_TOOL_RESULT_ENVELOPE_VERSION = 1
 
 
 def _base_tool_init_kwargs(values: dict[str, Any]) -> dict[str, Any]:
@@ -29,6 +32,118 @@ def _base_tool_init_kwargs(values: dict[str, Any]) -> dict[str, Any]:
     if isinstance(fields, Mapping):
         return {key: value for key, value in values.items() if key in fields}
     return values
+
+
+def _copy_json_state_value(value: Any, *, path: str) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        copied: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise KitaruUsageError(
+                    "Checkpointed Google ADK tool calls can only replay "
+                    "`tool_context.state` mappings with string keys. Disable "
+                    "checkpointing for this tool with "
+                    "`tool_checkpoint_config_by_name={tool_name: False}` if "
+                    "the tool needs non-JSON state."
+                )
+            copied[key] = _copy_json_state_value(item, path=f"{path}.{key}")
+        return copied
+    if isinstance(value, list):
+        return [
+            _copy_json_state_value(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    raise KitaruUsageError(
+        "Checkpointed Google ADK tool calls need replay-safe "
+        "`tool_context.state` values. Kitaru found an unsupported value at "
+        f"{path}: {type(value).__module__}.{type(value).__name__}. Disable "
+        "checkpointing for this tool with "
+        "`tool_checkpoint_config_by_name={tool_name: False}` if the tool "
+        "needs non-JSON state."
+    )
+
+
+def _read_tool_context_state(tool_context: Any) -> Any:
+    try:
+        state = tool_context.state
+    except AttributeError:
+        return _NO_TOOL_CONTEXT_STATE
+    if state is None:
+        return _NO_TOOL_CONTEXT_STATE
+    items = getattr(state, "items", None)
+    if not callable(items) or not hasattr(state, "__setitem__"):
+        raise KitaruUsageError(
+            "Checkpointed Google ADK tool calls need `tool_context.state` to "
+            "behave like a mutable mapping so Kitaru can replay state "
+            "mutations when a checkpoint is reused. Disable checkpointing for "
+            "this tool with "
+            "`tool_checkpoint_config_by_name={tool_name: False}` if the tool "
+            "uses a custom state object."
+        )
+    return state
+
+
+def _snapshot_tool_context_state(tool_context: Any) -> dict[str, Any] | object:
+    state = _read_tool_context_state(tool_context)
+    if state is _NO_TOOL_CONTEXT_STATE:
+        return _NO_TOOL_CONTEXT_STATE
+    return _copy_json_state_value(dict(state.items()), path="tool_context.state")
+
+
+def _build_state_delta(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "before": before,
+        "after": after,
+        "set": {
+            key: value
+            for key, value in after.items()
+            if key not in before or before[key] != value
+        },
+        "deleted": [key for key in before if key not in after],
+    }
+
+
+def _apply_state_delta(
+    tool_context: Any,
+    delta: Mapping[str, Any] | None,
+) -> None:
+    if delta is None:
+        return
+    state = _read_tool_context_state(tool_context)
+    if state is _NO_TOOL_CONTEXT_STATE:
+        raise KitaruUsageError(
+            "A cached Google ADK tool checkpoint includes state mutations, "
+            "but this `tool_context` has no replayable `.state` mapping."
+        )
+    current = _snapshot_tool_context_state(tool_context)
+    before = delta.get("before")
+    after = delta.get("after")
+    if current == after:
+        return
+    if current != before:
+        raise KitaruUsageError(
+            "Refusing to replay a cached Google ADK tool state mutation onto "
+            "a different starting `tool_context.state`. The tool call should "
+            "run again with a checkpoint input that includes the current state."
+        )
+    deleted = delta.get("deleted", [])
+    if deleted and not hasattr(state, "__delitem__"):
+        raise KitaruUsageError(
+            "A cached Google ADK tool checkpoint needs to delete keys from "
+            "`tool_context.state`, but this state object does not support "
+            "deletion. Disable checkpointing for this tool with "
+            "`tool_checkpoint_config_by_name={tool_name: False}`."
+        )
+    for key in deleted:
+        if key in state:
+            del state[key]
+    for key, value in delta.get("set", {}).items():
+        state[key] = _copy_json_state_value(value, path=f"tool_context.state.{key}")
 
 
 class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
@@ -146,22 +261,66 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
         )
         if config is None or not self._can_checkpoint():
             return await body(), False
+        before_state = _snapshot_tool_context_state(tool_context)
+        state_input = (
+            {"available": False}
+            if before_state is _NO_TOOL_CONTEXT_STATE
+            else {
+                "available": True,
+                "value": before_state,
+                "cache_identity": checkpoint_cache_key(before_state),
+            }
+        )
         tool_input = to_json_safe(
             {
                 "tool_name": self.name,
                 "args": args,
                 "tool_context": object_metadata(tool_context),
+                "tool_context_state_before": state_input,
                 "wrapped_tool": object_metadata(self._tool),
             },
             include_raw=self._capture.capture_mode == "full",
         )
-        return await run_async_in_checkpoint(
+
+        async def checkpoint_body() -> dict[str, Any]:
+            result = await body()
+            if before_state is _NO_TOOL_CONTEXT_STATE:
+                state_delta = None
+            else:
+                after_state = _snapshot_tool_context_state(tool_context)
+                if after_state is _NO_TOOL_CONTEXT_STATE:
+                    raise KitaruUsageError(
+                        "Google ADK tool checkpointing cannot replay a tool "
+                        "that removes `tool_context.state` during execution."
+                    )
+                state_delta = _build_state_delta(
+                    cast(dict[str, Any], before_state),
+                    cast(dict[str, Any], after_state),
+                )
+            return {
+                _TOOL_RESULT_ENVELOPE_KEY: _TOOL_RESULT_ENVELOPE_VERSION,
+                "result": result,
+                "tool_context_state_delta": state_delta,
+            }
+
+        checkpointed_result = await run_async_in_checkpoint(
             config=config,
             step_name=f"google_adk_tool_{self.name}",
-            body=body,
+            body=checkpoint_body,
             cache_key=checkpoint_cache_key(tool_input),
             checkpoint_inputs={"tool_args": tool_input},
-        ), True
+        )
+        if (
+            isinstance(checkpointed_result, Mapping)
+            and checkpointed_result.get(_TOOL_RESULT_ENVELOPE_KEY)
+            == _TOOL_RESULT_ENVELOPE_VERSION
+        ):
+            _apply_state_delta(
+                tool_context,
+                checkpointed_result.get("tool_context_state_delta"),
+            )
+            return checkpointed_result.get("result"), True
+        return checkpointed_result, True
 
     def _can_checkpoint(self) -> bool:
         if not runtime.is_inside_flow():

@@ -191,6 +191,49 @@ async def _create_runner_session(
     return session
 
 
+async def _get_runner_session(
+    runner: Any,
+    *,
+    app_name: str,
+    user_id: str,
+    session_id: str,
+) -> Any:
+    session_service = getattr(runner, "session_service", None)
+    if session_service is None:
+        pytest.fail("Installed ADK runner does not expose `.session_service`.")
+    get_session = getattr(session_service, "get_session", None)
+    if not callable(get_session):
+        pytest.fail("Installed ADK session service has no `get_session(...)`.")
+
+    parameters = inspect.signature(get_session).parameters
+    kwargs: dict[str, Any] = {}
+    if "app_name" in parameters:
+        kwargs["app_name"] = app_name
+    if "user_id" in parameters:
+        kwargs["user_id"] = user_id
+    if "session_id" in parameters:
+        kwargs["session_id"] = session_id
+    elif "id" in parameters:
+        kwargs["id"] = session_id
+
+    session = get_session(**kwargs)
+    if inspect.isawaitable(session):
+        return await session
+    return session
+
+
+def _session_state(session: Any) -> Mapping[str, Any]:
+    state = getattr(session, "state", None)
+    if isinstance(state, Mapping):
+        return state
+    model_dump = getattr(state, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return dumped
+    pytest.fail("Installed ADK session does not expose mapping-like `.state`.")
+
+
 def _contains_marker(value: Any, marker: str) -> bool:
     if isinstance(value, str):
         return marker in value
@@ -459,6 +502,7 @@ def test_real_adk_runner_invokes_kitaru_wrapped_local_model_and_tool_without_net
 
         async def run_async(self, *, args: dict[str, Any], tool_context: Any) -> Any:
             self.calls.append(dict(args))
+            tool_context.state["kitaru_lookup_marker"] = marker
             return {"query": args.get("query"), "answer": marker}
 
     async def run_smoke() -> Any:
@@ -493,13 +537,20 @@ def test_real_adk_runner_invokes_kitaru_wrapped_local_model_and_tool_without_net
                 ),
             )
         )
-        return result, local_model, local_tool
+        session = await _get_runner_session(
+            runner,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return result, local_model, local_tool, session
 
-    result, local_model, local_tool = asyncio.run(run_smoke())
+    result, local_model, local_tool, session = asyncio.run(run_smoke())
 
     assert result.status == "completed"
     assert len(local_model.calls) >= 2
     assert local_tool.calls == [{"query": "cats"}]
+    assert _session_state(session)["kitaru_lookup_marker"] == marker
     assert local_model.saw_tool_response is True
     assert result.events
     assert _contains_marker(result.events, marker)

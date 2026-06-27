@@ -39,6 +39,31 @@ class FakeTool:
         return {"result": args["query"], "context": type(tool_context).__name__}
 
 
+class FakeToolContext:
+    def __init__(self, state: dict[str, Any] | None = None) -> None:
+        self.state = dict(state or {})
+
+
+class StatefulTool(FakeTool):
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def run_async(self, *, args: Any, tool_context: Any) -> Any:
+        self.calls.append(dict(args))
+        tool_context.state["lookup_marker"] = "local-cat-fact"
+        return {"answer": "local-cat-fact", "query": args["query"]}
+
+
+class NestedStatefulTool(FakeTool):
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def run_async(self, *, args: Any, tool_context: Any) -> Any:
+        self.calls.append(dict(args))
+        tool_context.state["nested"] = {"answer": "local-cat-fact"}
+        return {"answer": "local-cat-fact", "query": args["query"]}
+
+
 class SyncProcessTool(FakeTool):
     def __init__(self) -> None:
         self.processed: list[tuple[Any, Any]] = []
@@ -162,6 +187,162 @@ def test_tool_wrapper_runs_tool_inside_checkpoint(
     assert (
         checkpoint_calls[0]["checkpoint_inputs"]["tool_args"]["tool_name"] == "search"
     )
+
+
+def test_tool_checkpoint_replay_restores_tool_context_state_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, tool_module = _modules(monkeypatch)
+    checkpoint_cache: dict[str, Any] = {}
+
+    monkeypatch.setattr(tool_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        cache_key = kwargs["cache_key"]
+        if cache_key not in checkpoint_cache:
+            checkpoint_cache[cache_key] = await kwargs["body"]()
+        return checkpoint_cache[cache_key]
+
+    monkeypatch.setattr(tool_module, "run_async_in_checkpoint", fake_checkpoint)
+
+    tool = StatefulTool()
+    wrapped = adapter.wrap_tool(tool)
+    first_context = FakeToolContext({"seed": "same"})
+    second_context = FakeToolContext({"seed": "same"})
+
+    first_result = asyncio.run(
+        wrapped.run_async(args={"query": "cats"}, tool_context=first_context)
+    )
+    second_result = asyncio.run(
+        wrapped.run_async(args={"query": "cats"}, tool_context=second_context)
+    )
+
+    assert (
+        first_result
+        == second_result
+        == {
+            "answer": "local-cat-fact",
+            "query": "cats",
+        }
+    )
+    assert tool.calls == [{"query": "cats"}]
+    assert first_context.state == {
+        "seed": "same",
+        "lookup_marker": "local-cat-fact",
+    }
+    assert second_context.state == {
+        "seed": "same",
+        "lookup_marker": "local-cat-fact",
+    }
+
+
+def test_tool_checkpoint_input_includes_starting_state_to_avoid_stale_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, tool_module = _modules(monkeypatch)
+    checkpoint_cache: dict[str, Any] = {}
+    checkpoint_inputs: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(tool_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        checkpoint_inputs.append(kwargs["checkpoint_inputs"]["tool_args"])
+        cache_key = kwargs["cache_key"]
+        if cache_key not in checkpoint_cache:
+            checkpoint_cache[cache_key] = await kwargs["body"]()
+        return checkpoint_cache[cache_key]
+
+    monkeypatch.setattr(tool_module, "run_async_in_checkpoint", fake_checkpoint)
+
+    tool = StatefulTool()
+    wrapped = adapter.wrap_tool(tool)
+    first_context = FakeToolContext({"seed": "first"})
+    second_context = FakeToolContext({"seed": "second"})
+
+    asyncio.run(wrapped.run_async(args={"query": "cats"}, tool_context=first_context))
+    asyncio.run(wrapped.run_async(args={"query": "cats"}, tool_context=second_context))
+
+    assert tool.calls == [{"query": "cats"}, {"query": "cats"}]
+    assert len(checkpoint_cache) == 2
+    assert [
+        item["tool_context_state_before"]["value"]["seed"] for item in checkpoint_inputs
+    ] == ["first", "second"]
+
+
+def test_tool_checkpoint_cache_identity_keeps_redacted_state_values_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, tool_module = _modules(monkeypatch)
+    checkpoint_cache: dict[str, Any] = {}
+
+    monkeypatch.setattr(tool_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        cache_key = kwargs["cache_key"]
+        if cache_key not in checkpoint_cache:
+            checkpoint_cache[cache_key] = await kwargs["body"]()
+        return checkpoint_cache[cache_key]
+
+    monkeypatch.setattr(tool_module, "run_async_in_checkpoint", fake_checkpoint)
+
+    tool = StatefulTool()
+    wrapped = adapter.wrap_tool(tool)
+
+    asyncio.run(
+        wrapped.run_async(
+            args={"query": "cats"},
+            tool_context=FakeToolContext({"api_token": "first"}),
+        )
+    )
+    asyncio.run(
+        wrapped.run_async(
+            args={"query": "cats"},
+            tool_context=FakeToolContext({"api_token": "second"}),
+        )
+    )
+
+    assert tool.calls == [{"query": "cats"}, {"query": "cats"}]
+    assert len(checkpoint_cache) == 2
+
+
+def test_tool_checkpoint_replay_copies_nested_state_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, tool_module = _modules(monkeypatch)
+    checkpoint_cache: dict[str, Any] = {}
+
+    monkeypatch.setattr(tool_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    async def fake_checkpoint(**kwargs: Any) -> Any:
+        cache_key = kwargs["cache_key"]
+        if cache_key not in checkpoint_cache:
+            checkpoint_cache[cache_key] = await kwargs["body"]()
+        return checkpoint_cache[cache_key]
+
+    monkeypatch.setattr(tool_module, "run_async_in_checkpoint", fake_checkpoint)
+
+    tool = NestedStatefulTool()
+    wrapped = adapter.wrap_tool(tool)
+
+    asyncio.run(
+        wrapped.run_async(args={"query": "cats"}, tool_context=FakeToolContext())
+    )
+    replayed_context = FakeToolContext()
+    asyncio.run(
+        wrapped.run_async(args={"query": "cats"}, tool_context=replayed_context)
+    )
+    replayed_context.state["nested"]["answer"] = "corrupted"
+    later_replayed_context = FakeToolContext()
+    asyncio.run(
+        wrapped.run_async(args={"query": "cats"}, tool_context=later_replayed_context)
+    )
+
+    assert tool.calls == [{"query": "cats"}]
+    assert later_replayed_context.state["nested"] == {"answer": "local-cat-fact"}
 
 
 def test_model_wrapper_nested_checkpoint_limitation_is_explicit(
