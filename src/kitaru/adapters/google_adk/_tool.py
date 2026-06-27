@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from typing import Any
 
@@ -62,10 +63,14 @@ class KitaruADKTool:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._tool, name)
 
-    async def process_llm_request(self, *, tool_context: Any, llm_request: Any) -> None:
+    async def process_llm_request(self, *, tool_context: Any, llm_request: Any) -> Any:
         process = getattr(self._tool, "process_llm_request", None)
-        if callable(process):
-            await process(tool_context=tool_context, llm_request=llm_request)
+        if not callable(process):
+            return None
+        result = process(tool_context=tool_context, llm_request=llm_request)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     async def run_async(self, *, args: Any, tool_context: Any) -> Any:
         """Run the wrapped ADK tool inside a checkpoint if possible."""

@@ -56,10 +56,12 @@ class KitaruADKModel:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._model, name)
 
-    @classmethod
-    def supported_models(cls) -> list[str]:
-        """Conservative fallback for ADK model-registry introspection."""
-        return []
+    def supported_models(self) -> list[str]:
+        """Return the wrapped model's supported model names when available."""
+        supported_models = getattr(self._model, "supported_models", None)
+        if not callable(supported_models):
+            return []
+        return supported_models()
 
     async def connect(self, *args: Any, **kwargs: Any) -> Any:
         connect = getattr(self._model, "connect", None)
