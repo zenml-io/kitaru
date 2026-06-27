@@ -1,8 +1,9 @@
 """Installed Google ADK public API contract tests.
 
 These tests use real ``google-adk`` classes when the optional dependency is
-installed. They do not instantiate hosted provider clients, run an ADK runner,
-or make network calls.
+installed. They do not instantiate hosted provider clients or make network
+calls. The runner smoke uses only a local in-memory ADK runner plus local dummy
+``BaseLlm`` / ``BaseTool`` objects.
 """
 
 from __future__ import annotations
@@ -11,8 +12,10 @@ import asyncio
 import importlib
 import inspect
 import os
+import socket
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -51,16 +54,187 @@ def _adk_contract_classes() -> tuple[type[Any], type[Any], type[Any]]:
     return base_llm_module.BaseLlm, base_tool_module.BaseTool, llm_agent
 
 
-def _adapter_wrappers() -> tuple[type[Any], type[Any]]:
+@dataclass(frozen=True)
+class _ADKRuntimeAPI:
+    runner_cls: type[Any] | None
+    in_memory_runner_cls: type[Any] | None
+    in_memory_session_service_cls: type[Any] | None
+    genai_types: Any
+    llm_response_cls: type[Any]
+
+
+def _adk_runtime_api() -> _ADKRuntimeAPI:
+    runners_module = _import_adk_module("google.adk.runners")
+    sessions_module = _import_adk_module("google.adk.sessions")
+    genai_types = _import_adk_module("google.genai.types")
+    llm_response_module = _import_adk_module("google.adk.models.llm_response")
+    return _ADKRuntimeAPI(
+        runner_cls=getattr(runners_module, "Runner", None),
+        in_memory_runner_cls=getattr(runners_module, "InMemoryRunner", None),
+        in_memory_session_service_cls=getattr(
+            sessions_module,
+            "InMemorySessionService",
+            None,
+        ),
+        genai_types=genai_types,
+        llm_response_cls=llm_response_module.LlmResponse,
+    )
+
+
+def _adapter_module() -> Any:
     for cached in list(sys.modules):
         if cached.startswith("kitaru.adapters.google_adk"):
             del sys.modules[cached]
-    adapter = importlib.import_module("kitaru.adapters.google_adk")
+    return importlib.import_module("kitaru.adapters.google_adk")
+
+
+def _adapter_wrappers() -> tuple[type[Any], type[Any]]:
+    adapter = _adapter_module()
     return adapter.KitaruADKModel, adapter.KitaruADKTool
 
 
 async def _collect_model_events(model: Any, request: Any) -> list[Any]:
     return [event async for event in model.generate_content_async(request)]
+
+
+def _text_content(genai_types: Any, text: str, *, role: str) -> Any:
+    part_cls = genai_types.Part
+    if hasattr(part_cls, "from_text"):
+        part = part_cls.from_text(text=text)
+    else:
+        part = part_cls(text=text)
+    return genai_types.Content(role=role, parts=[part])
+
+
+def _function_call_content(
+    genai_types: Any,
+    *,
+    name: str,
+    args: dict[str, Any],
+) -> Any:
+    part_cls = genai_types.Part
+    if hasattr(part_cls, "from_function_call"):
+        part = part_cls.from_function_call(name=name, args=args)
+    else:
+        function_call = genai_types.FunctionCall(name=name, args=args)
+        part = part_cls(function_call=function_call)
+    return genai_types.Content(role="model", parts=[part])
+
+
+def _llm_response(api: _ADKRuntimeAPI, content: Any) -> Any:
+    return api.llm_response_cls(content=content)
+
+
+def _local_lookup_declaration(genai_types: Any) -> Any:
+    return genai_types.FunctionDeclaration(
+        name="local_lookup",
+        description="Local lookup used by Kitaru's installed ADK runner smoke.",
+        parameters=genai_types.Schema(
+            type=genai_types.Type.OBJECT,
+            properties={"query": genai_types.Schema(type=genai_types.Type.STRING)},
+            required=["query"],
+        ),
+    )
+
+
+def _build_in_memory_runner(
+    api: _ADKRuntimeAPI,
+    *,
+    agent: Any,
+    app_name: str,
+) -> Any:
+    if api.in_memory_runner_cls is not None:
+        return api.in_memory_runner_cls(agent=agent, app_name=app_name)
+
+    if api.runner_cls is None or api.in_memory_session_service_cls is None:
+        pytest.fail(
+            "Installed google-adk does not expose InMemoryRunner or "
+            "Runner + InMemorySessionService for local runner smoke."
+        )
+
+    session_service = api.in_memory_session_service_cls()
+    return api.runner_cls(
+        app_name=app_name,
+        agent=agent,
+        session_service=session_service,
+    )
+
+
+async def _create_runner_session(
+    runner: Any,
+    *,
+    app_name: str,
+    user_id: str,
+    session_id: str,
+) -> Any:
+    session_service = getattr(runner, "session_service", None)
+    if session_service is None:
+        pytest.fail("Installed ADK runner does not expose `.session_service`.")
+    create_session = getattr(session_service, "create_session", None)
+    if not callable(create_session):
+        pytest.fail("Installed ADK session service has no `create_session(...)`.")
+
+    parameters = inspect.signature(create_session).parameters
+    kwargs: dict[str, Any] = {}
+    if "app_name" in parameters:
+        kwargs["app_name"] = app_name
+    if "user_id" in parameters:
+        kwargs["user_id"] = user_id
+    if "session_id" in parameters:
+        kwargs["session_id"] = session_id
+    elif "id" in parameters:
+        kwargs["id"] = session_id
+
+    session = create_session(**kwargs)
+    if inspect.isawaitable(session):
+        return await session
+    return session
+
+
+def _contains_marker(value: Any, marker: str) -> bool:
+    if isinstance(value, str):
+        return marker in value
+    if isinstance(value, Mapping):
+        return any(
+            _contains_marker(key, marker) or _contains_marker(item, marker)
+            for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return any(_contains_marker(item, marker) for item in value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _contains_marker(model_dump(mode="json"), marker)
+    return False
+
+
+def _install_no_hosted_provider_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_connect = socket.socket.connect
+
+    def guarded_connect(sock: socket.socket, address: Any) -> Any:
+        host = address[0] if isinstance(address, tuple) and address else address
+        if isinstance(host, bytes):
+            host = host.decode()
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            raise AssertionError(
+                f"Installed ADK smoke must not open network connections: {address!r}"
+            )
+        return real_connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+
+    try:
+        genai_module = importlib.import_module("google.genai")
+    except ModuleNotFoundError:
+        return
+
+    if hasattr(genai_module, "Client"):
+        monkeypatch.setattr(
+            genai_module,
+            "Client",
+            lambda *args, **kwargs: pytest.fail(
+                "Installed ADK smoke must not construct google.genai.Client."
+            ),
+        )
 
 
 def test_kitaru_adk_model_preserves_real_base_llm_public_behavior() -> None:
@@ -219,3 +393,113 @@ def test_real_llm_agent_accepts_kitaru_tool_wrapper() -> None:
     assert asyncio.run(
         agent.tools[0].run_async(args={"query": "cats"}, tool_context=object())
     ) == {"args": {"query": "cats"}, "context": "object"}
+
+
+def test_real_adk_runner_invokes_kitaru_wrapped_local_model_and_tool_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_no_hosted_provider_guard(monkeypatch)
+
+    BaseLlm, BaseTool, LlmAgent = _adk_contract_classes()
+    api = _adk_runtime_api()
+    adapter = _adapter_module()
+    marker = "local-cat-fact"
+
+    class LocalToolLoopLlm(BaseLlm):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            super().__init__(model="kitaru-local-runner-smoke-model")
+            object.__setattr__(self, "calls", [])
+            object.__setattr__(self, "saw_tool_response", False)
+
+        @classmethod
+        def supported_models(cls) -> list[str]:
+            return ["kitaru-local-runner-smoke-model"]
+
+        async def generate_content_async(
+            self,
+            llm_request: Any,
+            stream: bool = False,
+        ) -> AsyncIterator[Any]:
+            self.calls.append(llm_request)
+            if len(self.calls) == 1:
+                yield _llm_response(
+                    api,
+                    _function_call_content(
+                        api.genai_types,
+                        name="local_lookup",
+                        args={"query": "cats"},
+                    ),
+                )
+                return
+
+            for content in llm_request.contents:
+                for part in content.parts or []:
+                    function_response = getattr(part, "function_response", None)
+                    if function_response is not None:
+                        object.__setattr__(self, "saw_tool_response", True)
+            yield _llm_response(
+                api,
+                _text_content(
+                    api.genai_types,
+                    f"final local answer: {marker}",
+                    role="model",
+                ),
+            )
+
+    class LocalLookupTool(BaseTool):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            super().__init__(
+                name="local_lookup",
+                description="Local lookup used by Kitaru's ADK smoke.",
+            )
+            self.calls: list[dict[str, Any]] = []
+
+        def _get_declaration(self) -> Any:
+            return _local_lookup_declaration(api.genai_types)
+
+        async def run_async(self, *, args: dict[str, Any], tool_context: Any) -> Any:
+            self.calls.append(dict(args))
+            return {"query": args.get("query"), "answer": marker}
+
+    async def run_smoke() -> Any:
+        app_name = "kitaru_runner_smoke_app"
+        user_id = "local-user"
+        session_id = "local-session"
+        local_model = LocalToolLoopLlm()
+        local_tool = LocalLookupTool()
+        wrapped_model = adapter.KitaruADKModel(local_model)
+        wrapped_tool = adapter.KitaruADKTool(local_tool)
+        agent = LlmAgent(
+            name="kitaru_runner_smoke_agent",
+            model=wrapped_model,
+            tools=[wrapped_tool],
+        )
+        runner = _build_in_memory_runner(api, agent=agent, app_name=app_name)
+        await _create_runner_session(
+            runner,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        kitaru_runner = adapter.KitaruADKRunner(runner, name=app_name)
+        result = await kitaru_runner.run(
+            adapter.ADKRunRequest(
+                user_id=user_id,
+                session_id=session_id,
+                message=_text_content(
+                    api.genai_types,
+                    "please look up cats locally",
+                    role="user",
+                ),
+            )
+        )
+        return result, local_model, local_tool
+
+    result, local_model, local_tool = asyncio.run(run_smoke())
+
+    assert result.status == "completed"
+    assert len(local_model.calls) >= 2
+    assert local_tool.calls == [{"query": "cats"}]
+    assert local_model.saw_tool_response is True
+    assert result.events
+    assert _contains_marker(result.events, marker)
