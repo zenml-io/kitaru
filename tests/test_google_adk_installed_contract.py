@@ -11,11 +11,11 @@ import asyncio
 import importlib
 import inspect
 import os
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 
 def _import_adk_module(module_path: str) -> Any:
@@ -52,6 +52,9 @@ def _adk_contract_classes() -> tuple[type[Any], type[Any], type[Any]]:
 
 
 def _adapter_wrappers() -> tuple[type[Any], type[Any]]:
+    for cached in list(sys.modules):
+        if cached.startswith("kitaru.adapters.google_adk"):
+            del sys.modules[cached]
     adapter = importlib.import_module("kitaru.adapters.google_adk")
     return adapter.KitaruADKModel, adapter.KitaruADKTool
 
@@ -88,7 +91,7 @@ def test_kitaru_adk_model_preserves_real_base_llm_public_behavior() -> None:
     assert events == [{"request": {"prompt": "local only"}, "stream": False}]
 
 
-def test_real_llm_agent_rejects_composition_model_wrapper() -> None:
+def test_real_llm_agent_accepts_kitaru_model_wrapper() -> None:
     BaseLlm, _BaseTool, LlmAgent = _adk_contract_classes()
     KitaruADKModel, _KitaruADKTool = _adapter_wrappers()
 
@@ -102,13 +105,17 @@ def test_real_llm_agent_rejects_composition_model_wrapper() -> None:
             llm_request: Any,
             stream: bool = False,
         ) -> AsyncIterator[Any]:
-            if False:
-                yield {"request": llm_request, "stream": stream}
+            yield {"request": llm_request, "stream": stream}
 
     wrapped = KitaruADKModel(ContractLlm(model="kitaru-contract-model"))
 
-    with pytest.raises(ValidationError, match="BaseLlm"):
-        LlmAgent(name="contract_agent", model=wrapped)
+    assert isinstance(wrapped, BaseLlm)
+    agent = LlmAgent(name="contract_agent", model=wrapped)
+    assert agent.model is wrapped
+    assert isinstance(agent.model, BaseLlm)
+
+    events = asyncio.run(_collect_model_events(agent.model, {"prompt": "local only"}))
+    assert events == [{"request": {"prompt": "local only"}, "stream": False}]
 
 
 def test_kitaru_adk_tool_preserves_real_base_tool_public_behavior() -> None:
@@ -181,9 +188,9 @@ def test_kitaru_adk_tool_preserves_real_base_tool_public_behavior() -> None:
     assert async_tool.processed == [(context, request)]
 
 
-def test_real_llm_agent_rejects_composition_tool_wrapper() -> None:
+def test_real_llm_agent_accepts_kitaru_tool_wrapper() -> None:
     BaseLlm, BaseTool, LlmAgent = _adk_contract_classes()
-    KitaruADKModel, KitaruADKTool = _adapter_wrappers()
+    _KitaruADKModel, KitaruADKTool = _adapter_wrappers()
 
     class ContractLlm(BaseLlm):  # type: ignore[misc, valid-type]
         @classmethod
@@ -200,13 +207,15 @@ def test_real_llm_agent_rejects_composition_tool_wrapper() -> None:
 
     class ContractTool(BaseTool):  # type: ignore[misc, valid-type]
         async def run_async(self, *, args: dict[str, Any], tool_context: Any) -> Any:
-            return {"args": args}
+            return {"args": args, "context": type(tool_context).__name__}
 
     model = ContractLlm(model="kitaru-contract-model")
     tool = ContractTool(name="contract_tool", description="Local contract tool")
     wrapped = KitaruADKTool(tool)
 
-    assert not isinstance(KitaruADKModel(model), BaseLlm)
-    assert not isinstance(wrapped, BaseTool)
-    with pytest.raises(ValidationError, match="BaseTool"):
-        LlmAgent(name="contract_agent", model=model, tools=[wrapped])
+    assert isinstance(wrapped, BaseTool)
+    agent = LlmAgent(name="contract_agent", model=model, tools=[wrapped])
+    assert agent.tools[0] is wrapped
+    assert asyncio.run(
+        agent.tools[0].run_async(args={"query": "cats"}, tool_context=object())
+    ) == {"args": {"query": "cats"}, "context": "object"}

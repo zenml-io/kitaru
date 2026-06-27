@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import importlib
-import sys
-from types import ModuleType
 from typing import Any
 
 import pytest
 
+from google_adk_fakes import install_fake_google_adk, purge_google_adk_adapter_modules
 from kitaru.errors import KitaruUsageError
 
 
 def _modules(monkeypatch: pytest.MonkeyPatch):
-    for cached in list(sys.modules):
-        if cached.startswith("kitaru.adapters.google_adk"):
-            monkeypatch.delitem(sys.modules, cached, raising=False)
-    google = ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.adk", ModuleType("google.adk"))
+    purge_google_adk_adapter_modules(monkeypatch)
+    install_fake_google_adk(monkeypatch)
     adapter = importlib.import_module("kitaru.adapters.google_adk")
     agent_module = importlib.import_module("kitaru.adapters.google_adk._agent")
     return adapter, agent_module

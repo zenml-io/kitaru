@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import importlib
-import sys
-from types import ModuleType
 
 import pytest
 
+from google_adk_fakes import install_fake_google_adk, purge_google_adk_adapter_modules
 from kitaru.errors import KitaruUsageError
 
 
 def _utils(monkeypatch: pytest.MonkeyPatch):
-    google = ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.adk", ModuleType("google.adk"))
+    purge_google_adk_adapter_modules(monkeypatch)
+    install_fake_google_adk(monkeypatch)
     return importlib.import_module("kitaru.adapters.google_adk._utils")
 
 

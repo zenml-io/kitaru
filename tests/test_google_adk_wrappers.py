@@ -4,23 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import sys
-from types import ModuleType
 from typing import Any
 
 import pytest
 
+from google_adk_fakes import install_fake_google_adk, purge_google_adk_adapter_modules
 from kitaru.errors import KitaruUsageError
 
 
 def _modules(monkeypatch: pytest.MonkeyPatch):
-    for cached in list(sys.modules):
-        if cached.startswith("kitaru.adapters.google_adk"):
-            monkeypatch.delitem(sys.modules, cached, raising=False)
-    google = ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.adk", ModuleType("google.adk"))
+    purge_google_adk_adapter_modules(monkeypatch)
+    install_fake_google_adk(monkeypatch)
     adapter = importlib.import_module("kitaru.adapters.google_adk")
     model_module = importlib.import_module("kitaru.adapters.google_adk._model")
     tool_module = importlib.import_module("kitaru.adapters.google_adk._tool")
@@ -65,13 +59,15 @@ async def _collect_model(model: Any, request: dict[str, Any]) -> list[Any]:
     return [event async for event in model.generate_content_async(request)]
 
 
-def test_model_wrapper_supported_models_delegates_to_wrapped_model(
+def test_model_wrapper_is_base_llm_and_delegates_supported_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter, _model_module, _tool_module = _modules(monkeypatch)
+    from google.adk.models.base_llm import BaseLlm
 
     wrapped = adapter.KitaruADKModel(FakeModel())
 
+    assert isinstance(wrapped, BaseLlm)
     assert wrapped.supported_models() == ["gemini-fake", "gemini-fake-pro"]
 
 
@@ -86,15 +82,18 @@ def test_model_wrapper_without_supported_models_returns_empty_list(
     assert wrapped.supported_models() == []
 
 
-def test_tool_wrapper_process_llm_request_accepts_sync_delegate(
+def test_tool_wrapper_is_base_tool_and_accepts_sync_process_delegate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter, _model_module, _tool_module = _modules(monkeypatch)
+    from google.adk.tools.base_tool import BaseTool
+
     tool = SyncProcessTool()
     wrapped = adapter.wrap_tool(tool)
     context = object()
     request = {"prompt": "hi"}
 
+    assert isinstance(wrapped, BaseTool)
     asyncio.run(wrapped.process_llm_request(tool_context=context, llm_request=request))
 
     assert tool.processed == [(context, request)]

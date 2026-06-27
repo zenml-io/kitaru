@@ -8,27 +8,14 @@ from types import ModuleType
 
 import pytest
 
+from google_adk_fakes import install_fake_google_adk, purge_google_adk_adapter_modules
 from kitaru.errors import KitaruFeatureNotAvailableError
-
-
-def _purge_google_adk_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    for cached in list(sys.modules):
-        if cached.startswith("kitaru.adapters.google_adk"):
-            monkeypatch.delitem(sys.modules, cached, raising=False)
-
-
-def _install_fake_google_adk(monkeypatch: pytest.MonkeyPatch) -> None:
-    google = ModuleType("google")
-    google.__path__ = []  # type: ignore[attr-defined]
-    adk = ModuleType("google.adk")
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.adk", adk)
 
 
 def test_import_without_google_adk_raises_feature_not_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _purge_google_adk_adapter_modules(monkeypatch)
+    purge_google_adk_adapter_modules(monkeypatch)
     monkeypatch.setitem(sys.modules, "google.adk", None)
 
     with pytest.raises(KitaruFeatureNotAvailableError, match="google-adk"):
@@ -38,7 +25,7 @@ def test_import_without_google_adk_raises_feature_not_available(
 def test_transitive_google_adk_import_error_is_not_masked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _purge_google_adk_adapter_modules(monkeypatch)
+    purge_google_adk_adapter_modules(monkeypatch)
     for cached in list(sys.modules):
         if cached == "google.adk" or cached.startswith("kitaru.adapters.google_adk"):
             monkeypatch.delitem(sys.modules, cached, raising=False)
@@ -56,11 +43,26 @@ def test_transitive_google_adk_import_error_is_not_masked(
         importlib.import_module("kitaru.adapters.google_adk")
 
 
+def test_incomplete_google_adk_base_modules_error_is_not_masked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    purge_google_adk_adapter_modules(monkeypatch)
+    google = ModuleType("google")
+    google.__path__ = []  # type: ignore[attr-defined]
+    adk = ModuleType("google.adk")
+    adk.__path__ = []  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.adk", adk)
+
+    with pytest.raises(ModuleNotFoundError, match=r"google\.adk\.models"):
+        importlib.import_module("kitaru.adapters.google_adk")
+
+
 def test_fake_google_adk_allows_adapter_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _purge_google_adk_adapter_modules(monkeypatch)
-    _install_fake_google_adk(monkeypatch)
+    purge_google_adk_adapter_modules(monkeypatch)
+    install_fake_google_adk(monkeypatch)
 
     module = importlib.import_module("kitaru.adapters.google_adk")
 

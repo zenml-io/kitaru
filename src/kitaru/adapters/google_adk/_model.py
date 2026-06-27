@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Any
 
 from kitaru.analytics import AnalyticsEvent, track
@@ -23,8 +24,17 @@ from ._utils import (
     run_async_in_checkpoint,
 )
 
+_BaseLlm: type[Any] = importlib.import_module("google.adk.models.base_llm").BaseLlm
 
-class KitaruADKModel:
+
+def _base_llm_init_kwargs(values: dict[str, Any]) -> dict[str, Any]:
+    fields = getattr(_BaseLlm, "model_fields", None)
+    if isinstance(fields, Mapping):
+        return {key: value for key, value in values.items() if key in fields}
+    return values
+
+
+class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
     """Wrap an ADK model-like object at ``generate_content_async``.
 
     Public ADK docs expose ``BaseLlm.generate_content_async(...)`` as the model
@@ -43,15 +53,24 @@ class KitaruADKModel:
         call_policy: ADKCallCheckpointPolicy | None = None,
         tracker: EventTracker | None = None,
     ) -> None:
-        self._model = model
-        self._name = name or str(getattr(model, "model", None) or type(model).__name__)
-        self._capture = capture or ADKCapturePolicy()
-        self._call_policy = call_policy or ADKCallCheckpointPolicy()
-        self._tracker = tracker
+        public_model = str(
+            getattr(model, "model", None) or name or type(model).__name__
+        )
+        try:
+            super().__init__(**_base_llm_init_kwargs({"model": public_model}))
+        except TypeError:
+            super().__init__()
+            object.__setattr__(self, "model", public_model)
 
-    @property
-    def model(self) -> Any:
-        return getattr(self._model, "model", self._name)
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_name", name or public_model)
+        object.__setattr__(self, "_capture", capture or ADKCapturePolicy())
+        object.__setattr__(
+            self,
+            "_call_policy",
+            call_policy or ADKCallCheckpointPolicy(),
+        )
+        object.__setattr__(self, "_tracker", tracker)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._model, name)
