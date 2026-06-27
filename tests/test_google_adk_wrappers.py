@@ -84,6 +84,120 @@ async def _collect_model(model: Any, request: dict[str, Any]) -> list[Any]:
     return [event async for event in model.generate_content_async(request)]
 
 
+class PreviewPart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class PreviewContent:
+    def __init__(self, parts: list[Any]) -> None:
+        self.parts = parts
+
+
+class ExplodingPreviewPart:
+    @property
+    def text(self) -> str:
+        raise AssertionError("preview walked past the requested character budget")
+
+
+def test_final_output_preview_extracts_adk_content_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    output = PreviewContent(parts=[PreviewPart("hello"), PreviewPart(" world")])
+
+    assert adapter.final_output_preview(output) == "hello world"
+    assert (
+        adapter.final_output_preview({"content": {"parts": [{"text": "nested"}]}})
+        == "nested"
+    )
+    assert adapter.final_output_preview("abcdef", max_chars=4) == "abc…"
+
+
+def test_final_output_preview_stops_after_character_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    output = PreviewContent(parts=[PreviewPart("abcdef"), ExplodingPreviewPart()])
+
+    assert adapter.final_output_preview(output, max_chars=4) == "abc…"
+
+
+def test_runner_skips_handoff_extraction_when_events_have_no_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    agent_module = importlib.import_module("kitaru.adapters.google_adk._agent")
+
+    def fail_if_called(_events: list[dict[str, Any]]) -> list[Any]:
+        raise AssertionError("handoff extraction should not run without markers")
+
+    monkeypatch.setattr(agent_module, "extract_handoff_requests", fail_if_called)
+
+    class StaticRunner:
+        app_name = "plain-output-app"
+
+        def run(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return [{"text": "plain output"}]
+
+    result = adapter.KitaruADKRunner(StaticRunner()).run_sync(
+        adapter.ADKRunRequest(
+            user_id="local-user",
+            session_id="plain-session",
+            message={"text": "hello"},
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.handoffs == []
+    assert result.final_output == "plain output"
+
+
+def test_hitl_parser_accepts_synthetic_snake_case_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _modules(monkeypatch)
+    hitl_module = importlib.import_module("kitaru.adapters.google_adk._hitl")
+
+    handoffs = hitl_module.extract_handoff_requests(
+        [
+            {
+                "id": "event-1",
+                "invocation_id": "invocation-1",
+                "author": "agent",
+                "content": {
+                    "parts": [
+                        {
+                            "function_call": {
+                                "id": "request-1",
+                                "name": "adk_request_confirmation",
+                                "args": {
+                                    "original_function_call": {
+                                        "id": "tool-call-1",
+                                        "name": "delete_thing",
+                                        "args": {"thing": "draft"},
+                                    },
+                                    "tool_confirmation": {"hint": "Confirm?"},
+                                },
+                            }
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+
+    assert len(handoffs) == 1
+    handoff = handoffs[0]
+    assert handoff.kind == "tool_confirmation"
+    assert handoff.invocation_id == "invocation-1"
+    assert handoff.function_call_id == "tool-call-1"
+    assert handoff.request_function_call_id == "request-1"
+    assert handoff.tool_name == "delete_thing"
+    assert handoff.tool_args == {"thing": "draft"}
+    assert handoff.message == "Confirm?"
+
+
 def test_model_wrapper_is_base_llm_and_delegates_supported_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

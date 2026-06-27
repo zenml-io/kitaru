@@ -184,6 +184,25 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+  google-adk-contract:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    env:
+      KITARU_REQUIRE_GOOGLE_ADK_CONTRACT: '1'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          python-version: '3.12'
+      - name: Run installed Google ADK no-provider contract tests
+        run: >-
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/kitaru-google-adk-contract-env"
+          uv run --python 3.12 --no-dev --extra google-adk --with pytest
+          pytest -o addopts='-vv'
+          tests/test_google_adk_installed_contract.py
+          tests/test_google_adk_example.py
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

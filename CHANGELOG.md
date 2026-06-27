@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, an integration example, isolated no-dev contract/live smoke paths, and an explicit limitation that runner-level arbitrary `calls` mode is blocked until ADK exposes a safe public hook for model/tool call bodies.
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
 
 ### Fixed

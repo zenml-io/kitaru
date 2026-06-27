@@ -131,6 +131,7 @@ Translate changed provider behavior into smoke flags. Use this vocabulary only:
 | Claude Agent SDK / Anthropic behavior | `--required-provider-area anthropic` |
 | Gemini raw model response behavior | `--required-provider-area gemini-model` |
 | Gemini Antigravity managed-agent behavior | `--required-provider-area gemini-antigravity` |
+| Google ADK/Gemini adapter behavior | `--required-provider-area google-adk` |
 | OpenAI research bot web-search behavior | `--required-provider-area research-bot` |
 
 Do **not** let the smoke script infer this from git history. The release skill/operator decides which areas changed and passes the flags explicitly.
@@ -245,6 +246,7 @@ Never push without that explicit confirmation — the release workflow reads `CH
   [--required-provider-area anthropic] \
   [--required-provider-area gemini-model] \
   [--required-provider-area gemini-antigravity] \
+  [--required-provider-area google-adk] \
   [--required-provider-area research-bot]
 ```
 
@@ -252,7 +254,7 @@ Expected runtime: 3-5 minutes. The script:
 
 - Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `gemini`, `langgraph`)
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
-- Exercises CLI, SDK flows (including replay), MCP tools, the five adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions), and an end-to-end LLM flow
+- Exercises CLI, SDK flows (including replay), MCP tools, the adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions, and isolated Google ADK checks), and an end-to-end LLM flow
 - Tears down the server
 - Writes structured results to `smoke-results.json`, including skipped checks and skip reasons
 - In `--release` mode, fails if `timeout`/`gtimeout` is unavailable

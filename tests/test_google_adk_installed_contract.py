@@ -191,6 +191,32 @@ async def _create_runner_session(
     return session
 
 
+async def _run_in_memory_adapter_turn(
+    api: _ADKRuntimeAPI,
+    adapter: Any,
+    *,
+    agent: Any,
+    app_name: str,
+    session_id: str,
+    message: Any,
+    user_id: str = "local-user",
+) -> Any:
+    runner = _build_in_memory_runner(api, agent=agent, app_name=app_name)
+    await _create_runner_session(
+        runner,
+        app_name=app_name,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    return await adapter.KitaruADKRunner(runner, name=app_name).run(
+        adapter.ADKRunRequest(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+        )
+    )
+
+
 async def _get_runner_session(
     runner: Any,
     *,
@@ -438,6 +464,241 @@ def test_real_llm_agent_accepts_kitaru_tool_wrapper() -> None:
     ) == {"args": {"query": "cats"}, "context": "object"}
 
 
+def test_adk_tool_confirmation_events_become_typed_handoffs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_no_hosted_provider_guard(monkeypatch)
+
+    BaseLlm, _BaseTool, LlmAgent = _adk_contract_classes()
+    api = _adk_runtime_api()
+    adapter = _adapter_module()
+    function_tool_module = _import_adk_module("google.adk.tools.function_tool")
+
+    class ConfirmationLlm(BaseLlm):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            super().__init__(model="kitaru-confirmation-model")
+
+        @classmethod
+        def supported_models(cls) -> list[str]:
+            return ["kitaru-confirmation-model"]
+
+        async def generate_content_async(
+            self,
+            llm_request: Any,
+            stream: bool = False,
+        ) -> AsyncIterator[Any]:
+            yield _llm_response(
+                api,
+                _function_call_content(
+                    api.genai_types,
+                    name="dangerous_lookup",
+                    args={"query": "cats"},
+                ),
+            )
+
+    def dangerous_lookup(query: str) -> dict[str, Any]:
+        return {"query": query, "answer": "should-not-run-before-confirmation"}
+
+    agent = LlmAgent(
+        name="confirmation_agent",
+        model=ConfirmationLlm(),
+        tools=[
+            function_tool_module.FunctionTool(
+                dangerous_lookup,
+                require_confirmation=True,
+            )
+        ],
+    )
+    result = asyncio.run(
+        _run_in_memory_adapter_turn(
+            api,
+            adapter,
+            agent=agent,
+            app_name="kitaru_confirmation_app",
+            session_id="confirmation-session",
+            message=_text_content(api.genai_types, "confirm it", role="user"),
+        )
+    )
+
+    assert result.status == "requires_action"
+    assert len(result.handoffs) == 1
+    handoff = result.handoffs[0]
+    assert handoff.kind == "tool_confirmation"
+    assert handoff.tool_name == "dangerous_lookup"
+    assert handoff.tool_args == {"query": "cats"}
+    assert handoff.function_call_id is not None
+    assert handoff.request_function_call_id is not None
+    assert handoff.invocation_id is not None
+    assert isinstance(handoff.message, str) and handoff.message
+    assert _contains_marker(result.events, "adk_request_confirmation")
+    assert _contains_marker(result.events, "requestedToolConfirmations")
+
+
+def test_adk_credential_request_events_become_typed_handoffs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_no_hosted_provider_guard(monkeypatch)
+
+    BaseLlm, _BaseTool, LlmAgent = _adk_contract_classes()
+    api = _adk_runtime_api()
+    adapter = _adapter_module()
+    auth_module = _import_adk_module("google.adk.auth")
+    function_tool_module = _import_adk_module("google.adk.tools.function_tool")
+    tool_context_module = _import_adk_module("google.adk.tools.tool_context")
+    fastapi_models = _import_adk_module("fastapi.openapi.models")
+
+    class CredentialLlm(BaseLlm):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            super().__init__(model="kitaru-credential-model")
+
+        @classmethod
+        def supported_models(cls) -> list[str]:
+            return ["kitaru-credential-model"]
+
+        async def generate_content_async(
+            self,
+            llm_request: Any,
+            stream: bool = False,
+        ) -> AsyncIterator[Any]:
+            yield _llm_response(
+                api,
+                _function_call_content(
+                    api.genai_types,
+                    name="needs_api_key",
+                    args={"query": "cats"},
+                ),
+            )
+
+    def needs_api_key(
+        query: str,
+        tool_context: Any,  # ADK injects this because of the concrete annotation.
+    ) -> dict[str, Any]:
+        scheme = fastapi_models.APIKey(
+            type="apiKey",
+            **{"in": fastapi_models.APIKeyIn.header},
+            name="X-Kitaru-Test",
+        )
+        tool_context.request_credential(auth_module.AuthConfig(authScheme=scheme))
+        return {"query": query, "status": "credential-requested"}
+
+    needs_api_key.__annotations__["tool_context"] = tool_context_module.ToolContext
+
+    agent = LlmAgent(
+        name="credential_agent",
+        model=CredentialLlm(),
+        tools=[function_tool_module.FunctionTool(needs_api_key)],
+    )
+    result = asyncio.run(
+        _run_in_memory_adapter_turn(
+            api,
+            adapter,
+            agent=agent,
+            app_name="kitaru_credential_app",
+            session_id="credential-session",
+            message=_text_content(api.genai_types, "need auth", role="user"),
+        )
+    )
+
+    assert result.status == "requires_action"
+    assert len(result.handoffs) == 1
+    handoff = result.handoffs[0]
+    assert handoff.kind == "credential_request"
+    assert handoff.tool_name == "needs_api_key"
+    assert handoff.function_call_id is not None
+    assert handoff.request_function_call_id is not None
+    assert handoff.auth_config is not None
+    assert handoff.auth_config["authScheme"]["name"] == "X-Kitaru-Test"
+    assert _contains_marker(result.events, "adk_request_credential")
+    assert _contains_marker(result.events, "requestedAuthConfigs")
+
+
+def test_serialized_adk_request_input_event_becomes_typed_handoff() -> None:
+    _import_adk_module("google.adk")
+    adapter = _adapter_module()
+
+    request_event = {
+        "id": "request-input-event",
+        "invocationId": "request-input-invocation",
+        "author": "workflow_agent",
+        "content": {
+            "parts": [
+                {
+                    "functionCall": {
+                        "id": "request-input-call",
+                        "name": "adk_request_input",
+                        "args": {
+                            "interruptId": "request-input-interrupt",
+                            "message": "Choose the next step",
+                            "payload": {"question": "continue?"},
+                            "responseSchema": {
+                                "type": "object",
+                                "properties": {"ok": {"type": "boolean"}},
+                            },
+                        },
+                    }
+                }
+            ]
+        },
+    }
+
+    class StaticRunner:
+        app_name = "request-input-app"
+
+        async def run_async(self, **_kwargs: Any) -> AsyncIterator[Any]:
+            yield request_event
+
+    result = asyncio.run(
+        adapter.KitaruADKRunner(StaticRunner()).run(
+            adapter.ADKRunRequest(
+                user_id="local-user",
+                session_id="request-input-session",
+                message={"text": "start workflow"},
+            )
+        )
+    )
+
+    assert result.status == "requires_action"
+    assert len(result.handoffs) == 1
+    handoff = result.handoffs[0]
+    assert handoff.kind == "human_input"
+    assert handoff.event_id == "request-input-event"
+    assert handoff.invocation_id == "request-input-invocation"
+    assert handoff.author == "workflow_agent"
+    assert handoff.function_call_id == "request-input-interrupt"
+    assert handoff.request_function_call_id == "request-input-call"
+    assert handoff.message == "Choose the next step"
+    assert handoff.payload == {"question": "continue?"}
+    assert handoff.response_schema == {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+    }
+    assert _contains_marker(result.events, "adk_request_input")
+
+
+def test_adk_mcp_toolset_import_contract_documents_v1_limit() -> None:
+    _import_adk_module("google.adk.tools.mcp_tool")
+    try:
+        mcp_toolset_module = importlib.import_module(
+            "google.adk.tools.mcp_tool.mcp_toolset"
+        )
+    except ImportError as exc:
+        # google-adk 2.3.x exposes the MCP package path, but the no-dev
+        # `kitaru[google-adk]` environment cannot instantiate McpToolset here:
+        # without an MCP package the import says `No module named 'mcp'`; with
+        # the current standalone `mcp` package it fails on `SamplingCapability`.
+        # Kitaru v1 therefore documents ADK-hosted MCP only at the ADK-exposed
+        # tool call/result level, not as restored MCP process/session state.
+        message = str(exc)
+        assert "mcp" in message or "SamplingCapability" in message
+        return
+
+    mcp_toolset = getattr(mcp_toolset_module, "McpToolset", None)
+    assert mcp_toolset is not None
+    signature = inspect.signature(mcp_toolset)
+    assert "connection_params" in signature.parameters
+    assert any("tool" in name.lower() for name in dir(mcp_toolset))
+
+
 def test_real_adk_runner_invokes_kitaru_wrapped_local_model_and_tool_without_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -554,3 +815,8 @@ def test_real_adk_runner_invokes_kitaru_wrapped_local_model_and_tool_without_net
     assert local_model.saw_tool_response is True
     assert result.events
     assert _contains_marker(result.events, marker)
+    assert type(result.final_output).__module__ == "google.genai.types"
+    assert type(result.final_output).__qualname__ == "Content"
+    assert adapter.final_output_preview(result.final_output) == (
+        f"final local answer: {marker}"
+    )

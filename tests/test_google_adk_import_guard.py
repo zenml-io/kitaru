@@ -47,6 +47,9 @@ def test_incomplete_google_adk_base_modules_error_is_not_masked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     purge_google_adk_adapter_modules(monkeypatch)
+    for cached in list(sys.modules):
+        if cached.startswith("google.adk."):
+            monkeypatch.delitem(sys.modules, cached, raising=False)
     google = ModuleType("google")
     google.__path__ = []  # type: ignore[attr-defined]
     adk = ModuleType("google.adk")

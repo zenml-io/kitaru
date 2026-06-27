@@ -548,6 +548,39 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: google-adk-adapter
+    path: examples/integrations/google_adk_agent/google_adk_adapter.py
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/google-adk.md
+    owner_area: experimental Google ADK adapter
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_google_adk_example.py
+        notes: runs the example's real installed ADK local mode without hosted provider credentials when the isolated google-adk extra is installed; help path imports without google-adk
+      local_smoke:
+        status: covered
+        command: UV_PROJECT_ENVIRONMENT=.venv-google-adk uv run --python 3.12 --no-dev --extra google-adk python examples/integrations/google_adk_agent/google_adk_adapter.py
+        requires_server: false
+        timeout_seconds: 120
+        notes: must run in an isolated no-dev ADK environment; do not combine google-adk with local while the FastAPI conflict remains
+      live_provider:
+        status: opt_in_extended
+        provider: gemini
+        command: KITARU_SMOKE_GOOGLE_ADK=1 ./scripts/smoke-test.sh --release --required-provider-area google-adk
+        weekly_workflow: false
+        local_release_smoke: true
+        manual_command_available: true
+        required_env: [GEMINI_API_KEY, GOOGLE_API_KEY, KITARU_SMOKE_GOOGLE_ADK]
+        opt_in_env: [KITARU_SMOKE_GOOGLE_ADK]
+        timeout_seconds: 180
+        cost_class: low
+        notes: requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY; the smoke script runs the isolated no-dev ADK/Gemini pytest command.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: gemini-sandbox-function
     path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
     public_docs:

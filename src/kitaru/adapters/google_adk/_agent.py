@@ -15,6 +15,8 @@ from kitaru.errors import KitaruUsageError
 from . import _kitaru_internal as runtime
 from ._constants import ADAPTER_ID, ADAPTER_VERSION, DEFAULT_RUNNER_CHECKPOINT_TYPE
 from ._events import dump_adk_events
+from ._hitl import extract_handoff_requests, has_handoff_markers
+from ._outputs import extract_final_output
 from ._plugin import _TRUE_HOOK_ERROR
 from ._policy import (
     ADKCallCheckpointPolicy,
@@ -291,10 +293,19 @@ class KitaruADKRunner:
         event_dicts = [event for event in serialized_events if isinstance(event, dict)]
         if tracker is not None:
             event_dicts.extend(dump_adk_events(list(tracker.events)))
+        handoffs = (
+            extract_handoff_requests(event_dicts)
+            if has_handoff_markers(event_dicts)
+            else []
+        )
         result = ADKRunResult(
-            status="completed",
-            final_output=self._extract_final_output(raw_events),
+            status="requires_action" if handoffs else "completed",
+            final_output=extract_final_output(
+                raw_events,
+                include_raw=self._capture.capture_mode == "full",
+            ),
             events=event_dicts,
+            handoffs=handoffs,
             usage=usage,
             estimated_cost_usd=estimated_cost,
             event_log_artifact_name=None,
@@ -334,20 +345,6 @@ class KitaruADKRunner:
             return self._cost_calculator(usage)
         except Exception:
             return None
-
-    def _extract_final_output(self, raw_events: list[Any]) -> Any | None:
-        if not raw_events:
-            return None
-        last = raw_events[-1]
-        if isinstance(last, Mapping):
-            for key in ("final_output", "final_response", "output", "content", "text"):
-                if key in last:
-                    return last[key]
-            return to_json_safe(last, include_raw=self._capture.capture_mode == "full")
-        for attr in ("final_output", "final_response", "output", "content", "text"):
-            if hasattr(last, attr):
-                return getattr(last, attr)
-        return to_json_safe(last, include_raw=self._capture.capture_mode == "full")
 
     def _result_warnings(self, *, tracker: EventTracker | None) -> list[str]:
         if self._checkpoint_strategy == "calls":
@@ -408,11 +405,14 @@ class KitaruADKRunner:
         if result.usage is None or not self._capture.save_usage:
             return
         usage = result.usage
+        usage_status = (
+            "interrupted" if result.status == "requires_action" else result.status
+        )
         usage_record = build_usage_record(
             adapter=ADAPTER_ID,
             surface="adk_turn",
             call_name=self._name,
-            status=result.status,
+            status=usage_status,
             model=usage.model_name,
             provider=usage.provider_name,
             input_tokens=usage.input_tokens,
@@ -435,6 +435,7 @@ class KitaruADKRunner:
                 "checkpoint_strategy": self._checkpoint_strategy,
                 "status": result.status,
                 "event_count": len(result.events),
+                "handoff_count": len(result.handoffs),
                 "has_usage": result.usage is not None,
             },
         )

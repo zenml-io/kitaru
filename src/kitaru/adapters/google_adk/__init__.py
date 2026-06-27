@@ -21,7 +21,13 @@ from ._model import KitaruADKModel
 from ._plugin import KitaruADKPlugin
 from ._policy import ADKCallCheckpointPolicy, ADKCapturePolicy
 from ._tool import KitaruADKTool, wrap_tool
-from ._types import ADKRunRequest, ADKRunResult, ADKUsageSummary
+from ._types import (
+    ADKHandoffRequest,
+    ADKRunRequest,
+    ADKRunResult,
+    ADKUsageSummary,
+    final_output_preview,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointRuntime,
@@ -35,6 +41,7 @@ __all__ = [
     "ADKCallCheckpointPolicy",
     "ADKCapturePolicy",
     "ADKEventError",
+    "ADKHandoffRequest",
     "ADKRunEvent",
     "ADKRunRequest",
     "ADKRunResult",
@@ -47,6 +54,7 @@ __all__ = [
     "KitaruADKRunner",
     "KitaruADKTool",
     "ToolCheckpointOverride",
+    "final_output_preview",
     "validate_checkpoint_strategy",
     "wrap_tool",
 ]

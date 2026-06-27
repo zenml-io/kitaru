@@ -24,6 +24,7 @@ def test_public_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         "ADKCallCheckpointPolicy",
         "ADKCapturePolicy",
         "ADKEventError",
+        "ADKHandoffRequest",
         "ADKRunEvent",
         "ADKRunRequest",
         "ADKRunResult",
@@ -36,6 +37,7 @@ def test_public_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         "KitaruADKRunner",
         "KitaruADKTool",
         "ToolCheckpointOverride",
+        "final_output_preview",
         "validate_checkpoint_strategy",
         "wrap_tool",
     }
