@@ -55,15 +55,15 @@ What you choose depends on what you are trying to learn:
   expensive, or unsafe (tools with side effects, external writes, approvals).
 - **Skip a checkpoint** when you want upstream changes but need one step to stay
   exactly as prod recorded it.
-- **Mock a checkpoint output or swap tool code** when the real callable has side
-  effects, depends on stale external state, or you want to test a fix on historical
-  inputs without calling prod systems again.
+- **Mock a checkpoint output** when the real callable has side effects, depends on
+  stale external state, or you want to test a fix on historical inputs without
+  calling prod systems again.
 
 This demo uses **`lookup_policy_tool` as the replay anchor** for most scenarios:
 triage and the first model turn stay cached, and everything from policy lookup
 onward can change. That is one reasonable choice for *"we updated policy / model /
 prompt — what happens next on this ticket?"* — not the only valid one. The
-techniques below (`flow_overrides`, `skip`, input override, code swap) compose with
+techniques below (`flow_overrides`, `skip`, input override) compose with
 whatever anchor fits your question.
 
 ![Replay parent and child in the dashboard](screenshots/02-replay-compare.png)
@@ -143,26 +143,10 @@ Everything upstream stays cached from prod; only publish re-runs with the substi
 decision dict. Compare the `support_decision` artifact on the replay side.
 
 Adapter tool and model checkpoints do not support **`output` override** on this graph
-(no pipeline input edges between them). Use **`code-swap`** to change policy tool
-behavior instead.
+(no pipeline input edges between them). Use **`flow-override`** to change prompt
+profile and model behavior downstream instead.
 
 ![Publish input override](screenshots/05-publish-input.png)
-
-### Swap policy tool code
-
-**When:** You fixed a bug in `lookup_policy` and want to see downstream impact on
-**historical** tickets.
-
-```bash
-uv run python demo.py code-swap
-```
-
-Every `lookup_policy_tool` invocation in the replay uses `mocks.lookup_policy`
-(more permissive fast path). Compare policy checkpoint outputs and the final
-decision — sensitive requests that previously escalated may now get a direct-answer
-path.
-
-![Policy checkpoint diff](screenshots/06-code-swap.png)
 
 ### Change the model on one LLM call
 
@@ -237,7 +221,6 @@ to permissive direct actions.
 | Scope | What it changes | Demo command |
 |-------|-----------------|--------------|
 | `flow_overrides` | Flow inputs for the replay run (`model`, `prompt_profile`) | `flow-override` |
-| `checkpoint_overrides` | Every invocation of a checkpoint name (e.g. code swap) | `code-swap` |
 | `invocation_overrides` | One recorded call (publish input override or model swap) | `publish-input`, `model-override` |
 | `skip` | Reuse a recorded checkpoint instead of recomputing | `explicit-skip` |
 | `tag` | Label batch replay children for filtering and diff-matrix | `tagged-batch` |

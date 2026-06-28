@@ -33,7 +33,6 @@ OLD_TERMS = (
 REPLAY_SCENARIO_FILES = (
     "flow_override.py",
     "publish_input.py",
-    "checkpoint_code_swap.py",
     "invocation_model_override.py",
     "explicit_skip.py",
     "tagged_batch.py",
@@ -85,7 +84,6 @@ def test_replay_scenarios_use_unified_client_replay_api() -> None:
 
     assert "client.executions.replay(" in combined
     assert "flow_overrides=" in combined
-    assert "checkpoint_overrides=" in combined
     assert "invocation_overrides=" in combined
     assert "tag=REPLAY_TAG" in combined
     assert "skip=[FINAL_DECISION_CHECKPOINT]" in combined

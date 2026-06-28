@@ -6,7 +6,6 @@ Run from this directory:
     uv run python demo.py seed --count 15
     uv run python demo.py flow-override
     uv run python demo.py publish-input
-    uv run python demo.py code-swap
     uv run python demo.py model-override
     uv run python demo.py explicit-skip
     uv run python demo.py tagged-batch
@@ -25,7 +24,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from replay_scenarios import (
-    checkpoint_code_swap,
     diff_matrix,
     diff_report,
     explicit_skip,
@@ -105,7 +103,7 @@ def main(argv: list[str]) -> None:
     if not argv:
         raise SystemExit(
             "Usage: demo.py seed [--count N] | flow-override | publish-input | "
-            "code-swap | model-override | explicit-skip | tagged-batch [ID ...] | "
+            "model-override | explicit-skip | tagged-batch [ID ...] | "
             "diff-report [REPLAY_ID] | diff-matrix [ID ...]"
         )
 
@@ -121,8 +119,6 @@ def main(argv: list[str]) -> None:
         flow_override.replay_with_flow_overrides(resolve_prod_id())
     elif command == "publish-input":
         publish_input.replay_with_publish_input_override(resolve_prod_id())
-    elif command == "code-swap":
-        checkpoint_code_swap.replay_with_checkpoint_code_swap(resolve_prod_id())
     elif command == "model-override":
         invocation_model_override.replay_with_invocation_model_override(resolve_prod_id())
     elif command == "explicit-skip":
