@@ -223,11 +223,7 @@ examples:
       required_when_changed: true
   - id: replay-overrides-demo
     path: examples/end_to_end/replay_overrides_demo/demo.py
-    public_docs:
-      [
-        examples/end_to_end/replay_overrides_demo/README.md,
-        examples/end_to_end/replay_overrides_demo/PLAYBOOK.md,
-      ]
+    public_docs: [examples/end_to_end/replay_overrides_demo/README.md]
     owner_area: unified replay override scopes with live model comparison
     coverage:
       deterministic_pytest:

@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cohort experiment</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1c2024;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: #6b7280; margin: 0 0 24px; font-size: 13px; }
+.verdict { border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-weight: 600; }
+.verdict.good { background: #e9f7ec; color: #1e6b34; border: 1px solid #bfe6c8; }
+.verdict.bad { background: #fdecec; color: #8a1c1c; border: 1px solid #f3c0c0; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+.stat { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px; padding: 14px 16px; }
+.stat .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .l { color: #8a9099; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.card { background: #fff; border: 1px solid #e6e8eb; border-radius: 12px;
+  padding: 18px 20px; margin-bottom: 20px; }
+.card h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: #8a9099; margin: 0 0 14px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 8px 10px; text-align: left; vertical-align: top; font-size: 13px; }
+th { color: #6b7280; font-weight: 600; border-bottom: 1px solid #e6e8eb; }
+tr + tr td { border-top: 1px solid #f0f1f3; }
+.num { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #4b5563; }
+.arrow { color: #b0b6bd; padding: 0 4px; }
+.tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.tag.ok { background: #e9f7ec; color: #1e6b34; }
+.tag.bad { background: #fdecec; color: #8a1c1c; }
+.tag.warn { background: #fef3c7; color: #92590a; }
+.tag.muted { background: #f1f2f4; color: #6b7280; }
+</style></head>
+<body><div class="wrap">
+<h1>Cohort experiment</h1>
+<p class="sub">The same replay change applied across 6 production runs — original vs variant replay.</p>
+
+<div class="verdict good">Improvement — no metric regressed across the cohort.</div>
+
+<div class="cards"><div class="stat"><div class="n">6</div><div class="l">cases run</div></div><div class="stat"><div class="n">4</div><div class="l">skipped</div></div><div class="stat"><div class="n">0</div><div class="l">decision drift</div></div></div>
+
+<div class="card"><h2>Metrics — cohort means</h2>
+<table>
+<tr><th>metric</th><th>baseline</th><th></th><th>variant</th><th>delta</th><th>direction</th><th>verdict</th></tr>
+<tr><td>cost</td><td class="num">0.000</td><td class="arrow">→</td><td class="num">0.000</td><td class="num">+0.000</td><td>↓ lower better</td><td><span class="tag ok">no worse</span></td></tr><tr><td>latency</td><td class="num">41.500</td><td class="arrow">→</td><td class="num">16.167</td><td class="num">-25.333</td><td>↓ lower better</td><td><span class="tag ok">no worse</span></td></tr>
+</table></div>
+
+<div class="card"><h2>Per case</h2>
+<table>
+<tr><th>exec id</th><th>variant exec</th><th>decision changed</th><th>cost (base→var)</th><th>latency (base→var)</th></tr>
+<tr><td class="mono">5fb94df4-a83…</td><td class="mono">37f15f82-915…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">34.000 → 15.000</span></td></tr><tr><td class="mono">cff46fb6-d1e…</td><td class="mono">9a644577-558…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">35.000 → 16.000</span></td></tr><tr><td class="mono">b76a1e33-3a9…</td><td class="mono">ef89aad0-262…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">39.000 → 14.000</span></td></tr><tr><td class="mono">3ac5e3d3-924…</td><td class="mono">6f26f4b6-f9b…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">36.000 → 15.000</span></td></tr><tr><td class="mono">904fe5d3-383…</td><td class="mono">a9cba753-a76…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">39.000 → 16.000</span></td></tr><tr><td class="mono">7190df54-027…</td><td class="mono">e34258bf-72f…</td><td><span class="tag ok">no</span></td><td class="num"><span class="tag ok">0.000 → 0.000</span></td><td class="num"><span class="tag ok">66.000 → 21.000</span></td></tr>
+</table></div>
+
+<div class="card"><h2>Skipped cases</h2><table><tr><th>exec id</th><th>reason</th></tr><tr><td class="mono">c0ad4e9d-d7b…</td><td>variant failed: Failed to replay execution &#x27;c0ad4e9d-d7b3-42e4-ba61-f0c291bb7423&#x27;: File `s3://zenml-339712793861-bbc374680063/support_copilot_model_request/output/3c6085bc-d57e-4cf1-aa66-a0f6b3540347/1e34ee85/data.json` is outside of artifact store bounds `s3://zenml-k8s-339712793861-3794f302c1ca`</td></tr><tr><td class="mono">76e0ca81-8bb…</td><td>variant failed: Failed to replay execution &#x27;76e0ca81-8bbd-4733-a25a-c0d632ae4a7d&#x27;: File `s3://zenml-339712793861-bbc374680063/support_copilot_model_request/output/1d66af37-bcaa-471f-8975-5273f8e0342c/e462894b/data.json` is outside of artifact store bounds `s3://zenml-k8s-339712793861-3794f302c1ca`</td></tr><tr><td class="mono">b73799a2-973…</td><td>variant failed: Failed to replay execution &#x27;b73799a2-973d-40ae-9dbc-6ea6333a635d&#x27;: File `s3://zenml-339712793861-bbc374680063/support_copilot_model_request/output/a06d01d5-37b9-4bf6-92f2-b6b56002dd00/2ec41a9c/data.json` is outside of artifact store bounds `s3://zenml-k8s-339712793861-3794f302c1ca`</td></tr><tr><td class="mono">040b4988-84b…</td><td>variant failed: Failed to replay execution &#x27;040b4988-84bd-4b6c-9807-ee1efb240f34&#x27;: File `s3://zenml-339712793861-bbc374680063/support_copilot_model_request/output/6c13f8d4-f782-4105-aace-c4cac8350503/127ca437/data.json` is outside of artifact store bounds `s3://zenml-k8s-339712793861-3794f302c1ca`</td></tr></table></div>
+</div></body></html>

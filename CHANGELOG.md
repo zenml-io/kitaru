@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
 - Added a LangGraph replay and fork adapter (`kitaru.adapters.langgraph.replay`) that reconstructs a recorded LangGraph run as a directed graph from a captured trace and forks it for replay. Public surface includes `KitaruReplayAgent`, `KitaruAdapter`, `import_langgraph_trace` / `import_trace`, and graph `edit` helpers, with Langfuse and JSONL trace import sources.
 - `kitaru executions replay` now prints UI compare URLs (and includes `compare_url` in JSON output) for the original execution vs the new replay.
-- Reshaped the PydanticAI replay demo around the operator playbook: `demo.py seed`, variant-only replay comparisons, cohort JSON export, and `PLAYBOOK.md`.
+- Reshaped the replay overrides demo as a prod walkthrough: slim `demo.py` dispatcher, `replay_scenarios/` modules, `publish-input` re-publish override, and narrative `README.md` (removed synthetic `record_replay_observation` tail and `inject-output`).
 - `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
 - Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
 

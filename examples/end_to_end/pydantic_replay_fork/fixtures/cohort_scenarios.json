@@ -1,0 +1,52 @@
+[
+  {
+    "label": "sso_admin_access",
+    "customer": "acme-corp / alice@acme.example",
+    "prompt": "I need to grant all members of our engineering team admin access to the production SSO settings so they can self-service identity provider changes without going through IT. Can you enable that for our account?"
+  },
+  {
+    "label": "billing_owner_change",
+    "customer": "globex-inc / finance@globex.example",
+    "prompt": "Please change the billing owner for Globex to finance@globex.example effective immediately. Our current owner left the company last week."
+  },
+  {
+    "label": "refund_unused_seats",
+    "customer": "acme-corp / billing@acme.example",
+    "prompt": "We downgraded three seats this month but were still charged. Can unused seats be refunded under our plan?"
+  },
+  {
+    "label": "export_api_outage",
+    "customer": "acme-corp / ops@acme.example",
+    "prompt": "Our export API calls have been timing out since yesterday. Is there an active incident, and should we open a ticket?"
+  },
+  {
+    "label": "sso_plan_question",
+    "customer": "globex-inc / admin@globex.example",
+    "prompt": "Does our Globex workspace plan include SSO, and who is allowed to enable domain-wide SSO for us?"
+  },
+  {
+    "label": "beta_feature_toggle",
+    "customer": "acme-corp / owner@acme.example",
+    "prompt": "Turn on the beta_exports_fast_path feature flag for the entire Acme account now so nightly jobs finish faster."
+  },
+  {
+    "label": "usage_report_dispute",
+    "customer": "acme-corp / data@acme.example",
+    "prompt": "Our usage dashboard shows a spike we do not recognize. Can you explain what drove the increase this billing period?"
+  },
+  {
+    "label": "permission_escalation",
+    "customer": "globex-inc / contractor@globex.example",
+    "prompt": "I am a contractor and need temporary workspace admin rights to rotate API keys before the weekend maintenance window."
+  },
+  {
+    "label": "incident_status_check",
+    "customer": "acme-corp / sre@acme.example",
+    "prompt": "Is the identity sync service degraded right now? Our login success rate dropped and we need a status summary."
+  },
+  {
+    "label": "restricted_account_change",
+    "customer": "acme-corp / alice@acme.example",
+    "prompt": "Remove MFA enforcement for all users in our production workspace so we can onboard a partner team today without device enrollment."
+  }
+]

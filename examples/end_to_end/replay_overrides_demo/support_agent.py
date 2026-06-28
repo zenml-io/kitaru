@@ -6,8 +6,7 @@ The recorded run should look like this in Kitaru:
     gather_context_tool             -> deterministic support triage facts
     lookup_policy_tool              -> deterministic policy facts
     support_copilot_model_request_2 -> model returns SupportDecision
-    publish_support_decision        -> stable final artifact for reporting
-    record_replay_observation       -> downstream consumer for output injection
+    publish_support_decision        -> stable final artifact (flow return)
 
 The demo replays from ``lookup_policy_tool``. That means the first model request
 and the triage tool can come from the original run, while the policy lookup,
@@ -27,7 +26,6 @@ REPLAY_POINT = "lookup_policy_tool"
 FINAL_DECISION_CHECKPOINT = "publish_support_decision"
 MODEL_CHECKPOINT_PREFIX = "support_copilot_model_request"
 FINAL_MODEL_INVOCATION = "support_copilot_model_request_2"
-REPORTING_CHECKPOINT = "record_replay_observation"
 
 
 class SupportDecision(BaseModel):
@@ -176,12 +174,6 @@ def publish_support_decision(decision: dict) -> Annotated[dict, "support_decisio
     return decision
 
 
-@checkpoint(cache=False)
-def record_replay_observation(decision: dict) -> Annotated[dict, "support_report"]:
-    """Consume the published decision so output-injection replay has a target."""
-    return decision
-
-
 @flow(
     cache=False,
     image=ImageSettings(
@@ -202,5 +194,4 @@ def support_copilot_flow(
     )
     result = agent.run_sync(user_prompt)
     decision = result.output.model_dump()
-    published = publish_support_decision(decision)
-    return record_replay_observation(published)
+    return publish_support_decision(decision)
