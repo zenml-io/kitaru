@@ -1186,6 +1186,114 @@ class TestCachedCallsStrategyModelCheckpoints:
         get_replay_runtime_context.cache_clear()
 
     @pytest.mark.anyio
+    async def test_replay_model_override_targets_second_request_cache_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.messages import ModelResponse, TextPart
+        from pydantic_ai.models.function import FunctionModel
+
+        from kitaru.adapters.pydantic_ai import _model as model_module
+        from kitaru.adapters.pydantic_ai._model import KitaruModel
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+        from kitaru.replay_context import (
+            KITARU_REPLAY_CONTEXT_ENV,
+            ReplayRuntimeContext,
+            get_replay_runtime_context,
+        )
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        original_calls: list[str] = []
+        override_calls: list[str] = []
+        inferred_models: list[str] = []
+        checkpoint_names: list[str] = []
+        cache_key_payloads: list[dict[str, Any]] = []
+        cache_by_key: dict[str, ModelResponse] = {}
+
+        def original_model(_messages: list[Any], _info: Any) -> ModelResponse:
+            original_calls.append("called")
+            return ModelResponse(
+                parts=[TextPart(content="original")],
+                model_name="original-model",
+            )
+
+        def override_model(_messages: list[Any], _info: Any) -> ModelResponse:
+            override_calls.append("called")
+            return ModelResponse(
+                parts=[TextPart(content="override")],
+                model_name="replacement-model",
+            )
+
+        def fake_infer_model(model_name: str) -> FunctionModel:
+            inferred_models.append(model_name)
+            return FunctionModel(override_model, model_name="replacement-model")
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            checkpoint_names.append(kwargs["step_name"])
+            cache_key = kwargs["cache_key"]
+            if cache_key in cache_by_key:
+                return cache_by_key[cache_key]
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "llm_call"),
+            ):
+                result = await kwargs["body"]()
+            cache_by_key[cache_key] = result
+            return result
+
+        def fake_checkpoint_cache_key(payload: dict[str, Any]) -> str:
+            cache_key_payloads.append(payload)
+            return f"replay_model_override={payload.get('replay_model_override')}"
+
+        context = ReplayRuntimeContext(
+            at="agent_model_request_2",
+            model_overrides={"agent_model_request_2": "test/replacement"},
+        )
+        monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+        get_replay_runtime_context.cache_clear()
+        monkeypatch.setattr(model_module, "infer_model", fake_infer_model)
+        monkeypatch.setattr(model_module, "run_async_in_checkpoint", fake_checkpoint)
+        monkeypatch.setattr(
+            model_module,
+            "checkpoint_cache_key",
+            fake_checkpoint_cache_key,
+        )
+
+        model = KitaruModel(
+            FunctionModel(original_model, model_name="original-model"),
+            capture=CapturePolicy(
+                save_prompts=False,
+                save_responses=False,
+                correlate_otel_spans=False,
+            ),
+            agent_name="agent",
+            checkpoint_config={"cache": True},
+        )
+
+        try:
+            with _flow_scope(name="override_flow"):
+                first = await model.request([], None, self._model_request_parameters())
+                second = await model.request([], None, self._model_request_parameters())
+                third = await model.request([], None, self._model_request_parameters())
+        finally:
+            get_replay_runtime_context.cache_clear()
+
+        assert checkpoint_names == [
+            "agent_model_request",
+            "agent_model_request_2",
+            "agent_model_request_3",
+        ]
+        assert first.model_name == "original-model"
+        assert second.model_name == "replacement-model"
+        assert third.model_name == "original-model"
+        assert original_calls == ["called"]
+        assert override_calls == ["called"]
+        assert inferred_models == ["test/replacement"]
+        assert "replay_model_override" not in cache_key_payloads[0]
+        assert cache_key_payloads[1]["replay_model_override"] == "test/replacement"
+        assert "replay_model_override" not in cache_key_payloads[2]
+
+    @pytest.mark.anyio
     async def test_replay_tool_code_override_routes_executed_tool_call(
         self,
         monkeypatch: pytest.MonkeyPatch,

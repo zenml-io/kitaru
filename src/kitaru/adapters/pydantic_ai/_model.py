@@ -46,6 +46,7 @@ from ._kitaru_internal import (
     get_current_checkpoint_name,
     is_inside_checkpoint,
     is_inside_flow,
+    next_repeated_checkpoint_name,
 )
 from ._logging import logger
 from ._otel import attach_model_correlation
@@ -592,7 +593,8 @@ class KitaruModel(WrapperModel):
             if self._capture.save_responses:
                 output_artifacts[ARTIFACT_ROLE_RESPONSE] = ARTIFACT_SLOT_OUTPUT
 
-            checkpoint_name = f"{self._agent_name}_model_request"
+            checkpoint_base_name = f"{self._agent_name}_model_request"
+            checkpoint_name = next_repeated_checkpoint_name(checkpoint_base_name)
             replay_model_override = self._replay_model_override_name(checkpoint_name)
 
             # `_in_checkpoint` closes over live `messages` / `self`; safe only for
@@ -601,8 +603,9 @@ class KitaruModel(WrapperModel):
             async def _in_checkpoint() -> ModelResponse:
                 nonlocal body_executed
                 body_executed = True
-                model_override = self._replay_model_override_name(checkpoint_name)
-                request_model = infer_model(model_override) if model_override else None
+                request_model = (
+                    infer_model(replay_model_override) if replay_model_override else None
+                )
                 with adapter_checkpoint_artifact_refs(
                     input_artifacts=input_artifacts,
                     output_artifacts=output_artifacts,
