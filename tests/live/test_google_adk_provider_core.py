@@ -18,6 +18,10 @@ import pytest
 
 pytestmark = [pytest.mark.live_llm, pytest.mark.live_gemini]
 
+_adk_agents = pytest.importorskip("google.adk.agents")
+_adk_run_config = pytest.importorskip("google.adk.agents.run_config")
+_adk_runners = pytest.importorskip("google.adk.runners")
+
 from google.genai import types as genai_types
 
 from kitaru.adapters.google_adk import (
@@ -25,10 +29,6 @@ from kitaru.adapters.google_adk import (
     KitaruADKRunner,
     final_output_preview,
 )
-
-_adk_agents = pytest.importorskip("google.adk.agents")
-_adk_run_config = pytest.importorskip("google.adk.agents.run_config")
-_adk_runners = pytest.importorskip("google.adk.runners")
 
 LlmAgent: Any = _adk_agents.LlmAgent
 RunConfig: Any = _adk_run_config.RunConfig

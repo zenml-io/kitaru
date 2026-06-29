@@ -22,7 +22,7 @@ from ._policy import (
     ADKCapturePolicy,
     resolve_summary_checkpoint_config,
 )
-from ._serialization import object_metadata, to_json_safe
+from ._serialization import object_metadata, to_cache_identity, to_json_safe
 from ._tracking import EventTracker, tracker_scope
 from ._types import ADKRunRequest, ADKRunResult, ADKUsageSummary
 from ._usage import usage_from_event
@@ -141,13 +141,14 @@ class KitaruADKRunner:
         async def body() -> ADKRunResult:
             return await self._invoke_runner_async(request, tracker=None)
 
-        envelope = to_json_safe(self._runner_input_envelope(request))
+        raw_envelope = self._runner_input_envelope(request)
+        envelope = to_json_safe(raw_envelope)
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
             return await run_async_in_checkpoint(
                 config=self._runner_call_checkpoint_config(),
                 step_name=f"{self._name}_google_adk_runner_call",
                 body=body,
-                cache_key=checkpoint_cache_key(envelope),
+                cache_key=checkpoint_cache_key(to_cache_identity(raw_envelope)),
                 checkpoint_inputs={"adk_input": envelope},
             )
         return await body()
@@ -156,13 +157,14 @@ class KitaruADKRunner:
         def body() -> ADKRunResult:
             return self._invoke_runner_sync(request, tracker=None)
 
-        envelope = to_json_safe(self._runner_input_envelope(request))
+        raw_envelope = self._runner_input_envelope(request)
+        envelope = to_json_safe(raw_envelope)
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
             return run_sync_in_checkpoint(
                 config=self._runner_call_checkpoint_config(),
                 step_name=f"{self._name}_google_adk_runner_call",
                 body=body,
-                cache_key=checkpoint_cache_key(envelope),
+                cache_key=checkpoint_cache_key(to_cache_identity(raw_envelope)),
                 checkpoint_inputs={"adk_input": envelope},
             )
         return body()
@@ -318,23 +320,6 @@ class KitaruADKRunner:
         self._record_usage(result, duration_ms=elapsed_ms(started_at))
         return result
 
-    def _failed_result(
-        self,
-        error: BaseException,
-        *,
-        tracker: EventTracker | None,
-        started_at: float,
-    ) -> ADKRunResult:
-        result = ADKRunResult(
-            status="failed",
-            events=dump_adk_events(list(tracker.events)) if tracker is not None else [],
-            event_log_artifact_name=None,
-            run_summary_artifact_name=None,
-            warnings=[f"Google ADK runner failed: {type(error).__name__}: {error}"],
-        )
-        self._record_usage(result, duration_ms=elapsed_ms(started_at))
-        return result
-
     def _usage_from_events(self, events: list[Any]) -> ADKUsageSummary | None:
         for event in reversed(events):
             if usage := usage_from_event(event):
@@ -374,10 +359,7 @@ class KitaruADKRunner:
         if not self._call_checkpoint_policy.persist_run_artifacts:
             return result
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
-            summary = {
-                "result": result.model_dump(mode="python"),
-                "metadata": tracker.persisted_metadata(),
-            }
+            summary = self._calls_summary(result, tracker=tracker)
 
             async def body() -> dict[str, Any]:
                 return summary
@@ -399,10 +381,7 @@ class KitaruADKRunner:
         if not self._call_checkpoint_policy.persist_run_artifacts:
             return result
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
-            summary = {
-                "result": result.model_dump(mode="python"),
-                "metadata": tracker.persisted_metadata(),
-            }
+            summary = self._calls_summary(result, tracker=tracker)
             run_sync_in_checkpoint(
                 config=resolve_summary_checkpoint_config(self._call_checkpoint_policy),
                 step_name=f"{self._name}_google_adk_calls_summary",
@@ -410,6 +389,22 @@ class KitaruADKRunner:
                 cache_key=checkpoint_cache_key(summary),
             )
         return result
+
+    def _calls_summary(
+        self,
+        result: ADKRunResult,
+        *,
+        tracker: EventTracker,
+    ) -> dict[str, Any]:
+        return {
+            "status": result.status,
+            "event_count": len(result.events),
+            "handoff_count": len(result.handoffs),
+            "usage": result.usage.model_dump(mode="python") if result.usage else None,
+            "estimated_cost_usd": result.estimated_cost_usd,
+            "warnings": list(result.warnings),
+            "metadata": tracker.persisted_metadata(),
+        }
 
     def _record_usage(self, result: ADKRunResult, *, duration_ms: float) -> None:
         if result.usage is None or not self._capture.save_usage:

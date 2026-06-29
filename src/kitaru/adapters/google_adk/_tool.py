@@ -17,7 +17,7 @@ from ._policy import (
     ADKCapturePolicy,
     resolve_tool_call_checkpoint_config,
 )
-from ._serialization import object_metadata, to_json_safe
+from ._serialization import object_metadata, to_cache_identity, to_json_safe
 from ._tracking import (
     EventTracker,
     current_call_policy,
@@ -275,17 +275,18 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
             else {
                 "available": True,
                 "value": before_state,
-                "cache_identity": checkpoint_cache_key(before_state),
+                "cache_identity": checkpoint_cache_key(to_cache_identity(before_state)),
             }
         )
+        raw_tool_input = {
+            "tool_name": self.name,
+            "args": args,
+            "tool_context": object_metadata(tool_context),
+            "tool_context_state_before": state_input,
+            "wrapped_tool": object_metadata(self._tool),
+        }
         tool_input = to_json_safe(
-            {
-                "tool_name": self.name,
-                "args": args,
-                "tool_context": object_metadata(tool_context),
-                "tool_context_state_before": state_input,
-                "wrapped_tool": object_metadata(self._tool),
-            },
+            raw_tool_input,
             include_raw=capture.capture_mode == "full",
         )
 
@@ -318,7 +319,7 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
             config=config,
             step_name=f"google_adk_tool_{self.name}",
             body=checkpoint_body,
-            cache_key=checkpoint_cache_key(tool_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(raw_tool_input)),
             checkpoint_inputs={"tool_args": tool_input},
         )
         if (

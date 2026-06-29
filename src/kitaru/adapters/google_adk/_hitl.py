@@ -7,6 +7,7 @@ from typing import Any
 
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
 
+from ._constants import ADAPTER_ID
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._types import ADKHandoffRequest, ADKRunRequest, ADKRunResult
 
@@ -259,7 +260,7 @@ def wait_for_tool_confirmation(
         api_name="wait_for_tool_confirmation",
     )
     wait_metadata: dict[str, Any] = {
-        "adapter": "google_adk",
+        "adapter": ADAPTER_ID,
         "source": "tool_confirmation_wait",
         "handoff_kind": handoff.kind,
         "tool_name": handoff.tool_name,

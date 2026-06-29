@@ -241,7 +241,7 @@ def test_calls_mode_does_not_open_outer_runner_checkpoint(
 def test_calls_mode_persists_summary_after_runner_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter, agent_module, _tracking_module = _modules(monkeypatch)
+    adapter, agent_module, tracking_module = _modules(monkeypatch)
     order: list[str] = []
     summary_checkpoints: list[dict[str, Any]] = []
 
@@ -283,6 +283,17 @@ def test_calls_mode_persists_summary_after_runner_execution(
     assert order == ["runner", "summary"]
     assert len(summary_checkpoints) == 1
     assert summary_checkpoints[0]["step_name"] == "fake_runner_google_adk_calls_summary"
+    summary = summary_checkpoints[0]["body"]()
+    assert summary["status"] == "completed"
+    assert summary["event_count"] == 1
+    assert summary["handoff_count"] == 0
+    assert summary["usage"] is None
+    run_summaries = summary["metadata"][
+        tracking_module.GOOGLE_ADK_RUN_SUMMARIES_METADATA_KEY
+    ]
+    assert run_summaries[0]["runner_name"] == "fake_runner"
+    assert "events" not in summary
+    assert "final_output" not in summary
 
 
 def test_calls_mode_keeps_user_run_kwargs_but_does_not_inject_plugins(

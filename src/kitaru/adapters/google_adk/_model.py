@@ -16,7 +16,7 @@ from ._policy import (
     ADKCapturePolicy,
     resolve_model_checkpoint_config,
 )
-from ._serialization import object_metadata, to_json_safe
+from ._serialization import object_metadata, to_cache_identity, to_json_safe
 from ._tracking import (
     EventTracker,
     current_call_policy,
@@ -167,20 +167,21 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
         config = resolve_model_checkpoint_config(call_policy)
         if config is None or not self._can_checkpoint(call_policy):
             return await collect(), False
+        raw_model_input = {
+            "model": self.model,
+            "stream": stream,
+            "llm_request": llm_request,
+            "wrapped_model": object_metadata(self._model),
+        }
         model_input = to_json_safe(
-            {
-                "model": self.model,
-                "stream": stream,
-                "llm_request": llm_request,
-                "wrapped_model": object_metadata(self._model),
-            },
+            raw_model_input,
             include_raw=capture.capture_mode == "full",
         )
         return await run_async_in_checkpoint(
             config=config,
             step_name=f"google_adk_model_{self._name}",
             body=collect,
-            cache_key=checkpoint_cache_key(model_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(raw_model_input)),
             checkpoint_inputs={"model_input": model_input},
         ), True
 

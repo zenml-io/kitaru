@@ -67,9 +67,9 @@ def validate_checkpoint_strategy(value: str) -> CheckpointStrategy:
     if value in _GRANULAR_STRATEGIES:
         raise KitaruUsageError(
             "Unsupported Google ADK checkpoint strategy "
-            f"{value!r}. Use `checkpoint_strategy='calls'`. With the current "
-            "public ADK plugin API this mode is metadata-only unless a future "
-            "around-call hook provides a proceed callable."
+            f"{value!r}. Use `checkpoint_strategy='calls'`. Calls mode "
+            "checkpoints explicit KitaruADKModel and KitaruADKTool wrapper "
+            "calls, not arbitrary unmodified ADK internals."
         )
     expected = "', '".join(sorted(_VALID_CHECKPOINT_STRATEGIES))
     raise KitaruUsageError(

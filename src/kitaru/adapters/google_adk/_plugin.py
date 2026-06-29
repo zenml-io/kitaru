@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import time
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
@@ -17,7 +16,7 @@ from ._policy import (
     resolve_model_checkpoint_config,
     resolve_tool_call_checkpoint_config,
 )
-from ._serialization import to_json_safe
+from ._serialization import to_cache_identity, to_json_safe
 from ._tracking import EventTracker, current_tracker
 from ._utils import (
     checkpoint_cache_key,
@@ -357,7 +356,7 @@ class KitaruADKPlugin:
             config=config,
             step_name=step_name,
             body=body,
-            cache_key=checkpoint_cache_key(checkpoint_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(input_envelope)),
             checkpoint_inputs={"model_input": checkpoint_input},
         ), True
 
@@ -377,7 +376,7 @@ class KitaruADKPlugin:
             config=config,
             step_name=step_name,
             body=body,
-            cache_key=checkpoint_cache_key(checkpoint_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(input_envelope)),
             checkpoint_inputs={"model_input": checkpoint_input},
         ), True
 
@@ -399,7 +398,7 @@ class KitaruADKPlugin:
             config=config,
             step_name=step_name,
             body=body,
-            cache_key=checkpoint_cache_key(checkpoint_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(input_envelope)),
             checkpoint_inputs={"tool_args": checkpoint_input},
         ), True
 
@@ -421,11 +420,6 @@ class KitaruADKPlugin:
             config=config,
             step_name=step_name,
             body=body,
-            cache_key=checkpoint_cache_key(checkpoint_input),
+            cache_key=checkpoint_cache_key(to_cache_identity(input_envelope)),
             checkpoint_inputs={"tool_args": checkpoint_input},
         ), True
-
-
-def maybe_awaitable(value: Any) -> bool:
-    """Return whether ``value`` is awaitable."""
-    return inspect.isawaitable(value)
