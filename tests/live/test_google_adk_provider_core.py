@@ -18,11 +18,6 @@ import pytest
 
 pytestmark = [pytest.mark.live_llm, pytest.mark.live_gemini]
 
-pytest.importorskip("google.adk")
-
-from google.adk.agents import LlmAgent
-from google.adk.agents.run_config import RunConfig
-from google.adk.runners import InMemoryRunner
 from google.genai import types as genai_types
 
 from kitaru.adapters.google_adk import (
@@ -30,6 +25,14 @@ from kitaru.adapters.google_adk import (
     KitaruADKRunner,
     final_output_preview,
 )
+
+_adk_agents = pytest.importorskip("google.adk.agents")
+_adk_run_config = pytest.importorskip("google.adk.agents.run_config")
+_adk_runners = pytest.importorskip("google.adk.runners")
+
+LlmAgent: Any = _adk_agents.LlmAgent
+RunConfig: Any = _adk_run_config.RunConfig
+InMemoryRunner: Any = _adk_runners.InMemoryRunner
 
 _PROMPT = "Explain one Kitaru checkpoint in one short sentence. Do not use tools."
 _MODEL = os.environ.get("KITARU_LIVE_GOOGLE_ADK_MODEL", "gemini-2.5-flash")

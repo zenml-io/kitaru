@@ -474,7 +474,8 @@ def test_model_wrapper_is_base_llm_and_delegates_supported_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter, _model_module, _tool_module = _modules(monkeypatch)
-    from google.adk.models.base_llm import BaseLlm
+    base_llm_module = importlib.import_module("google.adk.models.base_llm")
+    BaseLlm = base_llm_module.BaseLlm
 
     wrapped = adapter.KitaruADKModel(FakeModel())
 
@@ -497,7 +498,8 @@ def test_tool_wrapper_is_base_tool_and_accepts_sync_process_delegate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter, _model_module, _tool_module = _modules(monkeypatch)
-    from google.adk.tools.base_tool import BaseTool
+    base_tool_module = importlib.import_module("google.adk.tools.base_tool")
+    BaseTool = base_tool_module.BaseTool
 
     tool = SyncProcessTool()
     wrapped = adapter.wrap_tool(tool)
