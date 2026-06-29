@@ -28,13 +28,36 @@ UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   python examples/integrations/google_adk_agent/google_adk_adapter.py --help
 ```
 
-For provider-backed runs, set one Google credential variable:
+For provider-backed live runs, choose one Google auth path.
+
+**Gemini Developer API key:**
 
 ```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
 # or
 export GOOGLE_API_KEY='<your-google-api-key>'
 ```
+
+**Local/manual Vertex AI with Application Default Credentials (ADC):**
+
+```bash
+gcloud auth application-default login
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT='<your-google-cloud-project>'
+export GOOGLE_CLOUD_LOCATION='<your-google-cloud-region>'
+```
+
+Kitaru only checks that the environment has one of those shapes. It does not call `gcloud`, read ADC files, create a Google credential object, or prove that your Google account can use Vertex AI. The concrete story is:
+
+```text
+1. You set GOOGLE_GENAI_USE_VERTEXAI=true, project, and location.
+2. Kitaru says: "This looks like a valid Vertex setup."
+3. ADK starts the model call.
+4. Google GenAI looks for ADC.
+5. If ADC is missing or expired, Google raises the auth error.
+```
+
+That is intentional: ADK / Google GenAI owns the real authentication step.
 
 ## Whole-runner checkpointing
 
@@ -230,10 +253,25 @@ UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   python examples/integrations/google_adk_agent/google_adk_adapter.py
 ```
 
-Run live Gemini mode:
+Run live Gemini mode with an API key:
 
 ```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
+# or
+export GOOGLE_API_KEY='<your-google-api-key>'
+
+UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+  uv run --python 3.12 --no-dev --extra google-adk \
+  python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
+```
+
+Or run live Gemini mode locally/manually with Vertex ADC:
+
+```bash
+gcloud auth application-default login
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT='<your-google-cloud-project>'
+export GOOGLE_CLOUD_LOCATION='<your-google-cloud-region>'
 
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk \
@@ -270,10 +308,25 @@ UV_PROJECT_ENVIRONMENT=.venv-google-adk \
     tests/test_google_adk_installed_contract.py tests/test_google_adk_example.py
 ```
 
-Optional live Gemini check:
+Optional live Gemini check with an API key:
 
 ```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
+# or
+export GOOGLE_API_KEY='<your-google-api-key>'
+
+UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+  uv run --python 3.12 --no-dev --extra google-adk --with pytest \
+  pytest -o addopts='-vv' tests/live/test_google_adk_provider_core.py -m "live_gemini"
+```
+
+Optional live Gemini check with local/manual Vertex ADC:
+
+```bash
+gcloud auth application-default login
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT='<your-google-cloud-project>'
+export GOOGLE_CLOUD_LOCATION='<your-google-cloud-region>'
 
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk --with pytest \

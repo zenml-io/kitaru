@@ -1,5 +1,6 @@
 """Deterministic coverage for the Google ADK adapter example."""
 
+import os
 import socket
 from typing import Any
 from uuid import uuid4
@@ -46,6 +47,128 @@ def test_google_adk_workflow_help_does_not_require_google_adk(
 
     assert exc_info.value.code == 0
     assert "persisted Kitaru workflow" in capsys.readouterr().out
+
+
+def _clear_google_adk_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for env_name in (
+        example.GEMINI_API_KEY_ENV,
+        example.GOOGLE_API_KEY_ENV,
+        example.VERTEXAI_ENV,
+        example.CLOUD_PROJECT_ENV,
+        example.CLOUD_LOCATION_ENV,
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+
+def test_google_adk_live_credentials_alias_gemini_key_to_google_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.GEMINI_API_KEY_ENV, "gemini-key")
+
+    example.prepare_live_google_credentials()
+
+    assert os.environ[example.GOOGLE_API_KEY_ENV] == "gemini-key"
+
+
+def test_google_adk_live_credentials_accept_google_key_without_gemini_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.GOOGLE_API_KEY_ENV, "google-key")
+
+    example.prepare_live_google_credentials()
+
+    assert example.GEMINI_API_KEY_ENV not in os.environ
+    assert os.environ[example.GOOGLE_API_KEY_ENV] == "google-key"
+
+
+@pytest.mark.parametrize("truthy_value", ["1", "true", "TRUE", "yes", "on"])
+def test_google_adk_live_credentials_accept_vertex_without_api_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    truthy_value: str,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.VERTEXAI_ENV, truthy_value)
+    monkeypatch.setenv(example.CLOUD_PROJECT_ENV, "demo-project")
+    monkeypatch.setenv(example.CLOUD_LOCATION_ENV, "europe-north1")
+
+    example.prepare_live_google_credentials()
+
+
+@pytest.mark.parametrize(
+    "missing_env_names",
+    [
+        (example.CLOUD_PROJECT_ENV,),
+        (example.CLOUD_LOCATION_ENV,),
+        (example.CLOUD_PROJECT_ENV, example.CLOUD_LOCATION_ENV),
+    ],
+)
+def test_google_adk_live_credentials_vertex_names_missing_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_env_names: tuple[str, ...],
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.VERTEXAI_ENV, "true")
+    monkeypatch.setenv(example.CLOUD_PROJECT_ENV, "demo-project")
+    monkeypatch.setenv(example.CLOUD_LOCATION_ENV, "europe-north1")
+    for env_name in missing_env_names:
+        monkeypatch.delenv(env_name, raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        example.prepare_live_google_credentials()
+
+    message = str(exc_info.value)
+    for env_name in missing_env_names:
+        assert env_name in message
+    assert "no API key" in message
+
+
+def test_google_adk_live_credentials_vertex_mode_takes_precedence_over_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.VERTEXAI_ENV, "true")
+    monkeypatch.setenv(example.GOOGLE_API_KEY_ENV, "google-key")
+
+    with pytest.raises(SystemExit) as exc_info:
+        example.prepare_live_google_credentials()
+
+    message = str(exc_info.value)
+    assert example.CLOUD_PROJECT_ENV in message
+    assert example.CLOUD_LOCATION_ENV in message
+
+
+def test_google_adk_live_credentials_false_vertex_value_needs_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+    monkeypatch.setenv(example.VERTEXAI_ENV, "false")
+    monkeypatch.setenv(example.CLOUD_PROJECT_ENV, "demo-project")
+    monkeypatch.setenv(example.CLOUD_LOCATION_ENV, "europe-north1")
+
+    with pytest.raises(SystemExit) as exc_info:
+        example.prepare_live_google_credentials()
+
+    assert "Missing Google/Gemini credentials" in str(exc_info.value)
+
+
+def test_google_adk_live_credentials_missing_message_lists_both_auth_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_google_adk_auth_env(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        example.prepare_live_google_credentials()
+
+    message = str(exc_info.value)
+    assert "API key" in message
+    assert example.GEMINI_API_KEY_ENV in message
+    assert example.GOOGLE_API_KEY_ENV in message
+    assert "Vertex AI" in message
+    assert example.VERTEXAI_ENV in message
+    assert example.CLOUD_PROJECT_ENV in message
+    assert example.CLOUD_LOCATION_ENV in message
 
 
 def test_google_adk_example_local_mode_runs_without_provider_credentials(

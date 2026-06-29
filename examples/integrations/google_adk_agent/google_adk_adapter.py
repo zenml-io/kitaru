@@ -10,15 +10,28 @@ Story:
   which is the path Kitaru uses for model/tool checkpoints when this code runs
   from inside a Kitaru flow.
 - `--mode live` swaps in ADK's Gemini model path and keeps the same runner-level
-  wrapper. It requires Google/Gemini credentials.
+  wrapper. It accepts either Gemini Developer API key credentials or a
+  Vertex AI / Application Default Credentials environment. Kitaru only checks
+  the environment shape; ADK and Google GenAI perform the real authentication.
 
 Run the deterministic local mode from an isolated no-dev ADK environment:
     UV_PROJECT_ENVIRONMENT=.venv-google-adk \
       uv run --python 3.12 --no-dev --extra google-adk \
       python examples/integrations/google_adk_agent/google_adk_adapter.py
 
-Run the optional live model mode:
+Run the optional live model mode with an API key:
     export GEMINI_API_KEY=<your-gemini-api-key>
+    # GOOGLE_API_KEY=<your-google-api-key> also works.
+    UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+      uv run --python 3.12 --no-dev --extra google-adk \
+      python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
+
+Run the optional live model mode with Vertex AI / ADC:
+    export GOOGLE_GENAI_USE_VERTEXAI=true
+    export GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+    export GOOGLE_CLOUD_LOCATION=<your-region>
+    # Authenticate outside Kitaru, for example with:
+    #   gcloud auth application-default login
     UV_PROJECT_ENVIRONMENT=.venv-google-adk \
       uv run --python 3.12 --no-dev --extra google-adk \
       python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
@@ -29,11 +42,19 @@ import asyncio
 import importlib
 import inspect
 import json
-import os
 import sys
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from kitaru._google_auth_env import (
+    CLOUD_LOCATION_ENV,
+    CLOUD_PROJECT_ENV,
+    GEMINI_API_KEY_ENV,
+    GOOGLE_API_KEY_ENV,
+    VERTEXAI_ENV,
+    require_google_live_auth_env,
+)
 
 DEFAULT_APP_NAME = "kitaru_google_adk_example"
 DEFAULT_USER_ID = "local-user"
@@ -287,15 +308,40 @@ def _build_live_agent(api: ADKRuntimeAPI, *, model: str) -> Any:
     )
 
 
-def _prepare_live_google_credentials() -> None:
-    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
-        if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
-            os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
-        return
-    raise SystemExit(
-        "Missing Google/Gemini credentials for --mode live. Set one of:\n"
-        "  export GEMINI_API_KEY='<your-gemini-api-key>'\n"
-        "  export GOOGLE_API_KEY='<your-google-api-key>'"
+def _incomplete_vertex_message(missing: tuple[str, ...]) -> str:
+    return (
+        f"{VERTEXAI_ENV} is enabled (Vertex AI / ADC mode), so no API key "
+        "is required when Vertex config is complete, but "
+        f"{' and '.join(missing)} must also be set:\n"
+        f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
+        f"  export {CLOUD_LOCATION_ENV}='<your-region>'\n"
+        "ADK / Google GenAI will authenticate the provider call."
+    )
+
+
+def _missing_credentials_message() -> str:
+    return (
+        "Missing Google/Gemini credentials for --mode live.\n"
+        "Pick one authentication path before a real ADK run.\n"
+        "API key (Gemini Developer API):\n"
+        f"  export {GEMINI_API_KEY_ENV}='<your-gemini-api-key>'\n"
+        f"  export {GOOGLE_API_KEY_ENV}='<your-google-api-key>'   # alternative name\n"
+        "Application Default Credentials (Vertex AI, no API key):\n"
+        f"  export {VERTEXAI_ENV}=true\n"
+        f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
+        f"  export {CLOUD_LOCATION_ENV}='<your-region>'\n"
+        "  gcloud auth application-default login\n"
+        "Kitaru only checks this environment shape; ADK / Google GenAI "
+        "authenticates the provider call."
+    )
+
+
+def prepare_live_google_credentials() -> None:
+    """Validate the live ADK Google auth environment without authenticating."""
+    require_google_live_auth_env(
+        alias_direction="gemini_to_google",
+        incomplete_vertex_message=_incomplete_vertex_message,
+        missing_credentials_message=_missing_credentials_message(),
     )
 
 
@@ -307,7 +353,7 @@ async def _run_adk_turn(args: argparse.Namespace) -> Any:
     session_id = str(args.session_id)
 
     if args.mode == "live":
-        _prepare_live_google_credentials()
+        prepare_live_google_credentials()
         agent = _build_live_agent(api, model=str(args.model))
         message = _text_content(api, str(args.prompt), role="user")
     else:

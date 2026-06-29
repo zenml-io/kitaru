@@ -22,6 +22,9 @@ _adk_agents = pytest.importorskip("google.adk.agents")
 _adk_run_config = pytest.importorskip("google.adk.agents.run_config")
 _adk_runners = pytest.importorskip("google.adk.runners")
 
+from examples.integrations.google_adk_agent.google_adk_adapter import (
+    prepare_live_google_credentials,
+)
 from google.genai import types as genai_types
 
 from kitaru.adapters.google_adk import (
@@ -88,13 +91,6 @@ def _contains_non_null_key(value: Any, key: str) -> bool:
     return False
 
 
-def _prepare_google_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    if os.environ.get("GOOGLE_API_KEY"):
-        return
-    if gemini_key := os.environ.get("GEMINI_API_KEY"):
-        monkeypatch.setenv("GOOGLE_API_KEY", gemini_key)
-
-
 async def _run_model_only_turn() -> Any:
     app_name = "kitaru_live_google_adk_core_app"
     user_id = "live-google-adk-user"
@@ -127,13 +123,9 @@ async def _run_model_only_turn() -> Any:
     )
 
 
-def test_google_adk_runner_call_with_gemini_completes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_google_adk_runner_call_with_gemini_completes() -> None:
     """The Google ADK adapter can run one bounded Gemini-backed ADK turn."""
-    if not (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")):
-        pytest.skip("GEMINI_API_KEY or GOOGLE_API_KEY is required for live ADK smoke")
-    _prepare_google_api_key(monkeypatch)
+    prepare_live_google_credentials()
 
     result = asyncio.run(_run_model_only_turn())
     preview = final_output_preview(result.final_output)

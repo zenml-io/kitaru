@@ -256,6 +256,6 @@ markers = [
     "live_llm: paid or external LLM/provider test; excluded from default pytest runs",
     "live_openai: live OpenAI provider test; requires OPENAI_API_KEY",
     "live_anthropic: live Anthropic/Claude provider test; requires ANTHROPIC_API_KEY",
-    "live_gemini: live Gemini/Google provider test; requires GEMINI_API_KEY or GOOGLE_API_KEY",
+    "live_gemini: live Gemini/Google provider test; requires GEMINI_API_KEY/GOOGLE_API_KEY or local/manual Vertex ADC env shape",
     "provider_extended: slower or higher-cost provider test outside the provider-core suite",
 ]

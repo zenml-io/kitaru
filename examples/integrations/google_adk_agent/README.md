@@ -82,15 +82,34 @@ This script submits a real Kitaru flow. The first ADK turn asks for tool confirm
 
 Live mode uses ADK's Gemini model path and keeps Kitaru at the whole-runner level.
 
+Choose one Google auth path.
+
+**Gemini Developer API key:**
+
 ```bash
 export GEMINI_API_KEY='<your-gemini-api-key>'
+# or
+export GOOGLE_API_KEY='<your-google-api-key>'
 
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk \
   python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
 ```
 
-You can also set `GOOGLE_API_KEY`; the script accepts either variable.
+**Local/manual Vertex AI with Application Default Credentials (ADC):**
+
+```bash
+gcloud auth application-default login
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT='<your-google-cloud-project>'
+export GOOGLE_CLOUD_LOCATION='<your-google-cloud-region>'
+
+UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+  uv run --python 3.12 --no-dev --extra google-adk \
+  python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
+```
+
+Kitaru only checks that the environment has one of those shapes. It does not call `gcloud`, read ADC files, create a Google credential object, or prove that your Google account can use Vertex AI. ADK starts the model call, then Google GenAI looks for credentials and raises the auth error if ADC is missing or expired.
 
 ## Output fields
 

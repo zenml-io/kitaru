@@ -577,7 +577,7 @@ examples:
         opt_in_env: [KITARU_SMOKE_GOOGLE_ADK]
         timeout_seconds: 180
         cost_class: low
-        notes: requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY; the smoke script runs the isolated no-dev ADK/Gemini pytest command.
+        notes: hosted/release smoke evidence remains API-key-only and requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY; the smoke script runs the isolated no-dev ADK/Gemini pytest command. For local/manual live runs outside hosted release evidence, the direct example and live pytest also accept Vertex ADC env shape with GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION; ADK / Google GenAI performs the real authentication.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
