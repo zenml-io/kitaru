@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 from kitaru._client._models import CheckpointCall, Execution, ExecutionStatus
-from kitaru.diff import diff
+from kitaru.diff import diff, serialize_execution_diff
+
+_diff_module = import_module("kitaru.diff")
 
 
 def _checkpoint(
@@ -272,6 +275,7 @@ def test_diff_auto_discovers_replays_and_returns_one_multi_exec_url() -> None:
         result = diff("kr-original")
 
     assert len(result.compared) == 2
+    assert result.warnings == []
     assert result.urls == [
         "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
         "?executions=kr-original,kr-replay-a,kr-replay-b"
@@ -325,3 +329,66 @@ def test_diff_sets_compare_urls_when_server_and_flow_are_available() -> None:
         "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
         "?executions=kr-original,kr-replay"
     ]
+
+
+def test_diff_warns_when_auto_discovery_hits_candidate_limit() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
+    )
+    candidates = [
+        _execution(
+            f"kr-candidate-{index}",
+            original_exec_id="kr-other",
+            checkpoints=[_checkpoint(call_id=f"cp-{index}", name="lookup_policy_tool")],
+        )
+        for index in range(_diff_module._AUTO_DISCOVERY_LIMIT)
+    ]
+
+    fake_client = MagicMock()
+    fake_client.executions.get.return_value = original
+    fake_client.executions.list.return_value = candidates
+
+    with patch("kitaru.diff.KitaruClient", return_value=fake_client):
+        result = diff("kr-original")
+
+    fake_client.executions.list.assert_called_once_with(
+        flow="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_LIMIT,
+    )
+    assert result.compared == []
+    assert len(result.warnings) == 1
+    warning = result.warnings[0]
+    assert "auto-discovery" in warning
+    assert "support_copilot_flow" in warning
+    assert "200" in warning
+    assert "execution IDs explicitly" in warning
+    assert serialize_execution_diff(result)["warnings"] == result.warnings
+
+
+def test_diff_does_not_warn_for_explicit_replay_ids_at_candidate_limit() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
+    )
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-2",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+
+    with patch("kitaru.diff.KitaruClient", return_value=fake_client):
+        result = diff("kr-original", "kr-replay")
+
+    fake_client.executions.list.assert_not_called()
+    assert result.warnings == []
+    assert serialize_execution_diff(result)["warnings"] == []

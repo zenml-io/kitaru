@@ -170,8 +170,14 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
         "on_error",
     }
     assert replay_schema["required"] == ["exec_ids", "at"]
-    assert replay_schema["properties"]["on_error"]["default"] == "collect"
-    assert replay_schema["properties"]["on_error"]["enum"] == ["fail", "collect"]
+    assert replay_schema["properties"]["on_error"].get("default") is None
+    on_error_variants = replay_schema["properties"]["on_error"]["anyOf"]
+    assert {"type": "null"} in on_error_variants
+    assert any(
+        variant.get("type") == "string"
+        and set(variant.get("enum", [])) == {"fail", "collect"}
+        for variant in on_error_variants
+    )
     assert "kitaru_executions_replay_many" not in tool_schemas
     assert "input" not in replay_properties
     assert "output" not in replay_properties
@@ -1207,6 +1213,31 @@ def test_executions_replay_forwards_unified_arguments_and_returns_json(
     )
     submission.to_json.assert_called_once_with()
     assert payload == replay_json
+
+
+def test_executions_replay_forwards_omitted_on_error_as_none(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Omitted MCP replay on_error should let the SDK apply its shared default."""
+    submission = MagicMock()
+    submission.to_json.return_value = {"submission_id": "rs-123"}
+    mock_kitaru_client.executions.replay.return_value = submission
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_replay(["kr-a"], at="lookup_policy_tool")
+
+    mock_kitaru_client.executions.replay.assert_called_once_with(
+        ["kr-a"],
+        at="lookup_policy_tool",
+        flow_overrides=None,
+        checkpoint_overrides=None,
+        invocation_overrides=None,
+        skip=None,
+        tag=None,
+        wait=None,
+        on_error=None,
+    )
+    assert payload == {"submission_id": "rs-123"}
 
 
 def test_mcp_does_not_expose_replay_many_tool() -> None:

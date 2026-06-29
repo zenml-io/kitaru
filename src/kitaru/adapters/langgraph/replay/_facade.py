@@ -29,6 +29,7 @@ from kitaru.adapters.langgraph.replay._agent import (
 )
 from kitaru.adapters.langgraph.replay._drift import DriftReport, compare_decisions
 from kitaru.adapters.langgraph.replay._importer import import_trace
+from kitaru.errors import KitaruRuntimeError
 
 RehydrateHook = Callable[[Any], "tuple[dict | None, dict | None]"]
 
@@ -83,7 +84,7 @@ def _fetch_langfuse_rows(trace_id: str, *, timeout: float = 120.0) -> list[dict]
         last = len(rows)
         time.sleep(3)
     if not rows:
-        raise SystemExit(f"No rows for trace {trace_id} after {timeout:.0f}s.")
+        raise KitaruRuntimeError(f"No rows for trace {trace_id} after {timeout:.0f}s.")
     return rows
 
 

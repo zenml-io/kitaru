@@ -41,6 +41,38 @@ When you replay an execution, Kitaru follows this sequence:
 
 So the replay is not a mutation of the old execution. The source execution stays as evidence. The replay is a new execution with metadata that points back to the source.
 
+## Replay runs your code again, side effects included
+
+Step 4 above says the checkpoint at `at` and everything downstream "run again." Take that literally. "Run again" means your Python executes again, so any real-world action inside those checkpoints fires a second time. Kitaru cannot tell which lines touched the outside world; to Kitaru they are ordinary checkpoint code that the replay plan marked to run.
+
+A concrete failure story:
+
+```text
+recorded run:           classify -> lookup_order -> issue_refund -> write_summary
+replay at issue_refund: issue_refund runs again, then write_summary runs again
+```
+
+Suppose `issue_refund` refunds a customer's card and posts a message to Slack. Replaying at `issue_refund` refunds the card a second time and posts to Slack a second time. The customer sees two refunds and two notifications, and nothing in Kitaru stopped it. The same risk applies to any irreversible action inside a replayed checkpoint: paid API calls, emails, file writes, database mutations, and outbound webhooks.
+
+This is the same double-effect risk the adapter guides call out for [LangGraph](../adapters/langgraph.md), the [Claude Agent SDK](../adapters/claude-agent-sdk.md), and [Gemini interactions](../adapters/gemini-interactions.md): when code reruns, its side effects rerun too.
+
+### Guard side effects with `kitaru.is_replay()`
+
+`kitaru.is_replay()` returns `True` when the current process is running inside a replay execution and `False` during a normal run. Use it to skip or stub the irreversible part of a checkpoint while letting the rest of the work run:
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def issue_refund(order: Order) -> RefundResult:
+    if kitaru.is_replay():
+        # Don't charge the card or post to Slack again during replay.
+        return RefundResult(refunded=False, note="skipped during replay")
+    return payment_api.refund(order.id)
+```
+
+This snippet is illustrative, not a complete production policy. Real flows often need more than an on/off switch. You might return a recorded refund ID so downstream checkpoints still receive a realistic value, or branch on which call is being replayed. For those finer decisions, `kitaru.get_replay_runtime_context()` returns the full `ReplayRuntimeContext` during replay (and `None` outside it).
+
 ## The three override levels
 
 Replay overrides are grouped by what they target.
@@ -48,7 +80,7 @@ Replay overrides are grouped by what they target.
 | Override level | What it targets | When to use it |
 |---|---|---|
 | `flow_overrides` / `--flow-overrides` | Flow parameters for the replay run | Change top-level inputs such as `topic`, `customer_id`, or `prompt_profile`. |
-| `checkpoint_overrides` / `--checkpoint-overrides` | Every invocation of a checkpoint name | Change all recorded calls named `lookup_policy_tool` or `draft_answer`. |
+| `checkpoint_overrides` / `--checkpoint-overrides` | Every recorded call in a checkpoint name's family | Change all recorded calls named `lookup_policy_tool` or `draft_answer`. |
 | `invocation_overrides` / `--invocation-overrides` | One recorded checkpoint, tool, or model call | Change exactly one call when the same checkpoint ran multiple times. |
 
 Checkpoint and invocation overrides can contain these fields:
@@ -61,6 +93,18 @@ Checkpoint and invocation overrides can contain these fields:
 | `"model"` | Kitaru changes the model for the targeted LLM checkpoint call. Unsupported targets fail before replay starts. |
 
 If a checkpoint override and an invocation override both target the same recorded call, the invocation override wins because it is more specific.
+
+### How each override level matches calls
+
+`flow_overrides` set top-level flow parameters for the whole replay run. `flow_overrides={"model": ...}` only changes the model when your flow actually exposes `model` as a top-level parameter that its checkpoints read. If the model is chosen inside a checkpoint or by an adapter, a flow override named `model` does nothing useful; target the LLM call with a checkpoint or invocation override instead.
+
+`checkpoint_overrides` match a whole family of recorded calls that share a base name. Adapters generate repeated calls with numbered suffixes, so a single tool used three times records as `lookup_policy_tool`, `lookup_policy_tool_2`, `lookup_policy_tool_3`, and a model request sent three times records as `support_copilot_model_request`, `support_copilot_model_request_2`, `support_copilot_model_request_3`. A checkpoint override keyed by the base name (`lookup_policy_tool` or `support_copilot_model_request`) applies to every member of that family. A checkpoint override keyed by an exact suffixed name (`support_copilot_model_request_2`) stays exact and matches only that one call. Kitaru does not collapse arbitrary numbered names: a checkpoint you named `phase_2` is never folded into a `phase` family.
+
+`invocation_overrides` are the precise path for one call. When the same checkpoint ran several times and you want to change exactly one of them, name that invocation ID, call ID, or suffixed checkpoint name. An invocation override always wins over a checkpoint override that also matches the call.
+
+### Output overrides need a downstream consumer
+
+An `"output"` override works by injecting the value as the target checkpoint's result and feeding it into the checkpoints that consume that output. It needs somewhere for the value to go. If you point an output override at a terminal (leaf) checkpoint whose result nothing else reads, there is no later input to replace, and Kitaru fails before submission with a message telling you to guard the side effect with `kitaru.is_replay()` or move the side effect into a checkpoint whose output is consumed later. So an output override cannot neutralize a side-effectful final checkpoint; use the replay guard for that.
 
 `"code"` overrides are runtime-only. They are carried in replay context and require the flow-wrapper replay path so the runtime can see that context while the checkpoint reruns. In a Pydantic AI tool call, Kitaru's wrapper reaches the tool checkpoint, reads the replay context, imports the replacement function, and calls that replacement instead of the original tool function.
 
@@ -387,6 +431,10 @@ Replay does not support overriding or pre-populating wait results. If a replayed
 Replay can raise `KitaruDivergenceError` when the backend detects that the replayed call sequence is no longer compatible with the source execution. A divergence means the run can no longer be reproduced faithfully, so any diff from it is untrustworthy.
 
 A concrete example: the source execution recorded `research → write_draft → publish_answer`, but your current code now runs `research → classify_customer → write_draft → publish_answer`. Kitaru cannot safely pretend the old recorded values line up with the new call sequence, so it stops instead of producing a replay that looks valid but used the wrong checkpoint history.
+
+### Don't reshape the run before the anchor
+
+The same caution applies to `flow_overrides`. The checkpoints before `at` are reused by matching the recorded call sequence, so the shape of the run up to the anchor has to stay the same. If a flow override changes pre-anchor control flow, for example a loop count, a branch condition, or the number of tool calls before the anchor, the recorded skip set no longer lines up with the new sequence and replay diverges instead of quietly producing a wrong result. If you need to change something that early, pick an earlier anchor that still matches, or expect replay to fail loudly rather than reproduce faithfully.
 
 Also check the replayed execution's failure metadata:
 

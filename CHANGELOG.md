@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added public replay-mode detection helpers: `kitaru.is_replay()`, `kitaru.get_replay_runtime_context()`, and `kitaru.ReplayRuntimeContext`, so side-effectful checkpoints can guard behavior during replay.
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
 - Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
 - Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
@@ -24,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
 
 ### Fixed
+- Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
+- Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
+- MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now warns when replay auto-discovery hits its 200-candidate cap.
+- LangGraph replay import now raises a catchable Kitaru error instead of `SystemExit` when Langfuse rows never arrive, and live forks support node callables that accept `(state, config)`.
 - `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
 - Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
 - `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.

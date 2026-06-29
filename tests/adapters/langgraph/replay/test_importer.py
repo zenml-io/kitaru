@@ -1,8 +1,15 @@
+import sys
+from types import SimpleNamespace
+
+import pytest
+
 from kitaru.adapters.langgraph.replay import (
     import_langgraph_trace,
     import_trace,
     trace_ids_in_rows,
 )
+from kitaru.adapters.langgraph.replay._facade import _fetch_langfuse_rows
+from kitaru.errors import KitaruRuntimeError
 
 _KIND_TO_TYPE = {
     "tool": "TOOL",
@@ -340,6 +347,16 @@ def test_trace_ids_in_rows_returns_stable_unique_ids():
     ]
 
     assert trace_ids_in_rows(rows) == ["trace_1", "trace_2"]
+
+
+def test_fetch_langfuse_rows_raises_kitaru_error_when_trace_has_no_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_langfuse = SimpleNamespace(Langfuse=lambda: object())
+    monkeypatch.setitem(sys.modules, "langfuse", fake_langfuse)
+
+    with pytest.raises(KitaruRuntimeError, match="No rows for trace trace_1"):
+        _fetch_langfuse_rows("trace_1", timeout=0)
 
 
 def test_import_langgraph_trace_forwards_trace_id_for_jsonl_rows():

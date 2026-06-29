@@ -90,6 +90,11 @@ def get_replay_runtime_context() -> ReplayRuntimeContext | None:
         return None
 
 
+def is_replay() -> bool:
+    """Return whether the current process is running inside a replay execution."""
+    return KITARU_REPLAY_CONTEXT_ENV in os.environ
+
+
 def _lookup_override(mapping: dict[str, str], *keys: str | None) -> str | None:
     for key in keys:
         if not key:
@@ -156,6 +161,7 @@ __all__ = [
     "KITARU_REPLAY_CONTEXT_ENV",
     "ReplayRuntimeContext",
     "get_replay_runtime_context",
+    "is_replay",
     "resolve_model_override",
     "resolve_tool_override",
 ]

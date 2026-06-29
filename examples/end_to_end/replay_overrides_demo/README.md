@@ -183,7 +183,7 @@ Targets `support_copilot_model_request_2` with `openai:gpt-5-nano`. The first mo
 checkpoint stays cached from prod. Compare the second model checkpoint and final
 decision.
 
-![Invocation model override](screenshots/07-model-override.png)
+In the dashboard compare view, inspect `support_copilot_model_request_2` and the final `support_decision` artifact. The important check is that only the final model turn changed; the first model-planning checkpoint should still match the prod recording.
 
 ### Reuse a recorded publish step
 
@@ -198,7 +198,7 @@ Replay applies a new prompt profile but **`skip`s `publish_support_decision`**, 
 the prod artifact. Final decision on the replay should match prod even if intermediate
 checkpoints differ.
 
-![Explicit skip — unchanged publish output](screenshots/08-explicit-skip.png)
+In the dashboard compare view, inspect `publish_support_decision`. Because that checkpoint is skipped, the replay should point back to the recorded prod artifact instead of creating a new published decision.
 
 ## 4. Batch evaluation before release
 
@@ -213,7 +213,7 @@ Replays all IDs in `fixtures/prod_exec_ids` with one tag (`replay-overrides-demo
 Filter by that tag in the dashboard, or open the batch compare link when present.
 Structured rows are also written to `reports/tagged_batch.json`.
 
-![Tagged batch in executions list](screenshots/09-tagged-batch.png)
+In the dashboard executions list, filter by the `replay-overrides-demo` tag to find the replay children created by the batch command. If you prefer a local artifact, open `reports/tagged_batch.json` and check the per-execution status rows.
 
 ## 5. Reading diffs for ship / no-ship
 
@@ -237,7 +237,7 @@ to permissive direct actions.
 **Investigate if:** batch replay reports failures or skipped rows in
 `reports/tagged_batch.json` before using results as release evidence.
 
-![Diff matrix or batch summary](screenshots/10-diff-matrix.png)
+Use `reports/diff_matrix.json` as the batch summary: each row compares an original execution with its tagged replay child, so you can scan for changed `risk_status`, changed `required_action`, failures, or skipped rows before treating the replay as release evidence.
 
 ## Override scopes (quick reference)
 

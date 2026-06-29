@@ -70,6 +70,11 @@ class TestPublicExports:
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
+    def test_replay_context_exports_exist(self) -> None:
+        assert hasattr(kitaru, "ReplayRuntimeContext")
+        assert hasattr(kitaru, "get_replay_runtime_context")
+        assert hasattr(kitaru, "is_replay")
+
     def test_run_sandbox_command_exists(self) -> None:
         assert hasattr(kitaru, "run_sandbox_command")
 
@@ -114,6 +119,7 @@ class TestPublicExports:
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
+            "ReplayRuntimeContext",
             "ReplaySubmission",
             "SandboxCommandResult",
             "Secret",
@@ -138,7 +144,9 @@ class TestPublicExports:
             "diff_matrix",
             "events",
             "flow",
+            "get_replay_runtime_context",
             "get_secret",
+            "is_replay",
             "list_stacks",
             "llm",
             "load",
@@ -160,6 +168,13 @@ class TestDirectImportStyle:
 
         assert flow is kitaru.flow
         assert checkpoint is kitaru.checkpoint
+
+    def test_direct_replay_context_imports(self) -> None:
+        from kitaru import ReplayRuntimeContext, get_replay_runtime_context, is_replay
+
+        assert ReplayRuntimeContext is kitaru.ReplayRuntimeContext
+        assert get_replay_runtime_context is kitaru.get_replay_runtime_context
+        assert is_replay is kitaru.is_replay
 
 
 class TestImplementedConnectionPrimitive:

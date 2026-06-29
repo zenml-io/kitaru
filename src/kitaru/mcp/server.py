@@ -444,7 +444,7 @@ def kitaru_executions_replay(
     skip: list[str] | None = None,
     tag: str | None = None,
     wait: bool | None = None,
-    on_error: Literal["fail", "collect"] = "collect",
+    on_error: Literal["fail", "collect"] | None = None,
 ) -> dict[str, Any]:
     """Replay explicit executions and return the replay submission JSON."""
 

@@ -24,6 +24,7 @@ from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay_context import ReplayRuntimeContext
 
 _TOOL_CHECKPOINT_SUFFIX = re.compile(r"_tool(?:_\d+)?$")
+_MODEL_REQUEST_CHECKPOINT_SUFFIX = re.compile(r"^(?P<base>.+_model_request)(?:_\d+)?$")
 _ALLOWED_OVERRIDE_FIELDS = frozenset({"input", "output", "model", "code"})
 logger = logging.getLogger(__name__)
 
@@ -432,9 +433,28 @@ def _resolve_checkpoint_scope_selector(
     selector: str,
     checkpoints: Sequence[_Checkpoint],
 ) -> list[_Checkpoint]:
-    matches = [checkpoint for checkpoint in checkpoints if checkpoint.name == selector]
-    if matches:
-        return matches
+    model_request_base = _unsuffixed_model_request_base(selector)
+    if model_request_base is not None:
+        matches = [
+            checkpoint
+            for checkpoint in checkpoints
+            if _is_llm_checkpoint(checkpoint)
+            and _model_request_base(checkpoint.name) == model_request_base
+        ]
+        if matches:
+            return matches
+
+    exact_matches = [
+        checkpoint for checkpoint in checkpoints if checkpoint.name == selector
+    ]
+    if exact_matches and not _is_unsuffixed_tool_selector(selector):
+        return exact_matches
+    if _is_suffixed_tool_selector(selector):
+        raise KitaruStateError(
+            f"Unknown checkpoint override target '{selector}'. Available checkpoints: "
+            f"{_available_checkpoint_selectors(checkpoints)}."
+        )
+
     normalized_selector = _normalized_tool_name(selector)
     matches = [
         checkpoint
@@ -449,11 +469,35 @@ def _resolve_checkpoint_scope_selector(
     )
 
 
+def _is_unsuffixed_tool_selector(selector: str) -> bool:
+    return selector.endswith("_tool")
+
+
+def _is_suffixed_tool_selector(selector: str) -> bool:
+    return re.search(r"_tool_\d+$", selector) is not None
+
+
 def _normalized_tool_name(name: str) -> str:
     """Normalize adapter tool checkpoint names for replay selectors."""
     if _TOOL_CHECKPOINT_SUFFIX.search(name):
         return _TOOL_CHECKPOINT_SUFFIX.sub("", name)
     return name.removesuffix("_tool")
+
+
+def _model_request_base(name: str) -> str | None:
+    """Return the adapter-generated model request family name, if present."""
+    match = _MODEL_REQUEST_CHECKPOINT_SUFFIX.match(name)
+    if match is None:
+        return None
+    return match.group("base")
+
+
+def _unsuffixed_model_request_base(selector: str) -> str | None:
+    """Return a model-request family selector only for unsuffixed base names."""
+    base = _model_request_base(selector)
+    if base is None or base != selector:
+        return None
+    return base
 
 
 def _iter_step_input_specs(step: StepRunResponse) -> Iterator[tuple[str, Any]]:
@@ -523,8 +567,13 @@ def _find_downstream_consumers(
 
     if not consumers:
         raise KitaruStateError(
-            "Checkpoint output override has no downstream consumer in this "
-            f"execution: {source.name}."
+            "Checkpoint output override target has no downstream consumer in "
+            f"this execution: {source.name}. Output overrides currently work "
+            "by replacing inputs to later checkpoints, and this checkpoint has "
+            "no later input to replace. For a side-effectful terminal "
+            "checkpoint, guard the side effect with `kitaru.is_replay()` or "
+            "move the side effect into a checkpoint whose output is consumed "
+            "later."
         )
 
     return consumers

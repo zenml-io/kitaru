@@ -14,6 +14,7 @@ from kitaru._ui_urls import resolve_ui_base_url
 from kitaru.client import KitaruClient
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
+_AUTO_DISCOVERY_LIMIT = 200
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ExecutionDiff:
     original_exec_id: str
     compared: list[tuple[str, list[CheckpointDiff]]] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -337,6 +339,7 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
             for replay_exec_id, checkpoint_diffs in item.compared
         ],
         "urls": list(item.urls),
+        "warnings": list(item.warnings),
     }
 
 
@@ -358,11 +361,18 @@ def _diff_impl(
     original_execution = client.executions.get(original)
 
     compared_exec_ids: list[str]
+    warnings: list[str] = []
     if executions:
         compared_exec_ids = list(executions)
     else:
         flow_name = original_execution.flow_name
-        candidates = client.executions.list(flow=flow_name, limit=200)
+        candidates = client.executions.list(flow=flow_name, limit=_AUTO_DISCOVERY_LIMIT)
+        if len(candidates) == _AUTO_DISCOVERY_LIMIT:
+            warnings.append(
+                "Replay auto-discovery inspected the newest 200 executions for "
+                f"flow {flow_name}. Older replay children may exist. Pass replay "
+                "execution IDs explicitly to diff all known replays."
+            )
         compared_exec_ids = [
             candidate.exec_id
             for candidate in candidates
@@ -401,6 +411,7 @@ def _diff_impl(
         original_exec_id=original,
         compared=compared,
         urls=compare_urls,
+        warnings=warnings,
     )
 
 
