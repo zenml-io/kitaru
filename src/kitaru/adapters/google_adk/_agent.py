@@ -127,13 +127,23 @@ class KitaruADKRunner:
         config = cast(CheckpointConfig, self._run_checkpoint_config or {})
         return with_default_type(config, DEFAULT_RUNNER_CHECKPOINT_TYPE)
 
-    def _runner_input_envelope(self, request: ADKRunRequest) -> dict[str, Any]:
+    def _runner_input_envelope(
+        self,
+        request: ADKRunRequest,
+        *,
+        include_request: bool = True,
+    ) -> dict[str, Any]:
+        request_payload: Any = (
+            request.model_dump(mode="python")
+            if include_request
+            else {"captured": False}
+        )
         return {
             "adapter": ADAPTER_ID,
             "adapter_version": ADAPTER_VERSION,
             "google_adk_version": _google_adk_version(),
             "runner": {"name": self._name, **object_metadata(self._runner)},
-            "request": request.model_dump(mode="python"),
+            "request": request_payload,
             "capture": self._capture.model_dump(mode="python"),
         }
 
@@ -142,12 +152,17 @@ class KitaruADKRunner:
             return await self._invoke_runner_async(request, tracker=None)
 
         raw_envelope = self._runner_input_envelope(request)
-        envelope = to_json_safe(raw_envelope)
+        envelope_input = (
+            raw_envelope
+            if self._capture.save_input
+            else self._runner_input_envelope(request, include_request=False)
+        )
+        envelope = to_json_safe(envelope_input)
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
             return await run_async_in_checkpoint(
                 config=self._runner_call_checkpoint_config(),
                 step_name=f"{self._name}_google_adk_runner_call",
-                body=body,
+                body=lambda: self._run_runner_call_body_async(body),
                 cache_key=checkpoint_cache_key(to_cache_identity(raw_envelope)),
                 checkpoint_inputs={"adk_input": envelope},
             )
@@ -158,16 +173,53 @@ class KitaruADKRunner:
             return self._invoke_runner_sync(request, tracker=None)
 
         raw_envelope = self._runner_input_envelope(request)
-        envelope = to_json_safe(raw_envelope)
+        envelope_input = (
+            raw_envelope
+            if self._capture.save_input
+            else self._runner_input_envelope(request, include_request=False)
+        )
+        envelope = to_json_safe(envelope_input)
         if runtime.is_inside_flow() and not runtime.is_inside_checkpoint():
             return run_sync_in_checkpoint(
                 config=self._runner_call_checkpoint_config(),
                 step_name=f"{self._name}_google_adk_runner_call",
-                body=body,
+                body=lambda: self._run_runner_call_body_sync(body),
                 cache_key=checkpoint_cache_key(to_cache_identity(raw_envelope)),
                 checkpoint_inputs={"adk_input": envelope},
             )
         return body()
+
+    async def _run_runner_call_body_async(
+        self,
+        body: Callable[[], Any],
+    ) -> ADKRunResult:
+        tracker = EventTracker(self._name)
+        with tracker_scope(
+            tracker,
+            capture=self._capture,
+            call_policy=self._runner_call_inner_policy(),
+        ):
+            return await body()
+
+    def _run_runner_call_body_sync(
+        self,
+        body: Callable[[], ADKRunResult],
+    ) -> ADKRunResult:
+        tracker = EventTracker(self._name)
+        with tracker_scope(
+            tracker,
+            capture=self._capture,
+            call_policy=self._runner_call_inner_policy(),
+        ):
+            return body()
+
+    def _runner_call_inner_policy(self) -> ADKCallCheckpointPolicy:
+        return ADKCallCheckpointPolicy(
+            model_checkpoint_config=False,
+            tool_checkpoint_config=False,
+            persist_run_artifacts=False,
+            nested_checkpoint_policy="metadata_only",
+        )
 
     async def _run_calls_async(self, request: ADKRunRequest) -> ADKRunResult:
         self._validate_explicit_wrapper_calls_mode_policy()

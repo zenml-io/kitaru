@@ -6,8 +6,6 @@ Run the deterministic local workflow from an isolated ADK environment:
       python examples/integrations/google_adk_agent/google_adk_workflow.py
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import json

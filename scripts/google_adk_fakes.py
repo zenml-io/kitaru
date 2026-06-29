@@ -80,6 +80,12 @@ class FakeBaseTool:
         self.is_long_running = is_long_running
         self.custom_metadata = custom_metadata
 
+    def _get_declaration(self) -> Any | None:
+        return None
+
+    async def process_llm_request(self, *, tool_context: Any, llm_request: Any) -> None:
+        llm_request.append_tools([self])
+
 
 def purge_google_adk_adapter_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove cached Kitaru Google ADK adapter modules."""

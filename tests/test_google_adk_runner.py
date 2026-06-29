@@ -166,6 +166,80 @@ def test_runner_call_wraps_sync_runner_in_checkpoint(
     assert runner.calls[0]["new_message"] == "hi"
 
 
+def test_runner_call_omits_request_when_input_capture_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, agent_module, _tracking_module = _modules(monkeypatch)
+    runner = FakeRunner()
+    checkpoint_calls: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(agent_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(agent_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        checkpoint_calls.append(kwargs)
+        return kwargs["body"]()
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_checkpoint)
+
+    wrapped = adapter.KitaruADKRunner(
+        runner,
+        checkpoint_strategy="runner_call",
+        capture=adapter.ADKCapturePolicy(save_input=False),
+    )
+    result = wrapped.run_sync(
+        adapter.ADKRunRequest(user_id="u", session_id="s", message="secret")
+    )
+
+    assert result.final_output == "echo:secret"
+    assert checkpoint_calls[0]["checkpoint_inputs"]["adk_input"]["request"] == {
+        "captured": False
+    }
+
+
+def test_runner_call_suppresses_inner_wrapper_checkpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, agent_module, tracking_module = _modules(monkeypatch)
+    raw_model = RawModel()
+    raw_tool = RawTool()
+    runner = ContextAwareRunner(
+        model=adapter.KitaruADKModel(raw_model, name="runner_model"),
+        tool=adapter.KitaruADKTool(raw_tool, name="runner_tool"),
+        tracking_module=tracking_module,
+    )
+    inside_checkpoint = False
+
+    monkeypatch.setattr(agent_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(
+        agent_module.runtime,
+        "is_inside_checkpoint",
+        lambda: inside_checkpoint,
+    )
+
+    def fake_checkpoint(**kwargs: Any) -> Any:
+        nonlocal inside_checkpoint
+        inside_checkpoint = True
+        try:
+            return kwargs["body"]()
+        finally:
+            inside_checkpoint = False
+
+    monkeypatch.setattr(agent_module, "run_sync_in_checkpoint", fake_checkpoint)
+
+    wrapped = adapter.KitaruADKRunner(runner, checkpoint_strategy="runner_call")
+    result = wrapped.run_sync(
+        adapter.ADKRunRequest(user_id="u", session_id="s", message="cats")
+    )
+
+    assert result.final_output["tool_result"] == {"answer": "tool:cats"}
+    policy = runner.seen_policy
+    assert policy is not None
+    assert policy.nested_checkpoint_policy == "metadata_only"
+    assert policy.model_checkpoint_config is False
+    assert policy.tool_checkpoint_config is False
+
+
 def test_runner_call_outside_flow_calls_runner_directly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

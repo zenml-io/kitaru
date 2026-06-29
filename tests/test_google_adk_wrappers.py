@@ -99,6 +99,20 @@ class AsyncProcessTool(FakeTool):
         self.processed.append((tool_context, llm_request))
 
 
+class ConnectModel(FakeModel):
+    def connect(self, request: Any) -> str:
+        return f"connection:{request}"
+
+
+class FakeLlmRequest:
+    def __init__(self) -> None:
+        self.tools_dict: dict[str, Any] = {}
+
+    def append_tools(self, tools: list[Any]) -> None:
+        for tool in tools:
+            self.tools_dict[tool.name] = tool
+
+
 async def _collect_model(model: Any, request: dict[str, Any]) -> list[Any]:
     return [event async for event in model.generate_content_async(request)]
 
@@ -494,6 +508,17 @@ def test_model_wrapper_without_supported_models_returns_empty_list(
     assert wrapped.supported_models() == []
 
 
+def test_model_wrapper_preserves_sync_live_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    wrapped = adapter.KitaruADKModel(ConnectModel())
+
+    result = wrapped.connect("live-request")
+
+    assert result == "connection:live-request"
+
+
 def test_tool_wrapper_is_base_tool_and_accepts_sync_process_delegate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -510,6 +535,32 @@ def test_tool_wrapper_is_base_tool_and_accepts_sync_process_delegate(
     asyncio.run(wrapped.process_llm_request(tool_context=context, llm_request=request))
 
     assert tool.processed == [(context, request)]
+
+
+def test_tool_wrapper_default_process_registers_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    base_tool_module = importlib.import_module("google.adk.tools.base_tool")
+    raw_tool = base_tool_module.BaseTool(name="search", description="Search.")
+    wrapped = adapter.wrap_tool(raw_tool)
+    request = FakeLlmRequest()
+
+    asyncio.run(wrapped.process_llm_request(tool_context=object(), llm_request=request))
+
+    assert request.tools_dict == {"search": wrapped}
+
+
+def test_tool_wrapper_preserves_response_scheduling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    tool: Any = FakeTool()
+    tool.response_scheduling = "WHEN_IDLE"
+
+    wrapped = adapter.wrap_tool(tool)
+
+    assert wrapped.response_scheduling == "WHEN_IDLE"
 
 
 def test_tool_wrapper_process_llm_request_accepts_async_delegate(
@@ -764,6 +815,56 @@ def test_tracker_scope_capture_controls_model_and_tool_checkpoint_inputs(
     assert result == {"result": "cats", "context": "object"}
     assert model_include_raw == [True]
     assert tool_include_raw == [True]
+
+
+def test_capture_policy_omits_model_input_and_tool_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, model_module, tool_module = _modules(monkeypatch)
+    tracking_module = importlib.import_module("kitaru.adapters.google_adk._tracking")
+    model_inputs: list[dict[str, Any]] = []
+    tool_inputs: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(model_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(model_module.runtime, "is_inside_checkpoint", lambda: False)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tool_module.runtime, "is_inside_checkpoint", lambda: False)
+
+    async def fake_model_checkpoint(**kwargs: Any) -> Any:
+        model_inputs.append(kwargs["checkpoint_inputs"]["model_input"])
+        return await kwargs["body"]()
+
+    async def fake_tool_checkpoint(**kwargs: Any) -> Any:
+        tool_inputs.append(kwargs["checkpoint_inputs"]["tool_args"])
+        return await kwargs["body"]()
+
+    monkeypatch.setattr(model_module, "run_async_in_checkpoint", fake_model_checkpoint)
+    monkeypatch.setattr(tool_module, "run_async_in_checkpoint", fake_tool_checkpoint)
+
+    policy = adapter.ADKCallCheckpointPolicy()
+    capture = adapter.ADKCapturePolicy(
+        save_model_input=False,
+        save_tool_args=False,
+    )
+    tracker = tracking_module.EventTracker("redacted_capture")
+    wrapped_model = adapter.KitaruADKModel(FakeModel())
+    wrapped_tool = adapter.KitaruADKTool(FakeTool())
+
+    with tracking_module.tracker_scope(tracker, capture=capture, call_policy=policy):
+        responses = asyncio.run(
+            _collect_model(wrapped_model, {"prompt": "sensitive prompt"})
+        )
+        result = asyncio.run(
+            wrapped_tool.run_async(
+                args={"query": "sensitive query"},
+                tool_context=object(),
+            )
+        )
+
+    assert responses == [{"text": "response:sensitive prompt", "stream": False}]
+    assert result == {"result": "sensitive query", "context": "object"}
+    assert model_inputs[0]["llm_request"] == {"captured": False}
+    assert tool_inputs[0]["args"] == {"captured": False}
 
 
 def test_tool_checkpoint_input_includes_starting_state_to_avoid_stale_replay(

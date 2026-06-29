@@ -189,19 +189,44 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
             "_call_policy",
             call_policy or ADKCallCheckpointPolicy(),
         )
+        if hasattr(tool, "response_scheduling"):
+            object.__setattr__(
+                self,
+                "response_scheduling",
+                tool.response_scheduling,
+            )
         object.__setattr__(self, "_tracker", tracker)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._tool, name)
 
+    def _get_declaration(self) -> Any:
+        get_declaration = getattr(self._tool, "_get_declaration", None)
+        if not callable(get_declaration):
+            return None
+        return get_declaration()
+
     async def process_llm_request(self, *, tool_context: Any, llm_request: Any) -> Any:
         process = getattr(self._tool, "process_llm_request", None)
         if not callable(process):
             return None
-        result = process(tool_context=tool_context, llm_request=llm_request)
+        if getattr(process, "__func__", None) is _BaseTool.process_llm_request:
+            result = _BaseTool.process_llm_request(
+                self,
+                tool_context=tool_context,
+                llm_request=llm_request,
+            )
+        else:
+            result = process(tool_context=tool_context, llm_request=llm_request)
         if inspect.isawaitable(result):
-            return await result
+            result = await result
+        self._replace_raw_tool_registration(llm_request)
         return result
+
+    def _replace_raw_tool_registration(self, llm_request: Any) -> None:
+        tools_dict = getattr(llm_request, "tools_dict", None)
+        if isinstance(tools_dict, dict) and tools_dict.get(self.name) is self._tool:
+            tools_dict[self.name] = self
 
     async def run_async(self, *, args: Any, tool_context: Any) -> Any:
         """Run the wrapped ADK tool inside a checkpoint if possible."""
@@ -285,8 +310,13 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
             "tool_context_state_before": state_input,
             "wrapped_tool": object_metadata(self._tool),
         }
+        tool_input_payload = (
+            raw_tool_input
+            if capture.save_tool_args
+            else {**raw_tool_input, "args": {"captured": False}}
+        )
         tool_input = to_json_safe(
-            raw_tool_input,
+            tool_input_payload,
             include_raw=capture.capture_mode == "full",
         )
 

@@ -87,11 +87,11 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
             return []
         return supported_models()
 
-    async def connect(self, *args: Any, **kwargs: Any) -> Any:
+    def connect(self, *args: Any, **kwargs: Any) -> Any:
         connect = getattr(self._model, "connect", None)
         if not callable(connect):
             raise AttributeError("Wrapped ADK model does not expose connect(...).")
-        return await connect(*args, **kwargs)
+        return connect(*args, **kwargs)
 
     async def generate_content_async(
         self,
@@ -173,8 +173,13 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
             "llm_request": llm_request,
             "wrapped_model": object_metadata(self._model),
         }
+        model_input_payload = (
+            raw_model_input
+            if capture.save_model_input
+            else {**raw_model_input, "llm_request": {"captured": False}}
+        )
         model_input = to_json_safe(
-            raw_model_input,
+            model_input_payload,
             include_raw=capture.capture_mode == "full",
         )
         return await run_async_in_checkpoint(
