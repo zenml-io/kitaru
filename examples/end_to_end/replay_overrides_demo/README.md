@@ -181,7 +181,7 @@ uv run python demo.py model-override
 
 Targets `support_copilot_model_request_2` with `openai:gpt-5-nano`. The first model
 checkpoint stays cached from prod. Compare the second model checkpoint and final
-decision.
+decision. As you can see in the screenshot below, this may trade speed for latency.
 
 ![Invocation model override](screenshots/07-model-override.png)
 
@@ -213,7 +213,6 @@ Replays all IDs in `fixtures/prod_exec_ids` with one tag (`replay-overrides-demo
 Filter by that tag in the dashboard, or open the batch compare link when present.
 Structured rows are also written to `reports/tagged_batch.json`.
 
-![Tagged batch in executions list](screenshots/09-tagged-batch.png)
 
 ## 5. Reading diffs for ship / no-ship
 
