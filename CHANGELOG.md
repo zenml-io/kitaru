@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
 - Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
-- MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now warns when replay auto-discovery hits its 200-candidate cap.
+- MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now scans up to 10,000 same-flow executions when auto-discovering replays before warning that older replays may require explicit IDs.
+- Unknown checkpoint override targets now give repeated-call guidance when a likely model/tool family exists, pointing users to family-level `checkpoint_overrides` or one-call `invocation_overrides`.
 - LangGraph replay import now raises a catchable Kitaru error instead of `SystemExit` when Langfuse rows never arrive, and live forks support node callables that accept `(state, config)`.
 - `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
 - Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.

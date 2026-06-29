@@ -450,10 +450,7 @@ def _resolve_checkpoint_scope_selector(
     if exact_matches and not _is_unsuffixed_tool_selector(selector):
         return exact_matches
     if _is_suffixed_tool_selector(selector):
-        raise KitaruStateError(
-            f"Unknown checkpoint override target '{selector}'. Available checkpoints: "
-            f"{_available_checkpoint_selectors(checkpoints)}."
-        )
+        raise _unknown_checkpoint_override_target_error(selector, checkpoints)
 
     normalized_selector = _normalized_tool_name(selector)
     matches = [
@@ -463,10 +460,60 @@ def _resolve_checkpoint_scope_selector(
     ]
     if matches:
         return matches
-    raise KitaruStateError(
+    raise _unknown_checkpoint_override_target_error(selector, checkpoints)
+
+
+def _unknown_checkpoint_override_target_error(
+    selector: str,
+    checkpoints: Sequence[_Checkpoint],
+) -> KitaruStateError:
+    message = (
         f"Unknown checkpoint override target '{selector}'. Available checkpoints: "
         f"{_available_checkpoint_selectors(checkpoints)}."
     )
+    family_selector = _likely_repeated_family_selector(selector, checkpoints)
+    if family_selector is not None:
+        message += (
+            " To change every recorded call in this family, use "
+            f"'{family_selector}' in checkpoint_overrides. To change one "
+            "specific call, pass its call ID or invocation ID in "
+            "invocation_overrides."
+        )
+    return KitaruStateError(message)
+
+
+def _likely_repeated_family_selector(
+    selector: str,
+    checkpoints: Sequence[_Checkpoint],
+) -> str | None:
+    model_request_base = _model_request_base(selector)
+    if (
+        model_request_base is not None
+        and model_request_base != selector
+        and any(
+            _is_llm_checkpoint(checkpoint)
+            and _model_request_base(checkpoint.name) == model_request_base
+            for checkpoint in checkpoints
+        )
+    ):
+        return model_request_base
+
+    tool_family_selector = _unsuffixed_tool_family_selector(selector)
+    if tool_family_selector is not None and any(
+        _unsuffixed_tool_family_selector(checkpoint.name) == tool_family_selector
+        for checkpoint in checkpoints
+    ):
+        return tool_family_selector
+
+    return None
+
+
+def _unsuffixed_tool_family_selector(name: str) -> str | None:
+    if _is_suffixed_tool_selector(name):
+        return name.rsplit("_", 1)[0]
+    if _is_unsuffixed_tool_selector(name):
+        return name
+    return None
 
 
 def _is_unsuffixed_tool_selector(selector: str) -> bool:
