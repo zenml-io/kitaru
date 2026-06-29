@@ -7,6 +7,10 @@ icon: flask
 
 The Google ADK adapter is experimental. Use it when you already have a Google ADK agent and want Kitaru to record the parts of the run that ADK exposes to your Python process.
 
+{% hint style="info" %}
+**Looking for Gemini Interactions or Antigravity?** Use the [Gemini Interactions adapter](gemini-interactions.md) if your code calls `client.interactions.create(...)`, polls `client.interactions.get(...)`, or uses the Antigravity managed agent. This page is for code built with `google.adk` agents, runners, models, and tools.
+{% endhint %}
+
 There are two useful paths today. Both persist checkpoints when the wrapped ADK call runs inside a Kitaru flow:
 
 1. **Whole-runner checkpointing** — `KitaruADKRunner(..., checkpoint_strategy="runner_call")` wraps one ADK runner turn. ADK runs the agent, and Kitaru stores the resulting `ADKRunResult`.

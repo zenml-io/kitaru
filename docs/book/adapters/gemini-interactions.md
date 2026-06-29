@@ -11,6 +11,10 @@ you can replay the surrounding flow without re-running Gemini for turns that
 already finished. Use it when a Gemini call is one step in a larger durable
 workflow.
 
+{% hint style="info" %}
+**Using Google ADK instead?** Use the [Google ADK adapter](google-adk.md) if your application runs a `google.adk` agent or runner. This page is for direct Gemini Interactions API calls, including Antigravity managed-agent runs.
+{% endhint %}
+
 The [Google Gemini Interactions API](https://ai.google.dev/) is a hosted
 interaction runtime: you send a request to Gemini or a Google-managed agent,
 Google runs the interaction, and you receive a response. Kitaru does **not**
