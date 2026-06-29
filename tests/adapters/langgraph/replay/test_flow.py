@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
 from kitaru._replay_verify_imported_models import RecordedCall
 from kitaru._source_aliases import (
     build_checkpoint_source_alias,
     build_pipeline_source_alias,
 )
 from kitaru.adapters.langgraph.replay._compiler import CompiledTopology
-from kitaru.adapters.langgraph.replay._flow import ReplayContext, run_seed
+from kitaru.adapters.langgraph.replay._flow import (
+    ReplayContext,
+    _call_node_callable,
+    run_seed,
+)
 
 
 def _topology(live_calls: list[str]) -> CompiledTopology:
@@ -136,6 +142,49 @@ def test_live_run_executes_tail_nodes(primed_zenml) -> None:
     handle = flow_def.run(False)
     handle.wait()
     assert "decide_action" in live_calls  # tail executed live
+
+
+def test_live_run_supports_state_config_node_callable(primed_zenml) -> None:
+    configs: list[dict] = []
+
+    def _node(state: dict, config: dict) -> dict:
+        configs.append(config)
+        return {"seen": state.get("seed"), "config": config}
+
+    topo = CompiledTopology(
+        nodes=["state_config_node"],
+        callables={"state_config_node": _node},
+        fanout_node=None,
+    )
+    ctx = ReplayContext(
+        topology=topo,
+        recorded_by_node={},
+        node_output_by_node={},
+        playback=False,
+        variant=None,
+        edits=[],
+        root_state={"seed": "root"},
+    )
+    from kitaru.adapters.langgraph.replay._flow import build_replay_flow
+
+    flow_def = build_replay_flow(ctx)
+    result = flow_def.run(False).wait()
+
+    assert configs == [{}]
+    assert result == {"state_config_node": {"seen": "root", "config": {}}}
+
+
+def test_node_callable_type_error_from_user_code_is_not_retried() -> None:
+    calls: list[str] = []
+
+    def _node(state: dict) -> dict:
+        calls.append("one-arg")
+        raise TypeError("user code failed")
+
+    with pytest.raises(TypeError, match="user code failed"):
+        _call_node_callable(_node, {}, accepts_config=False)
+
+    assert calls == ["one-arg"]
 
 
 def test_generated_replay_flow_refreshes_source_aliases_before_run(

@@ -63,6 +63,29 @@ def _run(*steps: Any) -> PipelineRunResponse:
     )
 
 
+def _support_copilot_model_request_steps(t0: datetime) -> tuple[Any, Any, Any]:
+    return (
+        _step(
+            name="support_copilot_model_request",
+            invocation_id="m1",
+            started_at=t0,
+            step_type="llm_call",
+        ),
+        _step(
+            name="support_copilot_model_request_2",
+            invocation_id="m2",
+            started_at=t0 + timedelta(seconds=1),
+            step_type="llm_call",
+        ),
+        _step(
+            name="support_copilot_model_request_3",
+            invocation_id="m3",
+            started_at=t0 + timedelta(seconds=2),
+            step_type="llm_call",
+        ),
+    )
+
+
 def test_replay_at_status_detects_present_missing_and_ambiguous() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     write_a = _step(name="write", invocation_id="write-a", started_at=t0)
@@ -104,6 +127,28 @@ def test_build_replay_plan_skips_steps_before_at_selector() -> None:
     assert plan.steps_to_skip == {"fetch"}
     assert plan.input_overrides == {}
     assert plan.step_input_overrides == {}
+
+
+def test_leaf_output_override_explains_no_downstream_consumer() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    charge_card = _step(
+        name="charge_card",
+        invocation_id="charge_card",
+        started_at=t0,
+        step_type="tool_call",
+    )
+
+    with pytest.raises(KitaruStateError) as exc_info:
+        build_replay_plan(
+            run=_run(charge_card),
+            at="charge_card",
+            invocation_overrides={"charge_card": {"output": "already charged"}},
+        )
+
+    message = str(exc_info.value)
+    assert "no downstream consumer" in message
+    assert "replacing inputs to later checkpoints" in message
+    assert "kitaru.is_replay()" in message
 
 
 def test_output_override_skips_source_and_injects_downstream() -> None:
@@ -288,19 +333,30 @@ def test_checkpoint_overrides_fan_out_to_matching_invocations() -> None:
         started_at=t0 + timedelta(seconds=1),
         step_type="tool_call",
     )
+    third = _step(
+        name="lookup_policy_tool_3",
+        invocation_id="lookup_policy_tool_3",
+        started_at=t0 + timedelta(seconds=2),
+        step_type="tool_call",
+    )
     decide = _step(
         name="decide",
         invocation_id="decide",
         started_at=t0 + timedelta(seconds=5),
-        upstream_steps=["lookup_policy_tool", "lookup_policy_tool_2"],
+        upstream_steps=[
+            "lookup_policy_tool",
+            "lookup_policy_tool_2",
+            "lookup_policy_tool_3",
+        ],
         inputs_v2={
             "policy_a": [_input_spec("lookup_policy_tool", "output")],
             "policy_b": [_input_spec("lookup_policy_tool_2", "output")],
+            "policy_c": [_input_spec("lookup_policy_tool_3", "output")],
         },
     )
 
     plan = build_replay_plan(
-        run=_run(first, second, decide),
+        run=_run(first, second, third, decide),
         at="decide",
         checkpoint_overrides={"lookup_policy": {"output": "mock"}},
     )
@@ -308,11 +364,259 @@ def test_checkpoint_overrides_fan_out_to_matching_invocations() -> None:
     assert plan.step_input_overrides["decide"] == {
         "policy_a": "mock",
         "policy_b": "mock",
+        "policy_c": "mock",
     }
     assert plan.document.matched_targets["checkpoint:lookup_policy"] == [
         "lookup_policy_tool",
         "lookup_policy_tool_2",
+        "lookup_policy_tool_3",
     ]
+
+
+def test_unsuffixed_tool_checkpoint_override_selector_fans_out() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=t0,
+        step_type="tool_call",
+    )
+    second = _step(
+        name="lookup_policy_tool_2",
+        invocation_id="lookup_policy_tool_2",
+        started_at=t0 + timedelta(seconds=1),
+        step_type="tool_call",
+    )
+    third = _step(
+        name="lookup_policy_tool_3",
+        invocation_id="lookup_policy_tool_3",
+        started_at=t0 + timedelta(seconds=2),
+        step_type="tool_call",
+    )
+
+    plan = build_replay_plan(
+        run=_run(first, second, third),
+        at="lookup_policy_tool",
+        checkpoint_overrides={"lookup_policy_tool": {"code": "mocks.lookup_policy"}},
+    )
+
+    assert plan.document.matched_targets["checkpoint:lookup_policy_tool"] == [
+        "lookup_policy_tool",
+        "lookup_policy_tool_2",
+        "lookup_policy_tool_3",
+    ]
+    assert plan.runtime_context.code_overrides["lookup_policy_tool"] == (
+        "mocks.lookup_policy"
+    )
+    assert plan.runtime_context.code_overrides["lookup_policy_tool_2"] == (
+        "mocks.lookup_policy"
+    )
+    assert plan.runtime_context.code_overrides["lookup_policy_tool_3"] == (
+        "mocks.lookup_policy"
+    )
+
+
+def test_suffixed_tool_checkpoint_override_selector_stays_exact() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=t0,
+        step_type="tool_call",
+    )
+    second = _step(
+        name="lookup_policy_tool_2",
+        invocation_id="lookup_policy_tool_2",
+        started_at=t0 + timedelta(seconds=1),
+        step_type="tool_call",
+    )
+    third = _step(
+        name="lookup_policy_tool_3",
+        invocation_id="lookup_policy_tool_3",
+        started_at=t0 + timedelta(seconds=2),
+        step_type="tool_call",
+    )
+
+    plan = build_replay_plan(
+        run=_run(first, second, third),
+        at="lookup_policy_tool",
+        checkpoint_overrides={"lookup_policy_tool_2": {"code": "mocks.lookup_policy"}},
+    )
+
+    assert plan.document.matched_targets["checkpoint:lookup_policy_tool_2"] == [
+        "lookup_policy_tool_2"
+    ]
+    assert "lookup_policy_tool" not in plan.runtime_context.code_overrides
+    assert plan.runtime_context.code_overrides["lookup_policy_tool_2"] == (
+        "mocks.lookup_policy"
+    )
+    assert "lookup_policy_tool_3" not in plan.runtime_context.code_overrides
+
+
+def test_checkpoint_model_override_fans_out_to_repeated_model_requests() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first, second, third = _support_copilot_model_request_steps(t0)
+
+    plan = build_replay_plan(
+        run=_run(first, second, third),
+        at="support_copilot_model_request",
+        checkpoint_overrides={
+            "support_copilot_model_request": {"model": "openai/gpt-5-nano"}
+        },
+    )
+
+    assert plan.document.matched_targets[
+        "checkpoint:support_copilot_model_request"
+    ] == ["m1", "m2", "m3"]
+    assert plan.runtime_context.model_overrides["m1"] == "openai/gpt-5-nano"
+    assert plan.runtime_context.model_overrides["m2"] == "openai/gpt-5-nano"
+    assert plan.runtime_context.model_overrides["m3"] == "openai/gpt-5-nano"
+
+
+def test_invocation_model_override_wins_over_repeated_checkpoint_fanout() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first, second, third = _support_copilot_model_request_steps(t0)
+
+    plan = build_replay_plan(
+        run=_run(first, second, third),
+        at="support_copilot_model_request",
+        checkpoint_overrides={
+            "support_copilot_model_request": {"model": "openai/gpt-5-nano"}
+        },
+        invocation_overrides={
+            "support_copilot_model_request_2": {"model": "anthropic/claude-opus-4"}
+        },
+    )
+
+    assert plan.runtime_context.model_overrides["m1"] == "openai/gpt-5-nano"
+    assert plan.runtime_context.model_overrides["m2"] == "anthropic/claude-opus-4"
+    assert plan.runtime_context.model_overrides["m3"] == "openai/gpt-5-nano"
+
+
+def test_suffixed_checkpoint_model_override_selector_stays_exact() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first, second, third = _support_copilot_model_request_steps(t0)
+
+    plan = build_replay_plan(
+        run=_run(first, second, third),
+        at="support_copilot_model_request",
+        checkpoint_overrides={
+            "support_copilot_model_request_2": {"model": "openai/gpt-5-nano"}
+        },
+    )
+
+    assert plan.document.matched_targets[
+        "checkpoint:support_copilot_model_request_2"
+    ] == ["m2"]
+    assert "m1" not in plan.runtime_context.model_overrides
+    assert plan.runtime_context.model_overrides["m2"] == "openai/gpt-5-nano"
+    assert "m3" not in plan.runtime_context.model_overrides
+
+
+def test_unknown_model_override_target_suggests_family_and_invocation() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first, second, third = _support_copilot_model_request_steps(t0)
+
+    with pytest.raises(KitaruStateError) as exc_info:
+        build_replay_plan(
+            run=_run(first, second, third),
+            at="support_copilot_model_request",
+            checkpoint_overrides={
+                "support_copilot_model_request_4": {"model": "openai/gpt-5-nano"}
+            },
+        )
+
+    message = str(exc_info.value)
+    assert (
+        "Unknown checkpoint override target 'support_copilot_model_request_4'"
+        in message
+    )
+    assert "Available checkpoints:" in message
+    assert "support_copilot_model_request" in message
+    assert "support_copilot_model_request_2" in message
+    assert "support_copilot_model_request_3" in message
+    assert "'support_copilot_model_request' in checkpoint_overrides" in message
+    assert "call ID or invocation ID in invocation_overrides" in message
+
+
+def test_unknown_tool_override_target_suggests_family_and_invocation() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=t0,
+        step_type="tool_call",
+    )
+    second = _step(
+        name="lookup_policy_tool_2",
+        invocation_id="lookup_policy_tool_2",
+        started_at=t0 + timedelta(seconds=1),
+        step_type="tool_call",
+    )
+    third = _step(
+        name="lookup_policy_tool_3",
+        invocation_id="lookup_policy_tool_3",
+        started_at=t0 + timedelta(seconds=2),
+        step_type="tool_call",
+    )
+
+    with pytest.raises(KitaruStateError) as exc_info:
+        build_replay_plan(
+            run=_run(first, second, third),
+            at="lookup_policy_tool",
+            checkpoint_overrides={
+                "lookup_policy_tool_4": {"code": "mocks.lookup_policy"}
+            },
+        )
+
+    message = str(exc_info.value)
+    assert "Unknown checkpoint override target 'lookup_policy_tool_4'" in message
+    assert "Available checkpoints:" in message
+    assert "lookup_policy_tool" in message
+    assert "lookup_policy_tool_2" in message
+    assert "lookup_policy_tool_3" in message
+    assert "'lookup_policy_tool' in checkpoint_overrides" in message
+    assert "call ID or invocation ID in invocation_overrides" in message
+
+
+def test_unknown_override_target_typo_stays_plain() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    first, second, third = _support_copilot_model_request_steps(t0)
+
+    with pytest.raises(KitaruStateError) as exc_info:
+        build_replay_plan(
+            run=_run(first, second, third),
+            at="support_copilot_model_request",
+            checkpoint_overrides={
+                "support_copilot_model_request_extra_4": {"model": "openai/gpt-5-nano"}
+            },
+        )
+
+    message = str(exc_info.value)
+    assert (
+        "Unknown checkpoint override target 'support_copilot_model_request_extra_4'"
+        in message
+    )
+    assert "Available checkpoints:" in message
+    assert "support_copilot_model_request" in message
+    assert "To change every recorded call in this family" not in message
+    assert "checkpoint_overrides" not in message
+    assert "invocation_overrides" not in message
+
+
+def test_checkpoint_override_does_not_strip_user_numbered_checkpoint_names() -> None:
+    phase_2 = _step(
+        name="phase_2",
+        invocation_id="phase_2",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+    )
+
+    with pytest.raises(KitaruStateError, match="Unknown checkpoint override target"):
+        build_replay_plan(
+            run=_run(phase_2),
+            at="phase_2",
+            checkpoint_overrides={"phase": {"input": "new value"}},
+        )
 
 
 def test_build_replay_plan_rejects_unknown_selector() -> None:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import importlib
+import inspect
 import sys
 from dataclasses import dataclass, field
 from functools import wraps
@@ -140,6 +141,37 @@ class ReplayContext:
     root_state: dict[str, Any] = field(default_factory=dict)
 
 
+def _callable_accepts_config(callable_: Any) -> bool:
+    """Return whether a LangGraph node accepts ``node(state, config)``.
+
+    This check happens while the replay flow is built, not while a live node is
+    executing.  The live call path then makes exactly one call, so a real
+    ``TypeError`` raised inside user code still propagates unchanged.
+    """
+    try:
+        signature = inspect.signature(callable_)
+    except (TypeError, ValueError):
+        return False
+
+    try:
+        signature.bind({}, {})
+    except TypeError:
+        return False
+    return True
+
+
+def _call_node_callable(
+    callable_: Any,
+    running_state: dict[str, Any],
+    *,
+    accepts_config: bool,
+) -> Any:
+    """Call a LangGraph node with its precomputed state/config shape."""
+    if accepts_config:
+        return callable_(running_state, {})
+    return callable_(running_state)
+
+
 def _apply_effective_variant(
     running_state: dict[str, Any],
     *,
@@ -215,6 +247,11 @@ def build_replay_flow(ctx: ReplayContext) -> Any:
     the accumulated state from previous nodes.
     """
 
+    node_accepts_config = {
+        node: _callable_accepts_config(ctx.topology.callables[node])
+        for node in ctx.topology.nodes
+    }
+
     # --- node checkpoint (one per build_replay_flow call; closed over ctx) ----
 
     @checkpoint(cache=False)
@@ -259,7 +296,11 @@ def build_replay_flow(ctx: ReplayContext) -> Any:
             _apply_effective_variant(running_state, effective=effective)
 
             callable_ = ctx.topology.callables[node]
-            node_out = callable_(running_state)
+            node_out = _call_node_callable(
+                callable_,
+                running_state,
+                accepts_config=node_accepts_config[node],
+            )
 
         # Surface THIS node's own output as an individual, JSON-clean named
         # artifact, so the dashboard shows e.g. `decide_action` / `final_response`

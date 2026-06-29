@@ -14,6 +14,7 @@ from kitaru._ui_urls import resolve_ui_base_url
 from kitaru.client import KitaruClient
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
+_AUTO_DISCOVERY_SCAN_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ExecutionDiff:
     original_exec_id: str
     compared: list[tuple[str, list[CheckpointDiff]]] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -337,6 +339,7 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
             for replay_exec_id, checkpoint_diffs in item.compared
         ],
         "urls": list(item.urls),
+        "warnings": list(item.warnings),
     }
 
 
@@ -350,6 +353,38 @@ def serialize_diff_matrix(item: CohortDiff) -> dict[str, Any]:
     }
 
 
+def _discover_replays(
+    client: KitaruClient,
+    *,
+    flow_name: str | None,
+    original: str,
+) -> tuple[list[str], list[str]]:
+    """Find replay executions for one original with a bounded single-pass scan.
+
+    Public ``executions.list(page=..., size=...)`` currently starts from backend
+    page 1 and skips client-side, so walking public pages here would make later
+    pages reread earlier backend pages. A single capped ``limit`` call lets the
+    client walk the backend once while still preventing unbounded discovery work.
+    """
+    candidates = client.executions.list(
+        flow=flow_name,
+        limit=_AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+    replay_ids = [
+        candidate.exec_id
+        for candidate in candidates
+        if candidate.original_exec_id == original
+    ]
+    warnings: list[str] = []
+    if len(candidates) == _AUTO_DISCOVERY_SCAN_LIMIT:
+        warnings.append(
+            "Replay auto-discovery stopped after scanning "
+            f"{_AUTO_DISCOVERY_SCAN_LIMIT} executions for flow {flow_name}. "
+            "If older replays exist, pass replay execution IDs explicitly."
+        )
+    return replay_ids, warnings
+
+
 def _diff_impl(
     original: str,
     *executions: str,
@@ -358,16 +393,15 @@ def _diff_impl(
     original_execution = client.executions.get(original)
 
     compared_exec_ids: list[str]
+    warnings: list[str] = []
     if executions:
         compared_exec_ids = list(executions)
     else:
-        flow_name = original_execution.flow_name
-        candidates = client.executions.list(flow=flow_name, limit=200)
-        compared_exec_ids = [
-            candidate.exec_id
-            for candidate in candidates
-            if candidate.original_exec_id == original
-        ]
+        compared_exec_ids, warnings = _discover_replays(
+            client,
+            flow_name=original_execution.flow_name,
+            original=original,
+        )
 
     compared: list[tuple[str, list[CheckpointDiff]]] = []
     for replay_exec_id in compared_exec_ids:
@@ -401,6 +435,7 @@ def _diff_impl(
         original_exec_id=original,
         compared=compared,
         urls=compare_urls,
+        warnings=warnings,
     )
 
 

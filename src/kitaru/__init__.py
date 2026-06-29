@@ -126,6 +126,11 @@ from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
 from kitaru.replay import ReplaySubmission
+from kitaru.replay_context import (
+    ReplayRuntimeContext,
+    get_replay_runtime_context,
+    is_replay,
+)
 from kitaru.runtime import current_execution_id
 from kitaru.secrets import (
     Secret,
@@ -175,6 +180,7 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "ReplayRuntimeContext",
     "ReplaySubmission",
     "SandboxCommandResult",
     "Secret",
@@ -199,7 +205,9 @@ __all__ = [
     "diff_matrix",
     "events",
     "flow",
+    "get_replay_runtime_context",
     "get_secret",
+    "is_replay",
     "list_stacks",
     "llm",
     "load",
