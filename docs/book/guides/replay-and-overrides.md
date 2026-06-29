@@ -57,10 +57,12 @@ Checkpoint and invocation overrides can contain these fields:
 |---|---|
 | `"input"` | Kitaru replaces the target checkpoint's inputs, then reruns that checkpoint and the checkpoints that depend on it. |
 | `"output"` | Kitaru injects the provided value as the target checkpoint output. The targeted checkpoint does not run. Downstream checkpoints consume the injected value. |
-| `"code"` | Kitaru imports the replacement callable and uses it when the target checkpoint reruns. The callable must accept the same inputs as the original. |
+| `"code"` | Kitaru imports the replacement callable and uses it when the target checkpoint reruns. The callable must accept the same inputs as the original and be importable in the replay runtime. |
 | `"model"` | Kitaru changes the model for the targeted LLM checkpoint call. Unsupported targets fail before replay starts. |
 
 If a checkpoint override and an invocation override both target the same recorded call, the invocation override wins because it is more specific.
+
+`"code"` overrides are runtime-only. They are carried in replay context and require the flow-wrapper replay path so the runtime can see that context while the checkpoint reruns. In a Pydantic AI tool call, Kitaru's wrapper reaches the tool checkpoint, reads the replay context, imports the replacement function, and calls that replacement instead of the original tool function.
 
 ## Reproduce a run
 
@@ -293,7 +295,7 @@ submission = client.executions.replay(
 )
 ```
 
-If `lookup_policy_tool` appears multiple times in the source execution, Kitaru applies the replacement callable to each matching recorded invocation.
+If `lookup_policy_tool` appears multiple times in the source execution, Kitaru applies the replacement callable to each matching recorded invocation. The replacement function must be importable where replay runs; for example, the replay overrides demo uses `mocks.lookup_policy` from `examples/end_to_end/replay_overrides_demo/mocks.py`.
 
 ### Replace one recorded call
 
@@ -396,10 +398,22 @@ if latest.failure:
 
 ## Example in this repository
 
+For a small deterministic replay example:
+
 ```bash
 uv sync --extra local
 uv run python examples/features/replay/replay_with_overrides.py
 uv run pytest tests/test_phase16_replay_example.py
+```
+
+For the end-to-end override walkthrough, including the Pydantic AI policy-tool code swap:
+
+```bash
+uv sync --extra local --extra pydantic-ai
+cd examples/end_to_end/replay_overrides_demo
+uv run kitaru init  # required in fresh worktrees; creates .kitaru/ here
+uv run python demo.py seed --count 1
+uv run python demo.py code-swap
 ```
 
 For the broader catalog, see [Examples](../getting-started/examples.md).

@@ -1,11 +1,13 @@
 """Replay overrides demo — seed prod runs and dispatch replay scenarios.
 
-Run from this directory:
+Run from this example directory after ``uv run kitaru init`` has created
+``.kitaru/`` here:
 
     uv run python demo.py seed
     uv run python demo.py seed --count 15
     uv run python demo.py flow-override
     uv run python demo.py publish-input
+    uv run python demo.py code-swap
     uv run python demo.py model-override
     uv run python demo.py explicit-skip
     uv run python demo.py tagged-batch
@@ -24,6 +26,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from replay_scenarios import (
+    checkpoint_code_swap,
     diff_matrix,
     diff_report,
     explicit_skip,
@@ -35,7 +38,8 @@ from replay_scenarios import (
 from seed_prod_runs import DEFAULT_COUNT, seed_prod_runs
 from utils.runtime import quiet_runtime_logs
 
-PROD_EXEC_IDS = Path("fixtures/prod_exec_ids")
+DEMO_ROOT = Path(__file__).resolve().parent
+PROD_EXEC_IDS = DEMO_ROOT / "fixtures" / "prod_exec_ids"
 
 
 def resolve_prod_id(explicit: str | None = None) -> str:
@@ -49,9 +53,7 @@ def resolve_prod_id(explicit: str | None = None) -> str:
         first = PROD_EXEC_IDS.read_text(encoding="utf-8").splitlines()[0].strip()
         if first:
             return first
-    raise SystemExit(
-        "Set PROD_ID or run demo.py seed first (fixtures/prod_exec_ids)."
-    )
+    raise SystemExit("Set PROD_ID or run demo.py seed first (fixtures/prod_exec_ids).")
 
 
 def resolve_prod_ids(explicit: list[str] | None = None) -> list[str]:
@@ -98,12 +100,12 @@ def _parse_flag(argv: list[str], flag: str) -> tuple[list[str], str | None]:
 
 
 def main(argv: list[str]) -> None:
-    load_dotenv(".env")
+    load_dotenv(DEMO_ROOT / ".env")
     quiet_runtime_logs()
     if not argv:
         raise SystemExit(
             "Usage: demo.py seed [--count N] | flow-override | publish-input | "
-            "model-override | explicit-skip | tagged-batch [ID ...] | "
+            "code-swap | model-override | explicit-skip | tagged-batch [ID ...] | "
             "diff-report [REPLAY_ID] | diff-matrix [ID ...]"
         )
 
@@ -119,8 +121,12 @@ def main(argv: list[str]) -> None:
         flow_override.replay_with_flow_overrides(resolve_prod_id())
     elif command == "publish-input":
         publish_input.replay_with_publish_input_override(resolve_prod_id())
+    elif command == "code-swap":
+        checkpoint_code_swap.replay_with_checkpoint_code_swap(resolve_prod_id())
     elif command == "model-override":
-        invocation_model_override.replay_with_invocation_model_override(resolve_prod_id())
+        invocation_model_override.replay_with_invocation_model_override(
+            resolve_prod_id()
+        )
     elif command == "explicit-skip":
         explicit_skip.replay_with_explicit_skip(resolve_prod_id())
     elif command == "tagged-batch":

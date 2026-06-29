@@ -27,7 +27,5 @@ def wait_for_execution(handle: Any) -> str:
     except KitaruExecutionError as exc:
         exec_id = getattr(handle, "exec_id", "<unknown>")
         status = exc.status.value if exc.status is not None else "failure"
-        raise RuntimeError(
-            f"Execution {exec_id} finished with {status}."
-        ) from exc
+        raise RuntimeError(f"Execution {exec_id} finished with {status}.") from exc
     return str(handle.exec_id)

@@ -21,7 +21,7 @@ VARIANT_PROMPT_PROFILE = "trimmed_permissions"
 
 def replay_with_explicit_skip(prod_id: str) -> None:
     client = KitaruClient()
-    submission = client.executions.replay(
+    client.executions.replay(
         prod_id,
         at=REPLAY_POINT,
         flow_overrides={"prompt_profile": VARIANT_PROMPT_PROFILE},

@@ -2,10 +2,13 @@
 
 CLI equivalent:
 
-    uv run kitaru executions replay "$PROD_ID" \\
-      --at lookup_policy_tool \\
-      --flow-overrides '{"model":"openai:gpt-5-nano","prompt_profile":"trimmed_permissions"}' \\
-      --wait \\
+    uv run kitaru executions replay "$PROD_ID" \
+      --at lookup_policy_tool \
+      --flow-overrides '{
+        "model":"openai:gpt-5-nano",
+        "prompt_profile":"trimmed_permissions"
+      }' \
+      --wait \
       -o json
 """
 
@@ -21,7 +24,7 @@ VARIANT_PROMPT_PROFILE = "trimmed_permissions"
 
 def replay_with_flow_overrides(prod_id: str) -> None:
     client = KitaruClient()
-    submission = client.executions.replay(
+    client.executions.replay(
         prod_id,
         at=REPLAY_POINT,
         flow_overrides={

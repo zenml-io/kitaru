@@ -2,12 +2,15 @@
 
 CLI equivalent:
 
-    uv run kitaru executions replay "$ID_1" "$ID_2" "$ID_3" \\
-      --at lookup_policy_tool \\
-      --flow-overrides '{"model":"openai:gpt-5-nano","prompt_profile":"trimmed_permissions"}' \\
-      --tag replay-overrides-demo \\
-      --wait \\
-      --on-error collect \\
+    uv run kitaru executions replay "$ID_1" "$ID_2" "$ID_3" \
+      --at lookup_policy_tool \
+      --flow-overrides '{
+        "model":"openai:gpt-5-nano",
+        "prompt_profile":"trimmed_permissions"
+      }' \
+      --tag replay-overrides-demo \
+      --wait \
+      --on-error collect \
       -o json
 """
 

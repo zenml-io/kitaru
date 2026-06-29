@@ -1,6 +1,6 @@
 """Seed production-like support copilot runs for replay demos.
 
-Prefer the dispatcher entrypoint:
+Prefer the dispatcher entrypoint from this example directory:
 
     uv run python demo.py seed
     uv run python demo.py seed --count 15
@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 from support_agent import support_copilot_flow
 from utils.runtime import quiet_runtime_logs, wait_for_execution
 
-SCENARIOS_PATH = Path("fixtures/scenarios.json")
-PROD_EXEC_IDS_PATH = Path("fixtures/prod_exec_ids")
+DEMO_ROOT = Path(__file__).resolve().parent
+SCENARIOS_PATH = DEMO_ROOT / "fixtures" / "scenarios.json"
+PROD_EXEC_IDS_PATH = DEMO_ROOT / "fixtures" / "prod_exec_ids"
 
 BASELINE_MODEL = "openai:gpt-5-mini"
 BASELINE_PROMPT_PROFILE = "baseline"
@@ -80,7 +81,7 @@ def _parse_flag(argv: list[str], flag: str) -> tuple[list[str], str | None]:
 
 
 def main(argv: list[str]) -> None:
-    load_dotenv(".env")
+    load_dotenv(DEMO_ROOT / ".env")
     rest, count_raw = _parse_flag(argv, "--count")
     if rest:
         raise SystemExit(f"Unknown arguments: {' '.join(rest)}")

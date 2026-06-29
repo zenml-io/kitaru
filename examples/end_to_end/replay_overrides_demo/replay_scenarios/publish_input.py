@@ -5,10 +5,17 @@ Upstream agent and tool checkpoints stay cached from prod. Only
 
 CLI equivalent:
 
-    uv run kitaru executions replay "$PROD_ID" \\
-      --at publish_support_decision \\
-      --invocation-overrides '{"publish_support_decision":{"input":{"policy_label":"injected_support_decision","risk_status":"safe_to_answer","required_action":"answer_directly_with_safety_note","summary":"Injected during replay"}}}' \\
-      --wait \\
+    uv run kitaru executions replay "$PROD_ID" \
+      --at publish_support_decision \
+      --invocation-overrides '{
+        "publish_support_decision":{"input":{
+          "policy_label":"injected_support_decision",
+          "risk_status":"safe_to_answer",
+          "required_action":"answer_directly_with_safety_note",
+          "summary":"Injected during replay"
+        }}
+      }' \
+      --wait \
       -o json
 """
 
@@ -30,7 +37,7 @@ INJECTED_DECISION: dict[str, Any] = {
 
 def replay_with_publish_input_override(prod_id: str) -> None:
     client = KitaruClient()
-    submission = client.executions.replay(
+    client.executions.replay(
         prod_id,
         at=FINAL_DECISION_CHECKPOINT,
         invocation_overrides={

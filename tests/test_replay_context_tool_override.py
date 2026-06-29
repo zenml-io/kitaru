@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from kitaru.errors import KitaruRuntimeError
 from kitaru.replay_context import (
     KITARU_REPLAY_CONTEXT_ENV,
     ReplayRuntimeContext,
@@ -58,4 +61,45 @@ def test_resolve_tool_override_returns_none_without_context(monkeypatch) -> None
     monkeypatch.delenv(KITARU_REPLAY_CONTEXT_ENV, raising=False)
     get_replay_runtime_context.cache_clear()
     assert resolve_tool_override("lookup_policy") is None
+    get_replay_runtime_context.cache_clear()
+
+
+def test_resolve_tool_override_raises_for_missing_attribute(monkeypatch) -> None:
+    context = ReplayRuntimeContext(
+        at="lookup_policy_tool",
+        code_overrides={
+            "lookup_policy_tool": "tests._replay_tool_stub.missing_lookup_policy"
+        },
+    )
+    monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+    get_replay_runtime_context.cache_clear()
+
+    with pytest.raises(KitaruRuntimeError, match="does not exist"):
+        resolve_tool_override("lookup_policy", target="lookup_policy_tool")
+    get_replay_runtime_context.cache_clear()
+
+
+def test_resolve_tool_override_raises_for_non_callable(monkeypatch) -> None:
+    context = ReplayRuntimeContext(
+        at="lookup_policy_tool",
+        code_overrides={"lookup_policy_tool": "tests._replay_tool_stub.not_callable"},
+    )
+    monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+    get_replay_runtime_context.cache_clear()
+
+    with pytest.raises(KitaruRuntimeError, match="is not callable"):
+        resolve_tool_override("lookup_policy", target="lookup_policy_tool")
+    get_replay_runtime_context.cache_clear()
+
+
+def test_resolve_tool_override_raises_for_malformed_import_path(monkeypatch) -> None:
+    context = ReplayRuntimeContext(
+        at="lookup_policy_tool",
+        code_overrides={"lookup_policy_tool": "not_a_dotted_path"},
+    )
+    monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+    get_replay_runtime_context.cache_clear()
+
+    with pytest.raises(KitaruRuntimeError, match="dotted import path"):
+        resolve_tool_override("lookup_policy", target="lookup_policy_tool")
     get_replay_runtime_context.cache_clear()

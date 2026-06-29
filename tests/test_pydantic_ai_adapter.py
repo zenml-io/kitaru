@@ -1186,6 +1186,69 @@ class TestCachedCallsStrategyModelCheckpoints:
         get_replay_runtime_context.cache_clear()
 
     @pytest.mark.anyio
+    async def test_replay_tool_code_override_routes_executed_tool_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import FunctionToolset
+        from pydantic_ai.models.test import TestModel
+        from pydantic_ai.tools import RunContext
+        from pydantic_ai.usage import RunUsage
+
+        from kitaru.adapters.pydantic_ai import CapturePolicy
+        from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+        from kitaru.replay_context import (
+            KITARU_REPLAY_CONTEXT_ENV,
+            ReplayRuntimeContext,
+            get_replay_runtime_context,
+        )
+        from kitaru.runtime import _flow_scope
+
+        original_calls: list[dict[str, Any]] = []
+        context = ReplayRuntimeContext(
+            at="lookup_policy_tool",
+            code_overrides={
+                "lookup_policy_tool": "tests._replay_tool_stub.lookup_policy"
+            },
+        )
+        monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+        get_replay_runtime_context.cache_clear()
+
+        toolset: FunctionToolset[None] = FunctionToolset()
+
+        @toolset.tool_plain
+        def lookup_policy(account_id: str) -> dict[str, object]:
+            original_calls.append({"account_id": account_id})
+            return {"source": "original"}
+
+        wrapped = kitaruify_toolset(
+            toolset,
+            capture=CapturePolicy(correlate_otel_spans=False),
+            tool_checkpoint_config={},
+        )
+        ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        tool = (await wrapped.get_tools(ctx))["lookup_policy"]
+        checkpoint_steps = _install_checkpoint_step_recorder(
+            monkeypatch,
+            enter_checkpoint_scope=True,
+        )
+
+        try:
+            with _flow_scope(name="override_flow"):
+                result = await wrapped.call_tool(
+                    "lookup_policy",
+                    {"account_id": "acct-1"},
+                    ctx,
+                    tool,
+                )
+        finally:
+            get_replay_runtime_context.cache_clear()
+
+        assert result == {"source": "stub"}
+        assert original_calls == []
+        assert checkpoint_steps == ["lookup_policy_tool"]
+
+    @pytest.mark.anyio
     async def test_calls_strategy_model_checkpoint_uses_structural_io_refs(
         self,
         monkeypatch: pytest.MonkeyPatch,

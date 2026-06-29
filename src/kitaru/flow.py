@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import sys
 import threading
 import time
@@ -108,11 +109,15 @@ from kitaru.replay import (
     safe_compare_url_for_executions,
     safe_persist_replay_submission_metadata,
 )
-from kitaru.replay_context import KITARU_REPLAY_CONTEXT_ENV
+from kitaru.replay_context import (
+    KITARU_REPLAY_CONTEXT_ENV,
+    get_replay_runtime_context,
+)
 from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
 _STACK_BINDING_LOCK = threading.RLock()
+_REPLAY_RUNTIME_CONTEXT_LOCK = threading.RLock()
 logger = logging.getLogger(__name__)
 
 
@@ -519,6 +524,26 @@ def _inject_replay_context_env(
     if image is None:
         return ImageSettings(environment=existing_environment)
     return image.model_copy(update={"environment": existing_environment})
+
+
+@contextmanager
+def _scoped_replay_runtime_context(
+    replay_context_json: str,
+) -> Iterator[None]:
+    """Expose replay runtime context to local replay code for one replay call."""
+    with _REPLAY_RUNTIME_CONTEXT_LOCK:
+        previous_value = os.environ.get(KITARU_REPLAY_CONTEXT_ENV)
+        had_previous_value = KITARU_REPLAY_CONTEXT_ENV in os.environ
+        os.environ[KITARU_REPLAY_CONTEXT_ENV] = replay_context_json
+        get_replay_runtime_context.cache_clear()
+        try:
+            yield
+        finally:
+            if had_previous_value and previous_value is not None:
+                os.environ[KITARU_REPLAY_CONTEXT_ENV] = previous_value
+            else:
+                os.environ.pop(KITARU_REPLAY_CONTEXT_ENV, None)
+            get_replay_runtime_context.cache_clear()
 
 
 def _inject_model_registry_env(
@@ -1022,6 +1047,13 @@ def _metadata_value(value: Any) -> Any:
         except Exception:
             return value
     return value
+
+
+def _metadata_mapping(metadata: Any) -> Mapping[str, Any]:
+    """Return plain metadata values from a ZenML metadata mapping."""
+    if not isinstance(metadata, Mapping):
+        return {}
+    return {str(key): _metadata_value(value) for key, value in metadata.items()}
 
 
 def _artifact_metadata_value(artifact: Any, key: str) -> Any:
@@ -1765,13 +1797,16 @@ class _FlowDefinition:
 
             observed_started_at = time.perf_counter()
             try:
-                replayed_run = configured_pipeline.replay(
-                    pipeline_run=original_run.id,
-                    skip=replay_plan.steps_to_skip,
-                    skip_successful_steps=False,
-                    input_overrides=replay_plan.input_overrides or None,
-                    step_input_overrides=replay_plan.step_input_overrides or None,
-                )
+                with _scoped_replay_runtime_context(
+                    replay_plan.runtime_context.to_json()
+                ):
+                    replayed_run = configured_pipeline.replay(
+                        pipeline_run=original_run.id,
+                        skip=replay_plan.steps_to_skip,
+                        skip_successful_steps=False,
+                        input_overrides=replay_plan.input_overrides or None,
+                        step_input_overrides=replay_plan.step_input_overrides or None,
+                    )
             except Exception as exc:
                 failure_origin = classify_failure_origin(
                     status_reason=str(exc),

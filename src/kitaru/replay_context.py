@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from functools import lru_cache
 from typing import Any
 
 from kitaru._source_aliases import normalize_checkpoint_name
+from kitaru.errors import KitaruRuntimeError
 
 KITARU_REPLAY_CONTEXT_ENV = "KITARU_REPLAY_CONTEXT"
 
@@ -111,13 +113,34 @@ def resolve_tool_override(name: str, *, target: str | None = None) -> Any | None
     import_path = _lookup_override(context.code_overrides, target, name)
     if not import_path:
         return None
-    module_path, _, attr = str(import_path).rpartition(".")
-    if not module_path or not attr:
-        return None
-    import importlib
 
-    module = importlib.import_module(module_path)
-    resolved = getattr(module, attr, None)
+    import_path = str(import_path)
+    module_path, _, attr = import_path.rpartition(".")
+    target_label = target or name
+    if not module_path or not attr:
+        raise KitaruRuntimeError(
+            "Replay code override for "
+            f"{target_label!r} must be a dotted import path, got {import_path!r}."
+        )
+
+    try:
+        module = importlib.import_module(module_path)
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Could not import replay code override "
+            f"{import_path!r} for {target_label!r}: {exc}"
+        ) from exc
+
+    if not hasattr(module, attr):
+        raise KitaruRuntimeError(
+            f"Replay code override {import_path!r} for {target_label!r} does not exist."
+        )
+    resolved = getattr(module, attr)
+    if not callable(resolved):
+        raise KitaruRuntimeError(
+            "Replay code override "
+            f"{import_path!r} for {target_label!r} is not callable."
+        )
     return resolved
 
 

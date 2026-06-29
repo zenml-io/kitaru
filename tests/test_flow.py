@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from collections import namedtuple
@@ -72,7 +73,11 @@ from kitaru.flow import (
 )
 from kitaru.inspection import ActiveConfigSelectionProvenance
 from kitaru.replay import ReplayPlan
-from kitaru.replay_context import ReplayRuntimeContext
+from kitaru.replay_context import (
+    KITARU_REPLAY_CONTEXT_ENV,
+    ReplayRuntimeContext,
+    get_replay_runtime_context,
+)
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
 
@@ -2884,6 +2889,66 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         == _empty_registry_payload()
     )
     assert "KITARU_REPLAY_CONTEXT" in docker_settings.environment
+
+
+def test_replay_sets_process_runtime_context_during_local_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    runtime_context = ReplayRuntimeContext(
+        at="lookup_policy_tool",
+        code_overrides={"lookup_policy_tool": "tests._replay_tool_stub.lookup_policy"},
+    )
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=runtime_context,
+    )
+
+    monkeypatch.delenv(KITARU_REPLAY_CONTEXT_ENV, raising=False)
+    get_replay_runtime_context.cache_clear()
+    assert get_replay_runtime_context() is None
+
+    def replay_side_effect(**_kwargs: Any) -> _DummyRun:
+        raw_context = os.environ[KITARU_REPLAY_CONTEXT_ENV]
+        parsed_context = ReplayRuntimeContext.from_json(raw_context)
+        assert parsed_context.code_overrides == runtime_context.code_overrides
+        cached_context = get_replay_runtime_context()
+        assert cached_context is not None
+        assert cached_context.code_overrides == runtime_context.code_overrides
+        return replayed_run
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.side_effect = replay_side_effect
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), at="lookup_policy_tool", wait=False)
+
+    assert KITARU_REPLAY_CONTEXT_ENV not in os.environ
+    assert get_replay_runtime_context() is None
 
 
 def test_replay_logs_kitaru_native_execution_url() -> None:

@@ -25,4 +25,6 @@ def report_execution_diff(prod_id: str, replay_id: str) -> None:
         "replay_exec_ids": [replay_id],
         "diff": serialize_execution_diff(result),
     }
-    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )

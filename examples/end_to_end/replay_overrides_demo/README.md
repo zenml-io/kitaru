@@ -10,7 +10,7 @@ engineering or ops wants to change something (cheaper model, updated policy code
 stricter prompt) and needs evidence that the change is safe **without** replaying
 from scratch or guessing from a local script.
 
-You run short commands from this directory. The **Kitaru dashboard** (and optional
+You run short commands from this example directory. The **Kitaru dashboard** (and optional
 JSON under `reports/`) is where you read outcomes.
 
 ## The production baseline
@@ -55,15 +55,15 @@ What you choose depends on what you are trying to learn:
   expensive, or unsafe (tools with side effects, external writes, approvals).
 - **Skip a checkpoint** when you want upstream changes but need one step to stay
   exactly as prod recorded it.
-- **Mock a checkpoint output** when the real callable has side effects, depends on
-  stale external state, or you want to test a fix on historical inputs without
-  calling prod systems again.
+- **Mock a checkpoint output or swap tool code** when the real callable has side
+  effects, depends on stale external state, or you want to test a fix on historical
+  inputs without calling prod systems again.
 
 This demo uses **`lookup_policy_tool` as the replay anchor** for most scenarios:
 triage and the first model turn stay cached, and everything from policy lookup
 onward can change. That is one reasonable choice for *"we updated policy / model /
 prompt — what happens next on this ticket?"* — not the only valid one. The
-techniques below (`flow_overrides`, `skip`, input override) compose with
+techniques below (`flow_overrides`, `skip`, input override, code swap) compose with
 whatever anchor fits your question.
 
 ![Replay parent and child in the dashboard](screenshots/02-replay-compare.png)
@@ -72,15 +72,19 @@ whatever anchor fits your question.
 
 ## Setup
 
-From the repository root:
+From the repository root, install the extras:
 
 ```bash
 uv sync --extra local --extra pydantic-ai
+```
 
+Then initialize and run the demo from this example directory:
+
+```bash
 cd examples/end_to_end/replay_overrides_demo
 cp .env.example .env          # set OPENAI_API_KEY
-uv run kitaru init              # fresh worktrees only
-uv run kitaru login             # local server, or: uv run kitaru login <server>
+uv run kitaru init            # required in fresh worktrees; creates .kitaru/ here
+uv run kitaru login           # local server, or: uv run kitaru login <server>
 ```
 
 ## 1. Seed prod-like executions
@@ -143,10 +147,29 @@ Everything upstream stays cached from prod; only publish re-runs with the substi
 decision dict. Compare the `support_decision` artifact on the replay side.
 
 Adapter tool and model checkpoints do not support **`output` override** on this graph
-(no pipeline input edges between them). Use **`flow-override`** to change prompt
-profile and model behavior downstream instead.
+(no pipeline input edges between them). Use **`code-swap`** to change policy tool
+behavior, or **`flow-override`** to change prompt profile and model behavior downstream.
 
 ![Publish input override](screenshots/05-publish-input.png)
+
+### Swap policy tool code
+
+**When:** You fixed a bug in `lookup_policy` and want to see downstream impact on
+**historical** tickets.
+
+```bash
+uv run python demo.py code-swap
+```
+
+Replay starts at `lookup_policy_tool`. When Pydantic AI reaches that tool call,
+Kitaru's wrapper reads the replay context, imports `mocks.lookup_policy`, and calls
+that replacement function instead of the original `support_agent.lookup_policy`.
+The replacement returns `policy_label=demo_mock_fast_path`,
+`risk_status=safe_to_answer`, and
+`required_action=answer_directly_with_safety_note`. Compare the policy checkpoint
+output and final decision against the original restricted-account-change run.
+
+![Policy checkpoint diff](screenshots/06-code-swap.png)
 
 ### Change the model on one LLM call
 
@@ -221,6 +244,7 @@ to permissive direct actions.
 | Scope | What it changes | Demo command |
 |-------|-----------------|--------------|
 | `flow_overrides` | Flow inputs for the replay run (`model`, `prompt_profile`) | `flow-override` |
+| `checkpoint_overrides` | Every invocation of a checkpoint name (for example, policy tool code swap) | `code-swap` |
 | `invocation_overrides` | One recorded call (publish input override or model swap) | `publish-input`, `model-override` |
 | `skip` | Reuse a recorded checkpoint instead of recomputing | `explicit-skip` |
 | `tag` | Label batch replay children for filtering and diff-matrix | `tagged-batch` |

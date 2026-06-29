@@ -123,7 +123,10 @@ def load_support_decision(client: KitaruClient, exec_id: str) -> dict[str, Any]:
             load_errors.append(f"flow_result_ref={flow_result_ref}: {exc}")
 
     for artifact in run.list_artifacts():
-        if artifact.name not in _PREFERRED_ARTIFACT_NAMES and artifact.direction != "output":
+        if (
+            artifact.name not in _PREFERRED_ARTIFACT_NAMES
+            and artifact.direction != "output"
+        ):
             continue
         try:
             extracted = _extract_support_decision(

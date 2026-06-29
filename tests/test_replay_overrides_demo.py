@@ -33,6 +33,7 @@ OLD_TERMS = (
 REPLAY_SCENARIO_FILES = (
     "flow_override.py",
     "publish_input.py",
+    "checkpoint_code_swap.py",
     "invocation_model_override.py",
     "explicit_skip.py",
     "tagged_batch.py",
@@ -70,6 +71,7 @@ def test_readme_documents_new_replay_surface_only() -> None:
     assert ".env.example" in combined
     assert "demo.py flow-override" in combined
     assert "demo.py publish-input" in combined
+    assert "demo.py code-swap" in combined
     assert "replay_scenarios/" in combined
     for flag in NEW_FLAGS:
         assert flag in combined
@@ -79,7 +81,8 @@ def test_readme_documents_new_replay_surface_only() -> None:
 
 def test_replay_scenarios_use_unified_client_replay_api() -> None:
     combined = "\n".join(
-        (SCENARIO_DIR / name).read_text(encoding="utf-8") for name in REPLAY_SCENARIO_FILES
+        (SCENARIO_DIR / name).read_text(encoding="utf-8")
+        for name in REPLAY_SCENARIO_FILES
     )
 
     assert "client.executions.replay(" in combined
@@ -104,7 +107,14 @@ def test_demo_dispatches_replay_scenarios() -> None:
     assert "def resolve_replay_id(" in source
     assert 'command == "flow-override"' in source
     assert 'command == "publish-input"' in source
-    assert "publish_input.replay_with_publish_input_override(resolve_prod_id())" in source
+    assert 'command == "code-swap"' in source
+    assert (
+        "publish_input.replay_with_publish_input_override(resolve_prod_id())" in source
+    )
+    assert (
+        "checkpoint_code_swap.replay_with_checkpoint_code_swap(resolve_prod_id())"
+        in source
+    )
     assert "flow_override.replay_with_flow_overrides(resolve_prod_id())" in source
     assert "seed_prod_runs(" in source
     assert "tagged_batch.replay_tagged_batch(resolve_prod_ids(" in source
@@ -115,13 +125,15 @@ def test_demo_dispatches_replay_scenarios() -> None:
 
 def test_replay_scenarios_use_descriptive_entrypoints() -> None:
     combined = "\n".join(
-        (SCENARIO_DIR / name).read_text(encoding="utf-8") for name in REPLAY_SCENARIO_FILES
+        (SCENARIO_DIR / name).read_text(encoding="utf-8")
+        for name in REPLAY_SCENARIO_FILES
     )
 
     assert "def resolve_prod_id(" not in combined
     assert "def main(" not in combined
     assert "def replay_with_flow_overrides(prod_id: str)" in combined
     assert "def replay_with_publish_input_override(prod_id: str)" in combined
+    assert "def replay_with_checkpoint_code_swap(prod_id: str)" in combined
     assert "def replay_tagged_batch(prod_ids: list[str])" in combined
 
 
@@ -163,12 +175,15 @@ def test_env_example_documents_openai_key() -> None:
 
 
 def test_load_support_decision_prefers_flow_result_ref() -> None:
+    import importlib
     import sys
     from types import SimpleNamespace
 
     sys.path.insert(0, str(DEMO_ROOT.resolve()))
     try:
-        from utils.load_decision import load_support_decision
+        load_support_decision = importlib.import_module(
+            "utils.load_decision"
+        ).load_support_decision
     finally:
         sys.path.pop(0)
 
