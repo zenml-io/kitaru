@@ -581,6 +581,32 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: google-adk-workflow
+    path: examples/integrations/google_adk_agent/google_adk_workflow.py
+    public_docs:
+      - examples/README.md
+      - examples/integrations/google_adk_agent/README.md
+      - docs/book/getting-started/examples.md
+      - docs/book/adapters/google-adk.md
+    owner_area: experimental Google ADK persisted workflow
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_google_adk_example.py
+        notes: submits the local workflow with real installed ADK classes when the isolated google-adk extra is installed; injects deterministic approval so no Kitaru wait pause or hosted provider credentials are needed
+      local_smoke:
+        status: covered
+        command: UV_PROJECT_ENVIRONMENT=.venv-google-adk uv run --python 3.12 --no-dev --extra google-adk python examples/integrations/google_adk_agent/google_adk_workflow.py
+        requires_server: false
+        timeout_seconds: 180
+        notes: must run in an isolated no-dev ADK environment while local/dev extras remain intentionally blocked
+      live_provider:
+        status: not_applicable
+        provider: none
+        notes: deterministic workflow uses a local ADK model/tool loop and never calls a hosted provider
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: gemini-sandbox-function
     path: examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py
     public_docs:

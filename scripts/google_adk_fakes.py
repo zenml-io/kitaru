@@ -20,6 +20,49 @@ class FakeBaseLlm:
         return []
 
 
+class FakeFunctionResponse:
+    """Minimal stand-in for ``google.genai.types.FunctionResponse``."""
+
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        id: str | None = None,
+        response: dict[str, Any] | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        self.name = name
+        self.id = id
+        self.response = response or {}
+
+
+class FakePart:
+    """Minimal stand-in for ``google.genai.types.Part``."""
+
+    def __init__(
+        self,
+        *,
+        function_response: Any | None = None,
+        functionResponse: Any | None = None,
+        text: str | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        self.function_response = function_response or functionResponse
+        self.text = text
+
+    @classmethod
+    def from_text(cls, *, text: str) -> FakePart:
+        return cls(text=text)
+
+
+class FakeContent:
+    """Minimal stand-in for ``google.genai.types.Content``."""
+
+    def __init__(self, *, role: str | None = None, parts: list[Any] | None = None):
+        self.role = role
+        self.parts = list(parts or [])
+
+
 class FakeBaseTool:
     """Minimal stand-in for ``google.adk.tools.base_tool.BaseTool``."""
 
@@ -57,14 +100,22 @@ def install_fake_google_adk(monkeypatch: pytest.MonkeyPatch) -> None:
     tools = ModuleType("google.adk.tools")
     tools.__path__ = []  # type: ignore[attr-defined]
     base_tool = ModuleType("google.adk.tools.base_tool")
+    genai = ModuleType("google.genai")
+    genai.__path__ = []  # type: ignore[attr-defined]
+    genai_types = ModuleType("google.genai.types")
 
     base_llm.__dict__["BaseLlm"] = FakeBaseLlm
     base_tool.__dict__["BaseTool"] = FakeBaseTool
+    genai_types.__dict__["Content"] = FakeContent
+    genai_types.__dict__["FunctionResponse"] = FakeFunctionResponse
+    genai_types.__dict__["Part"] = FakePart
     google.__dict__["adk"] = adk
+    google.__dict__["genai"] = genai
     adk.__dict__["models"] = models
     adk.__dict__["tools"] = tools
     models.__dict__["base_llm"] = base_llm
     tools.__dict__["base_tool"] = base_tool
+    genai.__dict__["types"] = genai_types
 
     for name, module in {
         "google": google,
@@ -73,5 +124,7 @@ def install_fake_google_adk(monkeypatch: pytest.MonkeyPatch) -> None:
         "google.adk.models.base_llm": base_llm,
         "google.adk.tools": tools,
         "google.adk.tools.base_tool": base_tool,
+        "google.genai": genai,
+        "google.genai.types": genai_types,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)

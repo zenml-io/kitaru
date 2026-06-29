@@ -44,6 +44,44 @@ class ReplayProofToolContext:
         self.state: dict[str, Any] = {"seed": "same"}
 
 
+class ReplayProofRunner:
+    name = "replay_runner"
+
+    def __init__(self, *, model: Any, tool: Any) -> None:
+        self.model = model
+        self.tool = tool
+        self.calls: list[dict[str, Any]] = []
+
+    def run(self, *, user_id: str, session_id: str, new_message: Any, **kwargs: Any):
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "new_message": new_message,
+                "kwargs": kwargs,
+            }
+        )
+        model_events = asyncio.run(
+            _collect_model_events(self.model, {"prompt": new_message})
+        )
+        tool_context = ReplayProofToolContext()
+        tool_result = asyncio.run(
+            self.tool.run_async(
+                args={"query": new_message},
+                tool_context=tool_context,
+            )
+        )
+        return [
+            {
+                "final_output": {
+                    "model_events": model_events,
+                    "tool_result": tool_result,
+                    "tool_state": tool_context.state,
+                }
+            }
+        ]
+
+
 async def _collect_model_events(model: Any, request: dict[str, Any]) -> list[Any]:
     return [event async for event in model.generate_content_async(request)]
 
@@ -129,3 +167,76 @@ def test_wrapped_model_and_tool_flow_reuses_cached_checkpoint_outputs(
     assert second_result == first_result
     assert local_model.calls == [{"request": {"prompt": "cats"}, "stream": False}]
     assert local_tool.calls == [{"query": "cats"}]
+
+
+def test_calls_mode_runner_flow_reuses_explicit_wrapper_checkpoints(
+    monkeypatch,
+    primed_zenml,
+) -> None:
+    _ = primed_zenml
+    purge_google_adk_adapter_modules(monkeypatch)
+    install_fake_google_adk(monkeypatch)
+    adapter = importlib.import_module("kitaru.adapters.google_adk")
+
+    local_model = ReplayProofModel()
+    local_tool = ReplayProofTool()
+    policy = adapter.ADKCallCheckpointPolicy(
+        model_checkpoint_config={"cache": True},
+        tool_checkpoint_config={"cache": True},
+        persist_run_artifacts=False,
+    )
+    wrapped_model = adapter.KitaruADKModel(
+        local_model,
+        name=f"runner_model_{uuid4().hex[:8]}",
+        call_policy=policy,
+    )
+    wrapped_tool = adapter.KitaruADKTool(
+        local_tool,
+        name=f"runner_tool_{uuid4().hex[:8]}",
+        call_policy=policy,
+    )
+    adk_runner = ReplayProofRunner(model=wrapped_model, tool=wrapped_tool)
+    kitaru_runner = adapter.KitaruADKRunner(
+        adk_runner,
+        name=f"runner_{uuid4().hex[:8]}",
+        checkpoint_strategy="calls",
+        call_checkpoint_policy=policy,
+    )
+
+    @flow(cache=True)
+    def adk_runner_calls_replay_flow(query: str, nonce: str) -> dict[str, Any]:
+        _ = nonce
+        result = kitaru_runner.run_sync(
+            adapter.ADKRunRequest(user_id="u", session_id="s", message=query)
+        )
+        return result.model_dump(mode="python")
+
+    first_handle = adk_runner_calls_replay_flow.run("cats", "first", cache=True)
+    first_result = first_handle.wait()
+
+    assert first_result["status"] == "completed"
+    assert first_result["final_output"] == {
+        "model_events": [{"text": "model:cats", "stream": False}],
+        "tool_result": {"answer": "tool:cats"},
+        "tool_state": {"seed": "same", "lookup_marker": "tool:cats"},
+    }
+    tracker_events = [event for event in first_result["events"] if "kind" in event]
+    assert [event["kind"] for event in tracker_events] == ["model_call", "tool_call"]
+    assert local_model.calls == [{"request": {"prompt": "cats"}, "stream": False}]
+    assert local_tool.calls == [{"query": "cats"}]
+    step_names = set(_wait_for_hydrated_run(first_handle.exec_id).steps)
+    assert any(name.startswith("google_adk_model_") for name in step_names)
+    assert any(name.startswith("google_adk_tool_") for name in step_names)
+    assert not any(name.endswith("_google_adk_runner_call") for name in step_names)
+
+    second_result = adk_runner_calls_replay_flow.run(
+        "cats",
+        "second",
+        cache=True,
+    ).wait()
+
+    assert second_result["status"] == "completed"
+    assert second_result["final_output"] == first_result["final_output"]
+    assert local_model.calls == [{"request": {"prompt": "cats"}, "stream": False}]
+    assert local_tool.calls == [{"query": "cats"}]
+    assert len(adk_runner.calls) == 2

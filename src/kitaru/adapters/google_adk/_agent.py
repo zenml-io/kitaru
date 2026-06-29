@@ -17,14 +17,13 @@ from ._constants import ADAPTER_ID, ADAPTER_VERSION, DEFAULT_RUNNER_CHECKPOINT_T
 from ._events import dump_adk_events
 from ._hitl import extract_handoff_requests, has_handoff_markers
 from ._outputs import extract_final_output
-from ._plugin import _TRUE_HOOK_ERROR
 from ._policy import (
     ADKCallCheckpointPolicy,
     ADKCapturePolicy,
     resolve_summary_checkpoint_config,
 )
 from ._serialization import object_metadata, to_json_safe
-from ._tracking import EventTracker
+from ._tracking import EventTracker, tracker_scope
 from ._types import ADKRunRequest, ADKRunResult, ADKUsageSummary
 from ._usage import usage_from_event
 from ._utils import (
@@ -51,9 +50,11 @@ class KitaruADKRunner:
     """Durable wrapper around a Google ADK runner.
 
     ``checkpoint_strategy='runner_call'`` opens one checkpoint around a whole
-    ADK runner turn. ``checkpoint_strategy='calls'`` is reserved for explicit
-    model/tool wrappers; runner-level plugin injection is not enabled until a
-    supported ADK plugin registration point is wired.
+    ADK runner turn. ``checkpoint_strategy='calls'`` runs the ADK runner
+    directly while installing Kitaru's tracker context. Only explicit
+    ``KitaruADKModel`` and ``KitaruADKTool`` objects can create per-call
+    checkpoints in that mode; arbitrary ADK internals are not mutated or
+    checkpointed.
     """
 
     def __init__(
@@ -167,16 +168,28 @@ class KitaruADKRunner:
         return body()
 
     async def _run_calls_async(self, request: ADKRunRequest) -> ADKRunResult:
-        self._validate_calls_mode_policy()
-        raise self._runner_plugin_injection_error()
+        self._validate_explicit_wrapper_calls_mode_policy()
+        tracker = EventTracker(self._name)
+        with tracker_scope(
+            tracker,
+            capture=self._capture,
+            call_policy=self._call_checkpoint_policy,
+        ):
+            result = await self._invoke_runner_async(request, tracker=tracker)
+        return await self._persist_calls_summary_async(result, tracker=tracker)
 
     def _run_calls_sync(self, request: ADKRunRequest) -> ADKRunResult:
-        self._validate_calls_mode_policy()
-        raise self._runner_plugin_injection_error()
+        self._validate_explicit_wrapper_calls_mode_policy()
+        tracker = EventTracker(self._name)
+        with tracker_scope(
+            tracker,
+            capture=self._capture,
+            call_policy=self._call_checkpoint_policy,
+        ):
+            result = self._invoke_runner_sync(request, tracker=tracker)
+        return self._persist_calls_summary_sync(result, tracker=tracker)
 
-    def _validate_calls_mode_policy(self) -> None:
-        if self._call_checkpoint_policy.require_true_call_hooks:
-            raise KitaruUsageError(_TRUE_HOOK_ERROR)
+    def _validate_explicit_wrapper_calls_mode_policy(self) -> None:
         if (
             runtime.is_inside_checkpoint()
             and self._call_checkpoint_policy.nested_checkpoint_policy == "error"
@@ -186,16 +199,6 @@ class KitaruADKRunner:
                 "checkpoint unless ADKCallCheckpointPolicy("
                 "nested_checkpoint_policy='metadata_only') is set."
             )
-
-    def _runner_plugin_injection_error(self) -> KitaruUsageError:
-        return KitaruUsageError(
-            "Google ADK runner-level calls mode cannot safely inject "
-            "`KitaruADKPlugin` into `runner.run(...)` / `run_async(...)`: the "
-            "verified public ADK runner signatures do not include a `plugins` "
-            "keyword. Use `checkpoint_strategy='runner_call'` for whole-turn "
-            "durability, or wrap explicit ADK model/tool objects with "
-            "KitaruADKModel / KitaruADKTool for the calls-mode spike."
-        )
 
     async def _invoke_runner_async(
         self,
@@ -347,13 +350,20 @@ class KitaruADKRunner:
             return None
 
     def _result_warnings(self, *, tracker: EventTracker | None) -> list[str]:
-        if self._checkpoint_strategy == "calls":
+        if self._checkpoint_strategy != "calls":
+            return []
+        if tracker is not None and tracker.events:
             return [
-                "Google ADK calls mode is metadata-only with the current public "
-                "ADK plugin API. Use runner_call for durable replay of the whole "
-                "turn."
+                "Google ADK calls mode used explicit KitaruADKModel / "
+                "KitaruADKTool wrapper calls. Only those wrapper calls can "
+                "create per-call checkpoints; arbitrary unmodified ADK internals "
+                "are not checkpointed."
             ]
-        return []
+        return [
+            "Google ADK calls mode observed no KitaruADKModel or KitaruADKTool "
+            "calls, so this run has no per-call ADK checkpoints. Arbitrary "
+            "unmodified ADK internals are not checkpointed."
+        ]
 
     async def _persist_calls_summary_async(
         self,

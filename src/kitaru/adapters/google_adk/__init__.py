@@ -17,6 +17,11 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
 
 from ._agent import KitaruADKRunner
 from ._events import ADKAdapterEvent, ADKEventError, ADKRunEvent
+from ._hitl import (
+    build_tool_confirmation_message,
+    build_tool_confirmation_request,
+    wait_for_tool_confirmation,
+)
 from ._model import KitaruADKModel
 from ._plugin import KitaruADKPlugin
 from ._policy import ADKCallCheckpointPolicy, ADKCapturePolicy
@@ -54,7 +59,10 @@ __all__ = [
     "KitaruADKRunner",
     "KitaruADKTool",
     "ToolCheckpointOverride",
+    "build_tool_confirmation_message",
+    "build_tool_confirmation_request",
     "final_output_preview",
     "validate_checkpoint_strategy",
+    "wait_for_tool_confirmation",
     "wrap_tool",
 ]

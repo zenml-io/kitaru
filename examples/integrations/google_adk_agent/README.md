@@ -2,7 +2,12 @@
 
 This example shows the experimental Kitaru adapter for [Google ADK](https://adk.dev/).
 
-The default run is deterministic and local: it uses real installed ADK classes, an ADK in-memory runner, a local dummy ADK model, and a local dummy ADK tool. No Gemini credentials and no hosted provider call are needed. The script is a direct adapter wiring demo; put the same runner/model/tool calls inside a Kitaru flow when you want persisted checkpoints and replay.
+The default direct run is deterministic and local: it uses real installed ADK classes, an ADK in-memory runner, a local dummy ADK model, and a local dummy ADK tool. No Gemini credentials and no hosted provider call are needed.
+
+This directory now has two scripts:
+
+- `google_adk_adapter.py` — a direct ADK wiring smoke test. It proves the adapter can wrap real installed ADK runner/model/tool objects.
+- `google_adk_workflow.py` — a persisted Kitaru flow. It uses `checkpoint_strategy="calls"`, explicit `KitaruADKModel` / `KitaruADKTool` wrappers, tool-confirmation resume, and structured workflow output.
 
 ## What it demonstrates
 
@@ -10,10 +15,8 @@ There are two useful ADK paths today:
 
 1. **Whole-runner checkpointing** with `KitaruADKRunner(checkpoint_strategy="runner_call")`.
    Inside a Kitaru flow, Kitaru wraps one ADK runner turn and returns an `ADKRunResult` with serialized events, status, handoffs, usage when ADK reports it, and the final output.
-2. **Model/tool checkpointing** with explicit wrappers: `KitaruADKModel(...)` and `KitaruADKTool(...)`.
-   In the local example, the ADK agent receives a wrapped local model and a wrapped local tool. When this pattern runs from inside a Kitaru flow, those wrapped calls are the point where Kitaru can checkpoint the actual model/tool work.
-
-Runner-level arbitrary `calls` mode is intentionally unsupported for ADK right now. ADK's public runner API does not currently expose a safe hook where Kitaru can inject itself around every internal model/tool call in an arbitrary runner. Use `runner_call` for a broad whole-turn checkpoint, or wrap the concrete ADK model and tool objects you control.
+2. **Model/tool checkpointing** with explicit wrappers and `KitaruADKRunner(checkpoint_strategy="calls")`.
+   ADK still decides when to call the model and tool. Kitaru only checkpoints calls that go through the `KitaruADKModel(...)` and `KitaruADKTool(...)` objects you passed into ADK yourself. It does not checkpoint arbitrary unwrapped ADK internals.
 
 ## Install
 
@@ -25,9 +28,9 @@ UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   python examples/integrations/google_adk_agent/google_adk_adapter.py --help
 ```
 
-> **Important:** Do **not** combine `--extra google-adk` with `--extra local` yet. `google-adk` currently resolves a newer FastAPI/Starlette stack than Kitaru's local server path. The adapter is tested in a no-dev ADK environment until that dependency conflict is resolved.
+> **Important:** Keep using the isolated no-dev ADK environment for now. As of 2026-06-29, `google-adk` resolves FastAPI `0.138.0` / Starlette `1.3.1`, and this project still intentionally blocks combining `google-adk` with the local/dev extras until the full local server path is certified with that newer stack.
 
-## Run local mode
+## Run the direct local mode
 
 From the repository root:
 
@@ -48,7 +51,32 @@ Event count: ...
 Handoff count: 0
 ```
 
-The story is: ADK asks the local model what to do, the local model asks for the `local_lookup` tool, ADK runs that wrapped local tool, and the model returns a final answer containing `local-cat-fact`. In this direct script, no Kitaru flow is submitted; the output proves the ADK/Kitaru wrapper wiring that you would place inside a flow for persisted checkpoints.
+The story is: ADK asks the local model what to do, the local model asks for the `local_lookup` tool, ADK runs that wrapped local tool, and the model returns a final answer containing `local-cat-fact`. In this direct script, no Kitaru flow is submitted; the output proves the ADK/Kitaru wrapper wiring.
+
+## Run the persisted workflow mode
+
+From the repository root:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+  uv run --python 3.12 --no-dev --extra google-adk \
+  python examples/integrations/google_adk_agent/google_adk_workflow.py
+```
+
+Expected shape:
+
+```text
+=== Workflow result ===
+{
+  "checkpoint_strategy": "calls",
+  "final_answer": "final workflow answer: workflow-local-cat-fact for cats",
+  "human_decision_happened": true,
+  "approval_source": "injected_decision",
+  ...
+}
+```
+
+This script submits a real Kitaru flow. The first ADK turn asks for tool confirmation. The default path injects a deterministic approval so the example can run in tests and smoke checks without pausing. Pass `--interactive-wait` to use `wait_for_tool_confirmation(...)`, which pauses at flow scope and returns the ADK follow-up request after the human decision.
 
 ## Run optional live mode
 
@@ -66,21 +94,28 @@ You can also set `GOOGLE_API_KEY`; the script accepts either variable.
 
 ## Output fields
 
-The example prints:
+The direct script prints:
 
 - `Status` — `completed`, `requires_action`, or `failed`.
 - `Final output preview` — produced with `final_output_preview(...)`, because ADK often returns a structured Google GenAI `Content` object rather than a plain string.
 - `Event count` — how many serialized ADK events Kitaru captured.
 - `Handoff count` — how many ADK human-action requests Kitaru observed.
-- `Checkpoint strategy` — always `runner_call` in this example.
+- `Checkpoint strategy` — `runner_call` for `google_adk_adapter.py`.
+
+The workflow script returns a structured dictionary. Its important fields are:
+
+- `checkpoint_strategy` — `calls`.
+- `final_answer` — display text from the final ADK result.
+- `human_decision_happened` and `approval_source` — whether ADK asked for confirmation and whether approval came from deterministic injection or `kitaru.wait()`.
+- `first_turn` and `final_turn` — event counts, handoff counts, tracked model/tool event kinds, and checkpoint names.
 
 ## Current limitations
 
 This adapter is experimental/beta.
 
 - `runner_call` is broad but coarse: one checkpoint around the whole ADK runner turn.
-- `KitaruADKModel` and `KitaruADKTool` are the model/tool checkpoint path for ADK objects you pass into the agent yourself.
-- Runner-level `calls` remains intentionally unsupported.
-- HITL reporting is observational. Kitaru reports ADK-emitted pending actions in `ADKRunResult.handoffs`; it does not yet provide automatic ADK resume helpers.
-- ADK-hosted MCP sessions are not restored by Kitaru. If ADK exposes an MCP-backed tool as an ADK `BaseTool` and you wrap that tool with `KitaruADKTool`, Kitaru can checkpoint the exposed ADK tool call/result. It does not restart or restore ADK's live MCP process/session.
+- `calls` is explicit-wrapper-only: `KitaruADKModel` and `KitaruADKTool` are the model/tool checkpoint path for ADK objects you pass into the agent yourself.
+- Tool-confirmation resume is supported with `build_tool_confirmation_request(...)` and `wait_for_tool_confirmation(...)`; credential requests and graph human input are reported but do not yet have public resume helpers.
+- ADK streaming is deferred. The durable record is the final `ADKRunResult`; no `run_stream(...)` API ships for ADK yet.
+- ADK-hosted MCP sessions are not restored by Kitaru. If ADK exposes a replay-safe MCP-backed tool as an ADK `BaseTool`-like object and you wrap that tool with `KitaruADKTool`, Kitaru can checkpoint the exposed ADK tool call/result. It does not restart a process, restore a session, replay hidden MCP server state, or manage ADK's MCP connection lifecycle.
 

@@ -40,12 +40,15 @@ class ADKCapturePolicy(BaseModel):
 
 
 class ADKCallCheckpointPolicy(BaseModel):
-    """Checkpoint settings for ADK calls mode.
+    """Checkpoint settings for ADK explicit-wrapper calls mode.
 
-    Current public Google ADK plugin callbacks are before/after/error hooks.
-    They do not give Kitaru a callable that performs the model or tool operation.
-    So plugin-based calls mode is metadata-only unless the caller later uses the
-    explicit ``wrap_*_call(..., proceed=...)`` methods with a true around-call API.
+    ``KitaruADKRunner(checkpoint_strategy="calls")`` installs this policy in
+    the tracker context for explicit ``KitaruADKModel`` and ``KitaruADKTool``
+    wrappers. Current public Google ADK plugin callbacks are still only
+    before/after/error hooks; they do not give Kitaru a callable that performs
+    the model or tool operation. ``require_true_call_hooks`` is therefore a
+    guard for plugin-only observation paths, not a blocker for explicit-wrapper
+    calls mode.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -61,9 +64,11 @@ class ADKCallCheckpointPolicy(BaseModel):
     require_true_call_hooks: bool = Field(
         default=True,
         description=(
-            "When True, refuse plugin-only calls mode because ADK before/after "
-            "callbacks cannot place provider/tool work inside a checkpoint. "
-            "Set False to opt into metadata-only observation."
+            "When True, refuse plugin-only observation paths because ADK "
+            "before/after callbacks cannot place provider/tool work inside a "
+            "checkpoint. Explicit KitaruADKModel/KitaruADKTool calls mode does "
+            "not use this gate. Set False to opt into metadata-only plugin "
+            "observation."
         ),
     )
 

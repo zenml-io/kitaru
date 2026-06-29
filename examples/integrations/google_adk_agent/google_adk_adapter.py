@@ -30,6 +30,7 @@ import importlib
 import inspect
 import json
 import os
+import sys
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -114,6 +115,12 @@ def _load_adk_api() -> ADKRuntimeAPI:
 
 
 def _load_kitaru_adk_adapter() -> Any:
+    # Unit tests install fake google.adk modules, then import the adapter against
+    # those fake base classes. The runnable examples need a fresh adapter import
+    # after `_load_adk_api()` has loaded the real installed ADK classes.
+    for cached in list(sys.modules):
+        if cached.startswith("kitaru.adapters.google_adk"):
+            del sys.modules[cached]
     return importlib.import_module("kitaru.adapters.google_adk")
 
 

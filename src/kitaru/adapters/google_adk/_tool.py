@@ -18,11 +18,17 @@ from ._policy import (
     resolve_tool_call_checkpoint_config,
 )
 from ._serialization import object_metadata, to_json_safe
-from ._tracking import EventTracker, current_tracker
+from ._tracking import (
+    EventTracker,
+    current_call_policy,
+    current_capture_policy,
+    current_tracker,
+)
 from ._utils import checkpoint_cache_key, elapsed_ms, run_async_in_checkpoint
 
 _BaseTool: type[Any] = importlib.import_module("google.adk.tools.base_tool").BaseTool
 _NO_TOOL_CONTEXT_STATE = object()
+_UNTRACKED_TOOL_CONTEXT_STATE = object()
 _TOOL_RESULT_ENVELOPE_KEY = "__kitaru_adk_tool_checkpoint_result__"
 _TOOL_RESULT_ENVELOPE_VERSION = 1
 
@@ -74,21 +80,18 @@ def _read_tool_context_state(tool_context: Any) -> Any:
         return _NO_TOOL_CONTEXT_STATE
     items = getattr(state, "items", None)
     if not callable(items) or not hasattr(state, "__setitem__"):
-        raise KitaruUsageError(
-            "Checkpointed Google ADK tool calls need `tool_context.state` to "
-            "behave like a mutable mapping so Kitaru can replay state "
-            "mutations when a checkpoint is reused. Disable checkpointing for "
-            "this tool with "
-            "`tool_checkpoint_config_by_name={tool_name: False}` if the tool "
-            "uses a custom state object."
-        )
+        # ADK sometimes exposes hidden/session state through an object that is
+        # not a mutable mapping. Kitaru cannot include that state in the cache
+        # key or replay mutations onto it, so the safe default is to run the
+        # physical tool call without creating a replayable checkpoint.
+        return _UNTRACKED_TOOL_CONTEXT_STATE
     return state
 
 
 def _snapshot_tool_context_state(tool_context: Any) -> dict[str, Any] | object:
     state = _read_tool_context_state(tool_context)
-    if state is _NO_TOOL_CONTEXT_STATE:
-        return _NO_TOOL_CONTEXT_STATE
+    if state is _NO_TOOL_CONTEXT_STATE or state is _UNTRACKED_TOOL_CONTEXT_STATE:
+        return state
     return _copy_json_state_value(dict(state.items()), path="tool_context.state")
 
 
@@ -255,13 +258,17 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
     async def _checkpoint_or_run(
         self, *, args: Any, tool_context: Any, body: Any
     ) -> tuple[Any, bool]:
+        call_policy = current_call_policy() or self._call_policy
+        capture = current_capture_policy() or self._capture
         config = resolve_tool_call_checkpoint_config(
-            self._call_policy,
+            call_policy,
             tool_name=self.name,
         )
-        if config is None or not self._can_checkpoint():
+        if config is None or not self._can_checkpoint(call_policy):
             return await body(), False
         before_state = _snapshot_tool_context_state(tool_context)
+        if before_state is _UNTRACKED_TOOL_CONTEXT_STATE:
+            return await body(), False
         state_input = (
             {"available": False}
             if before_state is _NO_TOOL_CONTEXT_STATE
@@ -279,7 +286,7 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
                 "tool_context_state_before": state_input,
                 "wrapped_tool": object_metadata(self._tool),
             },
-            include_raw=self._capture.capture_mode == "full",
+            include_raw=capture.capture_mode == "full",
         )
 
         async def checkpoint_body() -> dict[str, Any]:
@@ -288,10 +295,14 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
                 state_delta = None
             else:
                 after_state = _snapshot_tool_context_state(tool_context)
-                if after_state is _NO_TOOL_CONTEXT_STATE:
+                if (
+                    after_state is _NO_TOOL_CONTEXT_STATE
+                    or after_state is _UNTRACKED_TOOL_CONTEXT_STATE
+                ):
                     raise KitaruUsageError(
                         "Google ADK tool checkpointing cannot replay a tool "
-                        "that removes `tool_context.state` during execution."
+                        "that removes or hides `tool_context.state` during "
+                        "execution."
                     )
                 state_delta = _build_state_delta(
                     cast(dict[str, Any], before_state),
@@ -322,12 +333,12 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
             return checkpointed_result.get("result"), True
         return checkpointed_result, True
 
-    def _can_checkpoint(self) -> bool:
+    def _can_checkpoint(self, call_policy: ADKCallCheckpointPolicy) -> bool:
         if not runtime.is_inside_flow():
             return False
         if not runtime.is_inside_checkpoint():
             return True
-        if self._call_policy.nested_checkpoint_policy == "metadata_only":
+        if call_policy.nested_checkpoint_policy == "metadata_only":
             return False
         raise KitaruUsageError(
             "KitaruADKTool cannot open a tool-call checkpoint while already "

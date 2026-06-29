@@ -8,8 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, an integration example, isolated no-dev contract/live smoke paths, and an explicit limitation that runner-level arbitrary `calls` mode is blocked until ADK exposes a safe public hook for model/tool call bodies.
+- Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, direct and persisted-workflow integration examples, isolated no-dev contract/live smoke paths, explicit-wrapper `calls` mode, and tool-confirmation resume helpers.
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+
+### Changed
+- Clarified Google ADK MCP docs around the safe subset: Kitaru can checkpoint a replay-safe ADK `BaseTool`-like object wrapped with `KitaruADKTool`, but it does not restore ADK MCP processes, sessions, or hidden server state.
+- Refreshed the Google ADK dependency note: `google-adk` still stays out of the normal local/dev project environment, even though a 2026-06-29 direct resolver probe with `zenml[server]` now succeeds, until the full local server path is certified with the newer FastAPI/Starlette stack.
 
 ### Fixed
 - Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.

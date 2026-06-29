@@ -534,6 +534,118 @@ def test_adk_tool_confirmation_events_become_typed_handoffs(
     assert _contains_marker(result.events, "requestedToolConfirmations")
 
 
+def test_adk_tool_confirmation_helper_resumes_real_runner_without_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_no_hosted_provider_guard(monkeypatch)
+
+    BaseLlm, _BaseTool, LlmAgent = _adk_contract_classes()
+    api = _adk_runtime_api()
+    adapter = _adapter_module()
+    function_tool_module = _import_adk_module("google.adk.tools.function_tool")
+    tool_calls: list[str] = []
+
+    class ConfirmationLoopLlm(BaseLlm):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            super().__init__(model="kitaru-confirmation-loop-model")
+            object.__setattr__(self, "calls", [])
+
+        @classmethod
+        def supported_models(cls) -> list[str]:
+            return ["kitaru-confirmation-loop-model"]
+
+        async def generate_content_async(
+            self,
+            llm_request: Any,
+            stream: bool = False,
+        ) -> AsyncIterator[Any]:
+            self.calls.append(llm_request)
+            for content in getattr(llm_request, "contents", []) or []:
+                for part in getattr(content, "parts", []) or []:
+                    function_response = getattr(part, "function_response", None)
+                    if (
+                        function_response is not None
+                        and function_response.name == "dangerous_lookup"
+                    ):
+                        yield _llm_response(
+                            api,
+                            _text_content(
+                                api.genai_types,
+                                "final answer after approval",
+                                role="model",
+                            ),
+                        )
+                        return
+
+            yield _llm_response(
+                api,
+                _function_call_content(
+                    api.genai_types,
+                    name="dangerous_lookup",
+                    args={"query": "cats"},
+                ),
+            )
+
+    def dangerous_lookup(query: str) -> dict[str, Any]:
+        tool_calls.append(query)
+        return {"query": query, "answer": "ran-after-confirmation"}
+
+    async def run_round_trip() -> tuple[Any, Any, list[str]]:
+        app_name = "kitaru_confirmation_resume_app"
+        user_id = "local-user"
+        session_id = "confirmation-resume-session"
+        model = ConfirmationLoopLlm()
+        agent = LlmAgent(
+            name="confirmation_resume_agent",
+            model=model,
+            tools=[
+                function_tool_module.FunctionTool(
+                    dangerous_lookup,
+                    require_confirmation=True,
+                )
+            ],
+        )
+        runner = _build_in_memory_runner(api, agent=agent, app_name=app_name)
+        await _create_runner_session(
+            runner,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        kitaru_runner = adapter.KitaruADKRunner(runner, name=app_name)
+        first = await kitaru_runner.run(
+            adapter.ADKRunRequest(
+                user_id=user_id,
+                session_id=session_id,
+                message=_text_content(api.genai_types, "confirm it", role="user"),
+            )
+        )
+        assert tool_calls == []
+        followup = adapter.build_tool_confirmation_request(
+            first.handoffs[0],
+            confirmed=True,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        second = await kitaru_runner.run(followup)
+        return first, second, model.calls
+
+    first, second, model_calls = asyncio.run(run_round_trip())
+
+    assert first.status == "requires_action"
+    assert len(first.handoffs) == 1
+    handoff = first.handoffs[0]
+    assert handoff.kind == "tool_confirmation"
+    assert handoff.request_function_call_id is not None
+    assert tool_calls == ["cats"]
+    assert second.status == "completed"
+    assert second.handoffs == []
+    assert adapter.final_output_preview(second.final_output) == (
+        "final answer after approval"
+    )
+    assert len(model_calls) >= 2
+
+
 def test_adk_credential_request_events_become_typed_handoffs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -17,7 +17,12 @@ from ._policy import (
     resolve_model_checkpoint_config,
 )
 from ._serialization import object_metadata, to_json_safe
-from ._tracking import EventTracker, current_tracker
+from ._tracking import (
+    EventTracker,
+    current_call_policy,
+    current_capture_policy,
+    current_tracker,
+)
 from ._utils import (
     checkpoint_cache_key,
     elapsed_ms,
@@ -157,8 +162,10 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
         stream: bool,
         collect: Callable[[], Any],
     ) -> tuple[list[Any], bool]:
-        config = resolve_model_checkpoint_config(self._call_policy)
-        if config is None or not self._can_checkpoint():
+        call_policy = current_call_policy() or self._call_policy
+        capture = current_capture_policy() or self._capture
+        config = resolve_model_checkpoint_config(call_policy)
+        if config is None or not self._can_checkpoint(call_policy):
             return await collect(), False
         model_input = to_json_safe(
             {
@@ -167,7 +174,7 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
                 "llm_request": llm_request,
                 "wrapped_model": object_metadata(self._model),
             },
-            include_raw=self._capture.capture_mode == "full",
+            include_raw=capture.capture_mode == "full",
         )
         return await run_async_in_checkpoint(
             config=config,
@@ -177,12 +184,12 @@ class KitaruADKModel(_BaseLlm):  # type: ignore[misc, valid-type]
             checkpoint_inputs={"model_input": model_input},
         ), True
 
-    def _can_checkpoint(self) -> bool:
+    def _can_checkpoint(self, call_policy: ADKCallCheckpointPolicy) -> bool:
         if not runtime.is_inside_flow():
             return False
         if not runtime.is_inside_checkpoint():
             return True
-        if self._call_policy.nested_checkpoint_policy == "metadata_only":
+        if call_policy.nested_checkpoint_policy == "metadata_only":
             return False
         raise KitaruUsageError(
             "KitaruADKModel cannot open a model-call checkpoint while already "

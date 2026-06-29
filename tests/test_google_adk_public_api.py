@@ -37,8 +37,11 @@ def test_public_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         "KitaruADKRunner",
         "KitaruADKTool",
         "ToolCheckpointOverride",
+        "build_tool_confirmation_message",
+        "build_tool_confirmation_request",
         "final_output_preview",
         "validate_checkpoint_strategy",
+        "wait_for_tool_confirmation",
         "wrap_tool",
     }
     assert set(adapter.__all__) == expected
