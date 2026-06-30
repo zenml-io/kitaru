@@ -49,7 +49,9 @@ def test_google_adk_workflow_help_does_not_require_google_adk(
         workflow_example.main(["--help"])
 
     assert exc_info.value.code == 0
-    assert "persisted Kitaru workflow" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "persisted Kitaru workflow" in output
+    assert "--mode" in output
 
 
 def test_google_adk_workflow_help_runs_when_executed_by_path() -> None:
@@ -66,6 +68,17 @@ def test_google_adk_workflow_help_runs_when_executed_by_path() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "persisted Kitaru workflow" in result.stdout
+    assert "--mode" in result.stdout
+
+
+@pytest.mark.parametrize("local_only_flag", ["--deny", "--interactive-wait"])
+def test_google_adk_workflow_live_mode_rejects_local_confirmation_flags(
+    local_only_flag: str,
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        workflow_example.main(["--mode", "live", local_only_flag])
+
+    assert "only apply to --mode local" in str(exc_info.value)
 
 
 def _clear_google_adk_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -233,15 +246,19 @@ def test_google_adk_workflow_runs_persisted_local_path_without_provider_credenti
         session_id=f"workflow-local-{uuid4().hex}",
     )
 
+    assert result["mode"] == "local"
     assert result["status"] == "completed"
     assert result["checkpoint_strategy"] == "calls"
     assert result["human_decision_happened"] is True
     assert result["approval_decision"] is True
     assert result["approval_source"] == "injected_decision"
     assert result["final_answer"] == (
-        "final workflow answer: workflow-local-cat-fact for cats"
+        "final workflow answer: workflow-tool-calculation=3049 for cats"
     )
-    assert result["physical_tool_executions"] == ["cats"]
+    assert result["physical_tool_executions"] == [
+        "multiply_numbers:97x31=3007",
+        "add_offset:3007+42=3049",
+    ]
     assert result["status_history"] == ["requires_action", "completed"]
     assert "model_call" in result["first_turn"]["tracked_event_kinds"]
     assert "model_call" in result["final_turn"]["tracked_event_kinds"]
@@ -254,9 +271,12 @@ def test_google_adk_workflow_runs_persisted_local_path_without_provider_credenti
     )
 
     assert second_result["final_answer"] == (
-        "final workflow answer: workflow-local-cat-fact for dogs"
+        "final workflow answer: workflow-tool-calculation=3049 for dogs"
     )
-    assert second_result["physical_tool_executions"] == ["dogs"]
+    assert second_result["physical_tool_executions"] == [
+        "multiply_numbers:97x31=3007",
+        "add_offset:3007+42=3049",
+    ]
 
 
 def test_google_adk_workflow_denial_path_does_not_run_tool(

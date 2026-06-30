@@ -2,12 +2,12 @@
 
 This example shows the experimental Kitaru adapter for [Google ADK](https://adk.dev/).
 
-The default direct run is deterministic and local: it uses real installed ADK classes, an ADK in-memory runner, a local dummy ADK model, and a local dummy ADK tool. No Gemini credentials and no hosted provider call are needed.
+Start with `google_adk_workflow.py`: it runs a real Kitaru flow around a real installed ADK in-memory runner. The default path is deterministic and local, so it needs no Gemini credentials and makes no hosted provider call. Inside the flow, a local ADK model chooses two tools to calculate `(97 * 31) + 42`; the first tool goes through ADK tool confirmation, then the agent continues and calls the second tool.
 
-This directory now has two scripts:
+This directory has two scripts:
 
-- `google_adk_adapter.py` — a direct ADK wiring smoke test. It proves the adapter can wrap real installed ADK runner/model/tool objects.
-- `google_adk_workflow.py` — a persisted Kitaru flow. It uses `checkpoint_strategy="calls"`, explicit `KitaruADKModel` / `KitaruADKTool` wrappers, tool-confirmation resume, and structured workflow output.
+- `google_adk_workflow.py` — the main example. It submits a persisted Kitaru flow, uses `checkpoint_strategy="calls"`, explicit `KitaruADKModel` / `KitaruADKTool` wrappers, tool-confirmation resume, and structured workflow output.
+- `google_adk_adapter.py` — a lower-level direct ADK wiring smoke test. It proves the adapter can wrap installed ADK runner/model/tool objects outside a Kitaru flow.
 
 ## What it demonstrates
 
@@ -30,29 +30,6 @@ UV_PROJECT_ENVIRONMENT=.venv-google-adk \
 
 > **Important:** Keep using the isolated no-dev ADK environment for now. As of 2026-06-29, `google-adk` resolves FastAPI `0.138.0` / Starlette `1.3.1`, and this project still intentionally blocks combining `google-adk` with the local/dev extras until the full local server path is certified with that newer stack.
 
-## Run the direct local mode
-
-From the repository root:
-
-```bash
-UV_PROJECT_ENVIRONMENT=.venv-google-adk \
-  uv run --python 3.12 --no-dev --extra google-adk \
-  python examples/integrations/google_adk_agent/google_adk_adapter.py
-```
-
-Expected shape:
-
-```text
-=== ADK result ===
-Checkpoint strategy: runner_call
-Status: completed
-Final output preview: final local answer: local-cat-fact for cats
-Event count: ...
-Handoff count: 0
-```
-
-The story is: ADK asks the local model what to do, the local model asks for the `local_lookup` tool, ADK runs that wrapped local tool, and the model returns a final answer containing `local-cat-fact`. In this direct script, no Kitaru flow is submitted; the output proves the ADK/Kitaru wrapper wiring.
-
 ## Run the persisted workflow mode
 
 From the repository root, initialize the Kitaru project marker once and then run the workflow:
@@ -70,18 +47,30 @@ Expected shape:
 === Workflow result ===
 {
   "checkpoint_strategy": "calls",
-  "final_answer": "final workflow answer: workflow-local-cat-fact for cats",
+  "final_answer": "final workflow answer: workflow-tool-calculation=3049 for cats",
   "human_decision_happened": true,
   "approval_source": "injected_decision",
   ...
 }
 ```
 
-This script submits a real Kitaru flow. The first ADK turn asks for tool confirmation. The default path injects a deterministic approval so the example can run in tests and smoke checks without pausing. Pass `--interactive-wait` to use `wait_for_tool_confirmation(...)`, which pauses at flow scope and returns the ADK follow-up request after the human decision.
+This script submits a real Kitaru flow. ADK first asks to call `multiply_numbers(97, 31)`, which requires tool confirmation. The default path injects a deterministic approval so the example can run in tests and smoke checks without pausing. ADK then runs the multiplication tool, calls the `add_offset(3007, 42)` tool, and returns the final answer. Pass `--interactive-wait` to use `wait_for_tool_confirmation(...)`, which pauses at flow scope and returns the ADK follow-up request after the human decision.
 
-## Run optional live mode
+## Run the direct local smoke test
 
-Live mode uses ADK's Gemini model path and keeps Kitaru at the whole-runner level.
+From the repository root:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-google-adk \
+  uv run --python 3.12 --no-dev --extra google-adk \
+  python examples/integrations/google_adk_agent/google_adk_adapter.py
+```
+
+This direct script does not submit a Kitaru flow. It is useful when you want to check the lower-level ADK runner/model/tool wrapper wiring.
+
+## Run optional live workflow mode
+
+Live mode submits the same Kitaru workflow, but the ADK agent uses Gemini or Vertex AI instead of the deterministic local model. The live agent gets two calculation tools and is prompted to call them, so the demo still proves that the ADK turn ran from inside the flow.
 
 Choose one Google auth path.
 
@@ -92,9 +81,10 @@ export GEMINI_API_KEY='<your-gemini-api-key>'
 # or
 export GOOGLE_API_KEY='<your-google-api-key>'
 
+uv run kitaru init
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk \
-  python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
+  python examples/integrations/google_adk_agent/google_adk_workflow.py --mode live
 ```
 
 **Local/manual Vertex AI with Application Default Credentials (ADC):**
@@ -105,9 +95,10 @@ export GOOGLE_GENAI_USE_VERTEXAI=true
 export GOOGLE_CLOUD_PROJECT='<your-google-cloud-project>'
 export GOOGLE_CLOUD_LOCATION='<your-google-cloud-region>'
 
+uv run kitaru init
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk \
-  python examples/integrations/google_adk_agent/google_adk_adapter.py --mode live
+  python examples/integrations/google_adk_agent/google_adk_workflow.py --mode live
 ```
 
 Kitaru only checks that the environment has one of those shapes. It does not call `gcloud`, read ADC files, create a Google credential object, or prove that your Google account can use Vertex AI. ADK starts the model call, then Google GenAI looks for credentials and raises the auth error if ADC is missing or expired.
@@ -124,10 +115,12 @@ The direct script prints:
 
 The workflow script returns a structured dictionary. Its important fields are:
 
-- `checkpoint_strategy` — `calls`.
+- `mode` — `local` for the deterministic flow path, or `live` for Gemini/Vertex through ADK.
+- `checkpoint_strategy` — `calls` for local model/tool checkpointing, or `runner_call` for live whole-turn checkpointing.
 - `final_answer` — display text from the final ADK result.
-- `human_decision_happened` and `approval_source` — whether ADK asked for confirmation and whether approval came from deterministic injection or `kitaru.wait()`.
-- `first_turn` and `final_turn` — event counts, handoff counts, tracked model/tool event kinds, and checkpoint names.
+- `human_decision_happened` and `approval_source` — local-mode fields that show whether ADK asked for confirmation and whether approval came from deterministic injection or `kitaru.wait()`.
+- `first_turn` and `final_turn` — local-mode event counts, handoff counts, tracked model/tool event kinds, and checkpoint names.
+- `turn`, `usage`, and `model` — live-mode event summary, token usage when ADK reports it, and the selected Gemini/Vertex model.
 
 ## Current limitations
 
