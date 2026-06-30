@@ -1193,6 +1193,27 @@ def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None
     }
 
 
+def test_flow_return_coercion_saves_explicit_none_as_pipeline_artifact() -> None:
+    """Explicit ``None`` must be a durable result, not missing-result metadata."""
+    artifact = object()
+
+    with (
+        patch("kitaru.flow.save_artifact", return_value=artifact) as save_mock,
+        patch("kitaru.flow._record_flow_result_reference") as record_mock,
+    ):
+        result = _coerce_flow_return_for_zenml(None)
+
+    assert result is artifact
+    save_mock.assert_called_once()
+    assert save_mock.call_args.kwargs == {
+        "data": None,
+        "name": _FLOW_RESULT_ARTIFACT_NAME,
+        "artifact_type": ArtifactType.DATA,
+        "user_metadata": {"kitaru_artifact_type": "output"},
+    }
+    record_mock.assert_called_once_with(artifact)
+
+
 def test_flow_return_coercion_wraps_artifact_save_failures() -> None:
     """Internal result-artifact failures should not look like user-code errors."""
     with (
@@ -1416,6 +1437,28 @@ def test_flow_result_extraction_empty_run_outputs_fall_back_to_output_specs() ->
     )
 
     assert _extract_flow_result(_as_pipeline_run(run)) == "declared result"
+
+
+def test_flow_result_extraction_output_spec_none_beats_terminal_fallback() -> None:
+    """An output-spec ``None`` beats a discarded terminal checkpoint output."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("declared_step", "output", None),
+            _DummyOutput(
+                step_name="one_value",
+                output_name="output",
+                value="solo",
+                upstream_steps=["declared_step"],
+            ),
+        ],
+        run_outputs=[],
+    )
+    run.snapshot.pipeline_spec.outputs = [
+        SimpleNamespace(step_name="declared_step", output_name="output")
+    ]
+
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
 
 
 def test_flow_result_extraction_missing_run_outputs_falls_back_to_output_specs() -> (
@@ -3451,12 +3494,62 @@ def test_flow_handle_get_returns_none_when_no_outputs() -> None:
     assert result is None
 
 
-def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
-    """Ambiguous non-result terminals -> recover the value via the linked artifact.
+def test_flow_result_extraction_run_output_none_beats_terminal_fallback() -> None:
+    """An explicit run-level ``None`` beats a discarded terminal checkpoint."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+        run_outputs=[("output", None)],
+    )
+    run.snapshot.pipeline_spec.outputs = []
 
-    An adapter can create several non-result model/tool checkpoints, so terminal
-    inference is ambiguous. The flow's real return value is recovered from the
-    ``kitaru_flow_result`` artifact linked in execution metadata.
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
+
+
+def test_flow_result_linked_none_beats_terminal_fallback() -> None:
+    """A linked explicit ``None`` beats legacy single-terminal inference."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = _DummyArtifact(None)
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result is None
+    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+
+
+def test_flow_result_linked_plain_value_beats_terminal_fallback() -> None:
+    """Any linked plain flow result beats legacy single-terminal inference."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = _DummyArtifact({"answer": 42})
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == {"answer": 42}
+    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+
+
+def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
+    """Explicit linked flow results are recovered before terminal inference.
+
+    An adapter can create several non-result model/tool checkpoints. The flow's
+    real return value is recovered from the ``kitaru_flow_result`` artifact
+    linked in execution metadata before Kitaru tries to infer from terminals.
     """
     non_candidate = {"kitaru": {"flow_result_candidate": False}}
     run = _DummyRun(
@@ -3470,8 +3563,8 @@ def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> N
     run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
 
     client_mock = MagicMock()
-    client_mock.get_artifact_version.return_value = SimpleNamespace(
-        load=lambda: {"answer": "the real return value"}
+    client_mock.get_artifact_version.return_value = _DummyArtifact(
+        {"answer": "the real return value"}
     )
 
     with patch("kitaru.flow.Client", return_value=client_mock):

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added

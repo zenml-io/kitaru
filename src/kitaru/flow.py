@@ -268,10 +268,10 @@ def _register_pipeline_source_alias(
 
 _FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
 #: Execution-metadata key linking a saved plain-value flow result back to its run.
-#: ZenML dynamic pipelines discard the pipeline function's return value, so the
-#: ``kitaru_flow_result`` artifact is otherwise orphaned (no producer run). The
-#: link lets `.wait()` recover the value when terminal-step inference is ambiguous
-#: (e.g. an adapter created several non-result model/tool checkpoints).
+#: ZenML dynamic pipelines can leave Kitaru's explicit ``kitaru_flow_result``
+#: artifact unavailable through run outputs or pipeline output specs. The link
+#: lets `.wait()` recover that explicit return value before Kitaru guesses from
+#: terminal checkpoint outputs.
 _FLOW_RESULT_REF_METADATA_KEY = "kitaru_flow_result_ref_v1"
 _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
@@ -366,8 +366,6 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
     normal Python return values, so plain values need to be persisted manually
     before they are handed back to ZenML's pipeline finalizer.
     """
-    if value is None:
-        return None
     if _is_zenml_pipeline_output_artifact(value):
         return value
     if isinstance(value, tuple) and any(
@@ -1130,16 +1128,10 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     if not outputs:
         outputs = _extract_outputs_from_output_specs(run)
     if not outputs:
-        try:
-            outputs = _extract_outputs_from_terminal_steps(run)
-        except KitaruAmbiguousFlowResultError:
-            # No single result-candidate terminal step (e.g. an adapter created
-            # several non-result model/tool checkpoints). Recover the value the
-            # flow actually returned from the linked `kitaru_flow_result` artifact.
-            referenced = _load_referenced_flow_result(run)
-            if referenced is not _FLOW_RESULT_NOT_FOUND:
-                return referenced
-            raise
+        referenced = _load_referenced_flow_result(run)
+        if referenced is not _FLOW_RESULT_NOT_FOUND:
+            return referenced
+        outputs = _extract_outputs_from_terminal_steps(run)
 
     if not outputs:
         return None
