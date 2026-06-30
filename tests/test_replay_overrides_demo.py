@@ -177,15 +177,26 @@ def test_env_example_documents_openai_key() -> None:
 def test_load_support_decision_prefers_flow_result_ref() -> None:
     import importlib
     import sys
-    from types import SimpleNamespace
+    from types import ModuleType, SimpleNamespace
 
+    old_path = list(sys.path)
+    old_modules: dict[str, ModuleType | None] = {
+        name: sys.modules.get(name) for name in ("utils", "utils.load_decision")
+    }
+    sys.modules.pop("utils.load_decision", None)
+    sys.modules.pop("utils", None)
     sys.path.insert(0, str(DEMO_ROOT.resolve()))
     try:
         load_support_decision = importlib.import_module(
             "utils.load_decision"
         ).load_support_decision
     finally:
-        sys.path.pop(0)
+        sys.path[:] = old_path
+        sys.modules.pop("utils.load_decision", None)
+        sys.modules.pop("utils", None)
+        for name, module in old_modules.items():
+            if module is not None:
+                sys.modules[name] = module
 
     decision = {
         "policy_label": "restricted_account_change",

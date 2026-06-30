@@ -195,6 +195,8 @@ class KitaruADKTool(_BaseTool):  # type: ignore[misc, valid-type]
                 "response_scheduling",
                 tool.response_scheduling,
             )
+        if hasattr(tool, "_defers_response"):
+            object.__setattr__(self, "_defers_response", tool._defers_response)
         object.__setattr__(self, "_tracker", tracker)
 
     def __getattr__(self, name: str) -> Any:

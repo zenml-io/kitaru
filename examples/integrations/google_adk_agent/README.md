@@ -55,9 +55,10 @@ The story is: ADK asks the local model what to do, the local model asks for the 
 
 ## Run the persisted workflow mode
 
-From the repository root:
+From the repository root, initialize the Kitaru project marker once and then run the workflow:
 
 ```bash
+uv run kitaru init
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
   uv run --python 3.12 --no-dev --extra google-adk \
   python examples/integrations/google_adk_agent/google_adk_workflow.py

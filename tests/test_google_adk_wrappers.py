@@ -563,6 +563,18 @@ def test_tool_wrapper_preserves_response_scheduling(
     assert wrapped.response_scheduling == "WHEN_IDLE"
 
 
+def test_tool_wrapper_preserves_deferred_response_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _model_module, _tool_module = _modules(monkeypatch)
+    tool: Any = FakeTool()
+    tool._defers_response = True
+
+    wrapped = adapter.wrap_tool(tool)
+
+    assert wrapped._defers_response is True
+
+
 def test_tool_wrapper_process_llm_request_accepts_async_delegate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
