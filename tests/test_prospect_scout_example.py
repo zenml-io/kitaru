@@ -108,12 +108,13 @@ def test_qualifier_actually_calls_search_web(
 def test_image_pins_adapter_compatible_pydantic_ai(prospector_module: Any) -> None:
     """PROSPECTOR_IMAGE pins a pydantic-ai the Kitaru adapter can import.
 
-    The adapter imports names that only exist in pydantic-ai >=1.89, so a
-    too-old pin (e.g. <1.80) builds a remote image whose agent import fails.
+    The adapter needs a recent pydantic-ai and the image pin must stay above
+    the CVE-2026-48782 fix floor, otherwise remote images can build with a
+    vulnerable installed version.
     """
     requirements = prospector_module.PROSPECTOR_IMAGE.requirements or []
     assert any("pydantic-ai-slim" in req for req in requirements)
-    assert any(">=1.89" in req for req in requirements)
+    assert any(">=1.102.0" in req for req in requirements)
 
 
 @pytest.mark.parametrize(

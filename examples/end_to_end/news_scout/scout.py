@@ -112,7 +112,7 @@ def new_scout_agent() -> KitaruAgent:
 # inside the container; the `-slim` variant keeps the image small.
 SCOUT_IMAGE = ImageSettings(
     requirements=[
-        "pydantic-ai-slim[anthropic,openai]>=1.89,<1.104",
+        "pydantic-ai-slim[anthropic,openai]>=1.102.0,<1.104",
     ],
     environment=_collect_non_secret_env(),
 )
