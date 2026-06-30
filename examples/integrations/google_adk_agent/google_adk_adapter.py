@@ -64,7 +64,7 @@ DEFAULT_LOCAL_PROMPT = "Please look up one local cat fact."
 DEFAULT_LIVE_PROMPT = (
     "Explain one Kitaru checkpoint in one short sentence. Do not use tools."
 )
-DEFAULT_LIVE_MODEL = "gemini-2.0-flash"
+DEFAULT_LIVE_MODEL = "gemini-3.5-flash"
 LOCAL_MARKER = "local-cat-fact"
 Mode = Literal["local", "live"]
 

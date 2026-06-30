@@ -332,6 +332,9 @@ _PROVIDER_ID_ALIASES = {
     "xai": "xai",
 }
 _SUPPORTED_PROVIDER_IDS = frozenset(_PROVIDER_ID_ALIASES.values())
+_GOOGLE_PRICING_MODEL_ALIASES = {
+    "gemini-flash-latest": "gemini-3.5-flash",
+}
 _BARE_MODEL_PROVIDER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "openai",
@@ -421,12 +424,14 @@ def _provider_model_ref(model_ref: str | None, provider_id: str | None) -> str |
                 break
     if provider_id == "google":
         if normalized.startswith("models/"):
-            return normalized.removeprefix("models/")
-        if normalized.startswith("publishers/google/models/"):
-            return normalized.removeprefix("publishers/google/models/")
-        marker = "/publishers/google/models/"
-        if marker in normalized:
-            return normalized.rsplit(marker, 1)[1]
+            normalized = normalized.removeprefix("models/")
+        elif normalized.startswith("publishers/google/models/"):
+            normalized = normalized.removeprefix("publishers/google/models/")
+        else:
+            marker = "/publishers/google/models/"
+            if marker in normalized:
+                normalized = normalized.rsplit(marker, 1)[1]
+        return _GOOGLE_PRICING_MODEL_ALIASES.get(normalized, normalized)
     return normalized
 
 

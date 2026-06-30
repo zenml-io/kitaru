@@ -44,7 +44,7 @@ class FakeRunner:
 class UsageMetadataRunner:
     name = "usage_runner"
 
-    def __init__(self, *, model: str = "gemini-2.0-flash") -> None:
+    def __init__(self, *, model: str = "gemini-flash-latest") -> None:
         self.agent = SimpleNamespace(model=model)
 
     def run(self, *, user_id: str, session_id: str, new_message: Any, **kwargs: Any):
@@ -288,7 +288,7 @@ def test_runner_call_prices_adk_usage_with_default_genai_prices(
     monkeypatch.setattr(agent_module, "log_usage_record", records.append)
 
     wrapped = adapter.KitaruADKRunner(
-        UsageMetadataRunner(model="gemini-2.0-flash"),
+        UsageMetadataRunner(model="gemini-flash-latest"),
         checkpoint_strategy="runner_call",
     )
     result = wrapped.run_sync(
@@ -296,7 +296,7 @@ def test_runner_call_prices_adk_usage_with_default_genai_prices(
     )
 
     assert result.usage is not None
-    assert result.usage.model_name == "gemini-2.0-flash"
+    assert result.usage.model_name == "gemini-flash-latest"
     assert result.usage.provider_name == "google_gemini"
     assert result.estimated_cost_usd == 0.42
     assert genai_calls == [
@@ -307,7 +307,7 @@ def test_runner_call_prices_adk_usage_with_default_genai_prices(
                 "cache_read_tokens": None,
                 "cache_write_tokens": None,
             },
-            "model_ref": "gemini-2.0-flash",
+            "model_ref": "gemini-3.5-flash",
             "provider_id": "google",
         }
     ]
