@@ -1730,6 +1730,74 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
     )
 
 
+def test_flow_handle_does_not_persist_terminal_llm_usage_when_refresh_fails(
+    monkeypatch,
+) -> None:
+    """Terminal aggregation should retry later instead of using stale metadata."""
+    flow_module = sys.modules["kitaru.flow"]
+    run = _as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-1"))
+    handle = FlowHandle(run)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.side_effect = RuntimeError("refresh failed")
+
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    monkeypatch.setattr(
+        flow_module,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda _run, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not aggregate stale run")
+        ),
+    )
+
+    handle._persist_terminal_llm_usage_once(run)
+
+    assert handle._terminal_llm_usage_metadata_persisted is False
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-1",
+        allow_name_prefix_match=False,
+    )
+
+
+def test_flow_handle_init_persists_terminal_llm_usage_for_finished_run(
+    monkeypatch,
+) -> None:
+    """Already-finished handles should still write terminal LLM rollups."""
+    flow_module = sys.modules["kitaru.flow"]
+    run = _as_pipeline_run(
+        _DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-finished")
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = run
+    aggregation_calls: list[tuple[str, object]] = []
+    analytics_events: list[AnalyticsEvent] = []
+
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    monkeypatch.setattr(
+        flow_module,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda persisted_run, **kwargs: (
+            aggregation_calls.append(
+                (str(persisted_run.id), kwargs.get("zenml_client"))
+            )
+            or True
+        ),
+    )
+    monkeypatch.setattr(
+        flow_module,
+        "track",
+        lambda event, _metadata: analytics_events.append(event),
+    )
+
+    FlowHandle(run, track_terminal_if_finished=True)
+
+    assert analytics_events == [AnalyticsEvent.FLOW_TERMINAL]
+    assert aggregation_calls == [("run-finished", client_mock)]
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-finished",
+        allow_name_prefix_match=False,
+    )
+
+
 def test_flow_handle_aggregates_fresh_run_even_when_summary_exists(
     monkeypatch,
 ) -> None:
@@ -2368,6 +2436,134 @@ def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -
     assert written[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.0
 
 
+def test_terminal_llm_usage_metadata_preserves_replay_tail_incurred_record(
+    monkeypatch,
+) -> None:
+    """Replay-like raw statuses should not hide provider calls that executed."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="tail-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "write": [
+            SimpleNamespace(
+                id="attempt-write",
+                name="write",
+                spec=SimpleNamespace(invocation_id="write"),
+                status="replay_reused",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"tail-call": record}},
+            )
+        ]
+    }
+    written: dict[str, Any] = {}
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: written.update(metadata),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+            ),
+        )
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert summary is not None
+    assert summary["incurred_usage_record_count"] == 1
+    assert summary["reused_usage_record_count"] == 0
+    assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 37
+    assert written[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 0
+
+
+def test_terminal_llm_usage_metadata_marks_replay_skipped_attempt_reused(
+    monkeypatch,
+) -> None:
+    """The persisted replay skip list is direct evidence of replay reuse."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="upstream-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "fetch": [
+            SimpleNamespace(
+                id="attempt-fetch",
+                name="fetch",
+                spec=SimpleNamespace(invocation_id="fetch"),
+                status="replay_reused",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"upstream-call": record}},
+            )
+        ]
+    }
+    written: dict[str, Any] = {}
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: written.update(metadata),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+            ),
+        )
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert summary is not None
+    assert summary["incurred_usage_record_count"] == 0
+    assert summary["reused_usage_record_count"] == 1
+    assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 0
+    assert written[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 37
+
+
 def test_terminal_llm_usage_metadata_skips_when_attempt_fetch_fails(
     monkeypatch,
 ) -> None:
@@ -2855,6 +3051,9 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         ) as resolve_connection_mock,
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch(
+            "kitaru.flow.safe_persist_replay_submission_metadata"
+        ) as persist_replay_metadata_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
     ):
         client_instance = client_cls.return_value
@@ -2881,6 +3080,13 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     persist_mock.assert_called_once()
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
+    persist_replay_metadata_mock.assert_called_once_with(
+        replay_exec_id=str(replayed_run.id),
+        original_exec_id=str(source_run.id),
+        submission_id=submission.submission_id,
+        tag=None,
+        steps_to_skip={"fetch"},
+    )
     build_frozen_spec_call = base_pipeline.with_options.call_args
     docker_settings = build_frozen_spec_call.kwargs["settings"]["docker"]
     assert docker_settings.requirements == ["kitaru"]

@@ -1332,8 +1332,10 @@ class FlowHandle:
             if not run.status.is_successful:
                 origin = _safe_classify_run_failure(run)
                 self._track_terminal_once(run, failure_origin=origin)
+                self._persist_terminal_llm_usage_once(run)
             else:
                 self._track_terminal_once(run)
+                self._persist_terminal_llm_usage_once(run)
 
     @property
     def exec_id(self) -> str:
@@ -1384,8 +1386,6 @@ class FlowHandle:
         if self._terminal_llm_usage_metadata_persisted:
             return
 
-        aggregation_run = run
-        zenml_client: Client | None = None
         try:
             zenml_client = Client()
             aggregation_run = zenml_client.get_pipeline_run(
@@ -1398,8 +1398,8 @@ class FlowHandle:
                 "usage aggregation.",
                 exc_info=True,
             )
-        else:
-            self._run = aggregation_run
+            return
+        self._run = aggregation_run
 
         if _safe_persist_terminal_llm_usage_metadata(
             aggregation_run,
@@ -1719,6 +1719,8 @@ class _FlowDefinition:
         retries: int | None = None,
         resolved_connection: Any | None = None,
         original_run: PipelineRunResponse | None = None,
+        replay_submission_id: str | None = None,
+        replay_tag: str | None = None,
     ) -> tuple[FlowHandle, PipelineRunResponse, ReplayPlan]:
         """Submit one replay child and return the live handle plus its plan."""
         raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
@@ -1848,6 +1850,13 @@ class _FlowDefinition:
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
         )
+        safe_persist_replay_submission_metadata(
+            replay_exec_id=str(replayed_run.id),
+            original_exec_id=str(original_run.id),
+            submission_id=replay_submission_id or new_replay_submission_id(),
+            tag=replay_tag,
+            steps_to_skip=replay_plan.steps_to_skip,
+        )
 
         track(
             AnalyticsEvent.FLOW_REPLAYED,
@@ -1949,6 +1958,8 @@ class _FlowDefinition:
                     retries=retries,
                     resolved_connection=validated_connection,
                     original_run=original_run,
+                    replay_submission_id=submission_id,
+                    replay_tag=tag,
                 )
                 original_id = str(loaded_original_run.id)
                 plan_document = replay_plan.document
@@ -1957,12 +1968,6 @@ class _FlowDefinition:
                 if resolved_wait:
                     handle.wait()
                     row_status = "completed"
-                safe_persist_replay_submission_metadata(
-                    replay_exec_id=replay_exec_id,
-                    original_exec_id=original_id,
-                    submission_id=submission_id,
-                    tag=tag,
-                )
                 row_compare_url = safe_compare_url_for_executions(
                     [original_id, replay_exec_id]
                 )
