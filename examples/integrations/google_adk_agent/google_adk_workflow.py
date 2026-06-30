@@ -90,6 +90,16 @@ def _payload_value(payload: Any, key: str) -> Any:
     )
 
 
+def _tool_response_error(payload: Any) -> str | None:
+    if isinstance(payload, Mapping) and isinstance(payload.get("error"), str):
+        return payload["error"]
+    if isinstance(payload, Mapping) and isinstance(payload.get("result"), Mapping):
+        error = payload["result"].get("error")
+        if isinstance(error, str):
+            return error
+    return None
+
+
 def _multiply_numbers(left: int, right: int) -> dict[str, Any]:
     product = left * right
     return {"left": left, "right": right, "product": product}
@@ -140,6 +150,15 @@ def _build_confirmed_local_agent(api: Any, adapter: Any, *, query: str) -> Any:
                 )
                 return
             if MULTIPLY_TOOL_NAME in responses:
+                if error := _tool_response_error(responses[MULTIPLY_TOOL_NAME]):
+                    yield api.LlmResponse(
+                        content=_text_content(
+                            api,
+                            f"workflow tool rejected: {error} for {query}",
+                            role="model",
+                        )
+                    )
+                    return
                 product = _payload_value(responses[MULTIPLY_TOOL_NAME], "product")
                 yield api.LlmResponse(
                     content=_function_call_content(
@@ -361,6 +380,7 @@ async def _run_live_adk_workflow_turn(
         "checkpoint_strategy": "runner_call",
         "model": model,
         "usage": usage,
+        "estimated_cost_usd": result.estimated_cost_usd,
         "turn": _event_summary(result),
         "warnings": list(result.warnings),
     }
@@ -455,9 +475,7 @@ def _print_result(result: Mapping[str, Any]) -> None:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Run a persisted Kitaru workflow around a Google ADK agent."
-        )
+        description=("Run a persisted Kitaru workflow around a Google ADK agent.")
     )
     parser.add_argument(
         "--mode",
