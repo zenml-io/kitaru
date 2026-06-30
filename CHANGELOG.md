@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-06-30
+
 ### Added
 - Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, direct and persisted-workflow integration examples, isolated no-dev contract/live smoke paths, explicit-wrapper `calls` mode, and tool-confirmation resume helpers.
 - Added public replay-mode detection helpers: `kitaru.is_replay()`, `kitaru.get_replay_runtime_context()`, and `kitaru.ReplayRuntimeContext`, so side-effectful checkpoints can guard behavior during replay.
