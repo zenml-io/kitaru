@@ -37,6 +37,7 @@
 * [Execution Management](guides/execution-management.md)
 * [Configuration](guides/configuration.md)
 * [Authentication](guides/authentication.md)
+* [Projects](guides/projects.md)
 * [Deploy and Invoke Flows](guides/deployments.md)
 * [Containerization](guides/containerization.md)
 * [View Execution Runtime Logs](guides/execution-logs.md)

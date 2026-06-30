@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -47,6 +48,7 @@ from kitaru._client._statistics import (
     normalize_execution_statistics_groupings,
     normalize_execution_statistics_metrics,
 )
+from kitaru._env import apply_env_translations
 from kitaru._interface_deployments import Deployment
 from kitaru._llm_usage import (
     LLM_FLAT_DISPLAY_COST_USD_KEY,
@@ -79,6 +81,7 @@ from kitaru.client import (
 from kitaru.config import (
     FrozenExecutionSpec,
     KitaruConfig,
+    ProjectInfo,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
 )
@@ -662,6 +665,7 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
     assert hasattr(client, "deployments")
+    assert hasattr(client, "projects")
     assert hasattr(client, "auth")
     assert hasattr(client.auth, "service_accounts")
     assert hasattr(client.auth, "api_keys")
@@ -695,6 +699,20 @@ def test_client_for_auth_management_skips_project_validation() -> None:
     )
 
 
+def test_client_for_project_management_skips_project_validation() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(project=None),
+    ) as resolve_connection:
+        client = KitaruClient.for_project_management()
+
+    assert hasattr(client, "projects")
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=False,
+    )
+
+
 def test_auth_management_client_allows_env_remote_without_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -703,9 +721,123 @@ def test_auth_management_client_allows_env_remote_without_project(
 
     client = KitaruClient.for_auth_management()
 
-    assert client._project is None
     assert hasattr(client.auth, "service_accounts")
     assert hasattr(client.auth, "api_keys")
+
+
+def test_project_management_client_allows_env_remote_without_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    client = KitaruClient.for_project_management()
+
+    assert hasattr(client, "projects")
+
+
+def test_project_management_client_blocks_project_scoped_apis_without_project() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(project=None),
+    ):
+        client = KitaruClient.for_project_management()
+
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        client.executions.list()
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        client.artifacts.list("exec-1")
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        client.deployments.list()
+
+
+def test_client_projects_current_resolves_name_env_without_zenml_uuid_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_PROJECT=production should stay name-based through the client API."""
+
+    class _NameSelectedProjectClient:
+        def __init__(self) -> None:
+            self.get_project_calls: list[tuple[str, bool, bool]] = []
+
+        @property
+        def active_project(self) -> Any:
+            raise AssertionError("client should resolve KITARU_PROJECT by exact lookup")
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> SimpleNamespace:
+            self.get_project_calls.append((selector, allow_name_prefix_match, hydrate))
+            if selector != "production":
+                raise AssertionError(f"unexpected project selector: {selector}")
+            return SimpleNamespace(
+                id="prod-id",
+                name="production",
+                display_name="Production",
+                description=None,
+            )
+
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+    monkeypatch.setenv("KITARU_PROJECT", "production")
+    apply_env_translations()
+
+    assert "ZENML_ACTIVE_PROJECT_ID" not in os.environ
+
+    fake_client = _NameSelectedProjectClient()
+    with patch("kitaru.client.Client", return_value=fake_client):
+        client = KitaruClient()
+        result = client.projects.current()
+
+    assert client._project == "production"
+    assert result.name == "production"
+    assert fake_client.get_project_calls == [("production", False, True)]
+
+
+def test_projects_api_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-id",
+        name="production",
+        display_name="Production",
+        description=None,
+        is_active=True,
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client._current_project", return_value=project) as current,
+        patch("kitaru.client._list_projects", return_value=[project]) as list_,
+        patch("kitaru.client._get_project", return_value=project) as get,
+        patch("kitaru.client._use_project", return_value=project) as use,
+        patch("kitaru.client._create_project", return_value="created") as create,
+        patch("kitaru.client._delete_project", return_value="deleted") as delete,
+    ):
+        client = KitaruClient()
+        assert client.projects.current() == project
+        assert client.projects.list() == [project]
+        assert client.projects.get("production") == project
+        assert client.projects.use("production") == project
+        assert client.projects.create("staging", activate=False) == "created"
+        assert client.projects.delete("staging") == "deleted"
+
+    current.assert_called_once_with(client_factory=client._client)
+    list_.assert_called_once_with(client_factory=client._client)
+    get.assert_called_once_with("production", client_factory=client._client)
+    use.assert_called_once_with("production", client_factory=client._client)
+    create.assert_called_once_with(
+        "staging",
+        description="",
+        display_name=None,
+        activate=False,
+        client_factory=client._client,
+    )
+    delete.assert_called_once_with("staging", client_factory=client._client)
 
 
 def test_auth_service_accounts_delegate_to_zenml_client() -> None:

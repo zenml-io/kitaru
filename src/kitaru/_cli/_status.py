@@ -788,6 +788,8 @@ def login(
         return
 
     _print_success(f"Connected to Kitaru server: {connected_server_url}")
+    if project is not None:
+        print(f"Project: {project}")
 
 
 @app.command
