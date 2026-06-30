@@ -9,6 +9,7 @@
 #   -k, --keep-server    Keep the local server running after the test
 #   -s, --skip-install   Skip the uv sync step (use current install)
 #   -v, --verbose        Print command output even on success
+#   --python VERSION     Python version to run smoke commands with (default: 3.12)
 #   --release            Enforce release-grade preflight and required provider skips
 #   --required-provider-area AREA
 #                        Mark a provider area as required for this release.
@@ -36,6 +37,7 @@ Options:
   -k, --keep-server    Keep the local server running after the test
   -s, --skip-install   Skip the uv sync step (use current install)
   -v, --verbose        Print command output even on success
+  --python VERSION     Python version to run smoke commands with (default: 3.12)
   --release            Enforce release-grade preflight and required provider skips
   --required-provider-area AREA
                        Mark a provider area as required for this release.
@@ -130,6 +132,21 @@ while [[ $# -gt 0 ]]; do
         -k|--keep-server)  KEEP_SERVER=true; shift ;;
         -s|--skip-install) SKIP_INSTALL=true; shift ;;
         -v|--verbose)      VERBOSE=true; shift ;;
+        --python)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --python requires a version" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--python requires a version" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            if [[ ! "$2" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+                echo "Error: --python must be a numeric version like 3.14" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--python must be a numeric version like 3.14" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            PY="$2"
+            UV_RUN="uv run --python $PY"
+            shift 2
+            ;;
         --release)         RELEASE_MODE=true; shift ;;
         --json-out)
             if [[ $# -lt 2 ]]; then

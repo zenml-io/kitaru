@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added Python 3.14 as a supported and tested runtime.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added
