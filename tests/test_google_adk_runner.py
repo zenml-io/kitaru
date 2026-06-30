@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from google_adk_fakes import install_fake_google_adk, purge_google_adk_adapter_modules
 from kitaru.errors import KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
 def _modules(monkeypatch: pytest.MonkeyPatch):
@@ -37,6 +39,25 @@ class FakeRunner:
             }
         )
         return [{"final_output": f"echo:{new_message}"}]
+
+
+class UsageMetadataRunner:
+    name = "usage_runner"
+
+    def __init__(self, *, model: str = "gemini-2.0-flash") -> None:
+        self.agent = SimpleNamespace(model=model)
+
+    def run(self, *, user_id: str, session_id: str, new_message: Any, **kwargs: Any):
+        return [
+            {
+                "final_output": "priced output",
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
+            }
+        ]
 
 
 class AsyncOnlyRunner:
@@ -256,6 +277,46 @@ def test_runner_call_outside_flow_calls_runner_directly(
 
     assert result.final_output == "echo:direct"
     assert runner.calls[0]["kwargs"] == {}
+
+
+def test_runner_call_prices_adk_usage_with_default_genai_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, agent_module, _tracking_module = _modules(monkeypatch)
+    records: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.42)
+    monkeypatch.setattr(agent_module, "log_usage_record", records.append)
+
+    wrapped = adapter.KitaruADKRunner(
+        UsageMetadataRunner(model="gemini-2.0-flash"),
+        checkpoint_strategy="runner_call",
+    )
+    result = wrapped.run_sync(
+        adapter.ADKRunRequest(user_id="u", session_id="s", message="priced")
+    )
+
+    assert result.usage is not None
+    assert result.usage.model_name == "gemini-2.0-flash"
+    assert result.usage.provider_name == "google_gemini"
+    assert result.estimated_cost_usd == 0.42
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gemini-2.0-flash",
+            "provider_id": "google",
+        }
+    ]
+    cost = records[0]["cost"]
+    assert cost["actual_cost_usd"] is None
+    assert cost["estimated_cost_usd"] == 0.42
+    assert cost["source"] == "calculator"
+    assert cost["source_label"] == "genai-prices"
+    assert cost["pricing_version"].startswith("genai-prices:")
 
 
 def test_calls_mode_runs_directly_and_warns_when_no_wrappers_observed(

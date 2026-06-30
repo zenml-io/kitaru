@@ -70,7 +70,7 @@ This direct script does not submit a Kitaru flow. It is useful when you want to 
 
 ## Run optional live workflow mode
 
-Live mode submits the same Kitaru workflow, but the ADK agent uses Gemini or Vertex AI instead of the deterministic local model. The live agent gets two calculation tools and is prompted to call them, so the demo still proves that the ADK turn ran from inside the flow.
+Live mode submits the same Kitaru workflow, but the ADK agent uses Gemini or Vertex AI instead of the deterministic local model. The live agent gets two calculation tools and is prompted to call them, so the demo still proves that the ADK turn ran from inside the flow. The default model is `gemini-2.0-flash`, because Kitaru can estimate its cost with the bundled `genai-prices` metadata when ADK reports token usage.
 
 Choose one Google auth path.
 
@@ -120,7 +120,7 @@ The workflow script returns a structured dictionary. Its important fields are:
 - `final_answer` — display text from the final ADK result.
 - `human_decision_happened` and `approval_source` — local-mode fields that show whether ADK asked for confirmation and whether approval came from deterministic injection or `kitaru.wait()`.
 - `first_turn` and `final_turn` — local-mode event counts, handoff counts, tracked model/tool event kinds, and checkpoint names.
-- `turn`, `usage`, and `model` — live-mode event summary, token usage when ADK reports it, and the selected Gemini/Vertex model.
+- `turn`, `usage`, `estimated_cost_usd`, and `model` — live-mode event summary, token usage when ADK reports it, Kitaru's estimated USD cost when the model is priceable, and the selected Gemini/Vertex model.
 
 ## Current limitations
 

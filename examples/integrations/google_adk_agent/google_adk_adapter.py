@@ -64,7 +64,7 @@ DEFAULT_LOCAL_PROMPT = "Please look up one local cat fact."
 DEFAULT_LIVE_PROMPT = (
     "Explain one Kitaru checkpoint in one short sentence. Do not use tools."
 )
-DEFAULT_LIVE_MODEL = "gemini-flash-latest"
+DEFAULT_LIVE_MODEL = "gemini-2.0-flash"
 LOCAL_MARKER = "local-cat-fact"
 Mode = Literal["local", "live"]
 
@@ -432,6 +432,10 @@ def _print_result(result: Any, *, mode: Mode) -> None:
     if result.usage is not None:
         print("\n=== Usage ===")
         print(_json_block(result.usage))
+
+    if result.estimated_cost_usd is not None:
+        print("\n=== Estimated cost ===")
+        print(f"${result.estimated_cost_usd:.6f} USD")
 
     if result.warnings:
         print("\n=== Warnings ===")

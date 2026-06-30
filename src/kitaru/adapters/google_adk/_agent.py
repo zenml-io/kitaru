@@ -8,7 +8,12 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, cast
 
-from kitaru._llm_usage import build_usage_record, log_usage_record
+from kitaru._llm_usage import (
+    CalculatedCostMetadata,
+    build_usage_record,
+    calculated_or_genai_cost_metadata,
+    log_usage_record,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
@@ -345,8 +350,9 @@ class KitaruADKRunner:
             to_json_safe(event, include_raw=self._capture.capture_mode == "full")
             for event in raw_events
         ]
-        usage = self._usage_from_events(raw_events)
-        estimated_cost = self._estimate_cost(usage)
+        usage = self._usage_with_defaults(self._usage_from_events(raw_events))
+        warnings = self._result_warnings(tracker=tracker)
+        cost_metadata = self._cost_metadata(usage, warnings=warnings)
         event_dicts = [event for event in serialized_events if isinstance(event, dict)]
         if tracker is not None:
             event_dicts.extend(dump_adk_events(list(tracker.events)))
@@ -364,12 +370,16 @@ class KitaruADKRunner:
             events=event_dicts,
             handoffs=handoffs,
             usage=usage,
-            estimated_cost_usd=estimated_cost,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             event_log_artifact_name=None,
             run_summary_artifact_name=None,
-            warnings=self._result_warnings(tracker=tracker),
+            warnings=warnings,
         )
-        self._record_usage(result, duration_ms=elapsed_ms(started_at))
+        self._record_usage(
+            result,
+            duration_ms=elapsed_ms(started_at),
+            cost_metadata=cost_metadata,
+        )
         return result
 
     def _usage_from_events(self, events: list[Any]) -> ADKUsageSummary | None:
@@ -378,13 +388,53 @@ class KitaruADKRunner:
                 return usage
         return None
 
-    def _estimate_cost(self, usage: ADKUsageSummary | None) -> float | None:
-        if usage is None or self._cost_calculator is None:
+    def _usage_with_defaults(
+        self,
+        usage: ADKUsageSummary | None,
+    ) -> ADKUsageSummary | None:
+        if usage is None:
             return None
-        try:
-            return self._cost_calculator(usage)
-        except Exception:
-            return None
+        updates: dict[str, str] = {}
+        if usage.model_name is None and (model_name := self._runner_model_name()):
+            updates["model_name"] = model_name
+        if usage.provider_name is None:
+            updates["provider_name"] = "google_gemini"
+        if not updates:
+            return usage
+        return usage.model_copy(update=updates)
+
+    def _cost_metadata(
+        self,
+        usage: ADKUsageSummary | None,
+        *,
+        warnings: list[str],
+    ) -> CalculatedCostMetadata:
+        usage_payload = usage.model_dump(mode="json") if usage is not None else None
+        return calculated_or_genai_cost_metadata(
+            calculator=self._cost_calculator,
+            calculator_usage=usage,
+            genai_provider=usage.provider_name if usage is not None else None,
+            genai_model=usage.model_name if usage is not None else None,
+            genai_usage=usage_payload,
+            warnings=warnings,
+            adapter_name="Google ADK",
+            calculator_source_label="google_adk.cost_calculator",
+        )
+
+    def _runner_model_name(self) -> str | None:
+        candidates = [self._runner]
+        candidates.extend(
+            getattr(self._runner, attr, None)
+            for attr in ("agent", "root_agent", "_agent", "_root_agent")
+        )
+        for candidate in candidates:
+            model = getattr(candidate, "model", None)
+            if isinstance(model, str) and model.strip():
+                return model.strip()
+            nested_model = getattr(model, "model", None)
+            if isinstance(nested_model, str) and nested_model.strip():
+                return nested_model.strip()
+        return None
 
     def _result_warnings(self, *, tracker: EventTracker | None) -> list[str]:
         if self._checkpoint_strategy != "calls":
@@ -458,7 +508,13 @@ class KitaruADKRunner:
             "metadata": tracker.persisted_metadata(),
         }
 
-    def _record_usage(self, result: ADKRunResult, *, duration_ms: float) -> None:
+    def _record_usage(
+        self,
+        result: ADKRunResult,
+        *,
+        duration_ms: float,
+        cost_metadata: CalculatedCostMetadata,
+    ) -> None:
         if result.usage is None or not self._capture.save_usage:
             return
         usage = result.usage
@@ -478,10 +534,14 @@ class KitaruADKRunner:
             cached_input_tokens=usage.cached_input_tokens,
             reasoning_tokens=usage.reasoning_tokens,
             raw_usage=usage.raw,
-            estimated_cost_usd=result.estimated_cost_usd,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
+            cost_source=cost_metadata.cost_source,
+            cost_source_label=cost_metadata.cost_source_label,
+            pricing_version=cost_metadata.pricing_version,
             latency_ms=duration_ms,
             cache_status="unknown",
             billing_effect="unknown",
+            warnings=result.warnings,
         )
         log_usage_record(usage_record)
 
