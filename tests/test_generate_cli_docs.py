@@ -148,6 +148,9 @@ class TestBuildCommandTree:
         executions = _find_command(tree, "executions")
         assert [sub.name for sub in executions.subcommands] == [
             "cancel",
+            "cohort",
+            "diff",
+            "diff-matrix",
             "get",
             "input",
             "list",
@@ -534,6 +537,9 @@ class TestWriteDocsTree:
         meta = json.loads((output_dir / "executions" / "meta.json").read_text())
         assert meta["pages"] == [
             "cancel",
+            "cohort",
+            "diff",
+            "diff-matrix",
             "get",
             "input",
             "list",

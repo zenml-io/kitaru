@@ -79,9 +79,32 @@ class _CheckpointEventCounterState:
             return index
 
 
+class _RepeatedCheckpointNameState:
+    """Shared flow-local state for repeated synthetic checkpoint names."""
+
+    def __init__(self) -> None:
+        self._counts_by_base_name: dict[str, int] = {}
+        self._lock = Lock()
+
+    def next_name(self, base_name: str) -> str:
+        """Reserve and return the next name for one synthetic checkpoint base."""
+        with self._lock:
+            next_index = self._counts_by_base_name.get(base_name, 0) + 1
+            self._counts_by_base_name[base_name] = next_index
+        if next_index == 1:
+            return base_name
+        return f"{base_name}_{next_index}"
+
+
 _CHECKPOINT_EVENT_COUNTER: ContextVar[_CheckpointEventCounterState | None] = ContextVar(
     "kitaru_checkpoint_event_counter",
     default=None,
+)
+_REPEATED_CHECKPOINT_NAME_STATE: ContextVar[_RepeatedCheckpointNameState | None] = (
+    ContextVar(
+        "kitaru_repeated_checkpoint_name_state",
+        default=None,
+    )
 )
 
 
@@ -176,9 +199,13 @@ def _flow_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
+    repeated_checkpoint_token = _REPEATED_CHECKPOINT_NAME_STATE.set(
+        _RepeatedCheckpointNameState()
+    )
     try:
         yield
     finally:
+        _REPEATED_CHECKPOINT_NAME_STATE.reset(repeated_checkpoint_token)
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_FLOW_SCOPE.reset(flow_token)
 
@@ -369,6 +396,20 @@ def _next_llm_call_name(prefix: str = "llm") -> str:
     next_index = _LLM_CALL_COUNTER.get() + 1
     _LLM_CALL_COUNTER.set(next_index)
     return f"{normalized_prefix}_{next_index}"
+
+
+def _next_repeated_checkpoint_name(base_name: str) -> str:
+    """Reserve the next flow-local synthetic checkpoint name for ``base_name``.
+
+    The first reservation returns the base name unchanged. Later reservations
+    append the same suffix shape used by recorded repeated checkpoint steps:
+    ``agent_model_request_2``, ``agent_model_request_3``, and so on.
+    """
+    state = _REPEATED_CHECKPOINT_NAME_STATE.get()
+    if state is None:
+        state = _RepeatedCheckpointNameState()
+        _REPEATED_CHECKPOINT_NAME_STATE.set(state)
+    return state.next_name(base_name)
 
 
 def _not_implemented(name: str) -> NoReturn:

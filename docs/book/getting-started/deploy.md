@@ -63,5 +63,6 @@ Checkpoint outputs are written to cloud storage. You can observe the execution
 from the UI, the CLI, or any `KitaruClient` connected to the same server.
 
 Every cloud run records the same durable checkpoints as your local runs, so you
-can `flow.replay(exec_id, from_="<checkpoint>", **overrides)` a production
-execution with one input changed and diff it against the original baseline.
+can `flow.replay(exec_id, at="<checkpoint>", flow_overrides={...})` a
+production execution with one input changed and diff it against the original
+baseline.

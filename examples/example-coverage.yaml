@@ -221,6 +221,53 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
+  - id: replay-overrides-demo
+    path: examples/end_to_end/replay_overrides_demo/demo.py
+    public_docs: [examples/end_to_end/replay_overrides_demo/README.md]
+    owner_area: unified replay override scopes with live model comparison
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/test_replay_overrides_demo.py
+        notes: validates graph names, new replay API usage, new CLI flags in docs,
+          absence of old replay flags, scenarios, and manual live-provider caveats
+      local_smoke:
+        status: manual_only
+        waiver:
+          reason: The demo intentionally exercises real OpenAI-backed PydanticAI
+            calls, replay submissions, tags, and diff reports against a connected
+            Kitaru server, so it is not safe as unattended local smoke.
+          reviewer_action: If this example changes, run demo.py run-all with
+            OPENAI_API_KEY against the intended Kitaru server, using
+            openai:gpt-5-mini and openai:gpt-5-nano, or record a release waiver.
+        command: uv run python examples/end_to_end/replay_overrides_demo/demo.py
+          run-all
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 900
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: The replay overrides demo makes several real OpenAI calls and
+            depends on a connected Kitaru server with replay metadata, so it stays
+            manual until a bounded release job exists.
+          reviewer_action: If replay overrides change, run the full demo manually
+            with OPENAI_API_KEY and inspect the generated reports plus compare URLs,
+            or record a release waiver.
+        provider: openai
+        command: uv run python examples/end_to_end/replay_overrides_demo/demo.py
+          run-all
+        command_paths: [examples/end_to_end/replay_overrides_demo/demo.py]
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 900
+        cost_class: medium
+        notes: baseline model is openai:gpt-5-mini; variant model is
+          openai:gpt-5-nano
+    release_policy:
+      required_when_changed: true
   - id: tracked-llm-calls
     path: examples/features/llm/flow_with_llm.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

@@ -137,6 +137,9 @@ Execution tools:
 - `kitaru_executions_input`
 - `kitaru_executions_retry`
 - `kitaru_executions_replay`
+- `kitaru_executions_cohort`
+- `kitaru_executions_diff`
+- `kitaru_executions_diff_matrix`
 
 Deployment tools:
 
@@ -168,6 +171,14 @@ Connection tools:
 - `kitaru_status`
 - `kitaru_stacks_list`
 - `manage_stack`
+
+Diagnostics and maintenance tools:
+
+- `kitaru_info`
+- `kitaru_clean_preview`
+
+`kitaru_clean_preview` is strictly read-only: it returns what `kitaru clean
+<scope> --dry-run` would delete and never performs the cleanup itself.
 
 ## Copy-paste prompts
 
@@ -213,7 +224,7 @@ Replay the latest failed execution from the checkpoint before the failing one. E
 Replay with one change and diff against a baseline (the hill-climb loop):
 
 ```text
-Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_inputs setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
+Take the latest completed execution. Replay it once with no overrides to get a baseline, then replay it again from the same checkpoint with flow_overrides setting model to a cheaper model. Diff the two runs and tell me whether cost dropped without quality regressing.
 ```
 
 Inspect results from a completed execution:
@@ -471,15 +482,24 @@ faithful baseline; rerun it again with one input changed (a different model, a
 different prompt profile) and the diff between the two is your change, not replay
 noise. This is the loop the agent hill-climbs.
 
-`kitaru_executions_replay` starts a new execution and returns:
+`kitaru_executions_replay` replays explicit source executions and returns the shared replay submission JSON.
 
-- `available: true`
-- `operation: "replay"`
-- the serialized replayed execution payload
+The tool accepts:
 
-Use `from_` for checkpoint selection, optional `flow_inputs` for flow
-parameter overrides (this is where you change the model or prompt profile), and
-optional `overrides` for `checkpoint.*` overrides.
+- `exec_ids`: one or more execution IDs to replay;
+- `at`: the recorded checkpoint invocation, tool call, model call, or unambiguous checkpoint name where replay starts rerunning work;
+- `flow_overrides`: flow parameters for the replay run (this is where you change the model or prompt profile);
+- `checkpoint_overrides`: overrides keyed by checkpoint name, applied to every matching invocation;
+- `invocation_overrides`: overrides keyed by one invocation ID or call ID;
+- `skip`: invocation IDs or call IDs that should reuse recorded outputs even though they are at or after `at`;
+- `tag`, `wait`, and `on_error` for batch handling and replay labeling.
+
+The returned object includes `submission_id`, `plan`, `results`, `failures`, `skipped`, `summary`, and compare URLs where Kitaru can build them.
+
+For diffs, use:
+
+- `kitaru_executions_diff` for one original execution against one or more replays;
+- `kitaru_executions_diff_matrix` for many original executions against their auto-discovered replays.
 
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.

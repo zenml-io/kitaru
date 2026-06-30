@@ -9,13 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, direct and persisted-workflow integration examples, isolated no-dev contract/live smoke paths, explicit-wrapper `calls` mode, and tool-confirmation resume helpers.
+- Added public replay-mode detection helpers: `kitaru.is_replay()`, `kitaru.get_replay_runtime_context()`, and `kitaru.ReplayRuntimeContext`, so side-effectful checkpoints can guard behavior during replay.
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+- Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
+- Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
+- Added `kitaru.diff_matrix(exec_ids)` to diff many originals against their auto-discovered replays.
+- Added CLI commands `kitaru executions diff` and `kitaru executions diff-matrix`, plus MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_matrix`, and unified `kitaru_executions_replay` with explicit execution IDs.
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
+- Added a LangGraph replay and fork adapter (`kitaru.adapters.langgraph.replay`) that reconstructs a recorded LangGraph run as a directed graph from a captured trace and forks it for replay. Public surface includes `KitaruReplayAgent`, `KitaruAdapter`, `import_langgraph_trace` / `import_trace`, and graph `edit` helpers, with Langfuse and JSONL trace import sources.
+- `kitaru executions replay` now prints UI compare URLs (and includes `compare_url` in JSON output) for the original execution vs the new replay.
+- Reshaped the replay overrides demo as a prod walkthrough: slim `demo.py` dispatcher, `replay_scenarios/` modules, `publish-input` re-publish override, and narrative `README.md` (removed synthetic `record_replay_observation` tail and `inject-output`).
+- `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
+- Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
 
 ### Changed
+- **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
 - Clarified Google ADK MCP docs around the safe subset: Kitaru can checkpoint a replay-safe ADK `BaseTool`-like object wrapped with `KitaruADKTool`, but it does not restore ADK MCP processes, sessions, or hidden server state.
 - Refreshed the Google ADK dependency note: `google-adk` still stays out of the normal local/dev project environment, even though a 2026-06-29 direct resolver probe with `zenml[server]` now succeeds, until the full local server path is certified with the newer FastAPI/Starlette stack.
 
 ### Fixed
+- Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
+- Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
+- MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now scans up to 10,000 same-flow executions when auto-discovering replays before warning that older replays may require explicit IDs.
+- Unknown checkpoint override targets now give repeated-call guidance when a likely model/tool family exists, pointing users to family-level `checkpoint_overrides` or one-call `invocation_overrides`.
+- LangGraph replay import now raises a catchable Kitaru error instead of `SystemExit` when Langfuse rows never arrive, and live forks support node callables that accept `(state, config)`.
+- `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
+- Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
+- `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
+- Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
+- `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 - Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.
 - Updated LLM usage summaries so Kitaru normally writes them when executions finish, while `FlowHandle.wait()` and `.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written.
 

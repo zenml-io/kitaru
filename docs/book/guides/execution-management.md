@@ -412,9 +412,9 @@ execution in place.
 # Override flow inputs (e.g. topic) and prior checkpoint outputs.
 replayed = client.executions.replay(
     exec_id,
-    from_="write_draft",
-    overrides={"checkpoint.research": "Edited notes"},
-    topic="New topic",
+    at="write_draft",
+    flow_overrides={"topic": "New topic"},
+    checkpoint_overrides={"research": {"output": "Edited notes"}},
 )
 
 # Same-execution retry (failed executions only)
@@ -439,14 +439,16 @@ fresh = execution.refresh()          # re-fetch latest state
 retried = execution.retry()          # retry a failed execution
 resumed = execution.resume()         # resume after wait input
 cancelled = execution.cancel()       # cancel a running execution
-replayed = execution.replay(from_="write_draft", overrides={...})
+replayed = execution.replay(at="write_draft", checkpoint_overrides={"research": {"output": "Edited notes"}})
 
 checkpoints = execution.list_checkpoints()
 artifacts = execution.list_artifacts()
 ```
 
-These are equivalent to calling `client.executions.retry(exec_id)` etc. — they
-return a new `Execution` snapshot rather than mutating the existing object.
+These are equivalent to calling `client.executions.retry(exec_id)` etc.
+`refresh`, `retry`, `resume`, and `cancel` return a new `Execution` snapshot
+rather than mutating the existing object; `replay` returns a `ReplaySubmission`
+describing the new replay execution(s).
 
 ## Inspect or abort waits programmatically
 
@@ -507,7 +509,7 @@ kitaru executions input kr-a8f3c2 --abort
 kitaru executions input kr-a8f3c2 --interactive
 kitaru executions input --interactive  # sweep all waiting executions
 kitaru executions resume kr-a8f3c2
-kitaru executions replay kr-a8f3c2 --from write_draft --args '{"topic":"New topic"}' --overrides '{"checkpoint.research":"Edited notes"}'
+kitaru executions replay kr-a8f3c2 --at write_draft --flow-overrides '{"topic":"New topic"}' --checkpoint-overrides '{"research":{"output":"Edited notes"}}'
 kitaru executions retry kr-a8f3c2
 kitaru executions cancel kr-a8f3c2
 ```

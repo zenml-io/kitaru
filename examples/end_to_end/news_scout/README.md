@@ -161,7 +161,7 @@ frozen execution spec.
 
 ```bash
 kitaru executions list
-kitaru executions replay <exec_id> --from search_news_tool_3
+kitaru executions replay <exec_id> --at search_news_tool_3
 kitaru executions retry <exec_id>
 ```
 

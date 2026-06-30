@@ -43,7 +43,18 @@ PUBLIC_MODULES = ["kitaru"]
 
 # Submodules to exclude from the reference even if they appear in a
 # public module's tree. These have their own docs or are not public.
-EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime"}
+EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime", "replay_context"}
+
+# Symbols that may still exist for compatibility or implementation reuse, but
+# should not be taught as current public reference entries.
+EXCLUDED_SYMBOLS_BY_MODULE = {
+    "kitaru": {"CohortDiff", "diff_cohort"},
+    "kitaru.diff": {"CohortDiff", "diff_cohort", "serialize_cohort_diff"},
+}
+
+EXCLUDED_CLASS_MEMBERS = {
+    "kitaru.analytics.AnalyticsEvent": {"REPLAY_MANY_REQUESTED"},
+}
 
 
 def _is_private(name: str) -> bool:
@@ -78,12 +89,14 @@ def _filter_attributes(
     attributes: list[dict],
     *,
     exported_names: set[str] | None = None,
+    owner_path: str | None = None,
 ) -> list[dict]:
     """Filter a list of serialized attributes to public ones only."""
     filtered: list[dict] = []
+    excluded_members = EXCLUDED_CLASS_MEMBERS.get(owner_path or "", set())
     for attr in attributes:
         name = attr.get("name", "")
-        if name == "__all__":
+        if name == "__all__" or name in excluded_members:
             continue
         if exported_names is not None:
             if name not in exported_names:
@@ -97,6 +110,7 @@ def _filter_attributes(
 def _filter_class(data: dict) -> dict:
     """Filter private methods and attributes from one serialized class."""
     filtered = dict(data)
+    owner_path = str(data.get("path") or "")
     filtered["functions"] = {
         name: func
         for name, func in data.get("functions", {}).items()
@@ -107,7 +121,10 @@ def _filter_class(data: dict) -> dict:
         for name, cls in data.get("classes", {}).items()
         if _is_documented_member(name)
     }
-    filtered["attributes"] = _filter_attributes(data.get("attributes", []))
+    filtered["attributes"] = _filter_attributes(
+        data.get("attributes", []),
+        owner_path=owner_path,
+    )
     filtered["inherited_members"] = {
         name: member
         for name, member in data.get("inherited_members", {}).items()
@@ -123,6 +140,8 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
     submodules to the top level (matching __all__ behavior).
     """
     filtered = dict(data)
+    module_path = str(data.get("path") or "")
+    excluded_symbols = EXCLUDED_SYMBOLS_BY_MODULE.get(module_path, set())
     exported_names = _exported_names(data) if is_root else None
 
     # Collect symbols from private submodules before removing them
@@ -140,6 +159,7 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
                     for symbol_name, symbol in submod.get("classes", {}).items()
                     if exported_names is not None
                     and symbol_name in exported_names
+                    and symbol_name not in excluded_symbols
                     and _is_documented_member(symbol_name)
                 }
             )
@@ -149,6 +169,7 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
                     for symbol_name, symbol in submod.get("functions", {}).items()
                     if exported_names is not None
                     and symbol_name in exported_names
+                    and symbol_name not in excluded_symbols
                     and _is_documented_member(symbol_name)
                 }
             )
@@ -164,12 +185,14 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
         name: _filter_class(cls)
         for name, cls in data.get("classes", {}).items()
         if _is_documented_member(name)
+        and name not in excluded_symbols
         and (exported_names is None or name in exported_names)
     }
     filtered["functions"] = {
         name: func
         for name, func in data.get("functions", {}).items()
         if _is_documented_member(name)
+        and name not in excluded_symbols
         and (exported_names is None or name in exported_names)
     }
 
@@ -186,6 +209,7 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
     filtered["attributes"] = _filter_attributes(
         data.get("attributes", []),
         exported_names=exported_names,
+        owner_path=module_path,
     )
 
     return filtered

@@ -1,0 +1,16 @@
+name: nano_trimmed_permissions
+model: gpt-5-nano
+prompt_profile: trimmed_permissions
+tool_policy_name: weakened-permission-policy
+max_tool_calls: 6
+allowed_tools:
+  - lookup_customer
+  - get_service_status
+  - get_recent_usage
+  - get_billing
+  - search_kb
+  - create_support_ticket
+  - escalate_to_human
+  - update_customer_setting
+denied_tools: []
+dry_run_writes: false

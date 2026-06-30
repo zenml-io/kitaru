@@ -164,6 +164,7 @@ dev = [
     "claude-agent-sdk>=0.1.58,<0.2",
     "google-genai>=2.8.0,<3",
     "pip-audit>=2.9.0",
+    "python-dotenv>=1.0,<2",
 ]
 
 [tool.ruff]
@@ -192,6 +193,9 @@ select = [
 # UP006/UP007/UP035/UP045: upstream uses `Dict`/`Optional`/`typing.List` aliases.
 # UP008: upstream uses explicit `super(Cls, self)` in WrapperAgent subclass.
 "src/kitaru/adapters/pydantic_ai/**" = ["E501", "I001", "UP006", "UP007", "UP008", "UP035", "UP045", "SIM105"]
+# Demo HTML/CSS report builders: long inline style and markup string literals
+# that read more clearly unwrapped than broken across lines.
+"examples/end_to_end/*/reporting/*_html.py" = ["E501"]
 
 [tool.ruff.format]
 exclude = ["src/kitaru/adapters/pydantic_ai/**"]
@@ -221,6 +225,27 @@ include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# `langfuse` is an optional, lazily-imported dependency: only the live
+# Langfuse trace-fetch path needs it; the demo runs on local obs.jsonl files
+# without it, so it is intentionally not a declared dependency.
+include = ["src/kitaru/adapters/langgraph/replay/_facade.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# LangGraph's StateGraph/add_node/invoke generics are stricter than the toy
+# graphs these compiler tests build (lambda nodes, TypedDict state). The graphs
+# compile and run correctly; the mismatch is type-stub friction, not a bug.
+include = [
+    "tests/adapters/langgraph/replay/test_compiler.py",
+    "tests/adapters/langgraph/replay/test_langgraph_node_metadata_probe.py",
+]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
 
 [[tool.ty.overrides]]
 # Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime

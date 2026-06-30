@@ -237,7 +237,7 @@ def test_stage2_replay_from_checkpoint_completes_independently(
     """Replay from ``check_insurance`` should produce a distinct completed run.
 
     This pins the Stage 2 README's replay claim at the machinery level: the
-    replay endpoint accepts ``from_="check_insurance"`` against a Stage 2
+    replay endpoint accepts ``at="check_insurance"`` against a Stage 2
     execution, yields a new execution id, and reaches a terminal COMPLETED
     state. The cache-hit semantics (HR/IT/vendor reuse vs. re-execution) are
     governed by ZenML step caching and live override inputs, which this test
@@ -279,13 +279,14 @@ def test_stage2_replay_from_checkpoint_completes_independently(
     client = KitaruClient()
     replayed = client.executions.replay(
         first_handle.exec_id,
-        from_="check_insurance",
+        at="check_insurance",
     )
-    assert replayed.exec_id != first_handle.exec_id
+    replay_exec_id = replayed.results[0].replay_exec_id
+    assert replay_exec_id != first_handle.exec_id
 
     deadline = time.time() + 120
     while True:
-        execution = client.executions.get(replayed.exec_id)
+        execution = client.executions.get(replay_exec_id)
         if execution.status in {
             ExecutionStatus.COMPLETED,
             ExecutionStatus.FAILED,

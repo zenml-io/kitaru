@@ -117,7 +117,7 @@ Standard keys like `cost`, `tokens`, `latency`, and `model` are common
 conventions, but you can use any key name that makes sense for your workflow.
 
 {% hint style="info" %}
-These are the keys that pay off at replay time. After `flow.replay(exec_id, from_="...", model="...")`, a cross-run diff lines up the metadata from the baseline against the replay, so consistent keys like `cost` and `latency` make the difference your change produced easy to read.
+These are the keys that pay off at replay time. After `flow.replay(exec_id, at="...", flow_overrides={"model": "..."})`, a cross-run diff lines up the metadata from the baseline against the replay, so consistent keys like `cost` and `latency` make the difference your change produced easy to read.
 {% endhint %}
 
 ## Runtime logs (separate system)

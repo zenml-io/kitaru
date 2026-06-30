@@ -262,7 +262,7 @@ def durability_drill_gate(
         raise RuntimeError(
             "Intentional durability drill failure after the search stage. "
             f"Unset {FAIL_AFTER_SEARCHES_ENV} and replay this execution with "
-            "`kitaru executions replay <EXECUTION_ID> --from "
+            "`kitaru executions replay <EXECUTION_ID> --at "
             "durability_drill_gate`; Kitaru should reuse the completed "
             "planner/search outputs."
         )
