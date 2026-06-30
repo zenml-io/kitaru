@@ -17,6 +17,16 @@ from uuid import uuid4
 
 from zenml.models import PipelineRunResponse, PipelineRunUpdate, StepRunResponse
 
+from kitaru._checkpoint_metadata import (
+    ADAPTER_CHECKPOINT_KIND_KEY,
+    ADAPTER_KEY,
+    CHECKPOINT_ORIGIN_ADAPTER,
+    CHECKPOINT_ORIGIN_KEY,
+    KITARU_METADATA_NAMESPACE,
+    REPLAY_INPUT_SLOTS_KEY,
+    checkpoint_metadata_from_step,
+    checkpoint_metadata_value,
+)
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
@@ -26,6 +36,10 @@ from kitaru.replay_context import ReplayRuntimeContext
 _TOOL_CHECKPOINT_SUFFIX = re.compile(r"_tool(?:_\d+)?$")
 _MODEL_REQUEST_CHECKPOINT_SUFFIX = re.compile(r"^(?P<base>.+_model_request)(?:_\d+)?$")
 _ALLOWED_OVERRIDE_FIELDS = frozenset({"input", "output", "model", "code"})
+_PYDANTIC_AI_ADAPTER = "pydantic_ai"
+_PYDANTIC_AI_TOOL_CALL_KIND = "tool_call"
+_PYDANTIC_AI_MODEL_REQUEST_KIND = "model_request"
+_PYDANTIC_AI_TURN_KIND = "turn"
 logger = logging.getLogger(__name__)
 
 REPLAY_RESERVED_KWARGS = frozenset(
@@ -668,15 +682,86 @@ def _collect_descendants(
     return descendants
 
 
-def _checkpoint_input_slot_names(checkpoint: _Checkpoint) -> set[str]:
+def _recorded_step_input_names(step: StepRunResponse) -> set[str]:
+    step_spec = getattr(step, "spec", None)
+    inputs_v2 = getattr(step_spec, "inputs_v2", None)
+    if isinstance(inputs_v2, Mapping):
+        return {str(input_name) for input_name in inputs_v2}
+
+    legacy_inputs = getattr(step_spec, "inputs", None)
+    if isinstance(legacy_inputs, Mapping):
+        return {str(input_name) for input_name in legacy_inputs}
+
+    inputs = getattr(step, "inputs", None)
+    if isinstance(inputs, Mapping):
+        return {str(input_name) for input_name in inputs}
+    return set()
+
+
+def _explicit_checkpoint_metadata_value(
+    metadata: Mapping[str, Any], key: str
+) -> tuple[bool, Any]:
+    if key in metadata:
+        return True, metadata[key]
+    nested = metadata.get(KITARU_METADATA_NAMESPACE)
+    if isinstance(nested, Mapping) and key in nested:
+        return True, nested[key]
+    return False, None
+
+
+def _checkpoint_input_slot_names_with_source(
+    checkpoint: _Checkpoint,
+) -> tuple[set[str], bool]:
+    """Return replayable input slot names and whether metadata set them explicitly."""
+    metadata = checkpoint_metadata_from_step(checkpoint.step)
+    explicit_present, explicit_value = _explicit_checkpoint_metadata_value(
+        metadata, REPLAY_INPUT_SLOTS_KEY
+    )
+    if explicit_present:
+        if not isinstance(explicit_value, Sequence) or isinstance(
+            explicit_value, (str, bytes)
+        ):
+            raise KitaruUsageError(
+                f"Malformed replay input slot metadata for checkpoint "
+                f"'{checkpoint.name}': expected a sequence of string slot names."
+            )
+        slots = [slot for slot in explicit_value if isinstance(slot, str) and slot]
+        if len(slots) != len(explicit_value):
+            raise KitaruUsageError(
+                f"Malformed replay input slot metadata for checkpoint "
+                f"'{checkpoint.name}': expected a sequence of string slot names."
+            )
+        adapter = checkpoint_metadata_value(metadata, ADAPTER_KEY)
+        kind = checkpoint_metadata_value(metadata, ADAPTER_CHECKPOINT_KIND_KEY)
+        if adapter == _PYDANTIC_AI_ADAPTER:
+            if kind == _PYDANTIC_AI_TOOL_CALL_KIND:
+                return set(slots).intersection({"tool_args"}), True
+            if kind in {_PYDANTIC_AI_MODEL_REQUEST_KIND, _PYDANTIC_AI_TURN_KIND}:
+                return set(), True
+        return set(slots), True
+
+    recorded_names = _recorded_step_input_names(checkpoint.step)
+    if recorded_names:
+        return recorded_names, False
+
     if checkpoint.checkpoint_type == "tool_call":
-        return {"tool_args"}
+        return set(), False
     if checkpoint.checkpoint_type == "llm_call":
-        return {"messages", "input", "user_prompt", "message_history"}
-    names: set[str] = set()
-    for input_name, _ in _iter_step_input_specs(checkpoint.step):
-        names.add(input_name)
-    return names or {"input"}
+        return {"messages", "input", "user_prompt", "message_history"}, False
+    return {"input"}, False
+
+
+def _checkpoint_input_slot_names(checkpoint: _Checkpoint) -> set[str]:
+    slot_names, _ = _checkpoint_input_slot_names_with_source(checkpoint)
+    return slot_names
+
+
+def _is_adapter_checkpoint(checkpoint: _Checkpoint) -> bool:
+    metadata = checkpoint_metadata_from_step(checkpoint.step)
+    return (
+        checkpoint_metadata_value(metadata, CHECKPOINT_ORIGIN_KEY)
+        == CHECKPOINT_ORIGIN_ADAPTER
+    )
 
 
 def _normalize_checkpoint_input_value(
@@ -684,16 +769,38 @@ def _normalize_checkpoint_input_value(
     value: Any,
 ) -> dict[str, Any]:
     if isinstance(value, Mapping):
-        slot_names = _checkpoint_input_slot_names(checkpoint)
-        if slot_names.intersection(value.keys()):
+        slot_names, explicit_slot_names = _checkpoint_input_slot_names_with_source(
+            checkpoint
+        )
+        matched_slots = slot_names.intersection(value.keys())
+        if matched_slots:
+            unknown_slots = set(value) - slot_names
+            if unknown_slots:
+                unknown = ", ".join(sorted(str(slot) for slot in unknown_slots))
+                available = ", ".join(sorted(slot_names)) or "none"
+                raise KitaruUsageError(
+                    f"Unknown replay input slot for checkpoint '{checkpoint.name}': "
+                    f"{unknown}. Available replay input slots: {available}."
+                )
             return dict(value)
-        if checkpoint.checkpoint_type == "tool_call":
+        if not slot_names:
+            raise KitaruUsageError(
+                f"Checkpoint '{checkpoint.name}' does not expose replayable inputs."
+            )
+        if checkpoint.checkpoint_type == "tool_call" and "tool_args" in slot_names:
             return {"tool_args": value}
-        if checkpoint.checkpoint_type == "llm_call":
+        if checkpoint.checkpoint_type == "llm_call" and "messages" in slot_names:
             return {"messages": value}
         if len(slot_names) == 1:
             slot_name = next(iter(slot_names))
             return {slot_name: value}
+        if explicit_slot_names:
+            unknown = ", ".join(sorted(str(slot) for slot in value))
+            available = ", ".join(sorted(slot_names)) or "none"
+            raise KitaruUsageError(
+                f"Unknown replay input slot for checkpoint '{checkpoint.name}': "
+                f"{unknown}. Available replay input slots: {available}."
+            )
         return dict(value)
     slot_names = _checkpoint_input_slot_names(checkpoint)
     if len(slot_names) == 1:
@@ -949,7 +1056,9 @@ def _runtime_override_keys(checkpoint: _Checkpoint) -> set[str]:
 
 def _has_runtime_only_overrides(plan: ReplayPlan) -> bool:
     return bool(
-        plan.runtime_context.code_overrides or plan.runtime_context.model_overrides
+        plan.runtime_context.code_overrides
+        or plan.runtime_context.model_overrides
+        or plan.runtime_context.input_overrides
     )
 
 
@@ -1028,7 +1137,9 @@ def build_replay_plan(
                 children_by_invocation=children_by_invocation,
             )
             step_input_overrides.setdefault(invocation_id, {}).update(normalized)
-            runtime_input_overrides[checkpoint.call_id] = normalized
+            if _is_adapter_checkpoint(checkpoint):
+                for key in _runtime_override_keys(checkpoint):
+                    runtime_input_overrides[key] = normalized
 
         if "code" in entry:
             live.add(invocation_id)

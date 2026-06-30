@@ -23,6 +23,7 @@ from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
 from kitaru import events
+from kitaru._checkpoint_metadata import KITARU_METADATA_NAMESPACE
 from kitaru._source_aliases import (
     build_checkpoint_registration_name,
     build_checkpoint_source_alias,
@@ -55,7 +56,7 @@ _CHECKPOINT_OUTPUT_HANDLE_MESSAGE = (
     "This is a Kitaru checkpoint output handle for `{checkpoint}.{output}`, "
     "not the materialized value. Call `.load()` to materialize the value."
 )
-_KITARU_EXTRA_NAMESPACE = "kitaru"
+_KITARU_EXTRA_NAMESPACE = KITARU_METADATA_NAMESPACE
 _CHECKPOINT_BOUNDARY_KEY = "boundary"
 _CHECKPOINT_BOUNDARY_VALUE = "checkpoint"
 _FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
@@ -247,6 +248,7 @@ def _build_checkpoint_extra(
     checkpoint_type: str | None,
     *,
     flow_result_candidate: bool | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build namespaced step metadata for dashboard rendering."""
     payload: dict[str, Any] = {_CHECKPOINT_BOUNDARY_KEY: _CHECKPOINT_BOUNDARY_VALUE}
@@ -254,6 +256,8 @@ def _build_checkpoint_extra(
         payload["type"] = checkpoint_type
     if flow_result_candidate is not None:
         payload[_FLOW_RESULT_CANDIDATE_KEY] = flow_result_candidate
+    if metadata:
+        payload.update(dict(metadata))
     return {_KITARU_EXTRA_NAMESPACE: payload}
 
 
@@ -370,6 +374,7 @@ class _CheckpointDefinition:
         runtime: StepRuntime | str | None,
         cache: bool | None,
         flow_result_candidate: bool | None,
+        metadata: Mapping[str, Any] | None,
     ) -> None:
         """Initialize a Kitaru checkpoint wrapper."""
         self._func = func
@@ -398,6 +403,7 @@ class _CheckpointDefinition:
             extra=_build_checkpoint_extra(
                 checkpoint_type,
                 flow_result_candidate=flow_result_candidate,
+                metadata=metadata,
             ),
             step_type=_to_step_type(checkpoint_type),
             runtime=self._runtime,
@@ -514,6 +520,7 @@ def _synthetic_checkpoint(
     runtime: str | None = None,
     cache: bool | None = None,
     flow_result_candidate: bool | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Create a checkpoint with optional internal metadata."""
     checkpoint_type = type
@@ -526,6 +533,7 @@ def _synthetic_checkpoint(
             runtime=runtime,
             cache=cache,
             flow_result_candidate=flow_result_candidate,
+            metadata=metadata,
         )
 
     if func is not None:

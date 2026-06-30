@@ -190,6 +190,53 @@ def collect_bug_report() -> BugReport: ...
 
 ### Replay semantics
 
+With the default `checkpoint_strategy="calls"`, the adapter creates synthetic checkpoints for PydanticAI model requests, tool calls, and MCP calls when the agent runs directly at flow scope. "Synthetic" means the checkpoint is created by the adapter, not by a `@kitaru.checkpoint` decorator in your code. The stored checkpoint metadata marks these as adapter-generated PydanticAI checkpoints, so inspection clients can distinguish them from hand-written checkpoints that happen to use the same display type.
+
+For a PydanticAI tool call, the important replay names are:
+
+- `tool_args` — the recorded input arguments that PydanticAI passed to the tool.
+- `output` — the tool result that later model/tool/checkpoint work consumed.
+
+That gives you two different replay stories.
+
+Use an `input` override when you want the tool body to run again with edited arguments:
+
+```python
+submission = client.executions.replay(
+    "kr-a8f3c2",
+    at="lookup_policy_tool",
+    checkpoint_overrides={
+        "lookup_policy_tool": {
+            "input": {"account_id": "acct-2"},
+        },
+    },
+)
+```
+
+Kitaru records that as an override for the `tool_args` input. During replay, the generated checkpoint function receives the edited arguments and passes them into the PydanticAI tool. If the original run called `lookup_policy(account_id="acct-1")`, this replay calls `lookup_policy(account_id="acct-2")`. The replayed checkpoint's `tool_args` input artifact and `output` result then describe the edited call, not the original one.
+
+You can also write the input name explicitly:
+
+```python
+checkpoint_overrides={
+    "lookup_policy_tool": {
+        "input": {"tool_args": {"account_id": "acct-2"}},
+    },
+}
+```
+
+Use an `output` override when you do not want the tool body to run. Kitaru injects the value you provide as the tool result and feeds it to later checkpoints:
+
+```python
+checkpoint_overrides={
+    "lookup_policy_tool": {
+        "output": {"policy": "manual approval required"},
+    },
+}
+```
+
+The distinction matters for side effects. An `input` override reruns the tool, so any real-world action inside that tool can happen again. An `output` override skips the tool body, but it only works when a later checkpoint consumes that output.
+
 Waits belong at flow scope. `kitaru.wait()` is rejected inside `@checkpoint` bodies because the flow can pause while the enclosing checkpoint step is recorded as failed or incomplete. The default `checkpoint_strategy="calls"` splits each top-level model, tool, and MCP call into its own checkpoint, which improves visibility and retry isolation, but it also means regular tool-body waits need an explicit per-tool opt-out as shown above.
 
 ## Runtime behavior and guardrails

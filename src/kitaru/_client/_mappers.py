@@ -11,6 +11,19 @@ from pydantic import ValidationError
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
+from kitaru._checkpoint_metadata import (
+    ADAPTER_CHECKPOINT_KIND_KEY,
+    ADAPTER_KEY,
+    CHECKPOINT_ORIGIN_ADAPTER,
+    CHECKPOINT_ORIGIN_KEY,
+    CHECKPOINT_ORIGIN_USER,
+    REPLAY_INPUT_SLOTS_KEY,
+    REPLAY_OUTPUT_SLOTS_KEY,
+    CheckpointOrigin,
+    checkpoint_metadata_from_step,
+    checkpoint_metadata_slots,
+    checkpoint_metadata_str,
+)
 from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
@@ -296,6 +309,13 @@ def _map_artifact_ref(
     )
 
 
+def _checkpoint_origin(metadata: Mapping[str, Any]) -> CheckpointOrigin:
+    origin = checkpoint_metadata_str(metadata, CHECKPOINT_ORIGIN_KEY)
+    if origin == CHECKPOINT_ORIGIN_ADAPTER:
+        return CHECKPOINT_ORIGIN_ADAPTER
+    return CHECKPOINT_ORIGIN_USER
+
+
 def _adapter_structural_input_kind(
     *,
     checkpoint_type: str | None,
@@ -318,6 +338,8 @@ def _map_checkpoint_call(
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
     checkpoint_type = step.type.value if step.type else None
+    metadata = _to_plain_dict(step.run_metadata)
+    contract_metadata = checkpoint_metadata_from_step(step)
     seen_artifact_ids: set[str] = set()
     artifacts: list[ArtifactRef] = []
 
@@ -385,13 +407,24 @@ def _map_checkpoint_call(
         status=_to_public_status(step.status),
         started_at=step.start_time,
         ended_at=step.end_time,
-        metadata=_to_plain_dict(step.run_metadata),
+        metadata=metadata,
         original_call_id=original_call_id,
         parent_call_ids=[str(parent_id) for parent_id in step.parent_step_ids],
         failure=failure,
         attempts=attempts,
         artifacts=artifacts,
         checkpoint_type=checkpoint_type,
+        checkpoint_origin=_checkpoint_origin(contract_metadata),
+        adapter=checkpoint_metadata_str(contract_metadata, ADAPTER_KEY),
+        adapter_checkpoint_kind=checkpoint_metadata_str(
+            contract_metadata, ADAPTER_CHECKPOINT_KIND_KEY
+        ),
+        replay_input_slots=checkpoint_metadata_slots(
+            contract_metadata, REPLAY_INPUT_SLOTS_KEY
+        ),
+        replay_output_slots=checkpoint_metadata_slots(
+            contract_metadata, REPLAY_OUTPUT_SLOTS_KEY
+        ),
     )
 
 

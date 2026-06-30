@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
+
+### Changed
+- PydanticAI tool-checkpoint replay input overrides now rerun the tool body with edited `tool_args`. Users still pass the public `input` override field; shorthand tool arguments and explicit `{"tool_args": ...}` input-slot overrides are both supported.
+- Replay planning now uses recorded replay input slots and real step inputs before falling back to older type-based guesses, so a hand-written `type="tool_call"` checkpoint is no longer treated as a PydanticAI tool checkpoint unless it actually exposes replayable tool arguments.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added

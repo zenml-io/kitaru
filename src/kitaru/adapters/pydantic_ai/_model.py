@@ -35,6 +35,7 @@ from pydantic_ai.usage import RequestUsage
 from kitaru.replay_context import resolve_model_override
 
 from ._constants import (
+    ADAPTER_CHECKPOINT_KIND_MODEL_REQUEST,
     ARTIFACT_ROLE_PROMPT,
     ARTIFACT_ROLE_RESPONSE,
     ARTIFACT_ROLE_STREAM_TRANSCRIPT,
@@ -64,6 +65,7 @@ from ._utils import (
     checkpoint_input_value,
     get_adapter_checkpoint_artifact_refs,
     run_async_in_checkpoint,
+    with_adapter_checkpoint_metadata,
     with_default_type,
 )
 
@@ -630,7 +632,12 @@ class KitaruModel(WrapperModel):
                 cache_key = checkpoint_cache_key(cache_key_payload)
             started_at = time.perf_counter()
             response = await run_async_in_checkpoint(
-                config=with_default_type(self._checkpoint_config, "llm_call"),
+                config=with_adapter_checkpoint_metadata(
+                    with_default_type(self._checkpoint_config, "llm_call"),
+                    kind=ADAPTER_CHECKPOINT_KIND_MODEL_REQUEST,
+                    input_slots=[],
+                    output_slots=[ARTIFACT_SLOT_OUTPUT],
+                ),
                 step_name=checkpoint_name,
                 body=_in_checkpoint,
                 cache_key=cache_key,

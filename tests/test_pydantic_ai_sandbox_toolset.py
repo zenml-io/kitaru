@@ -454,6 +454,7 @@ def test_pydantic_ai_sandbox_example_keeps_per_tool_checkpoint(
     from examples.integrations.pydantic_ai_agent import pydantic_ai_sandbox_toolset
     from pydantic_ai.models.test import TestModel
 
+    from kitaru.adapters.pydantic_ai import _constants
     from kitaru.runtime import _checkpoint_scope, _flow_scope
 
     calls: list[dict[str, Any]] = []
@@ -512,6 +513,15 @@ def test_pydantic_ai_sandbox_example_keeps_per_tool_checkpoint(
     assert f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool" in checkpoint_steps
     assert checkpoint_configs[f"{_sandbox.SANDBOX_COMMAND_TOOL_NAME}_tool"] == {
         "cache": False,
+        "metadata": {
+            _constants.CHECKPOINT_ORIGIN_KEY: "adapter",
+            _constants.ADAPTER_KEY: _constants.ADAPTER_ID,
+            _constants.ADAPTER_CHECKPOINT_KIND_KEY: (
+                _constants.ADAPTER_CHECKPOINT_KIND_TOOL_CALL
+            ),
+            _constants.REPLAY_INPUT_SLOTS_KEY: [_constants.ARTIFACT_SLOT_TOOL_ARGS],
+            _constants.REPLAY_OUTPUT_SLOTS_KEY: [_constants.ARTIFACT_SLOT_OUTPUT],
+        },
         "type": "tool_call",
     }
 
