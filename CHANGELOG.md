@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
 
 ### Fixed
+- Kitaru terminal logs now rewrite ZenML's named pipeline completion message to ``Flow `...` completed successfully.``, so ``Pipeline `...` completed successfully.`` no longer leaks into flow output.
 - Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
 - Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
 - MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now scans up to 10,000 same-flow executions when auto-discovering replays before warning that older replays may require explicit IDs.
@@ -35,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
 - Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
 - `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
+
+### Security
+- Raised the `pydantic-ai-slim` lower bound and lockfile version to clear CVE-2026-48782.
 
 ### Fixed
 - Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.

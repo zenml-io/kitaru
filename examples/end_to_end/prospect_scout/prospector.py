@@ -65,7 +65,7 @@ EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search"
 # older pin builds a remote image whose agent import fails. The `-slim` variant
 # with an explicit provider extra keeps remote images small.
 PROSPECTOR_IMAGE = ImageSettings(
-    requirements=["pydantic-ai-slim[openai]>=1.89,<1.104"],
+    requirements=["pydantic-ai-slim[openai]>=1.102.0,<1.104"],
 )
 
 # ---------------------------------------------------------------------------

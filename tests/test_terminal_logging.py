@@ -202,6 +202,16 @@ class TestDecidePipelineLifecycle:
         assert decision.text == "Flow completed."
         assert decision.kind == "success"
 
+    def test_named_pipeline_completed(self) -> None:
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Pipeline `google_adk_workflow` completed successfully.",
+        )
+        decision = terminal_logging._decide(record)
+        assert decision is not None
+        assert decision.text == "Flow `google_adk_workflow` completed successfully."
+        assert decision.kind == "success"
+
     def test_pausing_pipeline_run(self) -> None:
         record = _make_record(
             "zenml.execution.pipeline.dynamic.runner",
