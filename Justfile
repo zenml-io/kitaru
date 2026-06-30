@@ -139,6 +139,9 @@ ui-smoke:
 
 # Run release-grade smoke with structured results.
 # Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
+# Remote stack smoke stays opt-in; build/push a flow image with
+# `just dev-image REPO=<operator-image-repo>`, then pass operator-provided
+# remote config via KITARU_REMOTE_SMOKE_* env vars or ./scripts/smoke-test.sh flags.
 release-smoke *ARGS:
     ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
 
@@ -146,10 +149,11 @@ release-smoke *ARGS:
 example-coverage-audit:
     uv run --with pyyaml python scripts/audit-example-coverage.py
 
-# Build dev base image for remote stack testing (K8s, etc.)
+# Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.
-# Pass REPO to override the target registry/image.
-dev-image REPO="strickvl/kitaru-dev":
+# Remote-smoke operators must pass their own target registry/image.
+dev-image REPO="":
+    @test -n "{{ REPO }}" || { printf 'Error: pass REPO=<operator-image-repo> for the remote smoke flow image.\n' >&2; exit 1; }
     docker build -f docker/Dockerfile.dev -t kitaru-dev .
     docker tag kitaru-dev {{ REPO }}:latest
     docker push {{ REPO }}:latest
