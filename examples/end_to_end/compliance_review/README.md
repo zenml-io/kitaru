@@ -77,7 +77,7 @@ Four domain checkpoints (HR, IT security, vendor contracts, insurance) run seque
 Each domain is its own checkpoint, so a failure in `check_insurance` or `synthesize_report` doesn't roll back the three domain audits that already completed. Pick up exactly where you left off:
 
 ```bash
-kitaru executions replay <exec-id> --from check_insurance
+kitaru executions replay <exec-id> --at check_insurance
 ```
 
 Everything before that checkpoint returns its cached `ClaudeAgentResult`; everything at or after re-runs. For a 5-turn audit that costs a few cents per turn, this is the difference between a cheap retry and a full restart.

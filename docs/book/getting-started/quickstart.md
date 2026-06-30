@@ -109,10 +109,12 @@ original run — the baseline you measure against.
 
 ```python
 import kitaru
+from agent import research_agent
 
 EXEC_ID = "kr-..."  # the exec_id printed above
 
-baseline = research_agent.replay(EXEC_ID, from_="research").wait()
+baseline = research_agent.replay(EXEC_ID, at="research")
+baseline_exec_id = baseline.results[0].replay_exec_id
 ```
 
 **Then replay again with one input changed** — here, a different model:
@@ -120,22 +122,28 @@ baseline = research_agent.replay(EXEC_ID, from_="research").wait()
 ```python
 candidate = research_agent.replay(
     EXEC_ID,
-    from_="research",
-    model="openai/gpt-5",
-).wait()
+    at="research",
+    flow_overrides={"model": "openai/gpt-5"},
+)
+candidate_exec_id = candidate.results[0].replay_exec_id
 ```
 
-Replay passes flow inputs as keyword arguments, so `model="openai/gpt-5"`
-overrides the original `model` input. `from_="research"` re-executes from the
-`research` checkpoint forward. Everything upstream of that checkpoint is reused
-from the recorded run, so you don't pay for or re-run work you aren't changing.
+`flow_overrides={"model": "openai/gpt-5"}` changes the original `model` flow
+input for the replay run. `at="research"` re-executes from the `research`
+checkpoint forward. Everything upstream of that checkpoint is reused from the
+recorded run, so you don't pay for or re-run work you aren't changing.
 
-**Now compare the two runs.** Both replay handles already hold their final
-reports, so you can diff them directly:
+**Now compare the original and the two replays.** The replay call returns a
+`ReplaySubmission`: a small record with the replay execution IDs, counts, and
+compare URLs. Diff the original, the faithful baseline replay, and the changed
+replay:
 
 ```python
-print("baseline:\n", baseline)
-print("candidate:\n", candidate)
+print("baseline replay:", baseline_exec_id)
+print("candidate replay:", candidate_exec_id)
+
+execution_diff = kitaru.diff(EXEC_ID, baseline_exec_id, candidate_exec_id)
+print(execution_diff.urls)
 ```
 
 Each `kitaru.llm()` call also recorded its prompt, response, token usage, and
@@ -158,8 +166,8 @@ and hill-climb on cost, latency, and quality:
 
 ```bash
 kitaru executions list                       # find the exec_id
-kitaru executions replay kr-... --from research \
-  --args '{"model":"openai/gpt-5"}'
+kitaru executions replay kr-... --at research \
+  --flow-overrides '{"model":"openai/gpt-5"}'
 ```
 
 For checkpoint-output overrides, selector rules, and divergence handling, see
@@ -172,7 +180,7 @@ fails — a rate limit, a transient error — replay from the failure point inst
 of re-running the whole script:
 
 ```bash
-kitaru executions replay kr-... --from draft_report
+kitaru executions replay kr-... --at draft_report
 ```
 
 The recorded output of `research` is reused; only `draft_report` re-executes.

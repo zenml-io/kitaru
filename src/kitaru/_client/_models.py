@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -20,6 +20,7 @@ from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
+    from kitaru.replay import ReplaySubmission
 
 
 def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
@@ -546,16 +547,26 @@ class Execution:
     def replay(
         self,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
-        **flow_inputs: Any,
-    ) -> Execution:
-        """Replay this execution from a prior checkpoint boundary."""
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+    ) -> ReplaySubmission:
+        """Replay this execution from a checkpoint cut point."""
         return self._client.executions.replay(
             self.exec_id,
-            from_=from_,
-            overrides=overrides,
-            **flow_inputs,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag=tag,
+            wait=wait,
+            on_error=on_error,
         )
 
     def list_checkpoints(self) -> list[CheckpointCall]:

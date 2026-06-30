@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -94,11 +95,29 @@ from kitaru.errors import (
     format_recovery_hint,
     traceback_last_line,
 )
-from kitaru.replay import build_replay_plan
+from kitaru.replay import (
+    ReplayFailureRow,
+    ReplayPlan,
+    ReplayResultRow,
+    ReplaySkippedRow,
+    ReplaySubmission,
+    build_replay_plan,
+    build_replay_request_document,
+    new_replay_submission_id,
+    replay_at_skip_reason,
+    replay_at_status,
+    safe_compare_url_for_executions,
+    safe_persist_replay_submission_metadata,
+)
+from kitaru.replay_context import (
+    KITARU_REPLAY_CONTEXT_ENV,
+    get_replay_runtime_context,
+)
 from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
 _STACK_BINDING_LOCK = threading.RLock()
+_REPLAY_RUNTIME_CONTEXT_LOCK = threading.RLock()
 logger = logging.getLogger(__name__)
 
 
@@ -248,6 +267,12 @@ def _register_pipeline_source_alias(
 
 
 _FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
+#: Execution-metadata key linking a saved plain-value flow result back to its run.
+#: ZenML dynamic pipelines discard the pipeline function's return value, so the
+#: ``kitaru_flow_result`` artifact is otherwise orphaned (no producer run). The
+#: link lets `.wait()` recover the value when terminal-step inference is ambiguous
+#: (e.g. an adapter created several non-result model/tool checkpoints).
+_FLOW_RESULT_REF_METADATA_KEY = "kitaru_flow_result_ref_v1"
 _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
 _FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
@@ -374,7 +399,25 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
         )
         return (*coerced_items, metadata)
 
-    return _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
+    saved = _save_flow_result_artifact(value, name=_FLOW_RESULT_ARTIFACT_NAME)
+    _record_flow_result_reference(saved)
+    return saved
+
+
+def _record_flow_result_reference(artifact: ArtifactVersionResponse) -> None:
+    """Link a saved plain-value flow result to the running execution.
+
+    Best-effort: the value was already saved and returned to ZenML, so a failed
+    metadata write must not break the flow. Recording the artifact id in
+    execution metadata is what lets `.wait()` recover the value when terminal-step
+    inference is ambiguous.
+    """
+    try:
+        from kitaru.logging import log as _log_flow_metadata
+
+        _log_flow_metadata(**{_FLOW_RESULT_REF_METADATA_KEY: str(artifact.id)})
+    except Exception:
+        logger.debug("Could not record flow result reference metadata.", exc_info=True)
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -466,6 +509,41 @@ def _build_pipeline_options(
     if transport_image is not None and transport_image.secret_environment_from:
         options["secrets"] = list(transport_image.secret_environment_from)
     return options
+
+
+def _inject_replay_context_env(
+    image: ImageSettings | None,
+    *,
+    replay_context_json: str,
+) -> ImageSettings:
+    """Attach replay runtime context to the transport image environment."""
+    existing_environment = (
+        dict(image.environment) if image and image.environment else {}
+    )
+    existing_environment[KITARU_REPLAY_CONTEXT_ENV] = replay_context_json
+    if image is None:
+        return ImageSettings(environment=existing_environment)
+    return image.model_copy(update={"environment": existing_environment})
+
+
+@contextmanager
+def _scoped_replay_runtime_context(
+    replay_context_json: str,
+) -> Iterator[None]:
+    """Expose replay runtime context to local replay code for one replay call."""
+    with _REPLAY_RUNTIME_CONTEXT_LOCK:
+        previous_value = os.environ.get(KITARU_REPLAY_CONTEXT_ENV)
+        had_previous_value = KITARU_REPLAY_CONTEXT_ENV in os.environ
+        os.environ[KITARU_REPLAY_CONTEXT_ENV] = replay_context_json
+        get_replay_runtime_context.cache_clear()
+        try:
+            yield
+        finally:
+            if had_previous_value and previous_value is not None:
+                os.environ[KITARU_REPLAY_CONTEXT_ENV] = previous_value
+            else:
+                os.environ.pop(KITARU_REPLAY_CONTEXT_ENV, None)
+            get_replay_runtime_context.cache_clear()
 
 
 def _inject_model_registry_env(
@@ -669,12 +747,15 @@ def _build_kitaru_execution_url(
 
 def _emit_kitaru_execution_url(
     run: PipelineRunResponse,
-    *,
-    server_url: str | None,
 ) -> None:
     """Log a Kitaru-native execution URL without risking flow execution."""
     try:
-        url = _build_kitaru_execution_url(run, server_url=server_url)
+        from kitaru._ui_urls import resolve_ui_base_url
+
+        url = _build_kitaru_execution_url(
+            run,
+            server_url=resolve_ui_base_url(),
+        )
     except Exception:
         logger.debug(
             "Failed to build Kitaru execution URL for run %s.",
@@ -968,6 +1049,13 @@ def _metadata_value(value: Any) -> Any:
     return value
 
 
+def _metadata_mapping(metadata: Any) -> Mapping[str, Any]:
+    """Return plain metadata values from a ZenML metadata mapping."""
+    if not isinstance(metadata, Mapping):
+        return {}
+    return {str(key): _metadata_value(value) for key, value in metadata.items()}
+
+
 def _artifact_metadata_value(artifact: Any, key: str) -> Any:
     """Return one metadata value from a ZenML artifact if available."""
     for attr_name in ("run_metadata", "user_metadata", "metadata"):
@@ -1005,6 +1093,27 @@ def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
     return cast(int, output.value["length"])
 
 
+_FLOW_RESULT_NOT_FOUND = object()
+
+
+def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
+    """Load the flow result linked via execution metadata, if present.
+
+    Returns ``_FLOW_RESULT_NOT_FOUND`` when the run has no linked result (e.g. it
+    predates this linkage, or returned a checkpoint handle handled elsewhere).
+    """
+    metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    artifact_id = metadata.get(_FLOW_RESULT_REF_METADATA_KEY)
+    if not isinstance(artifact_id, str) or not artifact_id:
+        return _FLOW_RESULT_NOT_FOUND
+    try:
+        return Client().get_artifact_version(artifact_id).load()
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            f"Could not load the linked flow result artifact {artifact_id!r}: {exc}"
+        ) from exc
+
+
 def _extract_flow_result(run: PipelineRunResponse) -> Any:
     """Extract user-facing flow return value from a finished pipeline run.
 
@@ -1021,7 +1130,16 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     if not outputs:
         outputs = _extract_outputs_from_output_specs(run)
     if not outputs:
-        outputs = _extract_outputs_from_terminal_steps(run)
+        try:
+            outputs = _extract_outputs_from_terminal_steps(run)
+        except KitaruAmbiguousFlowResultError:
+            # No single result-candidate terminal step (e.g. an adapter created
+            # several non-result model/tool checkpoints). Recover the value the
+            # flow actually returned from the linked `kitaru_flow_result` artifact.
+            referenced = _load_referenced_flow_result(run)
+            if referenced is not _FLOW_RESULT_NOT_FOUND:
+                return referenced
+            raise
 
     if not outputs:
         return None
@@ -1354,6 +1472,8 @@ class FlowHandle:
 class _FlowDefinition:
     """Flow wrapper returned by `@flow`."""
 
+    _kitaru_replay_flow_wrapper = True
+
     def __init__(
         self,
         func: Callable[..., Any],
@@ -1584,55 +1704,46 @@ class _FlowDefinition:
             inputs=flow_inputs,
         )
 
-    def replay(
+    def _replay_one_handle(
         self,
-        exec_id: str,
+        execution: str,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
         stack: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
-        **flow_inputs: Any,
-    ) -> FlowHandle:
-        """Replay a prior execution from a checkpoint boundary.
-
-        Args:
-            exec_id: Source execution ID.
-            from_: Checkpoint selector (name, invocation ID, or call ID).
-            overrides: Optional `checkpoint.*` override map.
-            stack: Optional stack override for the replay run.
-            image: Optional image override for the replay run.
-            cache: Optional cache override for the replay run.
-            retries: Optional retry override for the replay run. Retries rerun
-                the whole flow body; if an internal result-artifact save fails
-                after user code returns, ZenML may replay any side effects in
-                the flow.
-            **flow_inputs: Optional flow input overrides.
-
-        Returns:
-            A handle for the replayed execution.
-        """
+        resolved_connection: Any | None = None,
+        original_run: PipelineRunResponse | None = None,
+    ) -> tuple[FlowHandle, PipelineRunResponse, ReplayPlan]:
+        """Submit one replay child and return the live handle plus its plan."""
         raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
-        resolved_connection = resolve_connection_config(validate_for_use=True)
+        if resolved_connection is None:
+            resolved_connection = resolve_connection_config(validate_for_use=True)
 
-        try:
-            original_run = Client().get_pipeline_run(
-                name_id_or_prefix=exec_id,
-                allow_name_prefix_match=False,
-                hydrate=True,
-            )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to load source execution '{exec_id}' for replay: {exc}"
-            ) from exc
+        if original_run is None:
+            try:
+                original_run = Client().get_pipeline_run(
+                    name_id_or_prefix=execution,
+                    allow_name_prefix_match=False,
+                    hydrate=True,
+                )
+            except Exception as exc:
+                raise KitaruBackendError(
+                    f"Failed to load source execution '{execution}' for replay: {exc}"
+                ) from exc
 
         replay_plan = build_replay_plan(
             run=original_run,
-            from_=from_,
-            overrides=overrides,
-            flow_inputs=flow_inputs,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
         )
 
         resolved_execution = resolve_execution_config(
@@ -1651,6 +1762,13 @@ class _FlowDefinition:
         )
         transport_image, effective_model_registry = _prepare_model_registry_transport(
             resolved_execution.image
+        )
+        transport_image = _inject_replay_context_env(
+            transport_image,
+            replay_context_json=replay_plan.runtime_context.to_json(),
+        )
+        resolved_execution = resolved_execution.model_copy(
+            update={"image": transport_image}
         )
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
@@ -1671,7 +1789,7 @@ class _FlowDefinition:
                 resolved_execution.stack
             )
             replay_metadata = {
-                "from_checkpoint": from_,
+                "at_checkpoint": at,
                 "replay_path": "flow_wrapper",
                 **deployment_metadata,
             }
@@ -1679,13 +1797,16 @@ class _FlowDefinition:
 
             observed_started_at = time.perf_counter()
             try:
-                replayed_run = configured_pipeline.replay(
-                    pipeline_run=original_run.id,
-                    skip=replay_plan.steps_to_skip,
-                    skip_successful_steps=False,
-                    input_overrides=replay_plan.input_overrides or None,
-                    step_input_overrides=replay_plan.step_input_overrides or None,
-                )
+                with _scoped_replay_runtime_context(
+                    replay_plan.runtime_context.to_json()
+                ):
+                    replayed_run = configured_pipeline.replay(
+                        pipeline_run=original_run.id,
+                        skip=replay_plan.steps_to_skip,
+                        skip_successful_steps=False,
+                        input_overrides=replay_plan.input_overrides or None,
+                        step_input_overrides=replay_plan.step_input_overrides or None,
+                    )
             except Exception as exc:
                 failure_origin = classify_failure_origin(
                     status_reason=str(exc),
@@ -1702,13 +1823,13 @@ class _FlowDefinition:
                 )
                 if failure_origin == FailureOrigin.DIVERGENCE:
                     raise execution_error_from_failure(
-                        f"Replay diverged for execution '{exec_id}': {exc}",
+                        f"Replay diverged for execution '{execution}': {exc}",
                         exec_id=str(original_run.id),
                         status="failed",
                         origin=failure_origin,
                     ) from exc
                 raise KitaruBackendError(
-                    f"Failed to replay execution '{exec_id}': {exc}"
+                    f"Failed to replay execution '{execution}': {exc}"
                 ) from exc
 
         if replayed_run is None:
@@ -1722,10 +1843,7 @@ class _FlowDefinition:
             )
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
-        _emit_kitaru_execution_url(
-            replayed_run,
-            server_url=getattr(resolved_connection, "server_url", None),
-        )
+        _emit_kitaru_execution_url(replayed_run)
         persist_frozen_execution_spec(
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
@@ -1735,11 +1853,152 @@ class _FlowDefinition:
             AnalyticsEvent.FLOW_REPLAYED,
             {"replay_path": "flow_wrapper", **deployment_metadata},
         )
-        return FlowHandle(
+        handle = FlowHandle(
             replayed_run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
+        )
+        return handle, original_run, replay_plan
+
+    def replay(
+        self,
+        execution: str | Sequence[str],
+        *,
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+        stack: str | None = None,
+        image: ImageSetting | None = None,
+        cache: bool | None = None,
+        retries: int | None = None,
+    ) -> ReplaySubmission:
+        """Replay one or more explicit executions with unified overrides."""
+        from kitaru.cohort import coerce_exec_ids
+
+        exec_ids = (
+            [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        )
+        if not exec_ids:
+            raise KitaruUsageError("Pass at least one execution ID to replay.")
+        resolved_wait = (len(exec_ids) == 1) if wait is None else wait
+        resolved_on_error = on_error or ("fail" if len(exec_ids) == 1 else "collect")
+        if resolved_on_error not in {"collect", "fail"}:
+            raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
+        validated_connection = resolve_connection_config(validate_for_use=True)
+
+        submission_id = new_replay_submission_id()
+        request_document = build_replay_request_document(
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+        )
+        plan_document = request_document
+        results: list[ReplayResultRow] = []
+        failures: list[ReplayFailureRow] = []
+        skipped_rows: list[ReplaySkippedRow] = []
+        original_and_replay_ids: list[str] = []
+        client = Client()
+
+        for exec_ref in exec_ids:
+            original_id: str | None = None
+            try:
+                original_run = client.get_pipeline_run(
+                    name_id_or_prefix=exec_ref,
+                    allow_name_prefix_match=False,
+                    hydrate=True,
+                )
+                original_id = str(original_run.id)
+                if resolved_on_error == "collect":
+                    at_status = replay_at_status(run=original_run, at=at)
+                    if at_status in {"missing", "no_checkpoints"}:
+                        skipped_rows.append(
+                            ReplaySkippedRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=original_run, at=at),
+                            )
+                        )
+                        continue
+                    if at_status == "ambiguous":
+                        failures.append(
+                            ReplayFailureRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=original_run, at=at),
+                            )
+                        )
+                        continue
+
+                handle, loaded_original_run, replay_plan = self._replay_one_handle(
+                    exec_ref,
+                    at=at,
+                    flow_overrides=flow_overrides,
+                    checkpoint_overrides=checkpoint_overrides,
+                    invocation_overrides=invocation_overrides,
+                    skip=skip,
+                    stack=stack,
+                    image=image,
+                    cache=cache,
+                    retries=retries,
+                    resolved_connection=validated_connection,
+                    original_run=original_run,
+                )
+                original_id = str(loaded_original_run.id)
+                plan_document = replay_plan.document
+                replay_exec_id = str(handle.exec_id)
+                row_status: Literal["submitted", "completed", "failed"] = "submitted"
+                if resolved_wait:
+                    handle.wait()
+                    row_status = "completed"
+                safe_persist_replay_submission_metadata(
+                    replay_exec_id=replay_exec_id,
+                    original_exec_id=original_id,
+                    submission_id=submission_id,
+                    tag=tag,
+                )
+                row_compare_url = safe_compare_url_for_executions(
+                    [original_id, replay_exec_id]
+                )
+                original_and_replay_ids.extend([original_id, replay_exec_id])
+                results.append(
+                    ReplayResultRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        replay_exec_id=replay_exec_id,
+                        status=row_status,
+                        compare_url=row_compare_url,
+                        handle=None if resolved_wait else handle,
+                    )
+                )
+            except Exception as exc:
+                if resolved_on_error == "fail":
+                    raise
+                failures.append(
+                    ReplayFailureRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        reason=str(exc),
+                    )
+                )
+
+        compare_url = safe_compare_url_for_executions(original_and_replay_ids)
+        return ReplaySubmission.create(
+            submission_id=submission_id,
+            tag=tag,
+            at=at,
+            wait=resolved_wait,
+            plan=plan_document,
+            results=results,
+            failures=failures,
+            skipped=skipped_rows,
+            compare_url=compare_url,
         )
 
     def _submit(
@@ -1797,10 +2056,7 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
-        _emit_kitaru_execution_url(
-            run,
-            server_url=getattr(resolved_connection, "server_url", None),
-        )
+        _emit_kitaru_execution_url(run)
         track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
         persist_frozen_execution_spec(
             run_id=run.id,

@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-06-23T06:59:25.100982Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1361,6 +1361,7 @@ dev = [
     { name = "pytest-clarity" },
     { name = "pytest-randomly" },
     { name = "pytest-xdist", extra = ["psutil"] },
+    { name = "python-dotenv" },
     { name = "ruff" },
     { name = "ty" },
     { name = "yamlfix" },
@@ -1412,6 +1413,7 @@ dev = [
     { name = "pytest-clarity" },
     { name = "pytest-randomly" },
     { name = "pytest-xdist", extras = ["psutil"] },
+    { name = "python-dotenv", specifier = ">=1.0,<2" },
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },

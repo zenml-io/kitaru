@@ -78,6 +78,7 @@ from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient
+from kitaru.cohort import CohortQuery, CohortResult, cohort
 from kitaru.config import (
     ImageSettings,
     KitaruConfig,
@@ -91,6 +92,17 @@ from kitaru.config import (
     list_stacks,
     run_sandbox_command,
     use_stack,
+)
+from kitaru.diff import (
+    CohortDiff,
+    ExecutionDiff,
+    build_compare_url,
+    build_compare_url_for_executions,
+    build_compare_urls,
+    compare_url_for_executions,
+    diff,
+    diff_cohort,
+    diff_matrix,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -113,6 +125,12 @@ from kitaru.events import progress
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.replay import ReplaySubmission
+from kitaru.replay_context import (
+    ReplayRuntimeContext,
+    get_replay_runtime_context,
+    is_replay,
+)
 from kitaru.runtime import current_execution_id
 from kitaru.secrets import (
     Secret,
@@ -129,7 +147,11 @@ __all__ = [
     "AuthAPIKey",
     "AuthAPIKeyWithValue",
     "AuthServiceAccount",
+    "CohortDiff",
+    "CohortQuery",
+    "CohortResult",
     "Deployment",
+    "ExecutionDiff",
     "ExecutionEvent",
     "ExecutionStatistics",
     "ExecutionStatisticsDimension",
@@ -158,11 +180,18 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "ReplayRuntimeContext",
+    "ReplaySubmission",
     "SandboxCommandResult",
     "Secret",
     "SecretSummary",
     "StackInfo",
+    "build_compare_url",
+    "build_compare_url_for_executions",
+    "build_compare_urls",
     "checkpoint",
+    "cohort",
+    "compare_url_for_executions",
     "configure",
     "connect",
     "create_secret",
@@ -171,9 +200,14 @@ __all__ = [
     "current_stack",
     "delete_secret",
     "delete_stack",
+    "diff",
+    "diff_cohort",
+    "diff_matrix",
     "events",
     "flow",
+    "get_replay_runtime_context",
     "get_secret",
+    "is_replay",
     "list_stacks",
     "llm",
     "load",

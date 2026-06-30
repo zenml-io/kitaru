@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import time
@@ -21,7 +22,12 @@ from pydantic_ai.toolsets import (
 from pydantic_ai.toolsets.function import FunctionToolsetTool
 
 from kitaru.errors import KitaruContextError, KitaruUsageError
-from kitaru.runtime import _suspend_checkpoint_scope
+from kitaru.replay_context import resolve_tool_override
+from kitaru.runtime import (
+    _get_current_checkpoint_id,
+    _get_current_checkpoint_name,
+    _suspend_checkpoint_scope,
+)
 from kitaru.wait import _WAIT_INSIDE_CHECKPOINT_ERROR
 
 from ._constants import (
@@ -474,6 +480,16 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         tool: ToolsetTool[AgentDepsT],
         suspend_checkpoint_scope: bool,
     ) -> Any:
+        override_fn = resolve_tool_override(
+            name,
+            target=_get_current_checkpoint_name() or _get_current_checkpoint_id(),
+        )
+        if override_fn is not None:
+            result = override_fn(**tool_args)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+
         if suspend_checkpoint_scope:
             with (
                 _suspend_checkpoint_scope(),

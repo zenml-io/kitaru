@@ -42,6 +42,7 @@ from kitaru.mcp.server import (
     kitaru_deployments_tag,
     kitaru_deployments_untag,
     kitaru_executions_cancel,
+    kitaru_executions_diff_matrix,
     kitaru_executions_get,
     kitaru_executions_input,
     kitaru_executions_latest,
@@ -80,6 +81,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_executions_input,
     kitaru_executions_retry,
     kitaru_executions_replay,
+    kitaru_executions_diff_matrix,
     kitaru_secrets_create,
     kitaru_artifacts_list,
     kitaru_artifacts_get,
@@ -153,6 +155,38 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     assert stack_schema["properties"]["async_mode"]["default"] is False
     assert stack_schema["properties"]["verify"]["default"] is True
     assert "extra" in stack_schema["properties"]
+
+    replay_schema = tool_schemas["kitaru_executions_replay"]
+    replay_properties = set(replay_schema["properties"])
+    assert replay_properties == {
+        "exec_ids",
+        "at",
+        "flow_overrides",
+        "checkpoint_overrides",
+        "invocation_overrides",
+        "skip",
+        "tag",
+        "wait",
+        "on_error",
+    }
+    assert replay_schema["required"] == ["exec_ids", "at"]
+    assert replay_schema["properties"]["on_error"].get("default") is None
+    on_error_variants = replay_schema["properties"]["on_error"]["anyOf"]
+    assert {"type": "null"} in on_error_variants
+    assert any(
+        variant.get("type") == "string"
+        and set(variant.get("enum", [])) == {"fail", "collect"}
+        for variant in on_error_variants
+    )
+    assert "kitaru_executions_replay_many" not in tool_schemas
+    assert "input" not in replay_properties
+    assert "output" not in replay_properties
+    assert "tool" not in replay_properties
+    assert "llm_model" not in replay_properties
+    assert "flow_inputs" not in replay_properties
+
+    assert "kitaru_executions_diff_matrix" in tool_schemas
+    assert "kitaru_executions_diff_cohort" not in tool_schemas
 
 
 def test_load_flow_target_supports_module_paths(
@@ -1128,29 +1162,112 @@ def test_validate_pending_wait_input_ignores_missing_pending_wait(
     )
 
 
-def test_executions_replay_returns_structured_execution(
+def test_executions_replay_forwards_unified_arguments_and_returns_json(
     mock_kitaru_client: MagicMock,
-    sample_execution,
 ) -> None:
-    """Replay tool should return replay operation metadata and execution payload."""
-    mock_kitaru_client.executions.replay.return_value = sample_execution
+    """Replay tool should call the unified SDK API and return to_json directly."""
+    replay_json = {
+        "submission_id": "rs-123",
+        "tag": "candidate",
+        "at": "lookup_policy_tool",
+        "wait": True,
+        "plan": {},
+        "results": [{"original_exec_id": "kr-a", "replay_exec_id": "kr-r"}],
+        "failures": [],
+        "skipped": [],
+        "summary": {"submitted": 1, "completed": 1, "failed": 0, "skipped": 0},
+        "compare_url": "https://kitaru.example/compare",
+    }
+    submission = MagicMock()
+    submission.to_json.return_value = replay_json
+    mock_kitaru_client.executions.replay.return_value = submission
+
+    flow_overrides = {"prompt": "new prompt"}
+    checkpoint_overrides = {"lookup_policy_tool": {"output": {"tier": "gold"}}}
+    invocation_overrides = {"model_call_2": {"model": "gpt-4.1-mini"}}
+    skip = ["draft_email"]
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
         payload = kitaru_executions_replay(
-            "kr-a8f3c2",
-            from_="write_summary",
-            flow_inputs={"topic": "new topic"},
+            ["kr-a", "kr-b"],
+            at="lookup_policy_tool",
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag="candidate",
+            wait=True,
+            on_error="fail",
         )
 
     mock_kitaru_client.executions.replay.assert_called_once_with(
-        "kr-a8f3c2",
-        from_="write_summary",
-        overrides=None,
-        topic="new topic",
+        ["kr-a", "kr-b"],
+        at="lookup_policy_tool",
+        flow_overrides=flow_overrides,
+        checkpoint_overrides=checkpoint_overrides,
+        invocation_overrides=invocation_overrides,
+        skip=skip,
+        tag="candidate",
+        wait=True,
+        on_error="fail",
     )
-    assert payload["available"] is True
-    assert payload["operation"] == "replay"
-    assert payload["execution"]["exec_id"] == sample_execution.exec_id
+    submission.to_json.assert_called_once_with()
+    assert payload == replay_json
+
+
+def test_executions_replay_forwards_omitted_on_error_as_none(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Omitted MCP replay on_error should let the SDK apply its shared default."""
+    submission = MagicMock()
+    submission.to_json.return_value = {"submission_id": "rs-123"}
+    mock_kitaru_client.executions.replay.return_value = submission
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_replay(["kr-a"], at="lookup_policy_tool")
+
+    mock_kitaru_client.executions.replay.assert_called_once_with(
+        ["kr-a"],
+        at="lookup_policy_tool",
+        flow_overrides=None,
+        checkpoint_overrides=None,
+        invocation_overrides=None,
+        skip=None,
+        tag=None,
+        wait=None,
+        on_error=None,
+    )
+    assert payload == {"submission_id": "rs-123"}
+
+
+def test_mcp_does_not_expose_replay_many_tool() -> None:
+    """MCP exposes multi-ID replay through kitaru_executions_replay only."""
+    import kitaru.mcp.server as server
+
+    assert not hasattr(server, "kitaru_executions_replay_many")
+
+
+def test_executions_diff_matrix_returns_renamed_payload() -> None:
+    """Diff matrix tool should call the renamed helper and avoid cohort keys."""
+    diff_result = object()
+
+    with (
+        patch("kitaru.diff.diff_matrix", return_value=diff_result) as mock_diff_matrix,
+        patch(
+            "kitaru.diff.serialize_diff_matrix",
+            return_value={"rows": [{"original_exec_id": "kr-a"}]},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_diff_matrix(["kr-a", "kr-b"])
+
+    mock_diff_matrix.assert_called_once_with(["kr-a", "kr-b"])
+    mock_serialize.assert_called_once_with(diff_result)
+    assert payload == {
+        "available": True,
+        "operation": "diff_matrix",
+        "diff_matrix": {"rows": [{"original_exec_id": "kr-a"}]},
+    }
+    assert "cohort" not in payload
 
 
 def test_execution_mutation_tools_return_serialized_execution(

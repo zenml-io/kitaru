@@ -97,7 +97,7 @@ Copy the failed execution ID from the terminal or UI, then unset the flag and re
 
 ```bash
 unset KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES
-uv run kitaru executions replay <EXECUTION_ID> --from durability_drill_gate
+uv run kitaru executions replay <EXECUTION_ID> --at durability_drill_gate
 ```
 
 `replay` creates a new execution from the failed one and asks Kitaru to reuse completed upstream checkpoints. `retry` tries to restart the same failed execution, which is not always available on server-backed stacks after a run has concluded. `resume` is for paused executions that are waiting for input.

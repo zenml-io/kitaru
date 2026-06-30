@@ -16,7 +16,7 @@ as granular as your replay needs require.
 ## Decision table
 
 The **replay boundary** column is the unit you can replay from: a finer boundary
-means `flow.replay(exec_id, from_="<checkpoint>", ...)` can re-execute from a
+means `flow.replay(exec_id, at="<checkpoint>", ...)` can re-execute from a
 single model or tool call instead of re-running the entire turn.
 
 | You have... | Use this | Replay boundary (finest available) | First page |

@@ -8,7 +8,7 @@ import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from cyclopts import Parameter
 
@@ -105,6 +105,49 @@ def _parse_json_object(
             '(for example: \'{"topic": "AI"}\').'
         )
     return parsed
+
+
+def _load_replay_exec_ids(path: str) -> list[str]:
+    """Load replay parent execution IDs from a JSON file."""
+    ids_path = Path(path).expanduser()
+    source_label = f"--ids-file file '{ids_path}'"
+    try:
+        payload = _parse_json_value(ids_path.read_text(), option_name=source_label)
+    except OSError as exc:
+        raise KitaruUsageError(f"Unable to read ID file '{ids_path}': {exc}") from exc
+    except ValueError as exc:
+        raise KitaruUsageError(str(exc)) from exc
+
+    item = payload.get("item") if isinstance(payload, dict) else None
+    if isinstance(item, dict) and "exec_ids" in item:
+        payload = item
+
+    raw_ids: Any
+    if isinstance(payload, list):
+        raw_ids = payload
+    elif isinstance(payload, dict):
+        raw_ids = payload.get("exec_ids")
+    else:
+        raw_ids = None
+
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' must contain a JSON list or an object with "
+            "a non-empty exec_ids list."
+        )
+
+    non_string_ids = [item for item in raw_ids if not isinstance(item, str)]
+    if non_string_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' must contain only string execution IDs."
+        )
+
+    exec_ids = [exec_id.strip() for exec_id in raw_ids if exec_id.strip()]
+    if not exec_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' did not contain any non-empty execution IDs."
+        )
+    return exec_ids
 
 
 def _parse_image_option(
@@ -1297,52 +1340,122 @@ def input_(
 
 @executions_app.command
 def replay_(
-    exec_id: Annotated[
-        str,
-        Parameter(help="Execution ID."),
-    ],
+    exec_ids: Annotated[
+        list[str] | None,
+        Parameter(help="Execution ID(s) to replay."),
+    ] = None,
     *,
-    from_: Annotated[
+    ids_file: Annotated[
+        str | None,
+        Parameter(
+            name=["--ids-file"],
+            help=(
+                "JSON file containing execution IDs as a list or as an object "
+                "with an exec_ids list."
+            ),
+        ),
+    ] = None,
+    at: Annotated[
         str,
         Parameter(
-            help="Checkpoint selector (name, invocation ID, or call ID).",
-            alias=["--from"],
+            help=(
+                "Invocation ID or call ID where replay switches from playback "
+                "to live execution."
+            ),
         ),
     ],
-    args: Annotated[
+    flow_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--flow-overrides"],
+            help="Flow input overrides as a JSON object.",
+        ),
+    ] = None,
+    checkpoint_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--checkpoint-overrides"],
+            help=(
+                "Checkpoint-scope overrides as a JSON object keyed by checkpoint name."
+            ),
+        ),
+    ] = None,
+    invocation_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--invocation-overrides"],
+            help=(
+                "Invocation-scope overrides as a JSON object keyed by "
+                "invocation or call ID."
+            ),
+        ),
+    ] = None,
+    skip: Annotated[
         str | None,
         Parameter(
             help=(
-                "Flow input overrides as a JSON object "
-                '(for example \'{"topic": "New topic"}\').'
-            )
+                "Comma-separated invocation IDs or call IDs to force playback in "
+                "the live tail."
+            ),
         ),
     ] = None,
-    overrides: Annotated[
+    tag: Annotated[
         str | None,
-        Parameter(help=("Replay overrides as a JSON object with `checkpoint.*` keys.")),
+        Parameter(help="Tag to apply to replay children."),
+    ] = None,
+    wait: Annotated[
+        bool | None,
+        Parameter(help="Block until replay children complete."),
+    ] = None,
+    on_error: Annotated[
+        Literal["collect", "fail"] | None,
+        Parameter(help="Whether to collect or fail on per-parent replay errors."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Replay an execution from a checkpoint boundary."""
+    """Replay one or more executions from a checkpoint cut point."""
     command = "executions.replay"
     output_format = _resolve_output_format(output)
 
-    def _replay_execution() -> Execution:
-        flow_inputs = _parse_json_object(args, option_name="--args")
-        parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
+    def _resolve_exec_ids() -> list[str]:
+        positional_ids = [item.strip() for item in (exec_ids or []) if item.strip()]
+        file_ids = _load_replay_exec_ids(ids_file) if ids_file else []
+        combined_ids = [*positional_ids, *file_ids]
+        if not combined_ids:
+            raise KitaruUsageError("Provide at least one execution ID or `--ids-file`.")
+        return combined_ids
+
+    def _replay_execution() -> Any:
+        resolved_exec_ids = _resolve_exec_ids()
+        parsed_skip = (
+            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
+        )
         return (
             cli_dependencies()
             .kitaru_client()
             .executions.replay(
-                exec_id,
-                from_=from_,
-                overrides=parsed_overrides or None,
-                **flow_inputs,
+                resolved_exec_ids,
+                at=at,
+                flow_overrides=_parse_json_object(
+                    flow_overrides, option_name="--flow-overrides"
+                )
+                or None,
+                checkpoint_overrides=_parse_json_object(
+                    checkpoint_overrides, option_name="--checkpoint-overrides"
+                )
+                or None,
+                invocation_overrides=_parse_json_object(
+                    invocation_overrides, option_name="--invocation-overrides"
+                )
+                or None,
+                skip=parsed_skip,
+                tag=tag,
+                wait=wait,
+                on_error=on_error,
             )
         )
 
-    execution = run_with_cli_error_boundary(
+    submission = run_with_cli_error_boundary(
         _replay_execution,
         command=command,
         output=output_format,
@@ -1350,13 +1463,38 @@ def replay_(
     )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        payload = submission.to_json()
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    summary = submission.summary
+    results = submission.results
+    failures = submission.failures
+    skipped_rows = submission.skipped
+    if len(results) == 1 and not failures and not skipped_rows:
+        row = results[0]
+        _print_success(
+            f"Replayed execution: {row.replay_exec_id}",
+            detail=f"Status: {row.status}",
+        )
+        compare_url = row.compare_url or submission.compare_url
+        if compare_url:
+            print("\nCompare original vs replay:")
+            print(f"  {compare_url}")
         return
 
     _print_success(
-        f"Replayed execution: {execution.exec_id}",
-        detail=f"Status: {execution.status.value}",
+        "Replay submission complete",
+        detail=(
+            f"{summary.submitted} submitted, "
+            f"{summary.completed} completed, "
+            f"{summary.failed} failed, "
+            f"{summary.skipped} skipped."
+        ),
     )
+    if submission.compare_url:
+        print("\nCompare replay batch:")
+        print(f"  {submission.compare_url}")
 
 
 @executions_app.command
@@ -1440,4 +1578,171 @@ def cancel_(
     _print_success(
         f"Cancelled execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
+def diff_(
+    original: Annotated[
+        str,
+        Parameter(help="Original execution ID."),
+    ],
+    *executions: Annotated[
+        str,
+        Parameter(help="Optional replay execution IDs to compare."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Compare an original execution against replay executions."""
+    from kitaru.diff import diff, serialize_execution_diff
+
+    command = "executions.diff"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff(original, *executions)
+        return serialize_execution_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    compared_count = len(payload.get("compared", []))
+    _print_success(
+        f"Diff for {original}",
+        detail=f"Compared against {compared_count} replay execution(s).",
+    )
+    for url in payload.get("urls", []):
+        print(f"  ui: {url}")
+
+
+@executions_app.command(name="diff-matrix")
+def diff_matrix_(
+    *exec_ids: Annotated[
+        str,
+        Parameter(help="Original execution IDs to diff as a matrix."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Diff many original executions against their auto-discovered replays."""
+    from kitaru.diff import diff_cohort, serialize_cohort_diff
+
+    command = "executions.diff_matrix"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff_cohort(list(exec_ids))
+        return serialize_cohort_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    row_count = len(payload.get("rows", []))
+    _print_success(
+        "Diff matrix complete",
+        detail=f"Compared {row_count} original execution(s).",
+    )
+
+
+@executions_app.command
+def cohort_(
+    *,
+    flow: Annotated[str, Parameter(help="Flow name to select executions from.")],
+    at: Annotated[
+        str,
+        Parameter(help="Replay anchor checkpoint used for pre-filtering."),
+    ],
+    deployment: Annotated[
+        str | None,
+        Parameter(help="Deployment tag pin (for example prod)."),
+    ] = None,
+    deployment_version: Annotated[
+        int | None,
+        Parameter(help="Deployment version pin."),
+    ] = None,
+    order_by: Annotated[
+        str,
+        Parameter(help="Sort field; prefix with '-' for descending."),
+    ] = "-started_at",
+    limit: Annotated[int, Parameter(help="Maximum executions to return.")] = 50,
+    since: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/after this ISO date/time."),
+    ] = None,
+    until: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/before this ISO date/time."),
+    ] = None,
+    max_scan: Annotated[
+        int,
+        Parameter(help="Maximum executions to inspect while resolving."),
+    ] = 500,
+    include_failed: Annotated[
+        bool,
+        Parameter(help="Include failed executions in addition to completed."),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Resolve a cohort of original executions (dry-run selection only).
+
+    Use ``executions cohort -o json`` and ``executions replay --ids-file`` to
+    review selection before submitting replay work.
+    """
+    command = "executions.cohort"
+    output_format = _resolve_output_format(output)
+    status_filter: str | list[str] = (
+        ["completed", "failed"] if include_failed else "completed"
+    )
+
+    def _resolve_cohort() -> dict[str, Any]:
+        cohort_result = (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        return cohort_result.to_json()
+
+    payload = run_with_cli_error_boundary(
+        _resolve_cohort,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    matched = payload.get("matched", 0)
+    _print_success(
+        "Cohort resolved",
+        detail=(
+            f"{matched} execution(s) selected (scanned {payload.get('scanned', 0)})."
+        ),
     )

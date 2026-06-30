@@ -436,32 +436,116 @@ def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
 
 @tracked_mcp_tool
 def kitaru_executions_replay(
-    exec_id: str,
-    from_: str,
-    overrides: dict[str, Any] | None = None,
-    flow_inputs: dict[str, Any] | None = None,
+    exec_ids: list[str],
+    at: str,
+    flow_overrides: dict[str, Any] | None = None,
+    checkpoint_overrides: dict[str, Any] | None = None,
+    invocation_overrides: dict[str, Any] | None = None,
+    skip: list[str] | None = None,
+    tag: str | None = None,
+    wait: bool | None = None,
+    on_error: Literal["fail", "collect"] | None = None,
 ) -> dict[str, Any]:
-    """Replay an execution and return structured replay details."""
+    """Replay explicit executions and return the replay submission JSON."""
 
     def _replay_execution() -> dict[str, Any]:
-        replay_inputs = execution_interface.ensure_inputs_object(
-            flow_inputs,
-            input_label="`flow_inputs`",
+        submission = client_api.KitaruClient().executions.replay(
+            exec_ids,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag=tag,
+            wait=wait,
+            on_error=on_error,
         )
-        execution = client_api.KitaruClient().executions.replay(
-            exec_id,
-            from_=from_,
-            overrides=overrides,
-            **replay_inputs,
-        )
-
-        return {
-            "available": True,
-            "operation": "replay",
-            "execution": inspection.serialize_execution(execution),
-        }
+        return submission.to_json()
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_executions_cohort(
+    flow: str,
+    at: str,
+    deployment: str | None = None,
+    deployment_version: int | None = None,
+    order_by: str = "-started_at",
+    limit: int = 50,
+    since: str | None = None,
+    until: str | None = None,
+    max_scan: int = 500,
+    include_failed: bool = False,
+) -> dict[str, Any]:
+    """Resolve a cohort of original executions for batch replay."""
+
+    def _resolve_cohort() -> dict[str, Any]:
+        status_filter: str | list[str] = (
+            ["completed", "failed"] if include_failed else "completed"
+        )
+        result = (
+            client_api.KitaruClient()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        return {
+            "available": True,
+            "operation": "cohort",
+            "cohort": result.to_json(),
+        }
+
+    return run_with_mcp_error_boundary(_resolve_cohort)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff(
+    original: str,
+    executions: list[str] | None = None,
+) -> dict[str, Any]:
+    """Compare an original execution against replay executions."""
+
+    def _diff() -> dict[str, Any]:
+        from kitaru.diff import diff, serialize_execution_diff
+
+        compared = executions or ()
+        result = diff(original, *compared)
+        return {
+            "available": True,
+            "operation": "diff",
+            "diff": serialize_execution_diff(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff_matrix(
+    exec_ids: list[str],
+) -> dict[str, Any]:
+    """Diff many original executions against their auto-discovered replays."""
+
+    def _diff_matrix() -> dict[str, Any]:
+        from kitaru.diff import diff_matrix, serialize_diff_matrix
+
+        result = diff_matrix(exec_ids)
+        return {
+            "available": True,
+            "operation": "diff_matrix",
+            "diff_matrix": serialize_diff_matrix(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff_matrix)
 
 
 @tracked_mcp_tool

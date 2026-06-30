@@ -59,17 +59,19 @@ if __name__ == "__main__":
     # Run, then replay from a checkpoint with one input changed.
     run = research_agent.run(topic="Why do agents need durable execution?").wait()
 
-    baseline = research_agent.replay(run.exec_id, from_="draft_report")
+    baseline = research_agent.replay(run.exec_id, at="draft_report")
     variant = research_agent.replay(
-        run.exec_id, from_="draft_report", model="anthropic/claude-opus-4"
+        run.exec_id,
+        at="draft_report",
+        flow_overrides={"model": "anthropic/claude-opus-4"},
     )
     # baseline reproduces the original; diff variant against it to isolate your change.
 ```
 
 `run(...)` returns a handle; `.wait()` blocks for the result and exposes
-`.exec_id`. `replay(exec_id, from_="<checkpoint>", **overrides)` re-executes from
-that checkpoint, overriding flow inputs such as the model or prompt profile. The
-same loop is available over the [CLI](https://sdkdocs.kitaru.ai) and the
+`.exec_id`. `replay(exec_id, at="<checkpoint>", flow_overrides={...})`
+re-executes from that checkpoint, overriding flow inputs such as the model or
+prompt profile. The same loop is available over the [CLI](https://sdkdocs.kitaru.ai) and the
 [MCP server](agent-native/mcp-server.md) so a coding agent can drive it.
 
 See the [Quickstart](getting-started/quickstart.md) to install and run this
@@ -99,8 +101,8 @@ replayable.
 * **Replay and override:** Re-execute any run from any checkpoint — to recover
   from a failure, or with [overrides](guides/replay-and-overrides.md) (a
   different model or parameter) to isolate the effect of a change before you ship
-  it. Per-tool-call mocks (force a specific tool call to return a fake value or
-  fail) are on the roadmap, not yet shipped.
+  it. Use invocation overrides when you need to change one recorded checkpoint,
+  tool, or model call instead of every call with the same checkpoint name.
 * **Durable execution:** Wrap steps in [`@checkpoint`](concepts/checkpoints.md)
   and your agent picks up where it left off without re-running expensive work
 * **Wait and resume:** Add [`kitaru.wait()`](guides/wait-and-resume.md) and let

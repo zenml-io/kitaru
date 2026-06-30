@@ -38,7 +38,14 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.logging import log
-from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
+from kitaru.replay_context import resolve_model_override
+from kitaru.runtime import (
+    _get_current_checkpoint_id,
+    _get_current_checkpoint_name,
+    _is_inside_checkpoint,
+    _is_inside_flow,
+    _next_llm_call_name,
+)
 from kitaru.secrets import _read_secret_values
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
@@ -873,6 +880,14 @@ def _track_llm_call_analytics(
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
+    model_override = resolve_model_override(
+        request.call_name,
+        _get_current_checkpoint_name(),
+        _get_current_checkpoint_id(),
+    )
+    if model_override:
+        request = request.model_copy(update={"model": model_override})
+
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from collections import namedtuple
@@ -48,6 +49,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     _FLOW_RESULT_ARTIFACT_NAME,
+    _FLOW_RESULT_REF_METADATA_KEY,
     _FLOW_RESULT_ROLE_METADATA_KEY,
     _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
     _FLOW_RESULT_TUPLE_METADATA_MARKER,
@@ -71,6 +73,11 @@ from kitaru.flow import (
 )
 from kitaru.inspection import ActiveConfigSelectionProvenance
 from kitaru.replay import ReplayPlan
+from kitaru.replay_context import (
+    KITARU_REPLAY_CONTEXT_ENV,
+    ReplayRuntimeContext,
+    get_replay_runtime_context,
+)
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
 
@@ -189,6 +196,7 @@ class _DummyRun:
         self.start_time = start_time
         self.end_time = end_time
         self.status_reason = status_reason
+        self.run_metadata: dict[str, object] = {}
         self.exception_info = (
             SimpleNamespace(traceback=traceback) if traceback else None
         )
@@ -2721,6 +2729,10 @@ def test_run_logs_kitaru_native_execution_url() -> None:
             "kitaru.flow.resolve_connection_config",
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
         ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
         patch("kitaru.flow.logger.info") as logger_info_mock,
@@ -2773,6 +2785,7 @@ def test_replay_translates_active_stack_hydration_import_error_before_replay() -
         steps_to_skip={"fetch"},
         input_overrides={},
         step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
     )
     old_stack_id = uuid4()
     client = _ClientWithMissingStackDependency(old_stack_id=old_stack_id)
@@ -2793,7 +2806,7 @@ def test_replay_translates_active_stack_hydration_import_error_before_replay() -
         pytest.raises(KitaruStackIntegrationDependencyError) as exc_info,
     ):
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write", stack="prod")
+        wrapped.replay(str(source_run.id), at="write", stack="prod", wait=False)
 
     message = str(exc_info.value)
     assert "Cannot submit this Kitaru flow" in message
@@ -2827,6 +2840,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         steps_to_skip={"fetch"},
         input_overrides={"topic": "new topic"},
         step_input_overrides={"write": {"research": "edited"}},
+        runtime_context=ReplayRuntimeContext(at="write"),
     )
 
     with (
@@ -2848,14 +2862,15 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         client_instance.get_pipeline_run.return_value = source_run
 
         wrapped = flow(lambda topic: topic)
-        handle = wrapped.replay(
+        submission = wrapped.replay(
             str(source_run.id),
-            from_="write",
-            topic="new topic",
-            overrides={"checkpoint.research": "edited"},
+            at="write",
+            flow_overrides={"topic": "new topic"},
+            invocation_overrides={"research": {"output": "edited"}},
+            wait=False,
         )
 
-    assert isinstance(handle, FlowHandle)
+    assert submission.results[0].replay_exec_id == str(replayed_run.id)
     configured_pipeline.replay.assert_called_once_with(
         pipeline_run=source_run.id,
         skip={"fetch"},
@@ -2867,12 +2882,73 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     persist_mock.assert_called_once()
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
     build_frozen_spec_call = base_pipeline.with_options.call_args
-    assert build_frozen_spec_call.kwargs["settings"] == {
-        "docker": DockerSettings(
-            requirements=["kitaru"],
-            environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
-        )
-    }
+    docker_settings = build_frozen_spec_call.kwargs["settings"]["docker"]
+    assert docker_settings.requirements == ["kitaru"]
+    assert (
+        docker_settings.environment[KITARU_MODEL_REGISTRY_ENV]
+        == _empty_registry_payload()
+    )
+    assert "KITARU_REPLAY_CONTEXT" in docker_settings.environment
+
+
+def test_replay_sets_process_runtime_context_during_local_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    runtime_context = ReplayRuntimeContext(
+        at="lookup_policy_tool",
+        code_overrides={"lookup_policy_tool": "tests._replay_tool_stub.lookup_policy"},
+    )
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=runtime_context,
+    )
+
+    monkeypatch.delenv(KITARU_REPLAY_CONTEXT_ENV, raising=False)
+    get_replay_runtime_context.cache_clear()
+    assert get_replay_runtime_context() is None
+
+    def replay_side_effect(**_kwargs: Any) -> _DummyRun:
+        raw_context = os.environ[KITARU_REPLAY_CONTEXT_ENV]
+        parsed_context = ReplayRuntimeContext.from_json(raw_context)
+        assert parsed_context.code_overrides == runtime_context.code_overrides
+        cached_context = get_replay_runtime_context()
+        assert cached_context is not None
+        assert cached_context.code_overrides == runtime_context.code_overrides
+        return replayed_run
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.side_effect = replay_side_effect
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), at="lookup_policy_tool", wait=False)
+
+    assert KITARU_REPLAY_CONTEXT_ENV not in os.environ
+    assert get_replay_runtime_context() is None
 
 
 def test_replay_logs_kitaru_native_execution_url() -> None:
@@ -2895,6 +2971,7 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
         steps_to_skip=set(),
         input_overrides={},
         step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
     )
 
     with (
@@ -2908,6 +2985,10 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
             "kitaru.flow.resolve_connection_config",
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
         ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+        ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
@@ -2919,7 +3000,7 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
             id="default-stack-id",
         )
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     logger_info_mock.assert_any_call(
         "Execution URL: %s",
@@ -2944,6 +3025,7 @@ def test_replay_forwards_secret_environment_from_to_with_options() -> None:
         steps_to_skip=set(),
         input_overrides={},
         step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
     )
 
     resolved = _resolved_execution(
@@ -2965,14 +3047,21 @@ def test_replay_forwards_secret_environment_from_to_with_options() -> None:
         client_instance.get_pipeline_run.return_value = source_run
 
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write", topic="t")
+        wrapped.replay(
+            str(source_run.id),
+            at="write",
+            flow_overrides={"topic": "t"},
+            wait=False,
+        )
 
     call_kwargs = base_pipeline.with_options.call_args.kwargs
     assert call_kwargs["secrets"] == ["openai-creds"]
     docker_settings = call_kwargs["settings"]["docker"]
-    assert docker_settings.environment == {
-        KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload(),
-    }
+    assert (
+        docker_settings.environment[KITARU_MODEL_REGISTRY_ENV]
+        == _empty_registry_payload()
+    )
+    assert "KITARU_REPLAY_CONTEXT" in docker_settings.environment
 
 
 def test_replay_resolves_config_with_invocation_stack_override() -> None:
@@ -3002,6 +3091,7 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
     ):
@@ -3010,7 +3100,12 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
         client_instance.get_pipeline_run.return_value = source_run
 
         wrapped = flow(stack="decorator-stack")(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write", stack="invocation-stack")
+        wrapped.replay(
+            str(source_run.id),
+            at="write",
+            stack="invocation-stack",
+            wait=False,
+        )
 
     resolve_call = resolve_execution_config_mock.call_args.kwargs
     assert resolve_call["decorator_overrides"].stack == "decorator-stack"
@@ -3032,7 +3127,7 @@ def test_replay_validates_connection_before_loading_source_run() -> None:
         pytest.raises(KitaruUsageError, match="KITARU_PROJECT"),
     ):
         wrapped = flow(lambda topic: topic)
-        wrapped.replay("run-123", from_="write")
+        wrapped.replay("run-123", at="write", wait=False)
 
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     client_cls.return_value.get_pipeline_run.assert_not_called()
@@ -3061,6 +3156,7 @@ def test_replay_fails_closed_before_submitting_on_implicit_default_fallback() ->
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch(
@@ -3079,7 +3175,7 @@ def test_replay_fails_closed_before_submitting_on_implicit_default_fallback() ->
             id="default-stack-id",
         )
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     build_spec_mock.assert_not_called()
     base_pipeline.with_options.assert_not_called()
@@ -3353,6 +3449,58 @@ def test_flow_handle_get_returns_none_when_no_outputs() -> None:
         result = handle.get()
 
     assert result is None
+
+
+def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
+    """Ambiguous non-result terminals -> recover the value via the linked artifact.
+
+    An adapter can create several non-result model/tool checkpoints, so terminal
+    inference is ambiguous. The flow's real return value is recovered from the
+    ``kitaru_flow_result`` artifact linked in execution metadata.
+    """
+    non_candidate = {"kitaru": {"flow_result_candidate": False}}
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput("model_a", "output", "resp-a", config_extra=non_candidate),
+            _DummyOutput("model_b", "output", "resp-b", config_extra=non_candidate),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = SimpleNamespace(
+        load=lambda: {"answer": "the real return value"}
+    )
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == {"answer": "the real return value"}
+    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+
+
+def test_flow_result_ambiguous_terminals_still_raise_without_reference() -> None:
+    """With no linked result, ambiguous terminals raise as before (no regression)."""
+    non_candidate = {"kitaru": {"flow_result_candidate": False}}
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput("model_a", "output", "resp-a", config_extra=non_candidate),
+            _DummyOutput("model_b", "output", "resp-b", config_extra=non_candidate),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {}
+
+    with (
+        patch("kitaru.flow.Client", return_value=MagicMock()),
+        pytest.raises(KitaruRuntimeError) as exc_info,
+    ):
+        _extract_flow_result(_as_pipeline_run(run))
+
+    assert _is_multiple_terminal_steps_output_error(exc_info.value)
 
 
 def test_flow_handle_get_falls_back_to_terminal_step_outputs() -> None:
@@ -4032,19 +4180,20 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch("kitaru.flow.track") as track_mock,
     ):
         client_cls.return_value.get_pipeline_run.return_value = source_run
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
     assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
     assert requested_call.args[1]["replay_path"] == "flow_wrapper"
-    assert requested_call.args[1]["from_checkpoint"] == "write"
+    assert requested_call.args[1]["at_checkpoint"] == "write"
     assert requested_call.args[1]["kitaru_deployment_type"] == "kubernetes"
     assert requested_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
@@ -4091,13 +4240,13 @@ def test_replay_emits_immediate_terminal_event_when_replayed_run_completed() -> 
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda topic: topic)
-        handle = wrapped.replay(str(source_run.id), from_="write")
-        handle.get()
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     events = [call_args.args[0] for call_args in track_mock.call_args_list]
     assert events == [
@@ -4146,13 +4295,14 @@ def test_replay_emits_immediate_terminal_event_when_replayed_run_failed() -> Non
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch("kitaru.flow.track") as track_mock,
     ):
         client_cls.return_value.get_pipeline_run.return_value = source_run
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     events = [call_args.args[0] for call_args in track_mock.call_args_list]
     assert events == [
@@ -4195,6 +4345,7 @@ def test_replay_failure_emits_requested_then_failed_events() -> None:
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch("kitaru.flow.track") as track_mock,
@@ -4202,7 +4353,7 @@ def test_replay_failure_emits_requested_then_failed_events() -> None:
     ):
         client_cls.return_value.get_pipeline_run.return_value = source_run
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
@@ -4247,6 +4398,7 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
                 steps_to_skip=set(),
                 input_overrides={},
                 step_input_overrides={},
+                runtime_context=ReplayRuntimeContext(at="write"),
             ),
         ),
         patch("kitaru.flow.track") as track_mock,
@@ -4254,7 +4406,7 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
     ):
         client_cls.return_value.get_pipeline_run.return_value = source_run
         wrapped = flow(lambda topic: topic)
-        wrapped.replay(str(source_run.id), from_="write")
+        wrapped.replay(str(source_run.id), at="write", wait=False)
 
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
@@ -4659,3 +4811,92 @@ def test_flow_handle_wait_includes_retry_hint_on_failure() -> None:
 
     message = str(exc_info.value)
     assert f"kitaru executions retry {run_id}" in message
+
+
+def _replay_many_step(*, name: str, invocation_id: str) -> SimpleNamespace:
+    started = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    return SimpleNamespace(
+        id=uuid4(),
+        name=name,
+        start_time=started,
+        spec=SimpleNamespace(invocation_id=invocation_id, upstream_steps=[]),
+    )
+
+
+def test_flow_definition_does_not_expose_replay_many() -> None:
+    wrapped = kitaru.flow(lambda topic: topic)
+
+    assert not hasattr(wrapped, "replay_many")
+
+
+def test_unified_replay_single_defaults_to_wait_and_fail() -> None:
+    run = SimpleNamespace(
+        id="run-1",
+        steps={"write": _replay_many_step(name="write", invocation_id="write")},
+    )
+    handle = MagicMock(exec_id="replay-1")
+    plan = ReplayPlan(
+        original_run_id="run-1",
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+    wrapped = kitaru.flow(lambda topic: topic)
+    with (
+        patch("kitaru.flow.Client") as client_cls,
+        patch.object(wrapped, "_replay_one_handle", return_value=(handle, run, plan)),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = run
+        submission = wrapped.replay("run-1", at="write")
+
+    handle.wait.assert_called_once()
+    assert submission.wait is True
+    assert submission.results[0].status == "completed"
+
+
+def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None:
+    run_with_at = SimpleNamespace(
+        id="run-with",
+        steps={"write": _replay_many_step(name="write", invocation_id="write")},
+    )
+    run_without_at = SimpleNamespace(
+        id="run-without",
+        steps={"fetch": _replay_many_step(name="fetch", invocation_id="fetch")},
+    )
+    handle = MagicMock(exec_id="replay-1")
+    plan = ReplayPlan(
+        original_run_id="run-with",
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+    wrapped = kitaru.flow(lambda topic: topic)
+    with (
+        patch("kitaru.flow.Client") as client_cls,
+        patch.object(
+            wrapped,
+            "_replay_one_handle",
+            return_value=(handle, run_with_at, plan),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+    ):
+
+        def _get_pipeline_run(name_id_or_prefix, **_):
+            return {
+                "exec-with": run_with_at,
+                "exec-without": run_without_at,
+            }[name_id_or_prefix]
+
+        client_cls.return_value.get_pipeline_run.side_effect = _get_pipeline_run
+        submission = wrapped.replay(["exec-with", "exec-without"], at="write")
+
+    handle.wait.assert_not_called()
+    assert submission.wait is False
+    assert len(submission.results) == 1
+    assert len(submission.skipped) == 1
+    assert submission.skipped[0].original_exec_ref == "exec-without"
