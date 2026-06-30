@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, direct and persisted-workflow integration examples, isolated no-dev contract/live smoke paths, explicit-wrapper `calls` mode, and tool-confirmation resume helpers.
 - Added public replay-mode detection helpers: `kitaru.is_replay()`, `kitaru.get_replay_runtime_context()`, and `kitaru.ReplayRuntimeContext`, so side-effectful checkpoints can guard behavior during replay.
 - Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
 - Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
@@ -23,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Breaking:** Redesigned replay API around explicit override groups: `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides`. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now use the same `ReplaySubmission` result model. Batch replay now uses multi-ID replay instead of the removed prototype `replay_many` / `executions replay-many` paths, and diff cohorts were renamed to `diff_matrix`, `kitaru executions diff-matrix`, and `kitaru_executions_diff_matrix`.
+- Clarified Google ADK MCP docs around the safe subset: Kitaru can checkpoint a replay-safe ADK `BaseTool`-like object wrapped with `KitaruADKTool`, but it does not restore ADK MCP processes, sessions, or hidden server state.
+- Refreshed the Google ADK dependency note: `google-adk` still stays out of the normal local/dev project environment, even though a 2026-06-29 direct resolver probe with `zenml[server]` now succeeds, until the full local server path is certified with the newer FastAPI/Starlette stack.
 
 ### Fixed
 - Kitaru terminal logs now rewrite ZenML's named pipeline completion message to ``Flow `...` completed successfully.``, so ``Pipeline `...` completed successfully.`` no longer leaks into flow output.
@@ -36,13 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
 - Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
 - `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
+- Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.
+- Updated LLM usage summaries so Kitaru normally writes them when executions finish, while `FlowHandle.wait()` and `.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written.
 
 ### Security
 - Raised the `pydantic-ai-slim` lower bound and lockfile version to clear CVE-2026-48782.
-
-### Fixed
-- Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.
-- Updated LLM usage summaries so Kitaru normally writes them when executions finish, while `FlowHandle.wait()` and `.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written.
 
 ## [0.18.0] - 2026-06-25
 

@@ -39,7 +39,6 @@ _LIVE_PROVIDER_MARKERS = (
     "live_anthropic",
     "live_gemini",
 )
-
 _EARLY_TEST_ENV_VARS = (
     "KITARU_SERVER_URL",
     "KITARU_AUTH_TOKEN",
@@ -81,6 +80,14 @@ if _SRC_PATH not in sys.path:
     sys.path.insert(0, _SRC_PATH)
 
 from kitaru._env import _reset_applied as _reset_env_applied
+from kitaru._google_auth_env import (
+    CLOUD_LOCATION_ENV,
+    CLOUD_PROJECT_ENV,
+    GEMINI_API_KEY_ENV,
+    GOOGLE_API_KEY_ENV,
+    VERTEXAI_ENV,
+    has_google_live_auth_env,
+)
 from kitaru.config import (
     KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
@@ -191,29 +198,35 @@ def _is_live_provider_test(item: pytest.Item) -> bool:
     )
 
 
-def _required_live_env_groups(item: pytest.Item) -> list[tuple[str, ...]]:
-    required: list[tuple[str, ...]] = []
-    if item.get_closest_marker("live_openai") is not None:
-        required.append(("OPENAI_API_KEY",))
-    if item.get_closest_marker("live_anthropic") is not None:
-        required.append(("ANTHROPIC_API_KEY",))
-    if item.get_closest_marker("live_gemini") is not None:
-        required.append(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
-    return required
+def _missing_live_provider_auth_messages(item: pytest.Item) -> list[str]:
+    missing: list[str] = []
+    if item.get_closest_marker("live_openai") is not None and not os.environ.get(
+        "OPENAI_API_KEY"
+    ):
+        missing.append("OPENAI_API_KEY")
+    if item.get_closest_marker("live_anthropic") is not None and not os.environ.get(
+        "ANTHROPIC_API_KEY"
+    ):
+        missing.append("ANTHROPIC_API_KEY")
+    if (
+        item.get_closest_marker("live_gemini") is not None
+        and not has_google_live_auth_env()
+    ):
+        missing.append(
+            f"{GEMINI_API_KEY_ENV} or {GOOGLE_API_KEY_ENV}; or "
+            f"{VERTEXAI_ENV}=true plus {CLOUD_PROJECT_ENV} and "
+            f"{CLOUD_LOCATION_ENV}"
+        )
+    return missing
 
 
 def _skip_if_live_provider_keys_are_missing(item: pytest.Item) -> None:
-    missing_groups = [
-        env_group
-        for env_group in _required_live_env_groups(item)
-        if not any(os.environ.get(env_name) for env_name in env_group)
-    ]
-    if not missing_groups:
+    missing = _missing_live_provider_auth_messages(item)
+    if not missing:
         return
 
-    formatted = [" or ".join(env_group) for env_group in missing_groups]
     pytest.skip(
-        "live provider test requires environment variable(s): " + "; ".join(formatted)
+        "live provider test requires environment variable(s): " + "; ".join(missing)
     )
 
 

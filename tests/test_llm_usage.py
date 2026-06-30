@@ -72,6 +72,38 @@ def test_genai_prices_helper_estimates_gemini_with_normalized_usage(
     ]
 
 
+def test_genai_prices_helper_resolves_google_flash_latest_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_fake_genai_calc_price(monkeypatch, total_price=0.0195)
+    warnings: list[str] = []
+
+    metadata = estimate_genai_prices_cost(
+        provider="google_gemini",
+        model="gemini-flash-latest",
+        usage={"input_tokens": 100, "output_tokens": 50},
+        warnings=warnings,
+        adapter_name="Google ADK",
+    )
+
+    assert metadata.estimated_cost_usd == 0.0195
+    assert metadata.cost_source == "calculator"
+    assert metadata.cost_source_label == "genai-prices"
+    assert warnings == []
+    assert calls == [
+        {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "gemini-3.5-flash",
+            "provider_id": "google",
+        }
+    ]
+
+
 def test_genai_prices_helper_includes_anthropic_cache_buckets_in_pricing_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

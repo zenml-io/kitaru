@@ -14,7 +14,7 @@
 #                        Mark a provider area as required for this release.
 #                        Repeatable. Areas: openai, anthropic, gemini-model,
 #                        gemini-sandbox-function, gemini-antigravity,
-#                        research-bot
+#                        google-adk, research-bot
 #   --json-out PATH      Write structured smoke results to PATH
 #   -h, --help           Show this help message
 
@@ -41,7 +41,7 @@ Options:
                        Mark a provider area as required for this release.
                        Repeatable. Areas: openai, anthropic, gemini-model,
                        gemini-sandbox-function, gemini-antigravity,
-                       research-bot
+                       google-adk, research-bot
   --json-out PATH      Write structured smoke results to PATH
   -h, --help           Show this help message
 EOF
@@ -111,6 +111,7 @@ payload = {
             "gemini_api_key": False,
             "gemini_vertex": False,
             "gemini_any": False,
+            "google_adk_live_opt_in": False,
         },
         "required_area_status": {},
     },
@@ -141,16 +142,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --required-provider-area)
             if [[ $# -lt 2 ]]; then
-                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
+                echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, google-adk, research-bot" >&2
                 write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--required-provider-area requires a value" "$RELEASE_MODE" || true
                 exit 1
             fi
             case "$2" in
-                openai|anthropic|gemini-model|gemini-sandbox-function|gemini-antigravity|research-bot)
+                openai|anthropic|gemini-model|gemini-sandbox-function|gemini-antigravity|google-adk|research-bot)
                     REQUIRED_PROVIDER_AREAS+=("$2")
                     ;;
                 *)
-                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, research-bot" >&2
+                    echo "Error: unsupported provider area '$2'. Expected one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, google-adk, research-bot" >&2
                     write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "unsupported provider area '$2'" "$RELEASE_MODE" || true
                     exit 1
                     ;;
@@ -190,6 +191,7 @@ CURRENT_SECTION="Preflight"
 RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
 GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
+GOOGLE_ADK_SMOKE_ENV=""
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -342,8 +344,8 @@ write_json_results() {
     python3 - "$RESULT_RECORDS_FILE" "$JSON_OUT" \
         "$RELEASE_MODE" "$branch" "$sha" "$TIMEOUT_CMD" \
         "$HAS_OPENAI" "$HAS_CLAUDE_AGENT_SDK" "$HAS_GEMINI_API_KEY" \
-        "$HAS_GEMINI_VERTEX" "$HAS_GEMINI" "$RECORDING_FAILED" \
-        "${REQUIRED_PROVIDER_AREAS[*]-}" <<'PY'
+        "$HAS_GEMINI_VERTEX" "$HAS_GEMINI" "${KITARU_SMOKE_GOOGLE_ADK:-}" \
+        "$RECORDING_FAILED" "${REQUIRED_PROVIDER_AREAS[*]-}" <<'PY'
 import json
 import sys
 
@@ -359,6 +361,7 @@ import sys
     has_gemini_api_key,
     has_gemini_vertex,
     has_gemini,
+    google_adk_live_opt_in,
     recording_failed,
     required_provider_areas,
 ) = sys.argv[1:]
@@ -404,6 +407,7 @@ attestation = {
         "gemini_api_key": has_gemini_api_key == "true",
         "gemini_vertex": has_gemini_vertex == "true",
         "gemini_any": has_gemini == "true",
+        "google_adk_live_opt_in": google_adk_live_opt_in == "1",
     },
     "required_area_status": {},
 }
@@ -599,6 +603,9 @@ cleanup() {
         timed 60 $UV_RUN kitaru stack delete \
             "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" --recursive &>/dev/null || true
     fi
+    if [[ -n "${GOOGLE_ADK_SMOKE_ENV:-}" ]]; then
+        rm -rf "$GOOGLE_ADK_SMOKE_ENV"
+    fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
     elif [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
@@ -717,6 +724,35 @@ run_test "Claude Agent SDK sandbox MCP API imports" \
     $UV_RUN python -c 'from kitaru.adapters.claude_agent_sdk import DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS, KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME, create_kitaru_sandbox_mcp_server; assert callable(create_kitaru_sandbox_mcp_server); assert DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS > 0; assert KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME == "mcp__kitaru__run_command"'
 run_test "OpenAI Agents stream API imports" \
     $UV_RUN python -c 'from kitaru.adapters.openai_agents import OPENAI_STREAM_COMPLETED, OPENAI_STREAM_EVENT, OPENAI_STREAM_EVENT_KINDS, OPENAI_STREAM_FAILED, OPENAI_STREAM_STARTED, OPENAI_STREAM_TERMINAL_EVENT_KINDS, KitaruRunner; assert hasattr(KitaruRunner, "run_stream"); assert hasattr(KitaruRunner, "run_stream_sync"); assert OPENAI_STREAM_STARTED == "openai_agents.stream.started"; assert OPENAI_STREAM_EVENT == "openai_agents.stream.event"; assert OPENAI_STREAM_COMPLETED == "openai_agents.stream.completed"; assert OPENAI_STREAM_FAILED == "openai_agents.stream.failed"; assert OPENAI_STREAM_EVENT_KINDS == (OPENAI_STREAM_STARTED, OPENAI_STREAM_EVENT, OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED); assert OPENAI_STREAM_TERMINAL_EVENT_KINDS == (OPENAI_STREAM_COMPLETED, OPENAI_STREAM_FAILED)'
+
+# ---------------------------------------------------------------------------
+# Google ADK adapter
+# ---------------------------------------------------------------------------
+section_header "Google ADK adapter"
+
+GOOGLE_ADK_SMOKE_ENV=$(mktemp -d "${TMPDIR:-/tmp}/kitaru-google-adk-smoke.XXXXXX")
+run_provider_test "google-adk" "" \
+    "Google ADK installed no-provider contract tests" \
+    timed 180 env \
+        KITARU_REQUIRE_GOOGLE_ADK_CONTRACT=1 \
+        UV_PROJECT_ENVIRONMENT="$GOOGLE_ADK_SMOKE_ENV" \
+        uv run --python "$PY" --no-dev --extra google-adk --with pytest \
+        pytest -o addopts='-vv' \
+            tests/test_google_adk_installed_contract.py \
+            tests/test_google_adk_example.py
+
+if [[ "$HAS_GEMINI_API_KEY" != true ]]; then
+    skip_test "Google ADK live Gemini runner smoke" "GEMINI_API_KEY or GOOGLE_API_KEY not set" "google-adk" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GOOGLE_ADK"
+elif [[ "${KITARU_SMOKE_GOOGLE_ADK:-}" != "1" ]]; then
+    skip_test "Google ADK live Gemini runner smoke" "set KITARU_SMOKE_GOOGLE_ADK=1 to run the isolated Google ADK/Gemini live smoke" "google-adk" "KITARU_SMOKE_GOOGLE_ADK"
+else
+    run_provider_test "google-adk" "GEMINI_API_KEY,GOOGLE_API_KEY,KITARU_SMOKE_GOOGLE_ADK" \
+        "Google ADK live Gemini runner smoke" \
+        timed 180 env \
+            UV_PROJECT_ENVIRONMENT="$GOOGLE_ADK_SMOKE_ENV" \
+            uv run --python "$PY" --no-dev --extra google-adk --with pytest \
+            pytest -o addopts='-vv' tests/live/test_google_adk_provider_core.py -m "live_gemini"
+fi
 
 # ---------------------------------------------------------------------------
 # Clear state
@@ -1267,6 +1303,7 @@ if [[ "$RELEASE_MODE" == true ]]; then
     printf "    Anthropic/Claude credentials: %s\n" "$HAS_CLAUDE_AGENT_SDK"
     printf "    Gemini direct API credentials: %s\n" "$HAS_GEMINI_API_KEY"
     printf "    Gemini Vertex config: %s\n" "$HAS_GEMINI_VERTEX"
+    printf "    Google ADK live opt-in: %s\n" "${KITARU_SMOKE_GOOGLE_ADK:-0}"
     if [[ ${#REQUIRED_PROVIDER_AREAS[@]} -gt 0 ]]; then
         printf "    Required provider areas: %s\n" "${REQUIRED_PROVIDER_AREAS[*]}"
     else

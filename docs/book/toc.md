@@ -28,6 +28,7 @@
 * [OpenAI Agents](adapters/openai-agents.md)
 * [Claude Agent SDK](adapters/claude-agent-sdk.md)
 * [Gemini Interactions](adapters/gemini-interactions.md)
+* [Google ADK](adapters/google-adk.md)
 * [LangGraph](adapters/langgraph.md)
 
 ## Guides

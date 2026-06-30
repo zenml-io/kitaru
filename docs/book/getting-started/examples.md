@@ -32,8 +32,8 @@ source from a saved execution.
 Most examples can be run from the repository root with `uv run python path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 {% hint style="info" %}
-Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK, or
-Gemini Interactions project? See [Agent Skills](../agent-native/claude-code-skill.md)
+Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK,
+Gemini Interactions, or Google ADK project? See [Agent Skills](../agent-native/claude-code-skill.md)
 for migration skills that guide a coding agent through the adapter-specific path.
 {% endhint %}
 
@@ -115,6 +115,8 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability) |
 | `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network previews, streaming mode, and an Antigravity managed-agent path | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
+| `integrations/google_adk_agent/google_adk_adapter.py` | Experimental Google ADK direct runner-call result capture, plus explicit ADK model/tool wrappers in a deterministic local run. Use an isolated no-dev `google-adk` environment. | [Google ADK Adapter](../adapters/google-adk.md) |
+| `integrations/google_adk_agent/google_adk_workflow.py` | Persisted Kitaru flow using ADK calls mode, explicit `KitaruADKModel` / `KitaruADKTool`, deterministic tool-confirmation resume, and structured output. Use an isolated no-dev `google-adk` environment. | [Google ADK Adapter](../adapters/google-adk.md) |
 | `integrations/langgraph_agent/langgraph_adapter.py` | Local `graph_call` interrupt/resume demo, plus OpenAI-backed `calls` mode with LangChain model/tool checkpoints and deterministic local ticket tools | [LangGraph Adapter](../adapters/langgraph.md) |
 | `integrations/langgraph_agent/langgraph_streaming.py` | Watch best-effort `langgraph.stream.*` live events from a local graph-call stream while `.wait()` returns the durable `LangGraphRunResult` | [LangGraph Adapter](../adapters/langgraph.md#graph-call-streaming) |
 
@@ -127,7 +129,10 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 {% hint style="info" %}
 The LLM and most adapter examples require additional dependencies and provider
 API keys. The Gemini Interactions example has `--help` and `--dry-run` paths
-that require no credentials or network. The OpenAI Agents sandbox-tool example
+that require no credentials or network. The Google ADK examples have local
+no-provider paths, but they must run in an isolated no-dev `google-adk` environment
+while local/dev extras remain intentionally blocked.
+The OpenAI Agents sandbox-tool example
 also needs your current stack to have exactly one sandbox component. The LangGraph
 `graph_call` strategy is deterministic and local; the LangGraph `calls` strategy
 requires `langgraph-openai` and `OPENAI_API_KEY`. Check each example's README
@@ -156,8 +161,10 @@ Agent Harness Platform is the recommended starting point for most readers — it
 16. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
 17. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
 18. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
-19. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
-20. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
-21. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-22. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
-23. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.
+19. `integrations/google_adk_agent/google_adk_adapter.py` — [Google ADK Adapter](../adapters/google-adk.md). Run it with isolated `--no-dev --extra google-adk`.
+20. `integrations/google_adk_agent/google_adk_workflow.py` — [Google ADK Adapter](../adapters/google-adk.md). Persisted calls-mode workflow with explicit model/tool checkpoints.
+21. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
+22. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
+23. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
+24. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
+25. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.

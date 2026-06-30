@@ -37,6 +37,15 @@ import threading
 from typing import Any, Literal
 
 from kitaru import checkpoint, flow
+from kitaru._google_auth_env import (
+    CLOUD_LOCATION_ENV,
+    CLOUD_PROJECT_ENV,
+    GEMINI_API_KEY_ENV,
+    GOOGLE_API_KEY_ENV,
+    VERTEXAI_ENV,
+    google_vertex_mode_enabled,
+    require_google_live_auth_env,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.adapters.gemini import (
     GEMINI_STREAM_EVENT_KINDS,
@@ -54,13 +63,6 @@ from kitaru.client import KitaruClient
 from kitaru.config import SandboxCommandResult
 from kitaru.errors import KitaruBackendError, KitaruFeatureNotAvailableError
 
-GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
-GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
-VERTEXAI_ENV = "GOOGLE_GENAI_USE_VERTEXAI"
-CLOUD_PROJECT_ENV = "GOOGLE_CLOUD_PROJECT"
-CLOUD_LOCATION_ENV = "GOOGLE_CLOUD_LOCATION"
-# The google-genai SDK treats these (case-insensitively) as "use Vertex AI".
-_TRUTHY_VALUES = {"1", "true", "yes", "on"}
 DEFAULT_MODEL = "gemini-3.5-flash"
 DEFAULT_MODEL_PROMPT = (
     "In three plain sentences, explain why checkpointing one AI interaction is "
@@ -95,17 +97,11 @@ DEFAULT_PROMPTS_BY_MODE: dict[Mode, str] = {
 
 def _vertex_mode_enabled() -> bool:
     """Vertex AI mode authenticates with ADC instead of an API key."""
-    return os.getenv(VERTEXAI_ENV, "").strip().lower() in _TRUTHY_VALUES
+    return google_vertex_mode_enabled()
 
 
-def _require_vertex_settings() -> None:
-    """Vertex AI supplies credentials via ADC, but still needs project + region."""
-    missing = [
-        name for name in (CLOUD_PROJECT_ENV, CLOUD_LOCATION_ENV) if not os.getenv(name)
-    ]
-    if not missing:
-        return
-    raise SystemExit(
+def _incomplete_vertex_message(missing: tuple[str, ...]) -> str:
+    return (
         f"{VERTEXAI_ENV} is enabled (Vertex AI mode), so no API key is needed, "
         f"but {' and '.join(missing)} must also be set:\n"
         f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
@@ -114,29 +110,28 @@ def _require_vertex_settings() -> None:
     )
 
 
-def _prepare_google_credentials() -> None:
-    """Confirm the SDK can authenticate, via Vertex AI ADC or an API key."""
-    if _vertex_mode_enabled():
-        _require_vertex_settings()
-        return
-    if os.getenv(GEMINI_API_KEY_ENV):
-        return
-    google_api_key = os.getenv(GOOGLE_API_KEY_ENV)
-    if google_api_key:
-        os.environ[GEMINI_API_KEY_ENV] = google_api_key
-        return
-    raise SystemExit(
+def _missing_credentials_message() -> str:
+    return (
         "Missing Google/Gemini credentials.\n"
         "Pick one authentication path before a real run.\n"
         "API key (Gemini Developer API):\n"
-        "  export GEMINI_API_KEY='<your-gemini-api-key>'\n"
-        "  export GOOGLE_API_KEY='<your-google-api-key>'   # alternative name\n"
+        f"  export {GEMINI_API_KEY_ENV}='<your-gemini-api-key>'\n"
+        f"  export {GOOGLE_API_KEY_ENV}='<your-google-api-key>'   # alternative name\n"
         "Application Default Credentials (Vertex AI, no API key):\n"
         f"  export {VERTEXAI_ENV}=true\n"
         f"  export {CLOUD_PROJECT_ENV}='<your-gcp-project-id>'\n"
         f"  export {CLOUD_LOCATION_ENV}='<your-region>'\n"
         "  gcloud auth application-default login\n"
         "Use --dry-run to preview the example without credentials or network."
+    )
+
+
+def _prepare_google_credentials() -> None:
+    """Confirm the SDK can authenticate, via Vertex AI ADC or an API key."""
+    require_google_live_auth_env(
+        alias_direction="google_to_gemini",
+        incomplete_vertex_message=_incomplete_vertex_message,
+        missing_credentials_message=_missing_credentials_message(),
     )
 
 
