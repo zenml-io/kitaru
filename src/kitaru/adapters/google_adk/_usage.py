@@ -25,6 +25,37 @@ _USAGE_FIELD_NAMES = frozenset(
         "tokenUsage",
     }
 )
+_TOKEN_USAGE_KEYS = frozenset(
+    {
+        "input_tokens",
+        "prompt_tokens",
+        "request_tokens",
+        "tokens_input",
+        "input_token_count",
+        "prompt_token_count",
+        "promptTokenCount",
+        "output_tokens",
+        "completion_tokens",
+        "response_tokens",
+        "tokens_output",
+        "output_token_count",
+        "candidates_token_count",
+        "candidatesTokenCount",
+        "total_tokens",
+        "tokens_total",
+        "total_token_count",
+        "totalTokenCount",
+        "cached_input_tokens",
+        "cached_prompt_tokens",
+        "cache_read_tokens",
+        "cache_read_input_tokens",
+        "cached_content_token_count",
+        "cachedContentTokenCount",
+        "reasoning_tokens",
+        "thoughts_token_count",
+        "thoughtsTokenCount",
+    }
+)
 
 
 def _mapping_or_none(value: Any) -> Mapping[str, Any] | None:
@@ -46,13 +77,22 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _usage_token_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in mapping.items()
+        if str(key) in _TOKEN_USAGE_KEYS and _int_or_none(value) is not None
+    }
+
+
 def normalize_adk_usage(value: Any) -> ADKUsageSummary | None:
     """Normalize a Google/ADK usage payload into ``ADKUsageSummary``."""
     mapping = _mapping_or_none(value)
     if not mapping:
         return None
 
-    canonical = token_usage_from_mapping(mapping)
+    usage_mapping = _usage_token_mapping(mapping)
+    canonical = token_usage_from_mapping(usage_mapping)
     usage_data: dict[str, Any] = {
         "input_tokens": canonical.get("input_tokens"),
         "output_tokens": canonical.get("output_tokens"),
@@ -68,8 +108,7 @@ def normalize_adk_usage(value: Any) -> ADKUsageSummary | None:
         usage_data["model_name"] = str(model_name)
     if provider_name is not None:
         usage_data["provider_name"] = str(provider_name)
-    usage_data["raw"] = dict(mapping)
-
+    usage_data["raw"] = usage_mapping or None
     if not any(
         usage_data.get(field) is not None
         for field in (

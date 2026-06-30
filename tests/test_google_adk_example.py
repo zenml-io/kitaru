@@ -2,6 +2,9 @@
 
 import os
 import socket
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +50,22 @@ def test_google_adk_workflow_help_does_not_require_google_adk(
 
     assert exc_info.value.code == 0
     assert "persisted Kitaru workflow" in capsys.readouterr().out
+
+
+def test_google_adk_workflow_help_runs_when_executed_by_path() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "examples/integrations/google_adk_agent/google_adk_workflow.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "persisted Kitaru workflow" in result.stdout
 
 
 def _clear_google_adk_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:

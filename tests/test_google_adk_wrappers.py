@@ -508,6 +508,28 @@ def test_model_wrapper_without_supported_models_returns_empty_list(
     assert wrapped.supported_models() == []
 
 
+def test_usage_extraction_ignores_non_utf8_event_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _adapter, _model_module, _tool_module = _modules(monkeypatch)
+    usage_module = importlib.import_module("kitaru.adapters.google_adk._usage")
+
+    usage = usage_module.usage_from_event(
+        {
+            "usageMetadata": {
+                "promptTokenCount": 1,
+                "candidatesTokenCount": 2,
+            },
+            "opaque_payload": b"\xb8\x00",
+        }
+    )
+
+    assert usage is not None
+    assert usage.input_tokens == 1
+    assert usage.output_tokens == 2
+    assert usage.total_tokens == 3
+
+
 def test_model_wrapper_preserves_sync_live_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

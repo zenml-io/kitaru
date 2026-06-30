@@ -13,16 +13,28 @@ from collections.abc import AsyncIterator, Mapping
 from typing import Any
 from uuid import uuid4
 
-from examples.integrations.google_adk_agent.google_adk_adapter import (
-    DEFAULT_USER_ID,
-    _build_in_memory_runner,
-    _create_runner_session,
-    _function_call_content,
-    _import_adk_module,
-    _load_adk_api,
-    _load_kitaru_adk_adapter,
-    _text_content,
-)
+if __package__:
+    from .google_adk_adapter import (
+        DEFAULT_USER_ID,
+        _build_in_memory_runner,
+        _create_runner_session,
+        _function_call_content,
+        _import_adk_module,
+        _load_adk_api,
+        _load_kitaru_adk_adapter,
+        _text_content,
+    )
+else:
+    from google_adk_adapter import (
+        DEFAULT_USER_ID,
+        _build_in_memory_runner,
+        _create_runner_session,
+        _function_call_content,
+        _import_adk_module,
+        _load_adk_api,
+        _load_kitaru_adk_adapter,
+        _text_content,
+    )
 from kitaru import flow
 
 DEFAULT_APP_NAME = "kitaru_google_adk_workflow"
