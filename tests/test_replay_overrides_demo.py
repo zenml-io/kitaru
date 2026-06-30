@@ -175,28 +175,25 @@ def test_env_example_documents_openai_key() -> None:
 
 
 def test_load_support_decision_prefers_flow_result_ref() -> None:
-    import importlib
+    import importlib.util
     import sys
-    from types import ModuleType, SimpleNamespace
+    from types import SimpleNamespace
 
-    old_path = list(sys.path)
-    old_modules: dict[str, ModuleType | None] = {
-        name: sys.modules.get(name) for name in ("utils", "utils.load_decision")
-    }
-    sys.modules.pop("utils.load_decision", None)
-    sys.modules.pop("utils", None)
+    spec = importlib.util.spec_from_file_location(
+        "replay_overrides_load_decision_under_test",
+        DEMO_ROOT / "utils" / "load_decision.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     sys.path.insert(0, str(DEMO_ROOT.resolve()))
+    sys.modules[spec.name] = module
     try:
-        load_support_decision = importlib.import_module(
-            "utils.load_decision"
-        ).load_support_decision
+        spec.loader.exec_module(module)
     finally:
-        sys.path[:] = old_path
-        sys.modules.pop("utils.load_decision", None)
-        sys.modules.pop("utils", None)
-        for name, module in old_modules.items():
-            if module is not None:
-                sys.modules[name] = module
+        sys.path.pop(0)
+        sys.modules.pop(spec.name, None)
+    load_support_decision = module.load_support_decision
 
     decision = {
         "policy_label": "restricted_account_change",

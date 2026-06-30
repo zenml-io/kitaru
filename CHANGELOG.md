@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Refreshed the Google ADK dependency note: `google-adk` still stays out of the normal local/dev project environment, even though a 2026-06-29 direct resolver probe with `zenml[server]` now succeeds, until the full local server path is certified with the newer FastAPI/Starlette stack.
 
 ### Fixed
+- Kitaru terminal logs now rewrite ZenML's named pipeline completion message to ``Flow `...` completed successfully.``, so ``Pipeline `...` completed successfully.`` no longer leaks into flow output.
 - Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
 - Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
 - MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now scans up to 10,000 same-flow executions when auto-discovering replays before warning that older replays may require explicit IDs.
@@ -40,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `FlowHandle.wait()` / `.get()` now recover a flow's plain return value when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape). Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
 - Fixed `FlowHandle.wait()` and `.get()` to return persisted flow outputs for flows with explicit return values, so granular adapter flows no longer raise ambiguous-result errors in that common case.
 - Updated LLM usage summaries so Kitaru normally writes them when executions finish, while `FlowHandle.wait()` and `.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written.
+
+### Security
+- Raised the `pydantic-ai-slim` lower bound and lockfile version to clear CVE-2026-48782.
 
 ## [0.18.0] - 2026-06-25
 

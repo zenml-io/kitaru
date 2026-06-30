@@ -177,7 +177,7 @@ def publish_support_decision(decision: dict) -> Annotated[dict, "support_decisio
 @flow(
     cache=False,
     image=ImageSettings(
-        requirements=["pydantic-ai-slim[openai]>=1.96.0,<1.104.0"],
+        requirements=["pydantic-ai-slim[openai]>=1.102.0,<1.104.0"],
         secret_environment_from=["openai-creds"],
     ),
 )

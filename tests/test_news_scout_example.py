@@ -210,9 +210,8 @@ def test_image_settings_carries_non_secret_env_and_pinned_requirements(
     assert scout_module._image_override_for_active_stack() is None
 
     requirements = scout_module.SCOUT_IMAGE.requirements or []
-    # The pin must overlap Kitaru's own pydantic-ai range (>=1.89,<1.104) so the
-    # bundled adapter's imports resolve in the container; a lower floor crashes
-    # the pod at import. Provider extras are kept so the slim package ships the
-    # Anthropic + OpenAI clients.
+    # The pin must overlap Kitaru's own pydantic-ai range and stay above the
+    # CVE-2026-48782 fix floor. Provider extras are kept so the slim package
+    # ships the Anthropic + OpenAI clients.
     assert any("pydantic-ai-slim[anthropic,openai]" in req for req in requirements)
-    assert any(">=1.89" in req for req in requirements)
+    assert any(">=1.102.0" in req for req in requirements)

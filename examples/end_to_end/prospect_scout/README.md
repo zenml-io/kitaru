@@ -101,7 +101,7 @@ uv run kitaru secrets set prospect-scout-keys --OPENAI_API_KEY=sk-... --EXA_API_
 
 ```python
 PROSPECTOR_IMAGE = ImageSettings(
-    requirements=["pydantic-ai-slim[openai]>=1.89,<1.104"],
+    requirements=["pydantic-ai-slim[openai]>=1.102.0,<1.104"],
     secret_environment_from=["prospect-scout-keys"],
 )
 ```
