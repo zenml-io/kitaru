@@ -771,7 +771,15 @@ def _resolve_execution_flow_version(run: PipelineRunResponse) -> str:
         if parsed is not None:
             return str(parsed.version)
 
-    metadata = getattr(run, "run_metadata", None)
+    try:
+        metadata = getattr(run, "run_metadata", None)
+    except Exception:
+        logger.debug(
+            "Failed to read deployment metadata from run %s.",
+            getattr(run, "id", "<unknown>"),
+            exc_info=True,
+        )
+        metadata = None
     metadata_mapping = metadata if isinstance(metadata, Mapping) else {}
     nested = metadata_mapping.get("kitaru_deployment")
     nested_mapping = nested if isinstance(nested, Mapping) else {}

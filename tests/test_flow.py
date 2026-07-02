@@ -404,6 +404,26 @@ def test_build_kitaru_execution_url_uses_flow_execution_route() -> None:
     )
 
 
+def test_build_kitaru_execution_url_uses_local_when_metadata_unavailable() -> None:
+    class NonHydratedRun:
+        id = "run-123"
+        pipeline_id = "flow-456"
+        source_snapshot = None
+        resources = None
+
+        @property
+        def run_metadata(self) -> object:
+            raise RuntimeError("metadata is not hydrated yet")
+
+    assert (
+        _build_kitaru_execution_url(
+            cast(PipelineRunResponse, NonHydratedRun()),
+            server_url="http://127.0.0.1:8383/",
+        )
+        == "http://127.0.0.1:8383/flows/flow-456/executions/run-123"
+    )
+
+
 def test_build_kitaru_execution_url_uses_pro_route_when_context_is_pro() -> None:
     run = _DummyRun(
         status=ExecutionStatus.RUNNING,

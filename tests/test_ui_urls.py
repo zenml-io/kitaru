@@ -20,6 +20,7 @@ def _pro_server_info(
     pro_dashboard_url: str | None = "https://staging.cloud.zenml.io",
     dashboard_url: str | None = "https://staging.cloud.zenml.io/workspaces/kitaru-dev",
     pro_workspace_name: str | None = "kitaru-dev",
+    pro_workspace_id: str | None = "59f7a3b3-f50f-405c-b4fe-ea341cd0ffed",
     metadata: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
@@ -27,6 +28,7 @@ def _pro_server_info(
         pro_dashboard_url=pro_dashboard_url,
         dashboard_url=dashboard_url,
         pro_workspace_name=pro_workspace_name,
+        pro_workspace_id=pro_workspace_id,
         metadata=metadata or {},
     )
 
@@ -133,6 +135,26 @@ def test_resolve_ui_url_context_uses_metadata_workspace_fallback(
     assert context is not None
     assert context.route_kind == "pro"
     assert context.workspace == "metadata-workspace"
+
+
+def test_resolve_ui_url_context_uses_workspace_id_when_name_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(
+            pro_workspace_name=None,
+            pro_workspace_id="59f7a3b3-f50f-405c-b4fe-ea341cd0ffed",
+            metadata={},
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.route_kind == "pro"
+    assert context.workspace == "59f7a3b3-f50f-405c-b4fe-ea341cd0ffed"
 
 
 def test_kitaru_ui_url_override_preserves_pro_route_metadata(

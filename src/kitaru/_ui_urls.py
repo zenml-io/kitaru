@@ -89,8 +89,14 @@ def _workspace_from_server_info(server_info: Any) -> str | None:
 
     metadata = getattr(server_info, "metadata", None)
     if isinstance(metadata, Mapping):
-        return _non_empty_string(metadata.get("workspace_name"))
-    return None
+        workspace = _non_empty_string(metadata.get("workspace_name"))
+        if workspace is not None:
+            return workspace
+        workspace = _non_empty_string(metadata.get("workspace_id"))
+        if workspace is not None:
+            return workspace
+
+    return _non_empty_string(getattr(server_info, "pro_workspace_id", None))
 
 
 def _pro_context_from_server_info(
