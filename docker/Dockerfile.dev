@@ -19,10 +19,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
 ENV UV_SYSTEM_PYTHON=1
 
 # Install kitaru from local source. Its pyproject.toml pulls
-# zenml[local]>=0.95.1 from PyPI automatically.
+# zenml[local]>=0.96.0 from PyPI automatically.
 COPY . /tmp/kitaru
 RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 
 # Layer on cloud extras for remote artifact stores and connectors.
 RUN uv pip install \
-    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure]>=0.95.1"
+    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure]>=0.96.0"

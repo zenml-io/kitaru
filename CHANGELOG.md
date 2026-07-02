@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.0`.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added

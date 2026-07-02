@@ -1508,8 +1508,8 @@ requires-dist = [
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.102.0,<1.104.0" },
     { name = "rich", specifier = ">=12.0.0" },
     { name = "typing-extensions", marker = "extra == 'pydantic-ai'", specifier = ">=4.12" },
-    { name = "zenml", extras = ["local"], specifier = ">=0.95.1" },
-    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.95.1" },
+    { name = "zenml", extras = ["local"], specifier = ">=0.96.0" },
+    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.96.0" },
 ]
 provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "openai-agents", "langgraph", "langgraph-openai", "langgraph-anthropic", "claude-agent-sdk", "gemini", "google-adk", "mcp"]
 
@@ -1535,7 +1535,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["server"], specifier = ">=0.95.1" },
+    { name = "zenml", extras = ["server"], specifier = ">=0.96.0" },
 ]
 
 [[package]]
@@ -4361,7 +4361,7 @@ wheels = [
 
 [[package]]
 name = "zenml"
-version = "0.95.1"
+version = "0.96.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
@@ -4382,9 +4382,9 @@ dependencies = [
     { name = "setuptools" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/56/9d8e8e6b17af7b5a7f0342edc05b950de2224dfa74c633d3aca631c1adab/zenml-0.95.1.tar.gz", hash = "sha256:b8034f2b46e9c6feb4bb880d4df8c86b112f4b12952b08e9f9a2009cbd229afd", size = 7228227, upload-time = "2026-06-18T12:21:31.672Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/af/e777abb31c9b770a5902efeebdd138e06fe606eda47ab6ad01e8f9375d39/zenml-0.96.0.tar.gz", hash = "sha256:1eb4e9f3f8719ff8a21e8c553bc439fa8e3747ed57c9341c8497072faed755f8", size = 7253846, upload-time = "2026-07-02T12:39:45.515Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/07/261fb8413f26494aa8fa45ff186a0532d3679314d46b81bb9b8207779dfd/zenml-0.95.1-py3-none-any.whl", hash = "sha256:63e8299aa62de2a818a18c3d6359a891550cbcebefe5faaeb59c133bed1b28a4", size = 8459753, upload-time = "2026-06-18T12:21:29.392Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/9a/403fd0c38bd388778b5f95991725df2ae89de1e11b2befb83748614dd175/zenml-0.96.0-py3-none-any.whl", hash = "sha256:5b71bbeaad446bd255c936e1c76cb1d1da0042dde4c74d119a4e2a73d9ce5bdc", size = 8505352, upload-time = "2026-07-02T12:39:43.066Z" },
 ]
 
 [package.optional-dependencies]

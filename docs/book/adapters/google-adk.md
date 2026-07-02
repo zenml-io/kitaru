@@ -20,7 +20,7 @@ There are two useful paths today. Both persist checkpoints when the wrapped ADK 
 
 ## Install in an isolated ADK environment
 
-Use a no-dev ADK environment for adapter checks. As of 2026-06-29, `google-adk` resolves FastAPI `0.138.0` / Starlette `1.3.1`. A direct resolver probe with `google-adk>=2.3,<3` plus `zenml[server]>=0.95.1` succeeds, but this project still intentionally blocks `google-adk` with the local/dev extras until the full local server path is certified with that newer stack.
+Use a no-dev ADK environment for adapter checks. As of 2026-07-02, `google-adk` resolves FastAPI `0.138.0` / Starlette `1.3.1`. A direct resolver probe with `google-adk>=2.3,<3` plus `zenml[server]>=0.96.0` succeeds, but this project still intentionally blocks `google-adk` with the local/dev extras until the full local server path is certified with that newer stack.
 
 ```bash
 UV_PROJECT_ENVIRONMENT=.venv-google-adk \
