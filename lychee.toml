@@ -35,10 +35,16 @@ exclude = [
     "^https://katacontainers\\.io",
 ]
 
-# Paths to exclude from scanning
+# Paths to exclude from scanning.
+# CHANGELOG.md preserves historical release links, and planning/review folders are
+# internal agent scratch docs; stale links there should not block CI.
 exclude_path = [
     ".venv",
+    "CHANGELOG.md",
     "design",
+    "docs/investigations",
+    "docs/plans",
+    "docs/reviews",
     "prompt-exports",
 ]
 
