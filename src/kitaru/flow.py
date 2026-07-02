@@ -113,7 +113,7 @@ from kitaru.replay_context import (
     KITARU_REPLAY_CONTEXT_ENV,
     get_replay_runtime_context,
 )
-from kitaru.runtime import _flow_scope
+from kitaru.runtime import _flow_scope, _get_current_execution_id
 
 ImageSetting = ImageInput
 _STACK_BINDING_LOCK = threading.RLock()
@@ -273,6 +273,7 @@ _FLOW_RESULT_ARTIFACT_NAME = "kitaru_flow_result"
 #: lets `.wait()` recover that explicit return value before Kitaru guesses from
 #: terminal checkpoint outputs.
 _FLOW_RESULT_REF_METADATA_KEY = "kitaru_flow_result_ref_v1"
+_FLOW_RESULT_NONE_METADATA_KEY = "kitaru_flow_result_none_v1"
 _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME = "kitaru_flow_result_tuple_metadata"
 _FLOW_RESULT_TUPLE_METADATA_MARKER = "kitaru_flow_result_tuple_v1"
 _FLOW_RESULT_ROLE_METADATA_KEY = "kitaru_flow_result_role"
@@ -366,6 +367,9 @@ def _coerce_flow_return_for_zenml(value: Any) -> Any:
     normal Python return values, so plain values need to be persisted manually
     before they are handed back to ZenML's pipeline finalizer.
     """
+    if value is None:
+        _record_flow_result_none()
+        return None
     if _is_zenml_pipeline_output_artifact(value):
         return value
     if isinstance(value, tuple) and any(
@@ -416,6 +420,25 @@ def _record_flow_result_reference(artifact: ArtifactVersionResponse) -> None:
         _log_flow_metadata(**{_FLOW_RESULT_REF_METADATA_KEY: str(artifact.id)})
     except Exception:
         logger.debug("Could not record flow result reference metadata.", exc_info=True)
+
+
+def _record_flow_result_none() -> None:
+    """Record that the running execution explicitly returned ``None``."""
+    if _get_current_execution_id() is None:
+        return
+
+    try:
+        from kitaru.logging import log as _log_flow_metadata
+
+        _log_flow_metadata(**{_FLOW_RESULT_NONE_METADATA_KEY: True})
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Kitaru could not record that the flow returned None. The user "
+            "flow returned successfully, but Kitaru could not persist a "
+            "metadata marker for that explicit None result. Without that "
+            "marker, later result extraction could incorrectly infer a "
+            f"terminal checkpoint output instead: {exc}"
+        ) from exc
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -934,6 +957,43 @@ def _is_flow_result_candidate_step(step_run: Any) -> bool:
     return True
 
 
+def _extract_single_terminal_step_output(
+    *,
+    execution_id: str,
+    terminal_step_name: str,
+    terminal_step: Any,
+) -> list[_FlowResultOutput]:
+    """Extract the output for one selected terminal step."""
+    if not terminal_step.regular_outputs:
+        raise KitaruRuntimeError(
+            f"Execution {execution_id} has no regular outputs on terminal "
+            f"step '{terminal_step_name}'."
+        )
+    if len(terminal_step.regular_outputs) > 1:
+        output_names = ", ".join(sorted(terminal_step.regular_outputs))
+        raise KitaruAmbiguousFlowResultError(
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=(
+                    f"terminal checkpoint '{terminal_step_name}' has "
+                    f"{len(terminal_step.regular_outputs)} outputs: "
+                    f"{output_names}"
+                ),
+            )
+        )
+
+    output_name = next(iter(terminal_step.regular_outputs))
+    artifact = terminal_step.regular_outputs[output_name]
+    return [
+        _loaded_flow_result_output(
+            provenance="step_output",
+            step_name=terminal_step_name,
+            output_name=output_name,
+            artifact=artifact,
+        )
+    ]
+
+
 def _extract_outputs_from_terminal_steps(
     run: PipelineRunResponse,
 ) -> list[_FlowResultOutput]:
@@ -969,6 +1029,14 @@ def _extract_outputs_from_terminal_steps(
             else:
                 non_candidate_terminal_step_names.append(step_name)
 
+        if len(eligible_terminal_step_names) == 1:
+            terminal_step_name = eligible_terminal_step_names[0]
+            return _extract_single_terminal_step_output(
+                execution_id=execution_id,
+                terminal_step_name=terminal_step_name,
+                terminal_step=step_runs[terminal_step_name],
+            )
+
         reason = (
             f"multiple terminal checkpoints were found "
             f"({len(terminal_step_names)}): "
@@ -995,35 +1063,11 @@ def _extract_outputs_from_terminal_steps(
         )
 
     terminal_step_name = terminal_step_names[0]
-    terminal_step = step_runs[terminal_step_name]
-    if not terminal_step.regular_outputs:
-        raise KitaruRuntimeError(
-            f"Execution {execution_id} has no regular outputs on terminal "
-            f"step '{terminal_step_name}'."
-        )
-    if len(terminal_step.regular_outputs) > 1:
-        output_names = ", ".join(sorted(terminal_step.regular_outputs))
-        raise KitaruAmbiguousFlowResultError(
-            _ambiguous_terminal_message(
-                execution_id,
-                reason=(
-                    f"terminal checkpoint '{terminal_step_name}' has "
-                    f"{len(terminal_step.regular_outputs)} outputs: "
-                    f"{output_names}"
-                ),
-            )
-        )
-
-    output_name = next(iter(terminal_step.regular_outputs))
-    artifact = terminal_step.regular_outputs[output_name]
-    return [
-        _loaded_flow_result_output(
-            provenance="step_output",
-            step_name=terminal_step_name,
-            output_name=output_name,
-            artifact=artifact,
-        )
-    ]
+    return _extract_single_terminal_step_output(
+        execution_id=execution_id,
+        terminal_step_name=terminal_step_name,
+        terminal_step=step_runs[terminal_step_name],
+    )
 
 
 def _safe_artifact_name(artifact: Any) -> str | None:
@@ -1102,14 +1146,16 @@ def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
     """
     metadata = _metadata_mapping(getattr(run, "run_metadata", None))
     artifact_id = metadata.get(_FLOW_RESULT_REF_METADATA_KEY)
-    if not isinstance(artifact_id, str) or not artifact_id:
-        return _FLOW_RESULT_NOT_FOUND
-    try:
-        return Client().get_artifact_version(artifact_id).load()
-    except Exception as exc:
-        raise KitaruRuntimeError(
-            f"Could not load the linked flow result artifact {artifact_id!r}: {exc}"
-        ) from exc
+    if isinstance(artifact_id, str) and artifact_id:
+        try:
+            return Client().get_artifact_version(artifact_id).load()
+        except Exception as exc:
+            raise KitaruRuntimeError(
+                f"Could not load the linked flow result artifact {artifact_id!r}: {exc}"
+            ) from exc
+    if metadata.get(_FLOW_RESULT_NONE_METADATA_KEY) is True:
+        return None
+    return _FLOW_RESULT_NOT_FOUND
 
 
 def _extract_flow_result(run: PipelineRunResponse) -> Any:
@@ -1131,6 +1177,7 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
         referenced = _load_referenced_flow_result(run)
         if referenced is not _FLOW_RESULT_NOT_FOUND:
             return referenced
+    if not outputs:
         outputs = _extract_outputs_from_terminal_steps(run)
 
     if not outputs:
