@@ -20,6 +20,9 @@ permissions: {}
 concurrency:
   group: docs-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+env:
+  KITARU_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
 jobs:
   build-deploy:
     # PRs only build (no secrets/deploy). Production deploy runs from main or a

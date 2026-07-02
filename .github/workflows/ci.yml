@@ -16,6 +16,7 @@ concurrency:
 permissions:
   contents: read
 env:
+  KITARU_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   ZENML_MCP_ANALYTICS_DEV: true
@@ -117,7 +118,8 @@ jobs:
           --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
           -t kitaru-ci-server .
       - name: Start server container
-        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
+        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 -e KITARU_ANALYTICS_OPT_IN=false
+          -e ZENML_ANALYTICS_OPT_IN=false kitaru-ci-server
       - name: Wait for health endpoint
         run: |
           set -euo pipefail

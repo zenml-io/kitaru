@@ -23,6 +23,8 @@ concurrency:
   group: ui-prerelease-smoke-${{ github.ref }}-${{ inputs.ui-tag }}
   cancel-in-progress: false
 env:
+  KITARU_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
   ZENML_SERVER_TAG: 0.95.1
 jobs:
   smoke:
@@ -84,7 +86,8 @@ jobs:
           -t kitaru-ui-prerelease-smoke .
       - name: Start server container
         if: ${{ inputs.docker-smoke }}
-        run: docker run -d --rm --name kitaru-ui-prerelease-smoke -p 18080:8080 kitaru-ui-prerelease-smoke
+        run: docker run -d --rm --name kitaru-ui-prerelease-smoke -p 18080:8080 -e
+          KITARU_ANALYTICS_OPT_IN=false -e ZENML_ANALYTICS_OPT_IN=false kitaru-ui-prerelease-smoke
       - name: Wait for health endpoint
         if: ${{ inputs.docker-smoke }}
         run: |

@@ -49,6 +49,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     _FLOW_RESULT_ARTIFACT_NAME,
+    _FLOW_RESULT_NONE_METADATA_KEY,
     _FLOW_RESULT_REF_METADATA_KEY,
     _FLOW_RESULT_ROLE_METADATA_KEY,
     _FLOW_RESULT_TUPLE_METADATA_ARTIFACT_NAME,
@@ -269,6 +270,43 @@ class _DummyRun:
 
     def get_hydrated_version(self) -> _DummyRun:
         return self
+
+
+def _add_linked_flow_result_metadata(
+    run: _DummyRun,
+    artifact_id: str = "result-art-id",
+) -> None:
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: artifact_id}
+
+
+def _add_flow_result_none_metadata(run: _DummyRun) -> None:
+    run.run_metadata = {_FLOW_RESULT_NONE_METADATA_KEY: True}
+
+
+def _linked_flow_result_client(value: object) -> MagicMock:
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = SimpleNamespace(load=lambda: value)
+    return client_mock
+
+
+def _assert_linked_flow_result_loaded(
+    client_mock: MagicMock,
+    artifact_id: str = "result-art-id",
+) -> None:
+    client_mock.get_artifact_version.assert_called_once_with(artifact_id)
+
+
+def _zero_output_terminal_run() -> _DummyRun:
+    run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    run.snapshot.pipeline_spec.outputs = []
+    run.steps = {
+        "finalize": SimpleNamespace(
+            regular_outputs={},
+            config=SimpleNamespace(extra=None),
+            spec=SimpleNamespace(extra=None, upstream_steps=[]),
+        )
+    }
+    return run
 
 
 def _stale_default_stack_provenance() -> ActiveConfigSelectionProvenance:
@@ -1193,6 +1231,34 @@ def test_flow_return_coercion_saves_plain_values_as_pipeline_artifacts() -> None
     }
 
 
+def test_flow_return_coercion_records_explicit_none_result() -> None:
+    """Explicit None returns get metadata so extraction can beat heuristics."""
+    with (
+        patch("kitaru.flow.save_artifact") as save_mock,
+        patch("kitaru.flow._get_current_execution_id", return_value="run-id"),
+        patch("kitaru.logging.log") as log_mock,
+    ):
+        result = _coerce_flow_return_for_zenml(None)
+
+    assert result is None
+    save_mock.assert_not_called()
+    log_mock.assert_called_once_with(**{_FLOW_RESULT_NONE_METADATA_KEY: True})
+
+
+def test_flow_return_coercion_fails_closed_when_none_marker_fails() -> None:
+    """A None result must not become an inferred terminal checkpoint later."""
+    with (
+        patch("kitaru.flow.save_artifact") as save_mock,
+        patch("kitaru.flow._get_current_execution_id", return_value="run-id"),
+        patch("kitaru.logging.log", side_effect=RuntimeError("metadata down")),
+        pytest.raises(KitaruRuntimeError, match="flow returned None") as exc_info,
+    ):
+        _coerce_flow_return_for_zenml(None)
+
+    assert "terminal checkpoint output" in str(exc_info.value)
+    save_mock.assert_not_called()
+
+
 def test_flow_return_coercion_wraps_artifact_save_failures() -> None:
     """Internal result-artifact failures should not look like user-code errors."""
     with (
@@ -1341,6 +1407,38 @@ def test_flow_result_extraction_prefers_run_outputs_over_ambiguous_terminal_step
     run.snapshot.pipeline_spec.outputs = []
 
     assert _extract_flow_result(_as_pipeline_run(run)) == "final answer"
+
+
+def test_flow_result_extraction_prefers_run_outputs_over_linked_result() -> None:
+    """Run outputs are explicit, so they beat the linked fallback artifact."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_outputs=[("final_output", "run output")],
+    )
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = MagicMock()
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "run output"
+    client_mock.get_artifact_version.assert_not_called()
+
+
+def test_flow_result_extraction_prefers_output_specs_over_linked_result() -> None:
+    """Declared pipeline output specs are explicit, so they beat the link."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("declared_step", "output", "declared result")],
+    )
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = MagicMock()
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "declared result"
+    client_mock.get_artifact_version.assert_not_called()
 
 
 def test_flow_result_extraction_returns_multiple_run_outputs_in_persisted_order() -> (
@@ -3467,18 +3565,178 @@ def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> N
         ],
     )
     run.snapshot.pipeline_spec.outputs = []
-    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+    _add_linked_flow_result_metadata(run)
 
-    client_mock = MagicMock()
-    client_mock.get_artifact_version.return_value = SimpleNamespace(
-        load=lambda: {"answer": "the real return value"}
-    )
+    client_mock = _linked_flow_result_client({"answer": "the real return value"})
 
     with patch("kitaru.flow.Client", return_value=client_mock):
         result = _extract_flow_result(_as_pipeline_run(run))
 
     assert result == {"answer": "the real return value"}
-    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_linked_flow_result_wins_over_unique_terminal_candidate() -> None:
+    """The saved flow return beats a terminal step that heuristics could choose."""
+    non_candidate = {"kitaru": {"flow_result_candidate": False}}
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput("model_call", "output", "model", config_extra=non_candidate),
+            _DummyOutput("tool_call", "output", "tool", spec_extra=non_candidate),
+            ("finalize", "output", "heuristic"),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = _linked_flow_result_client("linked result")
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "linked result"
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_linked_flow_result_wins_over_single_non_candidate_terminal() -> None:
+    """A linked flow result beats the legacy single-terminal fallback."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                "adapter_call",
+                "output",
+                "synthetic",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = _linked_flow_result_client("linked result")
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "linked result"
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_linked_flow_result_wins_over_zero_output_terminal() -> None:
+    """A linked flow result returns before a terminal step with no outputs errors."""
+    run = _zero_output_terminal_run()
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = _linked_flow_result_client("linked result")
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "linked result"
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_broken_linked_flow_result_does_not_fall_back_to_terminal_output() -> None:
+    """Broken linked metadata raises instead of returning a heuristic terminal."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("finalize", "output", "heuristic fallback")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    _add_linked_flow_result_metadata(run)
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value.load.side_effect = RuntimeError(
+        "artifact backend unavailable"
+    )
+
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        pytest.raises(KitaruRuntimeError, match="Could not load the linked"),
+    ):
+        _extract_flow_result(_as_pipeline_run(run))
+
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_flow_result_none_marker_wins_over_unique_terminal_candidate() -> None:
+    """An explicit None return beats a terminal checkpoint heuristic."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            _DummyOutput(
+                "adapter_call",
+                "output",
+                "synthetic",
+                config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+            ("finalize", "output", "heuristic fallback"),
+        ],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    _add_flow_result_none_metadata(run)
+
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
+
+
+def test_flow_result_none_marker_wins_over_zero_output_terminal() -> None:
+    """An explicit None return beats a terminal checkpoint error path."""
+    run = _zero_output_terminal_run()
+    _add_flow_result_none_metadata(run)
+
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
+
+
+def test_linked_flow_result_ref_beats_none_marker() -> None:
+    """If both markers exist, the explicit artifact reference wins."""
+    run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    run.run_metadata = {
+        _FLOW_RESULT_REF_METADATA_KEY: "result-art-id",
+        _FLOW_RESULT_NONE_METADATA_KEY: True,
+    }
+
+    client_mock = _linked_flow_result_client("linked result")
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == "linked result"
+    _assert_linked_flow_result_loaded(client_mock)
+
+
+def test_flow_result_run_outputs_beat_none_marker() -> None:
+    """Run outputs stay more explicit than the None marker."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_outputs=[("final_output", "run output")],
+    )
+    _add_flow_result_none_metadata(run)
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "run output"
+
+
+def test_flow_result_output_specs_beat_none_marker() -> None:
+    """Declared output specs stay more explicit than the None marker."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("declared_step", "output", "declared result")],
+    )
+    _add_flow_result_none_metadata(run)
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "declared result"
+
+
+def test_flow_result_without_none_marker_uses_terminal_fallback() -> None:
+    """Old runs without the None marker keep using terminal inference."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("finalize", "output", "heuristic fallback")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+
+    assert _extract_flow_result(_as_pipeline_run(run)) == "heuristic fallback"
 
 
 def test_flow_result_ambiguous_terminals_still_raise_without_reference() -> None:
@@ -3611,7 +3869,7 @@ def test_flow_handle_get_terminal_fallback_uses_graph_sink_candidate() -> None:
     assert result == "done"
 
 
-def test_flow_handle_get_keeps_ambiguity_when_filtering_discards_terminal() -> None:
+def test_flow_handle_get_uses_unique_terminal_result_candidate() -> None:
     completed = _DummyRun(
         status=ExecutionStatus.COMPLETED,
         outputs=[
@@ -3620,6 +3878,12 @@ def test_flow_handle_get_keeps_ambiguity_when_filtering_discards_terminal() -> N
                 output_name="output",
                 value="synthetic",
                 config_extra={"kitaru": {"flow_result_candidate": False}},
+            ),
+            _DummyOutput(
+                step_name="adapter_tool_call",
+                output_name="output",
+                value="tool result",
+                spec_extra={"kitaru": {"flow_result_candidate": False}},
             ),
             ("finalize", "output", "done"),
         ],
@@ -3630,17 +3894,10 @@ def test_flow_handle_get_keeps_ambiguity_when_filtering_discards_terminal() -> N
     client_mock.get_pipeline_run.return_value = completed
 
     handle = FlowHandle(_as_pipeline_run(completed))
-    with (
-        patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(KitaruAmbiguousFlowResultError) as exc_info,
-    ):
-        handle.get()
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = handle.get()
 
-    assert _is_multiple_terminal_steps_output_error(exc_info.value)
-    message = str(exc_info.value)
-    assert "Terminal checkpoints still eligible as flow results: finalize" in message
-    assert "Terminal checkpoints marked as adapter-created/non-result" in message
-    assert "adapter_call" in message
+    assert result == "done"
 
 
 def test_flow_handle_get_single_terminal_non_candidate_still_returns() -> None:
@@ -3698,6 +3955,14 @@ def test_flow_handle_get_raises_when_terminal_filter_leaves_zero_candidates() ->
         handle.get()
 
     assert _is_multiple_terminal_steps_output_error(exc_info.value)
+
+
+def test_zero_output_terminal_still_raises_without_linked_result() -> None:
+    """Old/no-link runs still error when the selected terminal has no outputs."""
+    run = _zero_output_terminal_run()
+
+    with pytest.raises(KitaruRuntimeError, match="no regular outputs"):
+        _extract_flow_result(_as_pipeline_run(run))
 
 
 def test_flow_handle_get_output_specs_ignore_candidate_metadata() -> None:
@@ -3902,6 +4167,31 @@ def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> N
     assert not _is_inside_flow()
     assert _get_current_flow() is None
     assert _get_current_execution_id() is None
+
+
+def test_flow_wrapper_records_explicit_none_with_discovered_execution_id() -> None:
+    def _user_flow() -> None:
+        return None
+
+    wrapped = _wrap_flow_entrypoint(_user_flow)
+    run_context = SimpleNamespace(
+        run=SimpleNamespace(
+            id="exec-none-123",
+            pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+        ),
+        pipeline=SimpleNamespace(id=None, name=None),
+    )
+
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=None),
+        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=run_context),
+        patch("kitaru.logging.log") as log_mock,
+    ):
+        result = wrapped()
+
+    assert result is None
+    log_mock.assert_called_once_with(**{_FLOW_RESULT_NONE_METADATA_KEY: True})
+    assert not _is_inside_flow()
 
 
 def test_execution_id_lookup_requires_active_kitaru_scope() -> None:
