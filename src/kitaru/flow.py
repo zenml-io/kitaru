@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, Literal, cast, overload
-from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ConfigDict, create_model
@@ -37,7 +36,10 @@ from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
-from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
+    parse_deployment_snapshot_name,
+)
 from kitaru._client._mappers import _to_public_status
 from kitaru._client._models import ExecutionStatus
 from kitaru._config._active_context import (
@@ -52,6 +54,7 @@ from kitaru._interface_deployments import (
     resolve_deployment_selector,
     validate_deployment_selector,
 )
+from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
@@ -65,6 +68,11 @@ from kitaru._terminal_usage import (
     _persist_terminal_llm_usage_metadata as _shared_persist_terminal_llm_usage_metadata,
 )
 from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
+from kitaru._ui_urls import (
+    UiUrlContext,
+    build_execution_url_from_context,
+    resolve_ui_url_context,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -719,14 +727,59 @@ def _extract_run_pipeline_id(run: PipelineRunResponse) -> str | None:
     return None
 
 
+def _resolve_execution_flow_version(run: PipelineRunResponse) -> str:
+    """Resolve the Kitaru deployment version for an execution URL."""
+    snapshot_name_getters = (
+        lambda: getattr(getattr(run, "source_snapshot", None), "name", None),
+        lambda: getattr(
+            getattr(getattr(run, "resources", None), "source_snapshot", None),
+            "name",
+            None,
+        ),
+    )
+    for getter in snapshot_name_getters:
+        try:
+            parsed = parse_deployment_snapshot_name(getter())
+        except Exception:
+            logger.debug(
+                "Failed to read deployment snapshot name from run %s.",
+                getattr(run, "id", "<unknown>"),
+                exc_info=True,
+            )
+            continue
+        if parsed is not None:
+            return str(parsed.version)
+
+    metadata = getattr(run, "run_metadata", None)
+    metadata_mapping = metadata if isinstance(metadata, Mapping) else {}
+    nested = metadata_mapping.get("kitaru_deployment")
+    nested_mapping = nested if isinstance(nested, Mapping) else {}
+    for key in ("deployment_version", "kitaru_deployment_version"):
+        value = metadata_mapping.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    nested_version = nested_mapping.get("version")
+    if nested_version is not None and str(nested_version).strip():
+        return str(nested_version).strip()
+
+    return "local"
+
+
 def _build_kitaru_execution_url(
     run: PipelineRunResponse,
     *,
-    server_url: str | None,
+    ui_context: UiUrlContext | None = None,
+    server_url: str | None = None,
 ) -> str | None:
     """Build the Kitaru-native execution detail URL for a run if possible."""
-    if server_url is None or not str(server_url).strip():
-        return None
+    if ui_context is None:
+        if server_url is None or not str(server_url).strip():
+            return None
+        ui_context = UiUrlContext(
+            base_url=str(server_url).strip().rstrip("/"),
+            route_kind="legacy",
+            source="connection_config",
+        )
 
     execution_id_value = getattr(run, "id", None)
     if execution_id_value is None:
@@ -739,10 +792,17 @@ def _build_kitaru_execution_url(
     if flow_id is None:
         return None
 
-    base_url = str(server_url).strip().rstrip("/")
-    flow_segment = quote(flow_id, safe="")
-    execution_segment = quote(execution_id, safe="")
-    return f"{base_url}/flows/{flow_segment}/executions/{execution_segment}"
+    return build_execution_url_from_context(
+        ui_context,
+        flow_id=flow_id,
+        execution_id=execution_id,
+        project_name_or_id=extract_run_project_identity(
+            run,
+            logger=logger,
+            allow_lazy_project_lookup=True,
+        ).name_or_id,
+        version=_resolve_execution_flow_version(run),
+    )
 
 
 def _emit_kitaru_execution_url(
@@ -750,11 +810,9 @@ def _emit_kitaru_execution_url(
 ) -> None:
     """Log a Kitaru-native execution URL without risking flow execution."""
     try:
-        from kitaru._ui_urls import resolve_ui_base_url
-
         url = _build_kitaru_execution_url(
             run,
-            server_url=resolve_ui_base_url(),
+            ui_context=resolve_ui_url_context(),
         )
     except Exception:
         logger.debug(

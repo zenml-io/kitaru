@@ -1,4 +1,4 @@
-"""Tests for Kitaru UI deep-link base URL resolution."""
+"""Tests for Kitaru UI deep-link URL resolution and builders."""
 
 from __future__ import annotations
 
@@ -8,7 +8,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kitaru._config._env import KITARU_UI_URL_ENV
-from kitaru._ui_urls import resolve_ui_base_url
+from kitaru._ui_urls import (
+    build_compare_url_from_context,
+    resolve_ui_base_url,
+    resolve_ui_url_context,
+)
+
+
+def _pro_server_info(
+    *,
+    pro_dashboard_url: str | None = "https://staging.cloud.zenml.io",
+    dashboard_url: str | None = "https://staging.cloud.zenml.io/workspaces/kitaru-dev",
+    pro_workspace_name: str | None = "kitaru-dev",
+    metadata: dict[str, str] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        deployment_type="cloud",
+        pro_dashboard_url=pro_dashboard_url,
+        dashboard_url=dashboard_url,
+        pro_workspace_name=pro_workspace_name,
+        metadata=metadata or {},
+    )
 
 
 def test_resolve_ui_base_url_prefers_kitaru_ui_url_env(
@@ -18,23 +38,146 @@ def test_resolve_ui_base_url_prefers_kitaru_ui_url_env(
         KITARU_UI_URL_ENV,
         "https://preview.demo.kitaru.zenml.io/",
     )
-    with patch(
-        "kitaru.config.resolve_connection_config",
-        return_value=SimpleNamespace(
-            server_url="https://161e5333-zenml.staging.cloudinfra.zenml.io"
+    with (
+        patch(
+            "kitaru._ui_urls._server_info_from_client",
+            side_effect=AssertionError("base URL resolution should stay cheap"),
+        ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(
+                server_url="https://161e5333-zenml.staging.cloudinfra.zenml.io"
+            ),
         ),
     ):
         assert resolve_ui_base_url() == "https://preview.demo.kitaru.zenml.io"
+
+
+def test_resolve_ui_url_context_uses_pro_dashboard_origin_and_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://staging.cloud.zenml.io"
+    assert context.route_kind == "pro"
+    assert context.workspace == "kitaru-dev"
+    assert context.explicit_override is False
+
+
+def test_resolve_ui_url_context_uses_pro_dashboard_not_connection_server_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with (
+        patch(
+            "kitaru._ui_urls._server_info_from_client",
+            return_value=_pro_server_info(),
+        ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(
+                server_url="https://67e44b28-zenml.staging.cloudinfra.zenml.io"
+            ),
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://staging.cloud.zenml.io"
+    assert context.route_kind == "pro"
+    assert context.workspace == "kitaru-dev"
+
+
+def test_resolve_ui_url_context_uses_dashboard_url_origin_when_pro_origin_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(
+            pro_dashboard_url=None,
+            dashboard_url="https://staging.cloud.zenml.io/workspaces/kitaru-dev",
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://staging.cloud.zenml.io"
+    assert context.route_kind == "pro"
+    assert context.workspace == "kitaru-dev"
+
+
+def test_resolve_ui_url_context_uses_metadata_workspace_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(
+            pro_workspace_name=None,
+            metadata={"workspace_name": "metadata-workspace"},
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.route_kind == "pro"
+    assert context.workspace == "metadata-workspace"
+
+
+def test_kitaru_ui_url_override_preserves_pro_route_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        KITARU_UI_URL_ENV,
+        "https://preview.demo.kitaru.zenml.io",
+    )
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://preview.demo.kitaru.zenml.io"
+    assert context.route_kind == "pro"
+    assert context.workspace == "kitaru-dev"
+    assert context.explicit_override is True
+
+    assert build_compare_url_from_context(
+        context,
+        flow_id="flow-1",
+        exec_ids=["kr-original", "kr-replay"],
+        project_name_or_id="default",
+    ) == (
+        "https://preview.demo.kitaru.zenml.io/kitaru-workspaces/kitaru-dev"
+        "/projects/default/flows/flow-1/v/local/compare"
+        "?executions=kr-original,kr-replay"
+    )
 
 
 def test_resolve_ui_base_url_falls_back_to_connected_server_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
-    with patch(
-        "kitaru.config.resolve_connection_config",
-        return_value=SimpleNamespace(
-            server_url="https://161e5333-zenml.staging.cloudinfra.zenml.io/"
+    with (
+        patch("kitaru._ui_urls._server_info_from_client", return_value=None),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(
+                server_url="https://161e5333-zenml.staging.cloudinfra.zenml.io/"
+            ),
         ),
     ):
         assert (
@@ -50,7 +193,10 @@ def test_resolve_ui_base_url_uses_client_store_when_connection_unavailable(
     fake_client = MagicMock()
     fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io/"
 
-    with patch("kitaru.config.resolve_connection_config", side_effect=RuntimeError):
+    with (
+        patch("kitaru._ui_urls._server_info_from_client", return_value=None),
+        patch("kitaru.config.resolve_connection_config", side_effect=RuntimeError),
+    ):
         assert resolve_ui_base_url(fake_client) == "https://demo.kitaru.zenml.io"
 
 
@@ -71,13 +217,14 @@ def test_compare_urls_use_kitaru_ui_url_override(
         "https://161e5333-zenml.staging.cloudinfra.zenml.io"
     )
 
-    from kitaru.diff import compare_urls_for_replay
+    with patch("kitaru._ui_urls._server_info_from_client", return_value=None):
+        from kitaru.diff import compare_urls_for_replay
 
-    urls = compare_urls_for_replay(
-        fake_client,
-        original_exec_id="kr-original",
-        replay_exec_id="kr-replay",
-    )
+        urls = compare_urls_for_replay(
+            fake_client,
+            original_exec_id="kr-original",
+            replay_exec_id="kr-replay",
+        )
 
     assert urls == [
         "https://preview.demo.kitaru.zenml.io/flows/flow-1/v/local/compare"

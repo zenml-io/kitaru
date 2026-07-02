@@ -24,6 +24,8 @@ from zenml.models import PipelineRunResponse
 import kitaru
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru._config._core import ExecutionStackSource
+from kitaru._run_identity import extract_run_project_identity
+from kitaru._ui_urls import UiUrlContext
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.config import (
@@ -183,7 +185,9 @@ class _DummyRun:
         pipeline: object | None = None,
         snapshot_pipeline_id: object | None = None,
         snapshot_pipeline: object | None = None,
+        source_snapshot: object | None = None,
         resources: object | None = None,
+        project: object | None = None,
         status_reason: str | None = None,
         traceback: str | None = None,
         start_time: datetime | None = None,
@@ -192,6 +196,8 @@ class _DummyRun:
         self.id = run_id or uuid4()
         self.pipeline_id = pipeline_id
         self.pipeline = pipeline
+        self.project = project
+        self.source_snapshot = source_snapshot
         self.status = status
         self.start_time = start_time
         self.end_time = end_time
@@ -282,6 +288,49 @@ def _stale_default_stack_provenance() -> ActiveConfigSelectionProvenance:
     )
 
 
+def test_extract_run_project_identity_does_not_touch_lazy_project() -> None:
+    class LazyProjectRun:
+        id = "run-123"
+        project_id = "project-direct"
+        resources = None
+
+        @property
+        def project(self) -> object:
+            raise AssertionError("default extraction must not lazy-load project")
+
+        def get_body(self) -> SimpleNamespace:
+            return SimpleNamespace(project_id="project-body")
+
+    identity = extract_run_project_identity(LazyProjectRun())
+
+    assert identity.project_id == "project-direct"
+    assert identity.project_name is None
+    assert identity.name_or_id == "project-direct"
+
+
+def test_extract_run_project_identity_can_lazy_load_for_one_off_logging() -> None:
+    class LazyProjectRun:
+        id = "run-123"
+        project_id = "project-direct"
+        resources = None
+
+        @property
+        def project(self) -> SimpleNamespace:
+            return SimpleNamespace(name="default")
+
+        def get_body(self) -> SimpleNamespace:
+            return SimpleNamespace(project_id="project-body")
+
+    identity = extract_run_project_identity(
+        LazyProjectRun(),
+        allow_lazy_project_lookup=True,
+    )
+
+    assert identity.project_id == "project-direct"
+    assert identity.project_name == "default"
+    assert identity.name_or_id == "default"
+
+
 def test_extract_run_pipeline_id_prefers_direct_pipeline_id() -> None:
     run = _DummyRun(
         status=ExecutionStatus.RUNNING,
@@ -315,6 +364,51 @@ def test_build_kitaru_execution_url_uses_flow_execution_route() -> None:
         )
         == "http://127.0.0.1:8383/flows/flow%20456/executions/run%2F123"
     )
+
+
+def test_build_kitaru_execution_url_uses_pro_route_when_context_is_pro() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run/123",
+        pipeline_id="flow 456",
+        project=SimpleNamespace(name="default"),
+    )
+
+    assert _build_kitaru_execution_url(
+        _as_pipeline_run(run),
+        ui_context=UiUrlContext(
+            base_url="https://staging.cloud.zenml.io",
+            route_kind="pro",
+            source="server_info",
+            workspace="kitaru-dev",
+        ),
+    ) == (
+        "https://staging.cloud.zenml.io/kitaru-workspaces/kitaru-dev"
+        "/projects/default/flows/flow%20456/v/local/executions/run%2F123"
+    )
+
+
+def test_build_kitaru_execution_url_uses_deployment_snapshot_version() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+        project=SimpleNamespace(name="default"),
+        source_snapshot=SimpleNamespace(name="kitaru::support_copilot_flow::v3"),
+    )
+
+    url = _build_kitaru_execution_url(
+        _as_pipeline_run(run),
+        ui_context=UiUrlContext(
+            base_url="https://staging.cloud.zenml.io",
+            route_kind="pro",
+            source="server_info",
+            workspace="kitaru-dev",
+        ),
+    )
+
+    assert url is not None
+    assert "/v/3/executions/run-123" in url
 
 
 def test_build_kitaru_execution_url_returns_none_when_required_data_missing() -> None:
@@ -2730,8 +2824,12 @@ def test_run_logs_kitaru_native_execution_url() -> None:
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
         ),
         patch(
-            "kitaru.config.resolve_connection_config",
-            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="http://127.0.0.1:8383",
+                route_kind="legacy",
+                source="connection_config",
+            ),
         ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
@@ -2743,6 +2841,51 @@ def test_run_logs_kitaru_native_execution_url() -> None:
     logger_info_mock.assert_any_call(
         "Execution URL: %s",
         "http://127.0.0.1:8383/flows/flow-456/executions/run-123",
+    )
+
+
+def test_run_logs_kitaru_pro_execution_url() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+        project=SimpleNamespace(name="default"),
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
+        patch(
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="https://staging.cloud.zenml.io",
+                route_kind="pro",
+                source="server_info",
+                workspace="kitaru-dev",
+            ),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "https://staging.cloud.zenml.io/kitaru-workspaces/kitaru-dev"
+        "/projects/default/flows/flow-456/v/local/executions/run-123",
     )
 
 
@@ -2986,8 +3129,12 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
         ),
         patch(
-            "kitaru.config.resolve_connection_config",
-            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="http://127.0.0.1:8383",
+                route_kind="legacy",
+                source="connection_config",
+            ),
         ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
