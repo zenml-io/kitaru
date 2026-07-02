@@ -49,6 +49,7 @@ concurrency:
     github.event_name == 'workflow_dispatch' && inputs.suite || 'provider-core' }}
   cancel-in-progress: false
 env:
+  KITARU_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   AUTO_OPEN_DASHBOARD: false
