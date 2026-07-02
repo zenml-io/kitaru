@@ -22,6 +22,7 @@
 set -uo pipefail
 
 # Disable analytics so smoke-test runs don't leak events to Mixpanel.
+export KITARU_ANALYTICS_OPT_IN=false
 export ZENML_ANALYTICS_OPT_IN=false
 
 print_help() {
@@ -915,6 +916,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
             STACK_NAME="$PYDANTIC_SANDBOX_SMOKE_STACK" \
             ZENML_CONFIG_PATH="$PYDANTIC_SANDBOX_SMOKE_CONFIG" \
             ZENML_REPOSITORY_PATH="$PWD" \
+            KITARU_ANALYTICS_OPT_IN=false \
             ZENML_ANALYTICS_OPT_IN=false \
             $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
     run_provider_test "openai" "OPENAI_API_KEY" \
@@ -927,6 +929,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
             KITARU_STACK="$PYDANTIC_SANDBOX_SMOKE_STACK" \
             ZENML_CONFIG_PATH="$PYDANTIC_SANDBOX_SMOKE_CONFIG" \
             ZENML_REPOSITORY_PATH="$PWD" \
+            KITARU_ANALYTICS_OPT_IN=false \
             ZENML_ANALYTICS_OPT_IN=false \
             $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py
     restore_repo_active_stack
@@ -1119,6 +1122,7 @@ run_test "Create sandbox example stack" \
         STACK_NAME="$SANDBOX_SMOKE_STACK" \
         ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
         ZENML_REPOSITORY_PATH="$PWD" \
+        KITARU_ANALYTICS_OPT_IN=false \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
 run_test "Active stack sandbox command" \
@@ -1130,6 +1134,7 @@ run_test "Active stack sandbox command" \
         -u KITARU_STACK \
         ZENML_CONFIG_PATH="$SANDBOX_SMOKE_CONFIG" \
         ZENML_REPOSITORY_PATH="$PWD" \
+        KITARU_ANALYTICS_OPT_IN=false \
         ZENML_ANALYTICS_OPT_IN=false \
         $UV_RUN python examples/features/sandbox/active_stack_sandbox_command.py
 if [[ "$HAS_OPENAI" == true ]]; then
@@ -1145,6 +1150,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
             STACK_NAME="$LANGGRAPH_SANDBOX_SMOKE_STACK" \
             ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
             ZENML_REPOSITORY_PATH="$PWD" \
+            KITARU_ANALYTICS_OPT_IN=false \
             ZENML_ANALYTICS_OPT_IN=false \
             $UV_RUN python -c 'import os, kitaru; kitaru.create_stack(os.environ["STACK_NAME"])'
     run_provider_test "openai" "OPENAI_API_KEY" \
@@ -1158,6 +1164,7 @@ if [[ "$HAS_OPENAI" == true ]]; then
             LANGGRAPH_SANDBOX_AGENT_MODEL="${LANGGRAPH_SANDBOX_AGENT_MODEL:-gpt-5-nano}" \
             ZENML_CONFIG_PATH="$LANGGRAPH_SANDBOX_SMOKE_CONFIG" \
             ZENML_REPOSITORY_PATH="$PWD" \
+            KITARU_ANALYTICS_OPT_IN=false \
             ZENML_ANALYTICS_OPT_IN=false \
             $UV_RUN python examples/integrations/langgraph_agent/langgraph_adapter.py --strategy sandbox
 else

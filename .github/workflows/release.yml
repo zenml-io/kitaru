@@ -24,6 +24,9 @@ permissions: {}
 concurrency:
   group: release
   cancel-in-progress: false
+env:
+  KITARU_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
 jobs:
   release:
     runs-on: ubuntu-latest
