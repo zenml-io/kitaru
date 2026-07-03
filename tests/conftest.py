@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,8 @@ _LIVE_PROVIDER_MARKERS = (
 )
 _PROVIDER_CALL_GUARD_ACTIVE = False
 _PROVIDER_CALL_GUARD_NODEID: str | None = None
+_SPEED_PROBE_SESSION_ID_ENV = "KITARU_TEST_SPEED_SESSION_ID"
+_SPEED_PROBE_SESSION_ID: str | None = None
 _EARLY_TEST_ENV_VARS = (
     "KITARU_SERVER_URL",
     "KITARU_AUTH_TOKEN",
@@ -130,6 +133,31 @@ def _speed_worker_id() -> str:
     return os.environ.get("PYTEST_XDIST_WORKER", "master")
 
 
+def _speed_probe_session_id() -> str:
+    global _SPEED_PROBE_SESSION_ID
+    if _SPEED_PROBE_SESSION_ID is not None:
+        return _SPEED_PROBE_SESSION_ID
+
+    session_id = os.environ.get(_SPEED_PROBE_SESSION_ID_ENV)
+    if not session_id:
+        session_id = os.environ.get("PYTEST_XDIST_TESTRUNUID")
+    if not session_id:
+        session_id = (
+            f"{int(time.time() * 1_000_000)}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        )
+
+    _SPEED_PROBE_SESSION_ID = session_id
+    os.environ[_SPEED_PROBE_SESSION_ID_ENV] = session_id
+    return session_id
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    del config
+    if _speed_probe_enabled():
+        _speed_probe_session_id()
+
+
 def _record_speed_event(kind: str, payload: dict[str, Any]) -> None:
     if not _speed_probe_enabled():
         return
@@ -140,6 +168,7 @@ def _record_speed_event(kind: str, payload: dict[str, Any]) -> None:
     pid = os.getpid()
     event = {
         "kind": kind,
+        "session_id": _speed_probe_session_id(),
         "worker": worker,
         "pid": pid,
         "timestamp": time.time(),
@@ -430,6 +459,28 @@ def _provider_name_for_url(url: Any) -> str | None:
     return _provider_name_for_host(parsed.hostname)
 
 
+def _provider_name_for_possibly_relative_url(
+    url: Any,
+    base_url: Any | None = None,
+    *,
+    fallback: str | None = None,
+) -> str | None:
+    raw_url = str(url)
+    parsed = urlparse(raw_url)
+    if parsed.hostname is not None:
+        return _provider_name_for_host(parsed.hostname)
+    if base_url is not None:
+        return _provider_name_for_url(urljoin(str(base_url), raw_url))
+    return fallback
+
+
+def _provider_name_for_httpx_request(client: Any, url: Any) -> str | None:
+    return _provider_name_for_possibly_relative_url(
+        url,
+        getattr(client, "base_url", None),
+    )
+
+
 def _fail_provider_call(provider_name: str) -> None:
     nodeid = _PROVIDER_CALL_GUARD_NODEID
     location = f" in {nodeid}" if nodeid else ""
@@ -475,11 +526,11 @@ def _provider_name_for_sdk_request(
     base_url = getattr(client, "base_url", None)
 
     if raw_url is not None:
-        raw_url_string = str(raw_url)
-        if urlparse(raw_url_string).hostname is not None:
-            return _provider_name_for_url(raw_url_string)
-        if base_url is not None:
-            return _provider_name_for_url(urljoin(str(base_url), raw_url_string))
+        return _provider_name_for_possibly_relative_url(
+            raw_url,
+            base_url,
+            fallback=default_provider,
+        )
 
     if base_url is not None:
         return _provider_name_for_url(base_url)
@@ -549,14 +600,14 @@ def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
         def guarded_httpx_request(
             self: Any, method: str, url: Any, **kwargs: Any
         ) -> Any:
-            provider_name = _provider_name_for_url(url)
+            provider_name = _provider_name_for_httpx_request(self, url)
             _guard_provider_call_if_active(provider_name)
             return original_client_request(self, method, url, **kwargs)
 
         async def guarded_httpx_request_async(
             self: Any, method: str, url: Any, **kwargs: Any
         ) -> Any:
-            provider_name = _provider_name_for_url(url)
+            provider_name = _provider_name_for_httpx_request(self, url)
             _guard_provider_call_if_active(provider_name)
             return await original_async_client_request(self, method, url, **kwargs)
 

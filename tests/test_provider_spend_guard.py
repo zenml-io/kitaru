@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import cast
 
@@ -119,6 +120,65 @@ def test_provider_spend_guard_allows_httpx_localhost_request() -> None:
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         response = client.get("http://127.0.0.1:9999/health")
+
+    assert response.status_code == 200
+    assert len(requests_seen) == 1
+
+
+def test_provider_spend_guard_blocks_httpx_provider_base_url_before_transport() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(
+            base_url="https://api.openai.com",
+            transport=httpx.MockTransport(handler),
+        ) as client,
+        pytest.raises(AssertionError, match="Blocked OpenAI provider call"),
+    ):
+        client.get("/v1/models")
+
+    assert requests_seen == []
+
+
+def test_provider_spend_guard_blocks_async_httpx_base_url_before_transport() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    async def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    async def request_models() -> None:
+        async with httpx.AsyncClient(
+            base_url="https://api.openai.com",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await client.get("/v1/models")
+
+    with pytest.raises(AssertionError, match="Blocked OpenAI provider call"):
+        asyncio.run(request_models())
+
+    assert requests_seen == []
+
+
+def test_provider_spend_guard_allows_httpx_localhost_base_url_request() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with httpx.Client(
+        base_url="http://127.0.0.1:9999",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        response = client.get("/health")
 
     assert response.status_code == 200
     assert len(requests_seen) == 1
