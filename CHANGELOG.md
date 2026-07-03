@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
 - Added Python 3.14 as a supported and tested runtime.
 
 ### Changed

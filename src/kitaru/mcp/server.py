@@ -677,9 +677,14 @@ def manage_stack(
     async_mode: bool = False,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local, Kubernetes-backed, Vertex AI, SageMaker,
-    or AzureML stack. `sandbox` selects a sandbox flavor; local stacks default
-    to `local`. `async_mode` is the MCP equivalent of CLI `--async`."""
+    """Create or delete a local, Kubernetes, Vertex AI, SageMaker, AzureML,
+    or Modal stack.
+
+    For remote stacks, `sandbox` attaches a sandbox only when provided. Use
+    `sandbox="modal"` to attach a Modal sandbox component to a Modal stack.
+    Local stacks default to `local`. `async_mode` is the MCP equivalent of CLI
+    `--async`.
+    """
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(

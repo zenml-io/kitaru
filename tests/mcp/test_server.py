@@ -21,6 +21,7 @@ from kitaru.config import (
     CloudProvider,
     ImageSettings,
     KubernetesStackSpec,
+    ModalStackSpec,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackInfo,
@@ -1837,6 +1838,120 @@ def test_manage_stack_create_kubernetes_dispatches_structured_spec(
     }
 
 
+def test_manage_stack_create_modal_dispatches_structured_spec() -> None:
+    """MCP Modal create should build a shared serialized stack result."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "prod-modal (orchestrator)",
+                "prod-modal (artifact_store)",
+                "prod-modal (container_registry)",
+                "prod-modal (sandbox)",
+            ),
+            stack_type="modal",
+            service_connectors_created=(),
+            resources={
+                "provider": "gcp",
+                "artifact_store": "gs://my-bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+                "sandbox": "modal",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            activate=False,
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/repo",
+            sandbox="modal",
+            async_mode=True,
+            extra={
+                "orchestrator": {
+                    "token_id": "ak-test",
+                    "token_secret": "as-test",
+                    "synchronous": False,
+                },
+                "sandbox": {"timeout": 1800},
+            },
+        )
+
+    mock_create_stack.assert_called_once()
+    assert mock_create_stack.call_args.args == ("prod-modal",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "token_id": "ak-test",
+            "token_secret": "as-test",
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {"timeout": 1800},
+    }
+    assert payload == {
+        "id": "stack-modal-id",
+        "name": "prod-modal",
+        "is_active": False,
+        "previous_active_stack": None,
+        "components_created": [
+            "prod-modal (orchestrator)",
+            "prod-modal (artifact_store)",
+            "prod-modal (container_registry)",
+            "prod-modal (sandbox)",
+        ],
+        "stack_type": "modal",
+        "resources": {
+            "provider": "gcp",
+            "artifact_store": "gs://my-bucket/kitaru",
+            "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+            "sandbox": "modal",
+        },
+    }
+
+
+def test_manage_stack_create_modal_requires_storage_and_registry() -> None:
+    """Modal MCP create should reject missing required inputs early."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match=r'`stack_type="modal"` requires:'),
+    ):
+        manage_stack("create", "prod-modal", stack_type="modal")
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_rejects_region() -> None:
+    """Modal placement should use extra.orchestrator.region, not region."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="`region`"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            region="us-east-1",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
 def test_manage_stack_create_kubernetes_passes_explicit_sandbox() -> None:
     """MCP callers should be able to attach an explicit sandbox to remote stacks."""
     with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
@@ -1930,6 +2045,11 @@ def test_manage_stack_create_kubernetes_requires_required_fields(
 
 _REMOTE_STACK_TYPE_ERROR = (
     'Remote stack options require `stack_type="kubernetes"`, '
+    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
+    '`stack_type="azureml"`, or `stack_type="modal"`'
+)
+_CLOUD_CONNECTOR_STACK_TYPE_ERROR = (
+    'Remote stack options require `stack_type="kubernetes"`, '
     '`stack_type="vertex"`, `stack_type="sagemaker"`, or '
     '`stack_type="azureml"`'
 )
@@ -1951,13 +2071,13 @@ _REMOTE_STACK_TYPE_ERROR = (
             {"cluster": "cluster-1"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `cluster`',
         ),
-        ({"region": "eu-west-1"}, _REMOTE_STACK_TYPE_ERROR),
+        ({"region": "eu-west-1"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
         (
             {"namespace": "ml-team"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `namespace`',
         ),
-        ({"credentials": "implicit"}, _REMOTE_STACK_TYPE_ERROR),
-        ({"verify": False}, _REMOTE_STACK_TYPE_ERROR),
+        ({"credentials": "implicit"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
+        ({"verify": False}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
     ],
 )
 def test_manage_stack_create_local_rejects_kubernetes_only_options(
@@ -2070,8 +2190,8 @@ def test_manage_stack_create_async_mode_rejected_for_local() -> None:
             ValueError,
             match=(
                 r"`async_mode` requires `stack_type=\"kubernetes\"`, "
-                r"`stack_type=\"vertex\"`, `stack_type=\"sagemaker\"`, or "
-                r"`stack_type=\"azureml\"`\."
+                r"`stack_type=\"vertex\"`, `stack_type=\"sagemaker\"`, "
+                r"`stack_type=\"azureml\"`, or `stack_type=\"modal\"`\."
             ),
         ),
     ):

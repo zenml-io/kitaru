@@ -7,7 +7,7 @@ icon: dharmachakra
 
 A Kubernetes stack gives your flows a remote runner on your own cluster, so a flow you run, replay, and diff locally executes the same way against production infrastructure. This guide covers the full lifecycle: create a stack, inspect it, set it as your default, and delete it safely.
 
-Kubernetes is one shipped remote-stack path. For the broader stack model or a managed-runner option without `--cluster`, start with [Stacks](README.md), which also covers Vertex, SageMaker, and AzureML.
+Kubernetes is one shipped remote-stack path. For the broader stack model or a managed-runner option without `--cluster`, start with [Stacks](README.md), which also covers Modal, Vertex, SageMaker, and AzureML.
 
 Use this page for the workflow and the happy path. For exact flag syntax and every supported option, see the generated CLI reference for [`kitaru stack create`](https://sdkdocs.kitaru.ai), [`kitaru stack show`](https://sdkdocs.kitaru.ai), and [`kitaru stack delete`](https://sdkdocs.kitaru.ai).
 

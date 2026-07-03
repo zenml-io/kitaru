@@ -62,6 +62,13 @@ from zenml.integrations.gcp.flavors.vertex_orchestrator_flavor import (
 from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
     KubernetesOrchestratorFlavor,
 )
+from zenml.integrations.modal import MODAL_ORCHESTRATOR_FLAVOR
+from zenml.integrations.modal.flavors.modal_orchestrator_flavor import (
+    ModalOrchestratorFlavor,
+)
+from zenml.integrations.modal.flavors.modal_sandbox_flavor import (
+    ModalSandboxFlavor,
+)
 from zenml.integrations.s3.flavors.s3_artifact_store_flavor import (
     S3ArtifactStoreFlavor,
 )
@@ -93,6 +100,7 @@ class StackType(StrEnum):
     VERTEX = "vertex"
     SAGEMAKER = "sagemaker"
     AZUREML = "azureml"
+    MODAL = "modal"
 
 
 class CloudProvider(StrEnum):
@@ -187,8 +195,21 @@ class AzureMLStackSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ModalStackSpec(BaseModel):
+    """Request model for Modal stack creation."""
+
+    artifact_store: str
+    container_registry: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
 RemoteStackSpec = (
-    KubernetesStackSpec | VertexStackSpec | SagemakerStackSpec | AzureMLStackSpec
+    KubernetesStackSpec
+    | VertexStackSpec
+    | SagemakerStackSpec
+    | AzureMLStackSpec
+    | ModalStackSpec
 )
 
 
@@ -277,6 +298,8 @@ def _build_component_validation_registry() -> dict[
         VertexOrchestratorFlavor(),
         SagemakerOrchestratorFlavor(),
         AzureMLOrchestratorFlavor(),
+        ModalOrchestratorFlavor(),
+        ModalSandboxFlavor(),
         LocalArtifactStoreFlavor(),
         S3ArtifactStoreFlavor(),
         GCPArtifactStoreFlavor(),
@@ -553,6 +576,7 @@ _StackShowType = Literal[
     "vertex",
     "sagemaker",
     "azureml",
+    "modal",
     "custom",
 ]
 _StackComponentRole = Literal[
@@ -637,6 +661,41 @@ def _normalize_azure_artifact_store_uri(artifact_store_uri: str) -> str:
     if artifact_store_uri.startswith("abfss://"):
         return "abfs://" + artifact_store_uri.removeprefix("abfss://")
     return artifact_store_uri
+
+
+def _infer_cloud_provider_from_artifact_store(
+    artifact_store_uri: str,
+) -> CloudProvider:
+    """Infer a cloud provider from an artifact-store URI."""
+    parsed = urlparse(artifact_store_uri.strip())
+    if parsed.scheme == "s3" and parsed.netloc:
+        return CloudProvider.AWS
+    if parsed.scheme == "gs" and parsed.netloc:
+        return CloudProvider.GCP
+    if parsed.scheme in {"az", "abfs", "abfss"} and parsed.netloc:
+        return CloudProvider.AZURE
+    raise KitaruUsageError(
+        f"Cannot infer cloud provider from artifact store URI '{artifact_store_uri}'. "
+        "Use an s3://, gs://, az://, abfs://, or abfss:// URI."
+    )
+
+
+def _artifact_store_flavor(provider: CloudProvider) -> str:
+    """Return the provider-specific artifact-store component flavor."""
+    return {
+        CloudProvider.AWS: "s3",
+        CloudProvider.GCP: GCP_ARTIFACT_STORE_FLAVOR,
+        CloudProvider.AZURE: AZURE_ARTIFACT_STORE_FLAVOR,
+    }[provider]
+
+
+def _container_registry_flavor(provider: CloudProvider) -> str:
+    """Return the provider-specific container-registry component flavor."""
+    return {
+        CloudProvider.AWS: AWS_CONTAINER_REGISTRY_FLAVOR,
+        CloudProvider.GCP: ContainerRegistryFlavor.GCP.value,
+        CloudProvider.AZURE: ContainerRegistryFlavor.AZURE.value,
+    }[provider]
 
 
 def _container_registry_resource_id(
@@ -1212,6 +1271,89 @@ def _build_azureml_stack_request(
     return stack_request
 
 
+def _modal_container_registry_configuration(
+    container_registry: str,
+    provider: CloudProvider,
+) -> dict[str, str]:
+    """Return provider-specific container-registry configuration for Modal."""
+    if provider != CloudProvider.AWS:
+        return {"uri": container_registry}
+
+    normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
+    normalized_registry = normalized_registry.rstrip("/")
+    uri, _, default_repository = normalized_registry.partition("/")
+    configuration = {"uri": uri}
+    if default_repository:
+        configuration["default_repository"] = default_repository
+    return configuration
+
+
+def _build_modal_stack_request(
+    name: str,
+    *,
+    spec: ModalStackSpec,
+    labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
+) -> StackRequest:
+    """Build the one-shot ZenML stack request for a Modal stack."""
+    merged_labels = _merge_managed_labels(labels)
+    provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
+    artifact_store_uri = (
+        _normalize_azure_artifact_store_uri(spec.artifact_store)
+        if provider == CloudProvider.AZURE
+        else spec.artifact_store
+    )
+
+    stack_request = StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor=MODAL_ORCHESTRATOR_FLAVOR,
+                    configuration=_build_component_configuration(
+                        {},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor=_artifact_store_flavor(provider),
+                    configuration=_build_component_configuration(
+                        {"path": artifact_store_uri},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                ComponentInfo(
+                    flavor=_container_registry_flavor(provider),
+                    configuration=_build_component_configuration(
+                        _modal_container_registry_configuration(
+                            spec.container_registry,
+                            provider,
+                        ),
+                        overrides=component_overrides,
+                        target=StackComponentTarget.CONTAINER_REGISTRY,
+                    ),
+                )
+            ],
+        },
+        service_connectors=[],
+    )
+    assert stack_request.components is not None
+    _add_remote_sandbox_component_info(
+        stack_request.components,
+        sandbox_flavor=sandbox_flavor,
+        component_overrides=component_overrides,
+    )
+    return stack_request
+
+
 def _get_required_stack_component(
     stack_model: Any,
     component_type: StackComponentType,
@@ -1234,6 +1376,8 @@ def _get_required_stack_component(
 
 def _extract_remote_stack_components(
     stack_model: Any,
+    *,
+    require_connector_metadata: bool = True,
 ) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
     """Extract created component and connector names from a hydrated stack."""
     required_components = (
@@ -1278,7 +1422,7 @@ def _extract_remote_stack_components(
         _collect_component(
             _get_required_stack_component(stack_model, component_type),
             kind=kind,
-            require_connector_metadata=True,
+            require_connector_metadata=require_connector_metadata,
         )
 
     for sandbox_component in _stack_component_models_for_type(
@@ -1302,6 +1446,7 @@ def _stack_type_display_name(stack_type: StackType) -> str:
         StackType.VERTEX: "Vertex",
         StackType.SAGEMAKER: "SageMaker",
         StackType.AZUREML: "AzureML",
+        StackType.MODAL: "Modal",
     }.get(stack_type, str(stack_type))
 
 
@@ -1309,7 +1454,7 @@ def _create_remote_stack_operation(
     name: str,
     *,
     stack_type: StackType,
-    connector_spec: _ResolvedConnectorSpec,
+    connector_spec: _ResolvedConnectorSpec | None,
     stack_request: StackRequest,
     resource_summary: dict[str, str],
     activate: bool = True,
@@ -1330,21 +1475,22 @@ def _create_remote_stack_operation(
 
     _prevalidate_stack_request_components(stack_request)
 
-    try:
-        client.create_service_connector(
-            name=selector,
-            connector_type=connector_spec.connector_info.type,
-            resource_type=connector_spec.verify_resource_type,
-            auth_method=connector_spec.connector_info.auth_method,
-            configuration=dict(connector_spec.connector_info.configuration),
-            verify=verify,
-            list_resources=False,
-            register=False,
-        )
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to prepare {stack_label} stack '{selector}': {exc}"
-        ) from exc
+    if connector_spec is not None:
+        try:
+            client.create_service_connector(
+                name=selector,
+                connector_type=connector_spec.connector_info.type,
+                resource_type=connector_spec.verify_resource_type,
+                auth_method=connector_spec.connector_info.auth_method,
+                configuration=dict(connector_spec.connector_info.configuration),
+                verify=verify,
+                list_resources=False,
+                register=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to prepare {stack_label} stack '{selector}': {exc}"
+            ) from exc
 
     try:
         client._validate_stack_configuration(stack_request)
@@ -1368,8 +1514,12 @@ def _create_remote_stack_operation(
             f"error: {exc}"
         ) from exc
 
+    require_connector_metadata = connector_spec is not None
     components_created, service_connectors_created, missing_connector_metadata = (
-        _extract_remote_stack_components(created_stack)
+        _extract_remote_stack_components(
+            created_stack,
+            require_connector_metadata=require_connector_metadata,
+        )
     )
     if missing_connector_metadata:
         try:
@@ -1378,7 +1528,10 @@ def _create_remote_stack_operation(
             refreshed_stack = None
         if refreshed_stack is not None:
             components_created, service_connectors_created, _ = (
-                _extract_remote_stack_components(refreshed_stack)
+                _extract_remote_stack_components(
+                    refreshed_stack,
+                    require_connector_metadata=require_connector_metadata,
+                )
             )
 
     if activate:
@@ -1826,6 +1979,22 @@ def _stack_component_details_from_model(
                 details=tuple(details),
             )
 
+        if backend == MODAL_ORCHESTRATOR_FLAVOR:
+            details: list[tuple[str, str]] = []
+            for field_name in ("region", "cloud", "modal_environment", "timeout"):
+                value = _normalize_stack_detail_value(
+                    component_configuration.get(field_name)
+                )
+                if value is not None:
+                    details.append((field_name, value))
+
+            return StackComponentDetails(
+                role="runner",
+                name=component_name,
+                backend=backend,
+                details=tuple(details),
+            )
+
         if backend == AZUREML_ORCHESTRATOR_FLAVOR:
             details: list[tuple[str, str]] = []
             subscription_id = _normalize_stack_detail_value(
@@ -1930,6 +2099,11 @@ def _stack_component_details_from_model(
     if component_type == StackComponentType.CONTAINER_REGISTRY:
         details: list[tuple[str, str]] = []
         location = _normalize_stack_detail_value(component_configuration.get("uri"))
+        default_repository = _normalize_stack_detail_value(
+            component_configuration.get("default_repository")
+        )
+        if location is not None and default_repository is not None:
+            location = f"{location.rstrip('/')}/{default_repository.lstrip('/')}"
         if location is not None:
             details.append(("location", location))
 
@@ -2054,6 +2228,12 @@ def _infer_stack_details_type(
         for component in components
     ):
         return "azureml"
+
+    if any(
+        component.role == "runner" and component.backend == MODAL_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "modal"
 
     if any(
         component.role == "runner" and component.backend == "kubernetes"
@@ -2337,6 +2517,45 @@ def _create_azureml_stack_operation(
     )
 
 
+def _create_modal_stack_operation(
+    name: str,
+    *,
+    spec: ModalStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Create a Modal-backed stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
+    stack_request = _build_modal_stack_request(
+        selector,
+        spec=spec,
+        labels=labels,
+        component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
+    )
+    resource_summary = {
+        "provider": provider.value,
+        "artifact_store": spec.artifact_store,
+        "container_registry": spec.container_registry,
+    }
+    if sandbox_flavor is not None:
+        resource_summary["sandbox"] = sandbox_flavor
+    return _create_remote_stack_operation(
+        selector,
+        stack_type=StackType.MODAL,
+        connector_spec=None,
+        stack_request=stack_request,
+        resource_summary=resource_summary,
+        activate=activate,
+        verify=True,
+        client_factory=client_factory,
+    )
+
+
 def _create_stack_operation(
     name: str,
     *,
@@ -2356,6 +2575,7 @@ def _create_stack_operation(
         StackType.VERTEX: _create_vertex_stack_operation,
         StackType.SAGEMAKER: _create_sagemaker_stack_operation,
         StackType.AZUREML: _create_azureml_stack_operation,
+        StackType.MODAL: _create_modal_stack_operation,
     }
     if operation_overrides:
         dispatch.update(operation_overrides)

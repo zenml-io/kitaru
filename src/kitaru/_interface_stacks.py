@@ -17,6 +17,7 @@ from kitaru._config._stacks import (
     AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,
+    ModalStackSpec,
     RemoteStackSpec,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
@@ -31,14 +32,16 @@ _CREATE_ALLOWED_STACK_TYPES = (
     StackType.VERTEX,
     StackType.SAGEMAKER,
     StackType.AZUREML,
+    StackType.MODAL,
 )
 _DEFAULT_INTERFACE_STACK_TYPES = _CREATE_ALLOWED_STACK_TYPES
-_REMOTE_STACK_TYPES = (
+_CLOUD_CONNECTOR_STACK_TYPES = (
     StackType.KUBERNETES,
     StackType.VERTEX,
     StackType.SAGEMAKER,
     StackType.AZUREML,
 )
+_REMOTE_STACK_TYPES = (*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)
 _FIELD_ORDER = (
     "artifact_store",
     "container_registry",
@@ -78,20 +81,24 @@ _REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
         "resource_group",
         "workspace",
     ),
+    StackType.MODAL: (
+        "artifact_store",
+        "container_registry",
+    ),
 }
 _FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
     "artifact_store": frozenset(_REMOTE_STACK_TYPES),
     "container_registry": frozenset(_REMOTE_STACK_TYPES),
     "cluster": frozenset({StackType.KUBERNETES}),
-    "region": frozenset(_REMOTE_STACK_TYPES),
+    "region": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
     "subscription_id": frozenset({StackType.AZUREML}),
     "resource_group": frozenset({StackType.AZUREML}),
     "workspace": frozenset({StackType.AZUREML}),
     "execution_role": frozenset({StackType.SAGEMAKER}),
     "namespace": frozenset({StackType.KUBERNETES}),
-    "credentials": frozenset(_REMOTE_STACK_TYPES),
+    "credentials": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
     "sandbox": frozenset(_CREATE_ALLOWED_STACK_TYPES),
-    "verify": frozenset(_REMOTE_STACK_TYPES),
+    "verify": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
 }
 _FIXED_PROVIDER_BY_STACK_TYPE = {
     StackType.VERTEX: CloudProvider.GCP,
@@ -120,6 +127,7 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.VERTEX: "--type vertex",
         StackType.SAGEMAKER: "--type sagemaker",
         StackType.AZUREML: "--type azureml",
+        StackType.MODAL: "--type modal",
     },
     field_labels={
         "artifact_store": "--artifact-store",
@@ -146,6 +154,7 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.VERTEX: '`stack_type="vertex"`',
         StackType.SAGEMAKER: '`stack_type="sagemaker"`',
         StackType.AZUREML: '`stack_type="azureml"`',
+        StackType.MODAL: '`stack_type="modal"`',
     },
     field_labels={
         "artifact_store": "`artifact_store`",
@@ -381,7 +390,10 @@ def _render_stack_type_requirement(
 
 def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
     """Return a human-friendly label for a set of allowed stack types."""
-    if allowed_stack_types == frozenset(_REMOTE_STACK_TYPES):
+    if allowed_stack_types in {
+        frozenset(_REMOTE_STACK_TYPES),
+        frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
+    }:
         return "Remote stack options"
     if len(allowed_stack_types) == 1:
         stack_type = next(iter(allowed_stack_types))
@@ -390,6 +402,7 @@ def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
             StackType.VERTEX: "Vertex",
             StackType.SAGEMAKER: "SageMaker",
             StackType.AZUREML: "AzureML",
+            StackType.MODAL: "Modal",
         }.get(stack_type, stack_type.value.capitalize())
         return f"{display_name}-only options"
     return "Stack-specific options"
@@ -933,6 +946,12 @@ def build_remote_stack_spec(
             region=normalized_region,
             credentials=normalized_credentials,
             verify=verify,
+        )
+
+    if stack_type == StackType.MODAL:
+        return ModalStackSpec(
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
         )
 
     raise ValueError(f"Unsupported stack type: {stack_type.value}")

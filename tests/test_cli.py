@@ -44,6 +44,7 @@ from kitaru.config import (
     ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
+    ModalStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
     SagemakerStackSpec,
@@ -5934,7 +5935,7 @@ def test_stack_create_rejects_kubernetes_flags_for_local_stack(
     assert exc_info.value.code == 1
     assert (
         "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml: --artifact-store"
+        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -5949,7 +5950,7 @@ def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
     assert exc_info.value.code == 1
     assert (
         "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml: --artifact-store"
+        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -6006,6 +6007,19 @@ def test_stack_create_azureml_requires_all_mandatory_flags(
     assert (
         "--type azureml requires: --artifact-store, --container-registry, "
         "--subscription-id, --resource-group, --workspace."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_modal_requires_storage_and_registry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal stack creation should only require artifact store and registry."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "modal"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type modal requires: --artifact-store, --container-registry."
     ) in capsys.readouterr().err
 
 
@@ -6122,7 +6136,7 @@ def test_stack_create_rejects_unsupported_stack_type_json(
 ) -> None:
     """Invalid stack types should use the structured JSON error contract."""
     with pytest.raises(SystemExit) as exc_info:
-        app(["stack", "create", "dev", "--type", "modal", "--output", "json"])
+        app(["stack", "create", "dev", "--type", "spaceship", "--output", "json"])
 
     assert exc_info.value.code == 1
     payload = json.loads(capsys.readouterr().err)
@@ -6130,8 +6144,8 @@ def test_stack_create_rejects_unsupported_stack_type_json(
         "command": "stack.create",
         "error": {
             "message": (
-                "Unsupported stack type: modal. Use 'local', "
-                "'kubernetes', 'vertex', 'sagemaker', or 'azureml'."
+                "Unsupported stack type: spaceship. Use 'local', "
+                "'kubernetes', 'vertex', 'sagemaker', 'azureml', or 'modal'."
             ),
             "type": "ValueError",
         },
@@ -6160,7 +6174,7 @@ region: us-east-1
     assert exc_info.value.code == 1
     assert (
         "Unsupported stack type: . Use 'local', 'kubernetes', 'vertex', "
-        "'sagemaker', or 'azureml'." in capsys.readouterr().err
+        "'sagemaker', 'azureml', or 'modal'." in capsys.readouterr().err
     )
 
 
@@ -6610,6 +6624,157 @@ def test_stack_create_azureml_builds_spec() -> None:
     }
 
 
+def test_stack_create_modal_builds_spec_with_sandbox_and_overrides() -> None:
+    """Modal stacks should accept storage, registry, sandbox, async, and extras."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="prod-modal",
+            stack_type="modal",
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
+                ),
+                "sandbox": "modal",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+                "--sandbox",
+                "modal",
+                "--async",
+                "--extra",
+                "orchestrator.synchronous=false",
+                "--extra",
+                "orchestrator.token_id=ak-test",
+                "--extra",
+                "orchestrator.token_secret=as-test",
+                "--extra",
+                "sandbox.timeout=1800",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("prod-modal",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "synchronous": False,
+            "token_id": "ak-test",
+            "token_secret": "as-test",
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {"timeout": 1800},
+    }
+
+
+def test_stack_create_modal_rejects_region_and_cloud_connector_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal should not accept region/credential flags from other remote stacks."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+                "--region",
+                "us-east-1",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "Remote stack options require" in stderr
+    assert "--region" in stderr
+
+
+def test_stack_create_modal_builds_spec_from_yaml_file(tmp_path: Path) -> None:
+    """YAML Modal stack creation should accept nested orchestrator/sandbox extra."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-modal
+type: modal
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+sandbox: modal
+async: true
+extra:
+  orchestrator:
+    modal_environment: production
+    timeout: 7200
+  sandbox:
+    app_name: kitaru-agent-sandbox
+    timeout: 1800
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-modal",
+            stack_type="modal",
+        )
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "modal_environment": "production",
+            "timeout": 7200,
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {
+            "app_name": "kitaru-agent-sandbox",
+            "timeout": 1800,
+        },
+    }
+
+
 def test_stack_create_sagemaker_builds_spec_from_yaml_file(tmp_path: Path) -> None:
     """SageMaker stack creation should accept execution_role from YAML input."""
     stack_file = _write_stack_create_file(
@@ -6799,7 +6964,7 @@ def test_stack_create_local_rejects_async_flag(
     assert exc_info.value.code == 1
     assert (
         "--async requires --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml."
+        "--type sagemaker, --type azureml, or --type modal."
     ) in capsys.readouterr().err
 
 
@@ -7073,6 +7238,55 @@ def test_stack_create_azureml_text_output(
     assert "Artifacts:" in output and "az://container/kitaru" in output
     assert "Registry:" in output and "demo.azurecr.io/team/image" in output
     assert "Active stack: default → my-azure" in output
+
+
+def test_stack_create_modal_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal stack creation should render provider and resource details."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-modal",
+            stack_type="modal",
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru"
+                ),
+                "sandbox": "modal",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru",
+                "--sandbox",
+                "modal",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-modal (modal)" in output
+    assert "Provider:" in output and "aws" in output
+    assert "Artifacts:" in output and "s3://bucket/kitaru" in output
+    assert (
+        "Registry:" in output
+        and "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru" in output
+    )
+    assert "Sandbox:" in output and "modal" in output
+    assert "Active stack: default → my-modal" in output
 
 
 def test_stack_create_kubernetes_json_output(
