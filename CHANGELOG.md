@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Added Python 3.14 as a supported and tested runtime.
 
+### Changed
+- Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added
