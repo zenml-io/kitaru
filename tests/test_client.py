@@ -5753,10 +5753,28 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         status=ZenMLExecutionStatus.RUNNING,
         flow_name="sample_flow",
     )
+    project_events: list[tuple[str, str | None]] = []
 
-    replay_pipeline = SimpleNamespace(
-        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
-    )
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        project_events.append(("enter", project))
+        try:
+            yield
+        finally:
+            project_events.append(("exit", project))
+
+    def _replay(**_kwargs: Any) -> PipelineRunResponse:
+        assert project_events == [("enter", "production")]
+        return _as_pipeline_run(replayed_run)
+
+    def _persist_submission(**_kwargs: Any) -> None:
+        assert project_events == [
+            ("enter", "production"),
+            ("exit", "production"),
+            ("enter", "production"),
+        ]
+
+    replay_pipeline = SimpleNamespace(replay=MagicMock(side_effect=_replay))
     replay_module = SimpleNamespace(
         __kitaru_pipeline_source_sample_flow=replay_pipeline,
     )
@@ -5764,7 +5782,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     with (
         patch(
             "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
+            return_value=_resolved_connection(project="production"),
         ),
         patch("kitaru.client.Client") as client_cls,
         patch(
@@ -5775,6 +5793,11 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
             "kitaru.client._ExecutionsAPI._await_replay_completion",
             _immediate_replay_completion,
         ),
+        patch(
+            "kitaru.client.safe_persist_replay_submission_metadata",
+            side_effect=_persist_submission,
+        ),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
         patch("kitaru.client.importlib.import_module", return_value=replay_module),
     ):
         client_mock = client_cls.return_value
@@ -5789,6 +5812,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         submission = client.executions.replay(
             str(source_run.id),
             at="write",
+            wait=False,
         )
 
     replay_pipeline.replay.assert_called_once()
@@ -5796,6 +5820,15 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
     assert submission.results[0].replay_exec_id == str(replayed_run.id)
+    replay_handle = submission.results[0].handle
+    assert replay_handle is not None
+    assert replay_handle._project == "production"
+    assert project_events == [
+        ("enter", "production"),
+        ("exit", "production"),
+        ("enter", "production"),
+        ("exit", "production"),
+    ]
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:
@@ -6279,6 +6312,14 @@ def test_replay_fallback_emits_requested_and_replayed_events() -> None:
     replay_pipeline = SimpleNamespace(
         replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
     )
+
+    def _assert_project_aware_completion(
+        _self: object,
+        handle_or_run: object,
+    ) -> str:
+        assert getattr(handle_or_run, "_project", "missing") is None
+        return str(cast(Any, handle_or_run).exec_id)
+
     replay_module = SimpleNamespace(
         __kitaru_pipeline_source_sample_flow=replay_pipeline,
     )
@@ -6296,7 +6337,7 @@ def test_replay_fallback_emits_requested_and_replayed_events() -> None:
         patch("kitaru.client.track") as track_mock,
         patch(
             "kitaru.client._ExecutionsAPI._await_replay_completion",
-            _immediate_replay_completion,
+            _assert_project_aware_completion,
         ),
         patch("kitaru.client.importlib.import_module", return_value=replay_module),
     ):

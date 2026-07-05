@@ -1475,7 +1475,7 @@ class _ExecutionsAPI:
         ):
             handle = handle_or_run
         else:
-            handle = FlowHandle(handle_or_run)
+            handle = FlowHandle(handle_or_run, project=self._client_ref._project)
         handle.wait()
         return str(handle.exec_id)
 
@@ -1586,6 +1586,8 @@ class _ExecutionsAPI:
         prefetched_runs: Mapping[str, PipelineRunResponse] | None = None,
     ) -> ReplaySubmission:
         """Replay through ZenML pipeline fallback when no Kitaru flow wrapper exists."""
+        from kitaru.flow import FlowHandle, _temporary_active_project
+
         submission_id = new_replay_submission_id()
         request_document = build_replay_request_document(
             flow_overrides=flow_overrides,
@@ -1655,13 +1657,15 @@ class _ExecutionsAPI:
                 track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
 
                 try:
-                    replayed_run = replay_pipeline.replay(
-                        pipeline_run=source_run.id,
-                        skip=replay_plan.steps_to_skip,
-                        skip_successful_steps=False,
-                        input_overrides=replay_plan.input_overrides or None,
-                        step_input_overrides=replay_plan.step_input_overrides or None,
-                    )
+                    with _temporary_active_project(self._client_ref._project):
+                        replayed_run = replay_pipeline.replay(
+                            pipeline_run=source_run.id,
+                            skip=replay_plan.steps_to_skip,
+                            skip_successful_steps=False,
+                            input_overrides=replay_plan.input_overrides or None,
+                            step_input_overrides=replay_plan.step_input_overrides
+                            or None,
+                        )
                 except Exception as exc:
                     failure_origin = classify_failure_origin(
                         status_reason=str(exc),
@@ -1706,16 +1710,21 @@ class _ExecutionsAPI:
                     AnalyticsEvent.FLOW_REPLAYED,
                     {"replay_path": "pipeline_fallback"},
                 )
+                replay_handle = FlowHandle(
+                    replayed_run,
+                    project=self._client_ref._project,
+                )
                 row_status: Literal["submitted", "completed", "failed"] = "submitted"
                 if wait:
-                    replayed_exec_id = self._await_replay_completion(replayed_run)
+                    replayed_exec_id = self._await_replay_completion(replay_handle)
                     row_status = "completed"
-                safe_persist_replay_submission_metadata(
-                    replay_exec_id=replayed_exec_id,
-                    original_exec_id=original_id,
-                    submission_id=submission_id,
-                    tag=tag,
-                )
+                with _temporary_active_project(self._client_ref._project):
+                    safe_persist_replay_submission_metadata(
+                        replay_exec_id=replayed_exec_id,
+                        original_exec_id=original_id,
+                        submission_id=submission_id,
+                        tag=tag,
+                    )
                 compare_ids.extend([original_id, replayed_exec_id])
                 results.append(
                     ReplayResultRow(
@@ -1726,7 +1735,7 @@ class _ExecutionsAPI:
                         compare_url=safe_compare_url_for_executions(
                             [original_id, replayed_exec_id]
                         ),
-                        handle=None if wait else replayed_run,
+                        handle=None if wait else replay_handle,
                     )
                 )
             except Exception as exc:
@@ -2370,6 +2379,7 @@ class _DeploymentsAPI:
             )
         return FlowHandle(
             run,
+            project=self._client_ref._project,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )

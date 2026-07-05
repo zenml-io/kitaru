@@ -361,6 +361,103 @@ def test_create_project_handles_no_previous_active_project() -> None:
     assert result.project.is_active is True
 
 
+def test_create_project_creates_missing_kitaru_project_env_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "production")
+    created = _project_model("new-id", "production")
+
+    class _CreateEnvSelectedProjectClient:
+        def __init__(self) -> None:
+            self.get_project_calls: list[str] = []
+            self.create_project = Mock(return_value=created)
+            self.set_active_project = Mock(return_value=created)
+
+        @property
+        def active_project(self) -> Any:
+            raise AssertionError("env-selected projects should resolve by exact lookup")
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> Any:
+            assert (allow_name_prefix_match, hydrate) == (False, True)
+            self.get_project_calls.append(selector)
+            raise KeyError(selector)
+
+    fake_client = _CreateEnvSelectedProjectClient()
+
+    with patch("kitaru._config._projects.track", return_value=True):
+        result = create_project("production", client_factory=lambda: fake_client)
+
+    assert result.project.name == "production"
+    assert result.project.is_active is True
+    assert result.previous_active_project is None
+    assert result.activated is True
+    assert fake_client.get_project_calls == ["production"]
+    fake_client.create_project.assert_called_once_with(
+        name="production",
+        description="",
+        display_name=None,
+    )
+    fake_client.set_active_project.assert_called_once_with("new-id")
+
+
+def test_create_project_without_activation_handles_missing_kitaru_project_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "production")
+    created = _project_model("new-id", "production")
+
+    class _CreateEnvSelectedProjectClient:
+        def __init__(self) -> None:
+            self.create_project = Mock(return_value=created)
+            self.set_active_project = Mock()
+
+        @property
+        def active_project(self) -> Any:
+            raise AssertionError(
+                "activate=False should not read persisted active project"
+            )
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> Any:
+            assert (selector, allow_name_prefix_match, hydrate) == (
+                "production",
+                False,
+                True,
+            )
+            raise KeyError(selector)
+
+    fake_client = _CreateEnvSelectedProjectClient()
+
+    with patch("kitaru._config._projects.track", return_value=True):
+        result = create_project(
+            "production",
+            activate=False,
+            client_factory=lambda: fake_client,
+        )
+
+    assert result.project.name == "production"
+    assert result.project.is_active is True
+    assert result.previous_active_project is None
+    assert result.activated is False
+    fake_client.create_project.assert_called_once_with(
+        name="production",
+        description="",
+        display_name=None,
+    )
+    fake_client.set_active_project.assert_not_called()
+
+
 def test_delete_project_returns_deleted_project_and_tracks() -> None:
     target = _project_model("stage-id", "staging")
     fake_client = Mock()

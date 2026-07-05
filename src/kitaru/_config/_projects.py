@@ -154,6 +154,36 @@ def _active_project_selector_from_env() -> str | None:
     return _normalized_kitaru_env(ZENML_ACTIVE_PROJECT_ID_ENV)
 
 
+def _env_selector_matches_project(
+    selector: str | None,
+    *,
+    project_name: str | None = None,
+    project_model: Any | None = None,
+) -> bool:
+    """Return whether an env selector names a project exactly."""
+    if selector is None:
+        return False
+    normalized_selector = selector.strip()
+    if not normalized_selector:
+        return False
+
+    candidates: set[str] = set()
+    if project_name is not None:
+        normalized_name = project_name.strip()
+        if normalized_name:
+            candidates.add(normalized_name)
+    if project_model is not None:
+        candidates.update(
+            candidate
+            for candidate in {
+                str(getattr(project_model, "id", "")).strip(),
+                str(getattr(project_model, "name", "")).strip(),
+            }
+            if candidate
+        )
+    return normalized_selector in candidates
+
+
 def _get_project_by_exact_selector(client: Any, selector: str) -> Any:
     """Resolve a project selector without name-prefix matching."""
     return client.get_project(
@@ -311,10 +341,16 @@ def create_project(
     project_description = _normalize_optional_project_string(description) or ""
     project_display_name = _normalize_optional_project_string(display_name)
     client = client_factory()
+    env_selector = _active_project_selector_from_env()
     try:
         previous_active_project = current_project(client_factory=lambda: client).name
     except KitaruStateError:
         previous_active_project = None
+    except KitaruBackendError:
+        if _env_selector_matches_project(env_selector, project_name=project_name):
+            previous_active_project = None
+        else:
+            raise
     try:
         created_project = client.create_project(
             name=project_name,
@@ -329,11 +365,20 @@ def create_project(
             f"Failed to create project '{project_name}': {exc}"
         ) from exc
 
+    if activate:
+        active_project_id = str(active_project.id)
+    elif _env_selector_matches_project(
+        env_selector,
+        project_name=project_name,
+        project_model=created_project,
+    ):
+        active_project_id = str(created_project.id)
+    else:
+        active_project_id = _active_project_id(client)
+
     project_info = _project_info_from_model(
         active_project if activate else created_project,
-        active_project_id=str(active_project.id)
-        if activate
-        else _active_project_id(client),
+        active_project_id=active_project_id,
     )
     track(AnalyticsEvent.PROJECT_CREATED, {"activated": activate})
     return ProjectCreateResult(
