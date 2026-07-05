@@ -458,6 +458,92 @@ def test_create_project_without_activation_handles_missing_kitaru_project_env(
     fake_client.set_active_project.assert_not_called()
 
 
+def test_create_project_ignores_stale_unrelated_kitaru_project_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "stale-missing")
+    created = _project_model("new-id", "production")
+
+    class _CreateWithStaleEnvClient:
+        def __init__(self) -> None:
+            self.get_project_calls: list[str] = []
+            self.create_project = Mock(return_value=created)
+            self.set_active_project = Mock(return_value=created)
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> Any:
+            assert (allow_name_prefix_match, hydrate) == (False, True)
+            self.get_project_calls.append(selector)
+            raise KeyError(selector)
+
+    fake_client = _CreateWithStaleEnvClient()
+
+    with patch("kitaru._config._projects.track", return_value=True):
+        result = create_project("production", client_factory=lambda: fake_client)
+
+    assert result.project.name == "production"
+    assert result.project.is_active is False
+    assert result.previous_active_project is None
+    assert result.activated is True
+    assert fake_client.get_project_calls == ["stale-missing"]
+    fake_client.create_project.assert_called_once_with(
+        name="production",
+        description="",
+        display_name=None,
+    )
+    fake_client.set_active_project.assert_called_once_with("new-id")
+
+
+def test_create_project_without_activation_ignores_stale_unrelated_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "stale-missing")
+    created = _project_model("new-id", "production")
+
+    class _CreateWithoutActivationWithStaleEnvClient:
+        def __init__(self) -> None:
+            self.get_project_calls: list[str] = []
+            self.create_project = Mock(return_value=created)
+            self.set_active_project = Mock()
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> Any:
+            assert (allow_name_prefix_match, hydrate) == (False, True)
+            self.get_project_calls.append(selector)
+            raise KeyError(selector)
+
+    fake_client = _CreateWithoutActivationWithStaleEnvClient()
+
+    with patch("kitaru._config._projects.track", return_value=True):
+        result = create_project(
+            "production",
+            activate=False,
+            client_factory=lambda: fake_client,
+        )
+
+    assert result.project.name == "production"
+    assert result.project.is_active is False
+    assert result.previous_active_project is None
+    assert result.activated is False
+    assert fake_client.get_project_calls == ["stale-missing"]
+    fake_client.create_project.assert_called_once_with(
+        name="production",
+        description="",
+        display_name=None,
+    )
+    fake_client.set_active_project.assert_not_called()
+
+
 def test_delete_project_returns_deleted_project_and_tracks() -> None:
     target = _project_model("stage-id", "staging")
     fake_client = Mock()

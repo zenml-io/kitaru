@@ -8,7 +8,7 @@ from cyclopts import Parameter
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.config import ProjectInfo
+from kitaru.config import KITARU_PROJECT_ENV, ProjectInfo
 from kitaru.inspection import serialize_project
 
 from . import project_app
@@ -25,6 +25,7 @@ from ._helpers import (
     _emit_snapshot,
     _exit_with_error,
     _print_success,
+    _print_warning,
     _resolve_output_format,
     _validate_pagination,
 )
@@ -185,7 +186,7 @@ def create(
         return
 
     _print_success(f"Created project: {result.project.name}")
-    if result.activated:
+    if result.activated and result.project.is_active:
         if result.previous_active_project is not None:
             print(
                 "Activated project: "
@@ -193,6 +194,11 @@ def create(
             )
         else:
             print(f"Activated project: {result.project.name}")
+    elif result.activated:
+        _print_warning(
+            "Project activation is still overridden by the environment.",
+            f"Unset or update {KITARU_PROJECT_ENV} to use {result.project.name}.",
+        )
 
 
 @project_app.command

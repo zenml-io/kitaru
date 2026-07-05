@@ -194,11 +194,15 @@ def _project_create_result_stub(
     *,
     name: str = "staging",
     activated: bool = True,
+    is_active: bool | None = None,
     previous_active_project: str | None = "prod",
 ) -> SimpleNamespace:
     """Build a lightweight project-create result object for CLI tests."""
     return SimpleNamespace(
-        project=_project_stub(name=name, is_active=activated),
+        project=_project_stub(
+            name=name,
+            is_active=activated if is_active is None else is_active,
+        ),
         previous_active_project=previous_active_project,
         activated=activated,
     )
@@ -5839,6 +5843,29 @@ def test_project_create_no_activate_skips_activation(
     output = capsys.readouterr().out
     assert "Created project: staging" in output
     assert "Activated project" not in output
+
+
+def test_project_create_warns_when_env_overrides_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create` should not claim effective activation if env wins."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub(
+            activated=True,
+            is_active=False,
+        )
+        app(["project", "create", "staging"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    streams = capsys.readouterr()
+    assert "Created project: staging" in streams.out
+    assert "Activated project" not in streams.out
+    assert "Project activation is still overridden" in streams.err
+    assert "KITARU_PROJECT" in streams.err
 
 
 def test_project_delete_requires_yes(

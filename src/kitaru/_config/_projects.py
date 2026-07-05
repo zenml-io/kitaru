@@ -342,15 +342,14 @@ def create_project(
     project_display_name = _normalize_optional_project_string(display_name)
     client = client_factory()
     env_selector = _active_project_selector_from_env()
+    active_project_read_failed = False
     try:
         previous_active_project = current_project(client_factory=lambda: client).name
+    except KitaruBackendError:
+        previous_active_project = None
+        active_project_read_failed = True
     except KitaruStateError:
         previous_active_project = None
-    except KitaruBackendError:
-        if _env_selector_matches_project(env_selector, project_name=project_name):
-            previous_active_project = None
-        else:
-            raise
     try:
         created_project = client.create_project(
             name=project_name,
@@ -365,16 +364,26 @@ def create_project(
             f"Failed to create project '{project_name}': {exc}"
         ) from exc
 
-    if activate:
-        active_project_id = str(active_project.id)
-    elif _env_selector_matches_project(
+    env_selector_matches_created = _env_selector_matches_project(
         env_selector,
         project_name=project_name,
         project_model=created_project,
-    ):
+    )
+    if activate:
+        active_project_id = (
+            str(active_project.id)
+            if env_selector is None or env_selector_matches_created
+            else None
+        )
+    elif env_selector_matches_created:
         active_project_id = str(created_project.id)
+    elif active_project_read_failed:
+        active_project_id = None
     else:
-        active_project_id = _active_project_id(client)
+        try:
+            active_project_id = _active_project_id(client)
+        except KitaruBackendError:
+            active_project_id = None
 
     project_info = _project_info_from_model(
         active_project if activate else created_project,

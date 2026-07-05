@@ -167,6 +167,8 @@ def _temporary_active_project(project_name_or_id: str | None) -> Iterator[None]:
         target_project_id = str(target_project.id)
         with _temporary_env({ZENML_ACTIVE_PROJECT_ID_ENV: target_project_id}):
             try:
+                # ZenML persists this active-project change; the restore below is
+                # best-effort if the process exits before the context manager unwinds.
                 client.set_active_project(target_project_id)
             except Exception as exc:
                 raise KitaruBackendError(
