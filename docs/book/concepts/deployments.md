@@ -39,6 +39,13 @@ When you deploy from source targets (`path.py:flow_name`) via CLI, run
 `kitaru init` in the repository first so build/deploy-from-source metadata can be
 resolved correctly.
 
+Deployments are created and invoked in the active Kitaru project. Kitaru gets
+that project from your persisted login/project selection (`kitaru login
+--project ...` or `kitaru project use ...`), from `KITARU_PROJECT` in headless
+environments, or from an explicit process-local configuration override. If your
+active project is `staging`, `kitaru deploy` creates the deployment in `staging`;
+if you switch to `production`, the same command targets `production` instead.
+
 ## What gets saved
 
 Deploying a flow creates a Kitaru-managed saved snapshot that Kitaru treats as an

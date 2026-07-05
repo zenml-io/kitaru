@@ -172,6 +172,47 @@ def test_cli_command_modules_use_dependency_seam_not_legacy_facade() -> None:
     assert offenders == []
 
 
+def _project_stub(
+    *,
+    name: str = "prod",
+    project_id: str | None = None,
+    display_name: str | None = None,
+    description: str | None = None,
+    is_active: bool = False,
+) -> SimpleNamespace:
+    """Build a lightweight project object for CLI tests."""
+    return SimpleNamespace(
+        id=project_id or f"project-{name}-id",
+        name=name,
+        display_name=display_name,
+        description=description,
+        is_active=is_active,
+    )
+
+
+def _project_create_result_stub(
+    *,
+    name: str = "staging",
+    activated: bool = True,
+    is_active: bool | None = None,
+    previous_active_project: str | None = "prod",
+) -> SimpleNamespace:
+    """Build a lightweight project-create result object for CLI tests."""
+    return SimpleNamespace(
+        project=_project_stub(
+            name=name,
+            is_active=activated if is_active is None else is_active,
+        ),
+        previous_active_project=previous_active_project,
+        activated=activated,
+    )
+
+
+def _project_delete_result_stub(*, name: str = "staging") -> SimpleNamespace:
+    """Build a lightweight project-delete result object for CLI tests."""
+    return SimpleNamespace(deleted_project=_project_stub(name=name))
+
+
 def _stack_create_result_stub(
     *,
     name: str = "dev",
@@ -4370,6 +4411,37 @@ def test_login_delegates_to_remote_connect(
 
     output = capsys.readouterr().out
     assert "Connected to Kitaru server: https://example.com" in output
+    assert "Project: demo-project" in output
+    assert "Active project" not in output
+
+
+def test_login_remote_without_project_does_not_print_project(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Remote login without --project should not guess or print a project."""
+    with (
+        patch("kitaru.cli.login_to_server") as mock_login,
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="https://example.com",
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login", "https://example.com/"])
+
+    assert exc_info.value.code == 0
+    mock_login.assert_called_once_with(
+        "https://example.com/",
+        api_key=None,
+        refresh=False,
+        project=None,
+        no_verify_ssl=False,
+        ssl_ca_cert=None,
+        timeout=60,
+    )
+    output = capsys.readouterr().out
+    assert "Connected to Kitaru server: https://example.com" in output
+    assert "Project:" not in output
     assert "Active project" not in output
 
 
@@ -5649,6 +5721,268 @@ def test_secrets_delete_surfaces_backend_errors(
 
     assert exc_info.value.code == 1
     assert "already deleted" in capsys.readouterr().err
+
+
+def test_project_list_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project list` should render visible projects and active marker."""
+    with (
+        patch("kitaru.cli.list_projects") as mock_list_projects,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_projects.return_value = [
+            _project_stub(name="dev", is_active=False),
+            _project_stub(name="prod", is_active=True),
+        ]
+        app(["project", "list"])
+
+    assert exc_info.value.code == 0
+    mock_list_projects.assert_called_once_with(page=1, size=20)
+    output = capsys.readouterr().out
+    assert "Kitaru projects" in output
+    assert "dev: project-dev-id" in output
+    assert "prod: project-prod-id (active)" in output
+
+
+def test_project_current_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project current` should show active project details."""
+    with (
+        patch("kitaru.cli.current_project") as mock_current_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "current"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru project" in output
+    assert "Project: prod" in output
+    assert "Project ID: project-prod-id" in output
+
+
+def test_project_show_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project show` should render Kitaru project details."""
+    with (
+        patch("kitaru.cli.get_project") as mock_get_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_get_project.return_value = _project_stub(
+            name="prod",
+            display_name="Production",
+            description="Production project",
+            is_active=True,
+        )
+        app(["project", "show", "prod"])
+
+    assert exc_info.value.code == 0
+    mock_get_project.assert_called_once_with("prod")
+    output = capsys.readouterr().out
+    assert "Kitaru project" in output
+    assert "Name: prod" in output
+    assert "Display name: Production" in output
+    assert "Description: Production project" in output
+    assert "Active: yes" in output
+
+
+def test_project_use_delegates_to_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project use` should activate and report the selected project."""
+    with (
+        patch("kitaru.cli.use_project") as mock_use_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "use", "prod"])
+
+    assert exc_info.value.code == 0
+    mock_use_project.assert_called_once_with("prod")
+    output = capsys.readouterr().out
+    assert "Activated project: prod" in output
+    assert "Project ID: project-prod-id" in output
+
+
+def test_project_create_reports_auto_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create` should create and activate by default."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub()
+        app(["project", "create", "staging"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    output = capsys.readouterr().out
+    assert "Created project: staging" in output
+    assert "Activated project: prod → staging" in output
+
+
+def test_project_create_no_activate_skips_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create --no-activate` should not activate the new project."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub(
+            activated=False,
+        )
+        app(["project", "create", "staging", "--no-activate"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=False)
+    output = capsys.readouterr().out
+    assert "Created project: staging" in output
+    assert "Activated project" not in output
+
+
+def test_project_create_warns_when_env_overrides_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create` should not claim effective activation if env wins."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub(
+            activated=True,
+            is_active=False,
+        )
+        app(["project", "create", "staging"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    streams = capsys.readouterr()
+    assert "Created project: staging" in streams.out
+    assert "Activated project" not in streams.out
+    assert "Project activation is still overridden" in streams.err
+    assert "KITARU_PROJECT" in streams.err
+
+
+def test_project_delete_requires_yes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project delete` should fail before backend calls without --yes."""
+    with (
+        patch("kitaru.cli.delete_project") as mock_delete_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["project", "delete", "staging"])
+
+    assert exc_info.value.code == 1
+    mock_delete_project.assert_not_called()
+    assert "Refusing to delete project without --yes." in capsys.readouterr().err
+
+
+def test_project_delete_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project delete --yes` should delete and report the project."""
+    with (
+        patch("kitaru.cli.delete_project") as mock_delete_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_project.return_value = _project_delete_result_stub()
+        app(["project", "delete", "staging", "--yes"])
+
+    assert exc_info.value.code == 0
+    mock_delete_project.assert_called_once_with("staging")
+    assert "Deleted project: staging" in capsys.readouterr().out
+
+
+def test_project_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project list --output json` should emit serialized projects."""
+    with (
+        patch("kitaru.cli.list_projects") as mock_list_projects,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_projects.return_value = [
+            _project_stub(name="dev", is_active=False),
+            _project_stub(name="prod", is_active=True),
+        ]
+        app(["project", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_list_projects.assert_called_once_with(page=1, size=20)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.list",
+        "items": [
+            {
+                "id": "project-dev-id",
+                "name": "dev",
+                "display_name": None,
+                "description": None,
+                "is_active": False,
+            },
+            {
+                "id": "project-prod-id",
+                "name": "prod",
+                "display_name": None,
+                "description": None,
+                "is_active": True,
+            },
+        ],
+        "count": 2,
+    }
+
+
+def test_project_current_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project current --output json` should emit one project item."""
+    with (
+        patch("kitaru.cli.current_project") as mock_current_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "current", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.current",
+        "item": {
+            "id": "project-prod-id",
+            "name": "prod",
+            "display_name": None,
+            "description": None,
+            "is_active": True,
+        },
+    }
+
+
+def test_project_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project create --output json` should include activation metadata."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub()
+        app(["project", "create", "staging", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.create",
+        "item": {
+            "id": "project-staging-id",
+            "name": "staging",
+            "display_name": None,
+            "description": None,
+            "is_active": True,
+            "previous_active_project": "prod",
+            "activated": True,
+        },
+    }
 
 
 def test_stack_list_renders_snapshot(

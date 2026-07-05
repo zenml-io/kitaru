@@ -716,10 +716,12 @@ def _update_kitaru_global_config_impl(
 def _read_global_connection_config_impl(
     *,
     global_configuration_factory: Callable[[], Any],
+    active_project_getter: Callable[[], str | None] | None = None,
 ) -> KitaruConfig:
     """Read connection defaults from global user config/runtime state."""
     server_url: str | None = None
     auth_token: str | None = None
+    project: str | None = None
 
     global_config = global_configuration_factory()
     store = global_config.store
@@ -731,9 +733,13 @@ def _read_global_connection_config_impl(
                 server_url = _normalize_server_url(stripped_store_url)
         auth_token = _extract_store_token(store)
 
+    if active_project_getter is not None:
+        project = active_project_getter()
+
     return KitaruConfig(
         server_url=server_url,
         auth_token=auth_token,
+        project=project,
     )
 
 

@@ -39,6 +39,7 @@ from kitaru._cli import (
     log_store_app,
     main,
     model_app,
+    project_app,
     secrets_app,
     stack_app,
 )
@@ -152,6 +153,24 @@ from kitaru._cli._helpers import (
 )
 from kitaru._cli._init import init
 from kitaru._cli._models import _model_rows, list___, register
+from kitaru._cli._projects import (
+    create as project_create,
+)
+from kitaru._cli._projects import (
+    current as project_current,
+)
+from kitaru._cli._projects import (
+    delete as project_delete,
+)
+from kitaru._cli._projects import (
+    list_ as project_list,
+)
+from kitaru._cli._projects import (
+    show as project_show,
+)
+from kitaru._cli._projects import (
+    use as project_use,
+)
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
     _list_accessible_secrets,
@@ -229,12 +248,18 @@ from kitaru.config import (
     _delete_stack_operation,
     _list_stack_entries,
     _show_stack_operation,
+    create_project,
+    current_project,
+    delete_project,
+    get_project,
     list_model_aliases,
+    list_projects,
     login_to_server,
     register_model_alias,
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+    use_project,
 )
 from kitaru.config import current_stack as get_current_stack
 from kitaru.config import list_stacks as get_available_stacks
@@ -311,6 +336,7 @@ _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
         "log-store",
         "stack",
         "model",
+        "project",
     }
 )
 
@@ -474,9 +500,12 @@ __all__ = [
     "clean_app",
     "cli",
     "create",
+    "create_project",
     "current",
+    "current_project",
     "delete",
     "delete_",
+    "delete_project",
     "deploy",
     "deployment_delete",
     "execute_cleanup_plan",
@@ -495,6 +524,7 @@ __all__ = [
     "get_available_stacks",
     "get_credentials_store",
     "get_current_stack",
+    "get_project",
     "global_",
     "info",
     "init",
@@ -505,6 +535,7 @@ __all__ = [
     "list___",
     "list____",
     "list_model_aliases",
+    "list_projects",
     "log_store_app",
     "login",
     "login_to_server",
@@ -513,6 +544,13 @@ __all__ = [
     "main",
     "model_app",
     "project",
+    "project_app",
+    "project_create",
+    "project_current",
+    "project_delete",
+    "project_list",
+    "project_show",
+    "project_use",
     "register",
     "register_model_alias",
     "replay_",
@@ -543,4 +581,5 @@ __all__ = [
     "stop_registered_local_server",
     "time",
     "use",
+    "use_project",
 ]

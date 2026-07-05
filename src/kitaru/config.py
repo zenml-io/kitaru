@@ -35,6 +35,7 @@ from kitaru._config import _execution_spec as _config_execution_spec
 from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
+from kitaru._config import _projects as _config_projects
 from kitaru._config import _sandbox as _config_sandbox
 from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru._config import _stacks as _config_stacks
@@ -105,6 +106,10 @@ ModelAliasConfig = _config_models.ModelAliasConfig
 ModelRegistryConfig = _config_models.ModelRegistryConfig
 ModelAliasEntry = _config_models.ModelAliasEntry
 ResolvedModelSelection = _config_models.ResolvedModelSelection
+
+ProjectInfo = _config_projects.ProjectInfo
+ProjectCreateResult = _config_projects.ProjectCreateResult
+ProjectDeleteResult = _config_projects.ProjectDeleteResult
 
 SandboxCommandResult = _config_sandbox.SandboxCommandResult
 
@@ -199,6 +204,39 @@ _infer_stack_details_type = _config_stacks._infer_stack_details_type
 _stack_info_from_model = _config_stacks._stack_info_from_model
 _iter_available_stacks = _config_stacks._iter_available_stacks
 
+_project_info_from_model = _config_projects._project_info_from_model
+current_project = _config_projects.current_project
+list_projects = _config_projects.list_projects
+get_project = _config_projects.get_project
+create_project = _config_projects.create_project
+delete_project = _config_projects.delete_project
+use_project = _config_projects.use_project
+
+
+def _read_persisted_active_project() -> str | None:
+    """Read repo-local/global active project without applying env overrides."""
+    if os.environ.get(ZENML_STORE_URL_ENV):
+        return None
+
+    try:
+        client = Client()
+        local_config = getattr(client, "_config", None)
+        if local_config is not None:
+            try:
+                local_project = local_config.active_project
+            except Exception:
+                local_project = None
+            if local_project is not None:
+                return str(local_project.id)
+    except Exception:
+        pass
+
+    try:
+        global_project = GlobalConfiguration().get_active_project()
+    except Exception:
+        return None
+    return str(global_project.id) if global_project is not None else None
+
 
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
@@ -210,13 +248,15 @@ def _read_global_execution_config() -> KitaruConfig:
 def _read_global_connection_config() -> KitaruConfig:
     """Read connection defaults from global user config/runtime state.
 
-    Only reads ``server_url`` and ``auth_token`` from ZenML's persisted
-    store configuration. Project is intentionally omitted here — it is
-    only populated by explicit overrides (env var or runtime configure).
+    This is the lowest-precedence connection layer. It reads server URL and
+    auth token from ZenML's persisted store configuration, plus the active
+    project saved in repo-local config when available, otherwise global config.
+    Environment variables are intentionally handled by later layers.
     """
     with _suppress_zenml_cli_messages():
         return _config_core._read_global_connection_config_impl(
             global_configuration_factory=GlobalConfiguration,
+            active_project_getter=_read_persisted_active_project,
         )
 
 
@@ -297,10 +337,11 @@ def resolve_connection_config(
     """Resolve connection configuration with connection-specific precedence.
 
     Precedence (lowest to highest):
-    1. Global ZenML-backed defaults (server_url, auth_token only)
-    2. Environment variable overrides (KITARU_SERVER_URL, etc.)
-    3. Runtime overrides from ``kitaru.configure(project=...)``
-    4. Explicit argument passed by the caller
+    1. Persisted ZenML-backed defaults (server_url, auth_token, active project)
+    2. Direct ZenML compatibility environment variables
+    3. Public Kitaru environment variables
+    4. Runtime overrides from ``kitaru.configure(project=...)``
+    5. Explicit argument passed by the caller
     """
     return _config_env.resolve_connection_config_impl(
         explicit=explicit,
