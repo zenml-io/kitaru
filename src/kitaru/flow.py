@@ -2192,6 +2192,10 @@ class _FlowDefinition:
         track(AnalyticsEvent.FLOW_ATTEMPTED, _flow_submission_attempt_metadata())
         deployment_metadata: dict[str, Any] | None = None
         failure_origin: FailureOrigin | None = None
+        # Submission has succeeded the moment a run object exists. Failures after
+        # that point (URL emission, spec persistence) must not be tracked as
+        # submission failures, while every setup failure before it must be.
+        submitted = False
         try:
             raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
             resolved_execution = resolve_execution_config(
@@ -2220,18 +2224,12 @@ class _FlowDefinition:
                     transport_image=transport_image,
                 )
             )
-        except Exception as exc:
-            _track_flow_submission_failure(
-                exc,
-                deployment_metadata=deployment_metadata,
-                failure_origin=failure_origin,
-            )
-            raise
 
-        # The resolved project stays active across both the run submission and the
-        # post-submit spec persistence so ZenML writes them into the same project.
-        with _temporary_active_project(resolved_project):
-            try:
+            # The resolved project stays active across both the run submission and
+            # the post-submit spec persistence so ZenML writes them into the same
+            # project. Activating it can fail (deleted/mistyped project); that is a
+            # pre-submission setup failure and is tracked by the handler below.
+            with _temporary_active_project(resolved_project):
                 with _temporary_active_stack(resolved_execution.stack):
                     _preflight_active_stack_implementation_hydration()
                     deployment_metadata = _deployment_metadata_for_stack(
@@ -2245,23 +2243,23 @@ class _FlowDefinition:
                     raise KitaruRuntimeError(
                         "Flow execution did not produce a pipeline run."
                     )
-            except Exception as exc:
+
+                submitted = True
+                _emit_kitaru_execution_url(run)
+                track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
+                persist_frozen_execution_spec(
+                    run_id=run.id,
+                    frozen_execution_spec=frozen_execution_spec,
+                )
+        except Exception as exc:
+            if not submitted:
                 _track_flow_submission_failure(
                     exc,
                     deployment_metadata=deployment_metadata,
                     failure_origin=failure_origin,
                 )
-                raise
+            raise
 
-            # Submission succeeded once the run exists: report it before persisting
-            # the spec so a later persistence error is not tracked as a submission
-            # failure.
-            _emit_kitaru_execution_url(run)
-            track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
-            persist_frozen_execution_spec(
-                run_id=run.id,
-                frozen_execution_spec=frozen_execution_spec,
-            )
         return FlowHandle(
             run,
             observed_started_at=observed_started_at,
