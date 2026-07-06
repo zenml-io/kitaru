@@ -1423,6 +1423,31 @@ def _persist_terminal_llm_usage_metadata(
     )
 
 
+def _flow_submission_attempt_metadata() -> dict[str, Any]:
+    """Return privacy-safe metadata for direct SDK flow submission attempts."""
+    return {"submission_path": "flow_wrapper"}
+
+
+def _track_flow_submission_failure(
+    exc: Exception,
+    *,
+    deployment_metadata: Mapping[str, Any] | None,
+    failure_origin: FailureOrigin | None = None,
+) -> None:
+    """Emit privacy-safe analytics for failures before a run exists."""
+    origin = failure_origin or classify_failure_origin(
+        status_reason=str(exc),
+        traceback=None,
+        default=FailureOrigin.BACKEND,
+    )
+    metadata: dict[str, Any] = _flow_submission_attempt_metadata()
+    if deployment_metadata is not None:
+        metadata.update(deployment_metadata)
+    metadata["error_type"] = type(exc).__name__
+    metadata["failure_origin"] = origin.value
+    track(AnalyticsEvent.FLOW_FAILED, metadata)
+
+
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
@@ -2164,55 +2189,77 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
-        raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
-        resolved_execution = resolve_execution_config(
-            decorator_overrides=self._decorator_config,
-            invocation_overrides=invocation_overrides,
-        )
-        _guard_implicit_active_stack_fallback(
-            operation="run this flow",
-            resolved_execution=resolved_execution,
-            raw_active_stack_provenance=raw_active_stack_provenance,
-        )
-        resolved_connection = resolve_connection_config(validate_for_use=True)
-        transport_image, effective_model_registry = _prepare_model_registry_transport(
-            resolved_execution.image
-        )
-        frozen_execution_spec = build_frozen_execution_spec(
-            resolved_execution=resolved_execution,
-            flow_defaults=self._decorator_config,
-            connection=resolved_connection,
-            model_registry=effective_model_registry,
-        )
-        configured_pipeline = self._pipeline.with_options(
-            **_build_pipeline_options(
+        track(AnalyticsEvent.FLOW_ATTEMPTED, _flow_submission_attempt_metadata())
+        deployment_metadata: dict[str, Any] | None = None
+        failure_origin: FailureOrigin | None = None
+        # Submission has succeeded the moment a run object exists. Failures after
+        # that point (URL emission, spec persistence) must not be tracked as
+        # submission failures, while every setup failure before it must be.
+        submitted = False
+        try:
+            raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
+            resolved_execution = resolve_execution_config(
+                decorator_overrides=self._decorator_config,
+                invocation_overrides=invocation_overrides,
+            )
+            _guard_implicit_active_stack_fallback(
+                operation="run this flow",
                 resolved_execution=resolved_execution,
-                transport_image=transport_image,
+                raw_active_stack_provenance=raw_active_stack_provenance,
             )
-        )
-
-        resolved_project = _connection_project(resolved_connection)
-        with (
-            _temporary_active_project(resolved_project),
-            _temporary_active_stack(resolved_execution.stack),
-        ):
-            _preflight_active_stack_implementation_hydration()
-            deployment_metadata = _deployment_metadata_for_stack(
-                resolved_execution.stack
+            resolved_connection = resolve_connection_config(validate_for_use=True)
+            resolved_project = _connection_project(resolved_connection)
+            transport_image, effective_model_registry = (
+                _prepare_model_registry_transport(resolved_execution.image)
             )
-            observed_started_at = time.perf_counter()
-            run = configured_pipeline(*args, **kwargs)
-            if run is None:
-                raise KitaruRuntimeError(
-                    "Flow execution did not produce a pipeline run."
+            frozen_execution_spec = build_frozen_execution_spec(
+                resolved_execution=resolved_execution,
+                flow_defaults=self._decorator_config,
+                connection=resolved_connection,
+                model_registry=effective_model_registry,
+            )
+            configured_pipeline = self._pipeline.with_options(
+                **_build_pipeline_options(
+                    resolved_execution=resolved_execution,
+                    transport_image=transport_image,
                 )
-            persist_frozen_execution_spec(
-                run_id=run.id,
-                frozen_execution_spec=frozen_execution_spec,
             )
 
-        _emit_kitaru_execution_url(run)
-        track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
+            # The resolved project stays active across both the run submission and
+            # the post-submit spec persistence so ZenML writes them into the same
+            # project. Activating it can fail (deleted/mistyped project); that is a
+            # pre-submission setup failure and is tracked by the handler below.
+            with _temporary_active_project(resolved_project):
+                with _temporary_active_stack(resolved_execution.stack):
+                    _preflight_active_stack_implementation_hydration()
+                    deployment_metadata = _deployment_metadata_for_stack(
+                        resolved_execution.stack
+                    )
+                    observed_started_at = time.perf_counter()
+                    run = configured_pipeline(*args, **kwargs)
+
+                if run is None:
+                    failure_origin = FailureOrigin.RUNTIME
+                    raise KitaruRuntimeError(
+                        "Flow execution did not produce a pipeline run."
+                    )
+
+                submitted = True
+                _emit_kitaru_execution_url(run)
+                track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
+                persist_frozen_execution_spec(
+                    run_id=run.id,
+                    frozen_execution_spec=frozen_execution_spec,
+                )
+        except Exception as exc:
+            if not submitted:
+                _track_flow_submission_failure(
+                    exc,
+                    deployment_metadata=deployment_metadata,
+                    failure_origin=failure_origin,
+                )
+            raise
+
         return FlowHandle(
             run,
             observed_started_at=observed_started_at,
