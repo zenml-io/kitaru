@@ -15,12 +15,14 @@ from unittest.mock import Mock, call, patch
 import click
 import pytest
 from zenml.config.docker_settings import DockerSettings
-from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
+from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID, ENV_ZENML_ACTIVE_STACK_ID
 from zenml.enums import StackComponentType
 from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
 import kitaru.config as config_module
+from kitaru._config import _stacks as config_stacks_module
+from kitaru._config._active_stack_env import active_stack_env_override_warning
 from kitaru._env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
@@ -1071,6 +1073,31 @@ def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
         resolve_model_selection(None)
 
 
+def test_active_stack_env_override_warning_treats_uuid_equivalent_ids_as_same() -> None:
+    """Env and saved stack IDs should match like ZenML UUID parsing does."""
+    stack_id = "12345678-1234-5678-1234-567812345678"
+
+    warning = active_stack_env_override_warning(
+        selected_stack_name="default",
+        selected_stack_id=stack_id,
+        environ={ENV_ZENML_ACTIVE_STACK_ID: stack_id.upper()},
+    )
+
+    assert warning is None
+
+
+def test_active_stack_env_override_warning_reports_raw_env_value() -> None:
+    """Warning text should show the value the user has in their shell."""
+    warning = active_stack_env_override_warning(
+        selected_stack_name="default",
+        selected_stack_id="stack-default-id",
+        environ={ENV_ZENML_ACTIVE_STACK_ID: "  stale-stack-id  "},
+    )
+
+    assert warning is not None
+    assert f"{ENV_ZENML_ACTIVE_STACK_ID}='  stale-stack-id  '" in warning[1]
+
+
 def test_current_stack_returns_active_stack_info() -> None:
     """current_stack should expose the currently active stack."""
     active_stack = SimpleNamespace(id="stack-local-id", name="local")
@@ -1081,6 +1108,38 @@ def test_current_stack_returns_active_stack_info() -> None:
 
     assert stack.id == "stack-local-id"
     assert stack.name == "local"
+    assert stack.is_active is True
+
+
+def test_use_stack_returns_resolved_stack_without_post_activation_active_read() -> None:
+    """use_stack should not re-read env-sensitive active stack state."""
+    selected = SimpleNamespace(id="stack-default-id", name="default")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.activated_stack_ids: list[str] = []
+
+        def activate_stack(self, stack_id: str) -> None:
+            self.activated_stack_ids.append(stack_id)
+
+        @property
+        def active_stack_model(self) -> SimpleNamespace:
+            raise AssertionError("use_stack should not re-read the active stack")
+
+    client = FakeClient()
+
+    with patch(
+        "kitaru._config._stacks._resolve_stack_for_show",
+        return_value=selected,
+    ):
+        stack = config_stacks_module.use_stack(
+            "default",
+            client_factory=lambda: client,
+        )
+
+    assert client.activated_stack_ids == ["stack-default-id"]
+    assert stack.id == "stack-default-id"
+    assert stack.name == "default"
     assert stack.is_active is True
 
 

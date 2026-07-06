@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
+from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
 
 from kitaru._client._mappers import _map_checkpoint_call
 from kitaru.client import (
@@ -1002,7 +1003,7 @@ def test_build_runtime_snapshot_collects_active_context_source_precedence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ZENML_ACTIVE_STACK_ID", "env-stack-id")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "env-stack-id")
     monkeypatch.setenv("KITARU_PROJECT", "kitaru-project-id")
     monkeypatch.setenv("ZENML_ACTIVE_PROJECT_ID", "zenml-project-id")
     monkeypatch.setenv("KITARU_STACK", "execution-default-stack")
@@ -1052,7 +1053,7 @@ def test_build_runtime_snapshot_collects_active_context_source_precedence(
     assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
 
     assert stack_provenance.effective_source == "environment"
-    assert stack_provenance.effective_source_detail == "ZENML_ACTIVE_STACK_ID"
+    assert stack_provenance.effective_source_detail == ENV_ZENML_ACTIVE_STACK_ID
     assert stack_provenance.effective_id == "env-stack-id"
     assert stack_provenance.environment_id == "env-stack-id"
     assert stack_provenance.repository_id == "repo-stack-id"
@@ -1088,7 +1089,7 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
     tmp_path: Path,
 ) -> None:
     for name in (
-        "ZENML_ACTIVE_STACK_ID",
+        ENV_ZENML_ACTIVE_STACK_ID,
         "ZENML_ACTIVE_PROJECT_ID",
         "KITARU_PROJECT",
         "KITARU_STACK",
@@ -1159,6 +1160,79 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
         call.find_repository(enable_warnings=False),
         call(),
     ]
+
+
+def test_build_runtime_snapshot_warns_for_unresolvable_zenml_active_stack_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Snapshot warnings should explain stale ZENML_ACTIVE_STACK_ID recovery."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+    fake_gc = _fake_global_config(tmp_path)
+
+    class FakeClient:
+        root = None
+        active_user = SimpleNamespace(name="alice")
+        zen_store = SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="postgres",
+                deployment_type="kubernetes",
+            )
+        )
+
+        @staticmethod
+        def find_repository(*, enable_warnings: bool = False) -> None:
+            return None
+
+        @property
+        def active_stack_model(self) -> SimpleNamespace:
+            raise KeyError(
+                "Unable to get stack with ID 'stale-stack-id': "
+                "No stack with this ID found"
+            )
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, FakeClient):
+            stack.enter_context(context_manager)
+        stack.enter_context(
+            patch(
+                "kitaru._inspection_runtime.resolve_log_store",
+                return_value=ResolvedLogStore(
+                    backend="datadog",
+                    endpoint="https://logs.example.com",
+                    api_key=None,
+                    source="environment",
+                ),
+            )
+        )
+        mismatch_mock = stack.enter_context(
+            patch("kitaru._inspection_runtime.log_store_mismatch_details")
+        )
+        snapshot = build_runtime_snapshot()
+
+    mismatch_mock.assert_not_called()
+    assert snapshot.active_stack is None
+    assert snapshot.warning is not None
+    assert "Unable to query the configured store (KeyError)" in snapshot.warning
+    assert ENV_ZENML_ACTIVE_STACK_ID in snapshot.warning
+    assert "stale-stack-id" in snapshot.warning
+    assert "Unset it" in snapshot.warning
+    assert "remove it from .envrc" in snapshot.warning
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert any(
+        "Active-stack lookup failed (KeyError)" in note
+        for note in stack_provenance.notes
+    )
+    assert all("Client() failed" not in note for note in stack_provenance.notes)
+    assert any(
+        "Active-stack lookup failed (KeyError)" in note
+        for note in project_provenance.notes
+    )
+    assert all("Client() failed" not in note for note in project_provenance.notes)
 
 
 def test_build_runtime_snapshot_appends_legacy_warning_when_local_store_missing(
@@ -1571,7 +1645,7 @@ def test_describe_local_server_handles_non_import_error() -> None:
 
 def _clear_active_context_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "ZENML_ACTIVE_STACK_ID",
+        ENV_ZENML_ACTIVE_STACK_ID,
         "ZENML_ACTIVE_PROJECT_ID",
         "KITARU_PROJECT",
         "KITARU_STACK",

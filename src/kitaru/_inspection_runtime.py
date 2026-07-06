@@ -24,6 +24,7 @@ from kitaru._config._active_context import (
     stringify_config_id,
     with_resolved_selection,
 )
+from kitaru._config._active_stack_env import active_stack_env_resolution_warning
 from kitaru._version import resolve_installed_version
 from kitaru.config import (
     KITARU_PROJECT_ENV,
@@ -584,46 +585,64 @@ def build_runtime_snapshot(
     elif runtime_conn.project:
         snapshot.project_override = runtime_conn.project
 
+    client_failure_note: str | None = None
     try:
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        active_stack_model = client.active_stack_model
-        snapshot.active_stack = active_stack_model.name
-        snapshot.active_stack_provenance = with_resolved_selection(
-            snapshot.active_stack_provenance,
-            resolved_id=stringify_config_id(getattr(active_stack_model, "id", None)),
-            resolved_name=active_stack_model.name,
-        )
-        snapshot.repository_root = str(client.root) if client.root else None
-        snapshot.server_version = str(store_info.version)
-        snapshot.server_database = str(store_info.database_type)
-        snapshot.server_deployment_type = str(store_info.deployment_type)
-
-        # Active project
-        try:
-            active_project = client.active_project
-            snapshot.active_project = active_project.name
-            snapshot.active_project_provenance = with_resolved_selection(
-                snapshot.active_project_provenance,
-                resolved_id=stringify_config_id(getattr(active_project, "id", None)),
-                resolved_name=active_project.name,
-            )
-        except Exception:
-            logger.debug("Could not read active project", exc_info=True)
 
         try:
-            provenance = _collect_config_provenance(
-                gc,
-                repository_root=snapshot.repository_root,
+            active_stack_model = client.active_stack_model
+        except Exception as exc:
+            snapshot.warning = combine_warnings(
+                snapshot.warning,
+                f"Unable to query the configured store ({type(exc).__name__}): {exc}",
+                active_stack_env_resolution_warning(snapshot.active_stack_provenance),
             )
-            snapshot.kitaru_global_config_path = provenance.kitaru_global_config
-            snapshot.zenml_global_config_path = provenance.zenml_global_config
-            snapshot.local_stores_path = provenance.local_stores
-            snapshot.repository_config_path = provenance.repository_config
-            snapshot.uses_repo_local_config = provenance.uses_repo_local
-        except Exception:
-            logger.debug("Could not collect config provenance", exc_info=True)
+            client_failure_note = (
+                f"Active-stack lookup failed ({type(exc).__name__}): {exc}. "
+                "Raw IDs above were captured before this failure."
+            )
+        else:
+            snapshot.active_stack = active_stack_model.name
+            snapshot.active_stack_provenance = with_resolved_selection(
+                snapshot.active_stack_provenance,
+                resolved_id=stringify_config_id(
+                    getattr(active_stack_model, "id", None)
+                ),
+                resolved_name=active_stack_model.name,
+            )
+            snapshot.repository_root = str(client.root) if client.root else None
+            snapshot.server_version = str(store_info.version)
+            snapshot.server_database = str(store_info.database_type)
+            snapshot.server_deployment_type = str(store_info.deployment_type)
+
+            # Active project
+            try:
+                active_project = client.active_project
+                snapshot.active_project = active_project.name
+                snapshot.active_project_provenance = with_resolved_selection(
+                    snapshot.active_project_provenance,
+                    resolved_id=stringify_config_id(
+                        getattr(active_project, "id", None)
+                    ),
+                    resolved_name=active_project.name,
+                )
+            except Exception:
+                logger.debug("Could not read active project", exc_info=True)
+
+            try:
+                provenance = _collect_config_provenance(
+                    gc,
+                    repository_root=snapshot.repository_root,
+                )
+                snapshot.kitaru_global_config_path = provenance.kitaru_global_config
+                snapshot.zenml_global_config_path = provenance.zenml_global_config
+                snapshot.local_stores_path = provenance.local_stores
+                snapshot.repository_config_path = provenance.repository_config
+                snapshot.uses_repo_local_config = provenance.uses_repo_local
+            except Exception:
+                logger.debug("Could not collect config provenance", exc_info=True)
 
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         snapshot.warning = combine_warnings(
@@ -634,6 +653,8 @@ def build_runtime_snapshot(
             f"Client() failed ({type(exc).__name__}): {exc}. "
             "Raw IDs above were captured before this failure."
         )
+
+    if client_failure_note is not None:
         snapshot.active_stack_provenance = _annotate_provenance_with_note(
             snapshot.active_stack_provenance,
             client_failure_note,
@@ -651,11 +672,12 @@ def build_runtime_snapshot(
         )
         return snapshot
 
-    log_store_status, log_store_warning = log_store_mismatch_details(
-        preferred_log_store
-    )
-    snapshot.log_store_status = log_store_status
-    snapshot.log_store_warning = log_store_warning
+    if client_failure_note is None:
+        log_store_status, log_store_warning = log_store_mismatch_details(
+            preferred_log_store
+        )
+        snapshot.log_store_status = log_store_status
+        snapshot.log_store_warning = log_store_warning
     snapshot.warning = combine_warnings(
         snapshot.warning,
         active_context_fallback_warning(
