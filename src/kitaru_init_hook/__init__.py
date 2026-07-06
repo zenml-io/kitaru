@@ -12,6 +12,7 @@ Only ``os``, ``warnings``, and ``click`` are imported here. No
 from __future__ import annotations
 
 import os
+import uuid
 import warnings
 
 import click
@@ -38,7 +39,6 @@ ZENML_CONFIG_PATH_ENV = "ZENML_CONFIG_PATH"
 _ENV_TRANSLATIONS: tuple[tuple[str, str], ...] = (
     (KITARU_SERVER_URL_ENV, ZENML_STORE_URL_ENV),
     (KITARU_AUTH_TOKEN_ENV, ZENML_STORE_API_KEY_ENV),
-    (KITARU_PROJECT_ENV, ZENML_ACTIVE_PROJECT_ID_ENV),
     (KITARU_DEBUG_ENV, ZENML_DEBUG_ENV),
     (KITARU_ANALYTICS_OPT_IN_ENV, ZENML_ANALYTICS_OPT_IN_ENV),
     (KITARU_DEFAULT_ANALYTICS_SOURCE_ENV, ZENML_DEFAULT_ANALYTICS_SOURCE_ENV),
@@ -64,6 +64,33 @@ def _reset_applied() -> None:
     _applied = False
 
 
+def _is_uuid(value: str) -> bool:
+    """Return whether a string can safely be used as a ZenML project UUID."""
+    try:
+        uuid.UUID(value.strip())
+    except ValueError:
+        return False
+    return True
+
+
+def _translate_project_env_if_uuid() -> None:
+    """Copy ``KITARU_PROJECT`` to ZenML only when it is already a UUID."""
+    kitaru_value = _normalized_kitaru_env(KITARU_PROJECT_ENV)
+    if kitaru_value is None or not _is_uuid(kitaru_value):
+        return
+
+    zenml_value = os.environ.get(ZENML_ACTIVE_PROJECT_ID_ENV)
+    normalized_kitaru_value = kitaru_value.strip()
+    if zenml_value is not None and zenml_value != normalized_kitaru_value:
+        warnings.warn(
+            f"Both {KITARU_PROJECT_ENV} and {ZENML_ACTIVE_PROJECT_ID_ENV} are "
+            f"set with different values; using {KITARU_PROJECT_ENV}.",
+            stacklevel=2,
+        )
+
+    os.environ[ZENML_ACTIVE_PROJECT_ID_ENV] = normalized_kitaru_value
+
+
 def apply_env_translations() -> None:
     """Translate public ``KITARU_*`` env vars into ``ZENML_*`` equivalents."""
     global _applied
@@ -85,6 +112,8 @@ def apply_env_translations() -> None:
             )
 
         os.environ[zenml_var] = kitaru_value
+
+    _translate_project_env_if_uuid()
 
     # Unify config directories: ZenML should store its database,
     # credentials, and local_stores alongside Kitaru's own config.
