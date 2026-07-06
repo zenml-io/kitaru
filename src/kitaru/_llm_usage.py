@@ -168,19 +168,28 @@ LLMCacheStatus = Literal[
     "unknown",
 ]
 _REUSED_CHECKPOINT_STATUSES = frozenset({"cached", "skipped"})
-_REPLAY_REUSED_CHECKPOINT_STATUSES = frozenset(
-    {"replay_reused", "reused", "reused_not_incurred"}
-)
 
 
 def cache_status_for_checkpoint_status(status: Any) -> LLMCacheStatus | None:
-    """Return the LLM cache status implied by a raw checkpoint status."""
+    """Return the LLM cache status implied by a concrete cache status."""
     raw_status = str(getattr(status, "value", status)).strip().lower()
-    if raw_status in _REPLAY_REUSED_CHECKPOINT_STATUSES:
-        return "replay_reused"
     if raw_status in _REUSED_CHECKPOINT_STATUSES:
         return "checkpoint_cache_hit"
     return None
+
+
+def usage_reuse_classification(
+    *,
+    replay_reused: bool = False,
+    checkpoint_status: Any = None,
+) -> tuple[bool, LLMCacheStatus]:
+    """Return whether usage should be treated as reused and with what status."""
+    if replay_reused:
+        return True, "replay_reused"
+    cache_status = cache_status_for_checkpoint_status(checkpoint_status)
+    if cache_status is not None:
+        return True, cache_status
+    return False, "checkpoint_cache_hit"
 
 
 def _int_or_none(value: Any) -> int | None:

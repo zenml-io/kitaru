@@ -3159,7 +3159,10 @@ def test_build_run_statistics_request_maps_public_filters_to_zenml() -> None:
     assert request.filter.pipeline == "support_flow"
     assert request.filter.stack == "prod-stack"
     assert request.filter.tags == ["release", "replay"]
-    assert request.filter.status == 'oneof:["completed","cached","skipped"]'
+    assert request.filter.status == (
+        'oneof:["completed","cached","skipped",'
+        '"replay_reused","reused","reused_not_incurred"]'
+    )
     assert request.max_groups == 12
     assert [grouping.name for grouping in request.groupings] == [
         "flow_id",
@@ -5941,6 +5944,187 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         ("enter", "production"),
         ("exit", "production"),
     ]
+
+
+def _replay_fallback_source_and_pipeline(
+    *,
+    replayed_status: ZenMLExecutionStatus,
+) -> tuple[_DummyRun, _DummyRun, SimpleNamespace, SimpleNamespace]:
+    fetch_step = _DummyStep(
+        name="fetch",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    fetch_step.spec = SimpleNamespace(
+        invocation_id="fetch",
+        upstream_steps=[],
+        inputs_v2={},
+    )
+    write_step = _DummyStep(
+        name="write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    write_step.spec = SimpleNamespace(
+        invocation_id="write",
+        upstream_steps=["fetch"],
+        inputs_v2={},
+    )
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        steps={fetch_step.name: fetch_step, write_step.name: write_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=replayed_status,
+        flow_name="sample_flow",
+    )
+    replay_pipeline = SimpleNamespace(
+        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
+    )
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+    return source_run, replayed_run, replay_pipeline, replay_module
+
+
+def test_replay_fallback_wait_persists_metadata_before_wait_aggregation() -> None:
+    source_run, replayed_run, _replay_pipeline, replay_module = (
+        _replay_fallback_source_and_pipeline(
+            replayed_status=ZenMLExecutionStatus.COMPLETED
+        )
+    )
+    events: list[str] = []
+
+    def fake_persist_replay_metadata(**kwargs: Any) -> None:
+        assert kwargs["steps_to_skip"] == {"fetch"}
+        events.append("persist")
+
+    def fake_terminal_aggregation(run: PipelineRunResponse, **_kwargs: Any) -> bool:
+        assert str(run.id) == str(replayed_run.id)
+        events.append("aggregate")
+        return True
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.flow.Client") as flow_client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch(
+            "kitaru.client.safe_persist_replay_submission_metadata",
+            side_effect=fake_persist_replay_metadata,
+        ),
+        patch(
+            "kitaru.flow._safe_persist_terminal_llm_usage_metadata",
+            side_effect=fake_terminal_aggregation,
+        ),
+        patch("kitaru.flow._extract_flow_result", return_value=None),
+        patch("kitaru.flow.track"),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+        flow_client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(
+            replayed_run
+        )
+
+        submission = KitaruClient().executions.replay(
+            str(source_run.id), at="write", wait=True
+        )
+
+    assert events == ["persist", "aggregate"]
+    assert submission.results[0].status == "completed"
+
+
+def test_replay_fallback_wait_false_terminal_run_aggregates_immediately() -> None:
+    source_run, replayed_run, _replay_pipeline, replay_module = (
+        _replay_fallback_source_and_pipeline(
+            replayed_status=ZenMLExecutionStatus.COMPLETED
+        )
+    )
+    aggregation_calls: list[str] = []
+
+    def fake_terminal_aggregation(run: PipelineRunResponse, **_kwargs: Any) -> bool:
+        aggregation_calls.append(str(run.id))
+        return True
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.safe_persist_replay_submission_metadata"),
+        patch(
+            "kitaru.client._safe_persist_terminal_llm_usage_metadata",
+            side_effect=fake_terminal_aggregation,
+        ),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+
+        submission = KitaruClient().executions.replay(
+            str(source_run.id), at="write", wait=False
+        )
+
+    assert aggregation_calls == [str(replayed_run.id)]
+    assert submission.results[0].status == "submitted"
+
+
+def test_replay_fallback_wait_false_running_run_does_not_aggregate() -> None:
+    source_run, _replayed_run, _replay_pipeline, replay_module = (
+        _replay_fallback_source_and_pipeline(
+            replayed_status=ZenMLExecutionStatus.RUNNING
+        )
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.safe_persist_replay_submission_metadata"),
+        patch(
+            "kitaru.client._safe_persist_terminal_llm_usage_metadata",
+            side_effect=AssertionError("running replay should not aggregate"),
+        ),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+
+        submission = KitaruClient().executions.replay(
+            str(source_run.id), at="write", wait=False
+        )
+
+    assert submission.results[0].status == "submitted"
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:

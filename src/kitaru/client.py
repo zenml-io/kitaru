@@ -142,6 +142,7 @@ from kitaru._source_aliases import (
 )
 from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
 from kitaru._telemetry import deployment_metadata_for_stack_model
+from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     ProjectCreateResult,
@@ -1548,6 +1549,33 @@ class _ExecutionsAPI:
         handle.wait()
         return str(handle.exec_id)
 
+    def _persist_replay_terminal_llm_usage_if_terminal(self, exec_id: str) -> None:
+        """Best-effort terminal LLM rollup after replay metadata exists."""
+        try:
+            run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        except Exception:
+            logger.debug(
+                "Failed to refresh replay execution before terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        if not getattr(getattr(run, "status", None), "is_finished", False):
+            return
+        try:
+            zenml_client = self._client_ref._client()
+        except Exception:
+            logger.debug(
+                "Failed to create ZenML client for replay terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        _safe_persist_terminal_llm_usage_metadata(
+            run,
+            zenml_client=zenml_client,
+        )
+
     def replay(
         self,
         execution: str | Sequence[str],
@@ -1783,16 +1811,23 @@ class _ExecutionsAPI:
                     replayed_run,
                     project=self._client_ref._project,
                 )
-                row_status: Literal["submitted", "completed", "failed"] = "submitted"
-                if wait:
-                    replayed_exec_id = self._await_replay_completion(replay_handle)
-                    row_status = "completed"
                 with _temporary_active_project(self._client_ref._project):
                     safe_persist_replay_submission_metadata(
                         replay_exec_id=replayed_exec_id,
                         original_exec_id=original_id,
                         submission_id=submission_id,
                         tag=tag,
+                        steps_to_skip=replay_plan.steps_to_skip,
+                    )
+                row_status: Literal["submitted", "completed", "failed"] = "submitted"
+                if wait:
+                    replayed_exec_id = self._await_replay_completion(replay_handle)
+                    row_status = "completed"
+                elif getattr(
+                    getattr(replayed_run, "status", None), "is_finished", False
+                ):
+                    self._persist_replay_terminal_llm_usage_if_terminal(
+                        replayed_exec_id
                     )
                 compare_ids.extend([original_id, replayed_exec_id])
                 results.append(

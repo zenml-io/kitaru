@@ -1763,6 +1763,28 @@ def test_flow_result_extraction_empty_run_outputs_fall_back_to_output_specs() ->
     assert _extract_flow_result(_as_pipeline_run(run)) == "declared result"
 
 
+def test_flow_result_extraction_output_spec_none_beats_terminal_fallback() -> None:
+    """An output-spec ``None`` beats a discarded terminal checkpoint output."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("declared_step", "output", None),
+            _DummyOutput(
+                step_name="one_value",
+                output_name="output",
+                value="solo",
+                upstream_steps=["declared_step"],
+            ),
+        ],
+        run_outputs=[],
+    )
+    run.snapshot.pipeline_spec.outputs = [
+        SimpleNamespace(step_name="declared_step", output_name="output")
+    ]
+
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
+
+
 def test_flow_result_extraction_missing_run_outputs_falls_back_to_output_specs() -> (
     None
 ):
@@ -2071,6 +2093,76 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
     assert calls == ["run-1"]
     client_mock.get_pipeline_run.assert_called_once_with(
         run.id,
+        allow_name_prefix_match=False,
+        project=None,
+    )
+
+
+def test_flow_handle_does_not_persist_terminal_llm_usage_when_refresh_fails(
+    monkeypatch,
+) -> None:
+    """Terminal aggregation should retry later instead of using stale metadata."""
+    flow_module = sys.modules["kitaru.flow"]
+    run = _as_pipeline_run(_DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-1"))
+    handle = FlowHandle(run)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.side_effect = RuntimeError("refresh failed")
+
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    monkeypatch.setattr(
+        flow_module,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda _run, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not aggregate stale run")
+        ),
+    )
+
+    handle._persist_terminal_llm_usage_once(run)
+
+    assert handle._terminal_llm_usage_metadata_persisted is False
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-1",
+        allow_name_prefix_match=False,
+        project=None,
+    )
+
+
+def test_flow_handle_init_persists_terminal_llm_usage_for_finished_run(
+    monkeypatch,
+) -> None:
+    """Already-finished handles should still write terminal LLM rollups."""
+    flow_module = sys.modules["kitaru.flow"]
+    run = _as_pipeline_run(
+        _DummyRun(status=ExecutionStatus.COMPLETED, run_id="run-finished")
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = run
+    aggregation_calls: list[tuple[str, object]] = []
+    analytics_events: list[AnalyticsEvent] = []
+
+    monkeypatch.setattr(flow_module, "Client", lambda: client_mock)
+    monkeypatch.setattr(
+        flow_module,
+        "_safe_persist_terminal_llm_usage_metadata",
+        lambda persisted_run, **kwargs: (
+            aggregation_calls.append(
+                (str(persisted_run.id), kwargs.get("zenml_client"))
+            )
+            or True
+        ),
+    )
+    monkeypatch.setattr(
+        flow_module,
+        "track",
+        lambda event, _metadata: analytics_events.append(event),
+    )
+
+    FlowHandle(run, track_terminal_if_finished=True)
+
+    assert analytics_events == [AnalyticsEvent.FLOW_TERMINAL]
+    assert aggregation_calls == [("run-finished", client_mock)]
+    client_mock.get_pipeline_run.assert_called_once_with(
+        "run-finished",
         allow_name_prefix_match=False,
         project=None,
     )
@@ -2716,6 +2808,134 @@ def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -
     assert written[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.0
 
 
+def test_terminal_llm_usage_metadata_preserves_replay_tail_incurred_record(
+    monkeypatch,
+) -> None:
+    """Replay-like raw statuses should not hide provider calls that executed."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="tail-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "write": [
+            SimpleNamespace(
+                id="attempt-write",
+                name="write",
+                spec=SimpleNamespace(invocation_id="write"),
+                status="replay_reused",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"tail-call": record}},
+            )
+        ]
+    }
+    written: dict[str, Any] = {}
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: written.update(metadata),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+            ),
+        )
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert summary is not None
+    assert summary["incurred_usage_record_count"] == 1
+    assert summary["reused_usage_record_count"] == 0
+    assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 37
+    assert written[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 0
+
+
+def test_terminal_llm_usage_metadata_marks_replay_skipped_attempt_reused(
+    monkeypatch,
+) -> None:
+    """The persisted replay skip list is direct evidence of replay reuse."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="upstream-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "fetch": [
+            SimpleNamespace(
+                id="attempt-fetch",
+                name="fetch",
+                spec=SimpleNamespace(invocation_id="fetch"),
+                status="replay_reused",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"upstream-call": record}},
+            )
+        ]
+    }
+    written: dict[str, Any] = {}
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, **metadata: written.update(metadata),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+            ),
+        )
+    )
+
+    summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert summary is not None
+    assert summary["incurred_usage_record_count"] == 0
+    assert summary["reused_usage_record_count"] == 1
+    assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 0
+    assert written[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 37
+
+
 def test_terminal_llm_usage_metadata_skips_when_attempt_fetch_fails(
     monkeypatch,
 ) -> None:
@@ -3287,6 +3507,9 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         ) as resolve_connection_mock,
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch(
+            "kitaru.flow.safe_persist_replay_submission_metadata"
+        ) as persist_replay_metadata_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
     ):
         client_instance = client_cls.return_value
@@ -3313,6 +3536,13 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     persist_mock.assert_called_once()
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
+    persist_replay_metadata_mock.assert_called_once_with(
+        replay_exec_id=str(replayed_run.id),
+        original_exec_id=str(source_run.id),
+        submission_id=submission.submission_id,
+        tag=None,
+        steps_to_skip={"fetch"},
+    )
     build_frozen_spec_call = base_pipeline.with_options.call_args
     docker_settings = build_frozen_spec_call.kwargs["settings"]["docker"]
     assert docker_settings.requirements == ["kitaru"]
@@ -3344,11 +3574,7 @@ def test_replay_uses_resolved_project_for_source_lookup_and_replay_write() -> No
         assert project_events == [("enter", "production")]
 
     def _persist_submission(**_kwargs: Any) -> None:
-        assert project_events == [
-            ("enter", "production"),
-            ("exit", "production"),
-            ("enter", "production"),
-        ]
+        assert project_events == [("enter", "production")]
 
     configured_pipeline = MagicMock()
     configured_pipeline.replay.side_effect = _replay
@@ -3399,8 +3625,6 @@ def test_replay_uses_resolved_project_for_source_lookup_and_replay_write() -> No
     assert replay_handle is not None
     assert replay_handle._project == "production"
     assert project_events == [
-        ("enter", "production"),
-        ("exit", "production"),
         ("enter", "production"),
         ("exit", "production"),
     ]
@@ -4053,12 +4277,66 @@ def test_flow_handle_get_returns_none_when_no_outputs() -> None:
     assert result is None
 
 
-def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
-    """Ambiguous non-result terminals -> recover the value via the linked artifact.
+def test_flow_result_extraction_run_output_none_beats_terminal_fallback() -> None:
+    """An explicit run-level ``None`` beats a discarded terminal checkpoint."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+        run_outputs=[("output", None)],
+    )
+    run.snapshot.pipeline_spec.outputs = []
 
-    An adapter can create several non-result model/tool checkpoints, so terminal
-    inference is ambiguous. The flow's real return value is recovered from the
-    ``kitaru_flow_result`` artifact linked in execution metadata.
+    assert _extract_flow_result(_as_pipeline_run(run)) is None
+
+
+def test_flow_result_linked_none_beats_terminal_fallback() -> None:
+    """A linked explicit ``None`` beats legacy single-terminal inference."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = _DummyArtifact(None)
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result is None
+    client_mock.get_artifact_version.assert_called_once_with(
+        "result-art-id", project=None
+    )
+
+
+def test_flow_result_linked_plain_value_beats_terminal_fallback() -> None:
+    """Any linked plain flow result beats legacy single-terminal inference."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("one_value", "output", "solo")],
+    )
+    run.snapshot.pipeline_spec.outputs = []
+    run.run_metadata = {_FLOW_RESULT_REF_METADATA_KEY: "result-art-id"}
+
+    client_mock = MagicMock()
+    client_mock.get_artifact_version.return_value = _DummyArtifact({"answer": 42})
+
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = _extract_flow_result(_as_pipeline_run(run))
+
+    assert result == {"answer": 42}
+    client_mock.get_artifact_version.assert_called_once_with(
+        "result-art-id", project=None
+    )
+
+
+def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
+    """Explicit linked flow results are recovered before terminal inference.
+
+    An adapter can create several non-result model/tool checkpoints. The flow's
+    real return value is recovered from the ``kitaru_flow_result`` artifact
+    linked in execution metadata before Kitaru tries to infer from terminals.
     """
     non_candidate = {"kitaru": {"flow_result_candidate": False}}
     run = _DummyRun(
