@@ -14,6 +14,10 @@ from uuid import uuid4
 
 import pytest
 
+from kitaru._checkpoint_metadata import (
+    KITARU_METADATA_NAMESPACE,
+    adapter_checkpoint_metadata,
+)
 from kitaru._client._mappers import _map_checkpoint_call
 from kitaru.client import (
     ArtifactRef,
@@ -367,6 +371,72 @@ def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
     assert checkpoint.artifacts[1].kind == "response"
 
 
+def test_checkpoint_mapping_surfaces_adapter_checkpoint_metadata() -> None:
+    step = SimpleNamespace(
+        id="step-id",
+        name="lookup_policy_tool",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={
+            KITARU_METADATA_NAMESPACE: adapter_checkpoint_metadata(
+                adapter="pydantic_ai",
+                kind="tool_call",
+                input_slots=["tool_args"],
+                output_slots=["output"],
+            )
+        },
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={},
+        outputs={},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert checkpoint.checkpoint_origin == "adapter"
+    assert checkpoint.adapter == "pydantic_ai"
+    assert checkpoint.adapter_checkpoint_kind == "tool_call"
+    assert checkpoint.replay_input_slots == ["tool_args"]
+    assert checkpoint.replay_output_slots == ["output"]
+
+
+def test_checkpoint_mapping_keeps_user_tool_call_origin_without_adapter_metadata() -> (
+    None
+):
+    step = SimpleNamespace(
+        id="step-id",
+        name="user_tool_checkpoint",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={},
+        outputs={},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert checkpoint.checkpoint_type == "tool_call"
+    assert checkpoint.checkpoint_origin == "user"
+    assert checkpoint.adapter is None
+    assert checkpoint.adapter_checkpoint_kind is None
+    assert checkpoint.replay_input_slots == []
+    assert checkpoint.replay_output_slots == []
+
+
 def test_checkpoint_mapping_includes_tool_call_structural_input_artifacts() -> None:
     input_artifact = SimpleNamespace(
         id="input-artifact-id",
@@ -496,6 +566,11 @@ def test_serialize_checkpoint_call_contract() -> None:
         "call_id": "call-1",
         "name": "research",
         "checkpoint_type": "tool_call",
+        "checkpoint_origin": "user",
+        "adapter": None,
+        "adapter_checkpoint_kind": None,
+        "replay_input_slots": [],
+        "replay_output_slots": [],
         "status": "failed",
         "started_at": "2026-03-14T10:00:00+00:00",
         "ended_at": "2026-03-14T10:10:00+00:00",

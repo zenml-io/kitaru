@@ -10,6 +10,11 @@ from uuid import uuid4
 import pytest
 from zenml.models import PipelineRunResponse, PipelineRunUpdate
 
+from kitaru._checkpoint_metadata import (
+    KITARU_METADATA_NAMESPACE,
+    REPLAY_INPUT_SLOTS_KEY,
+    adapter_checkpoint_metadata,
+)
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import (
     REPLAY_SKIPPED_STEPS_METADATA_KEY,
@@ -18,6 +23,7 @@ from kitaru.replay import (
     ReplaySubmission,
     build_replay_plan,
     parse_replay_skipped_steps_metadata,
+    plan_requires_runtime_transport,
     replay_at_status,
     replay_skipped_steps_metadata,
     safe_persist_replay_submission_metadata,
@@ -36,6 +42,7 @@ def _step(
     upstream_steps: list[str] | None = None,
     inputs_v2: dict[str, list[Any]] | None = None,
     step_type: str | None = None,
+    run_metadata: dict[str, Any] | None = None,
 ) -> Any:
     step_type_obj = None
     if step_type is not None:
@@ -53,6 +60,7 @@ def _step(
         ),
         outputs={"output": [object()]},
         regular_outputs={"output": object()},
+        run_metadata=run_metadata or {},
     )
 
 
@@ -64,6 +72,22 @@ def _run(*steps: Any) -> PipelineRunResponse:
             steps={step.name: step for step in steps},
         ),
     )
+
+
+def _adapter_metadata(
+    *,
+    kind: str = "tool_call",
+    input_slots: list[str] | None = None,
+    output_slots: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        KITARU_METADATA_NAMESPACE: adapter_checkpoint_metadata(
+            adapter="pydantic_ai",
+            kind=kind,
+            input_slots=input_slots or [],
+            output_slots=output_slots or ["output"],
+        )
+    }
 
 
 def _support_copilot_model_request_steps(t0: datetime) -> tuple[Any, Any, Any]:
@@ -218,6 +242,25 @@ def test_input_override_forces_checkpoint_reexecution() -> None:
 
     assert "transform" not in plan.steps_to_skip
     assert plan.step_input_overrides["transform"] == {"data": "new features"}
+
+
+def test_generic_input_override_does_not_require_runtime_transport() -> None:
+    transform = _step(
+        name="transform",
+        invocation_id="transform",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        inputs_v2={"data": []},
+    )
+
+    plan = build_replay_plan(
+        run=_run(transform),
+        at="transform",
+        invocation_overrides={"transform": {"input": {"data": "new features"}}},
+    )
+
+    assert plan.step_input_overrides == {"transform": {"data": "new features"}}
+    assert plan.runtime_context.input_overrides == {}
+    assert plan_requires_runtime_transport(plan) is False
 
 
 def test_replay_at_branch_leaf_skips_unrelated_branch() -> None:
@@ -697,6 +740,301 @@ def test_explicit_skip_forces_playback_in_live_tail() -> None:
     assert "write" in plan.steps_to_skip
     assert "fetch" in plan.steps_to_skip
     assert "publish" not in plan.steps_to_skip
+
+
+def test_adapter_replay_input_slots_enable_tool_args_shorthand() -> None:
+    step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        run_metadata=_adapter_metadata(input_slots=["tool_args"]),
+    )
+
+    plan = build_replay_plan(
+        run=_run(step),
+        at="lookup_policy_tool",
+        invocation_overrides={
+            "lookup_policy_tool": {"input": {"account_id": "acct-2"}}
+        },
+    )
+
+    assert plan.step_input_overrides == {
+        "lookup_policy_tool": {"tool_args": {"account_id": "acct-2"}}
+    }
+    assert plan.runtime_context.input_overrides["lookup_policy_tool"] == {
+        "tool_args": {"account_id": "acct-2"}
+    }
+    assert plan.runtime_context.input_overrides[str(step.id)] == {
+        "tool_args": {"account_id": "acct-2"}
+    }
+    assert plan_requires_runtime_transport(plan) is True
+
+
+def test_adapter_replay_input_slots_accept_explicit_tool_args() -> None:
+    step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        run_metadata=_adapter_metadata(input_slots=["tool_args"]),
+    )
+
+    plan = build_replay_plan(
+        run=_run(step),
+        at="lookup_policy_tool",
+        invocation_overrides={
+            "lookup_policy_tool": {"input": {"tool_args": {"account_id": "acct-2"}}}
+        },
+    )
+
+    assert plan.step_input_overrides == {
+        "lookup_policy_tool": {"tool_args": {"account_id": "acct-2"}}
+    }
+
+
+def test_adapter_replay_input_rejects_unknown_explicit_slot() -> None:
+    step = _step(
+        name="lookup_policy_tool",
+        invocation_id="lookup_policy_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        run_metadata=_adapter_metadata(input_slots=["tool_args"]),
+    )
+
+    with pytest.raises(KitaruUsageError, match="Unknown replay input slot"):
+        build_replay_plan(
+            run=_run(step),
+            at="lookup_policy_tool",
+            invocation_overrides={
+                "lookup_policy_tool": {
+                    "input": {
+                        "tool_args": {"account_id": "acct-2"},
+                        "mystery": "unexpected",
+                    }
+                }
+            },
+        )
+
+
+def test_pydantic_ai_model_request_rejects_input_override() -> None:
+    step = _step(
+        name="support_copilot_model_request",
+        invocation_id="support_copilot_model_request",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="llm_call",
+        run_metadata=_adapter_metadata(kind="model_request", input_slots=[]),
+    )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match="does not expose replayable inputs",
+    ):
+        build_replay_plan(
+            run=_run(step),
+            at="support_copilot_model_request",
+            invocation_overrides={
+                "support_copilot_model_request": {
+                    "input": {"messages": [{"role": "user", "content": "edited"}]}
+                }
+            },
+        )
+
+
+def test_pydantic_ai_turn_rejects_input_override() -> None:
+    step = _step(
+        name="support_copilot_turn",
+        invocation_id="support_copilot_turn",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="llm_call",
+        run_metadata=_adapter_metadata(kind="turn", input_slots=[]),
+    )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match="does not expose replayable inputs",
+    ):
+        build_replay_plan(
+            run=_run(step),
+            at="support_copilot_turn",
+            invocation_overrides={
+                "support_copilot_turn": {
+                    "input": {
+                        "user_prompt": "edited prompt",
+                        "message_history": [],
+                    }
+                }
+            },
+        )
+
+
+def test_stale_pydantic_ai_model_request_metadata_rejects_input_override() -> None:
+    step = _step(
+        name="support_copilot_model_request",
+        invocation_id="support_copilot_model_request",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="llm_call",
+        run_metadata=_adapter_metadata(kind="model_request", input_slots=["messages"]),
+    )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match="does not expose replayable inputs",
+    ):
+        build_replay_plan(
+            run=_run(step),
+            at="support_copilot_model_request",
+            invocation_overrides={
+                "support_copilot_model_request": {
+                    "input": {"messages": [{"role": "user", "content": "edited"}]}
+                }
+            },
+        )
+
+
+def test_stale_pydantic_ai_turn_metadata_rejects_input_override() -> None:
+    step = _step(
+        name="support_copilot_turn",
+        invocation_id="support_copilot_turn",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="llm_call",
+        run_metadata=_adapter_metadata(
+            kind="turn",
+            input_slots=["user_prompt", "message_history"],
+        ),
+    )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match="does not expose replayable inputs",
+    ):
+        build_replay_plan(
+            run=_run(step),
+            at="support_copilot_turn",
+            invocation_overrides={
+                "support_copilot_turn": {
+                    "input": {
+                        "user_prompt": "edited prompt",
+                        "message_history": [],
+                    }
+                }
+            },
+        )
+
+
+def test_user_authored_tool_call_without_tool_args_rejects_input_replay() -> None:
+    step = _step(
+        name="user_tool_checkpoint",
+        invocation_id="user_tool_checkpoint",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+    )
+
+    with pytest.raises(KitaruUsageError, match="does not expose replayable inputs"):
+        build_replay_plan(
+            run=_run(step),
+            at="user_tool_checkpoint",
+            invocation_overrides={
+                "user_tool_checkpoint": {
+                    "input": {"tool_args": {"account_id": "acct-2"}}
+                }
+            },
+        )
+
+
+def test_recorded_inputs_win_over_tool_call_type_guess() -> None:
+    step = _step(
+        name="user_tool_checkpoint",
+        invocation_id="user_tool_checkpoint",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        inputs_v2={"payload": []},
+    )
+
+    plan = build_replay_plan(
+        run=_run(step),
+        at="user_tool_checkpoint",
+        invocation_overrides={
+            "user_tool_checkpoint": {"input": {"account_id": "acct-2"}}
+        },
+    )
+
+    assert plan.step_input_overrides == {
+        "user_tool_checkpoint": {"payload": {"account_id": "acct-2"}}
+    }
+
+
+def test_user_checkpoint_mixed_recorded_and_literal_inputs_pass_through() -> None:
+    step = _step(
+        name="transform",
+        invocation_id="transform",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        inputs_v2={"data": []},
+    )
+
+    plan = build_replay_plan(
+        run=_run(step),
+        at="transform",
+        invocation_overrides={
+            "transform": {
+                "input": {
+                    "data": {"account_id": "acct-2"},
+                    "config": {"mode": "strict"},
+                }
+            }
+        },
+    )
+
+    assert plan.step_input_overrides == {
+        "transform": {
+            "data": {"account_id": "acct-2"},
+            "config": {"mode": "strict"},
+        }
+    }
+
+
+def test_explicit_empty_replay_input_slots_disable_type_guess() -> None:
+    step = _step(
+        name="redacted_tool",
+        invocation_id="redacted_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        run_metadata=_adapter_metadata(input_slots=[]),
+    )
+
+    with pytest.raises(KitaruUsageError, match="does not expose replayable inputs"):
+        build_replay_plan(
+            run=_run(step),
+            at="redacted_tool",
+            invocation_overrides={"redacted_tool": {"input": {"topic": "new"}}},
+        )
+
+
+def test_malformed_explicit_replay_input_slots_raise_usage_error() -> None:
+    step = _step(
+        name="broken_tool",
+        invocation_id="broken_tool",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        step_type="tool_call",
+        run_metadata={
+            KITARU_METADATA_NAMESPACE: {
+                **adapter_checkpoint_metadata(
+                    adapter="pydantic_ai",
+                    kind="tool_call",
+                    input_slots=["tool_args"],
+                    output_slots=["output"],
+                ),
+                REPLAY_INPUT_SLOTS_KEY: "tool_args",
+            }
+        },
+    )
+
+    with pytest.raises(KitaruUsageError, match="Malformed replay input slot metadata"):
+        build_replay_plan(
+            run=_run(step),
+            at="broken_tool",
+            invocation_overrides={"broken_tool": {"input": {"topic": "new"}}},
+        )
 
 
 def test_explicit_skip_conflicts_with_input_override() -> None:

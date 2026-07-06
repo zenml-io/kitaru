@@ -95,7 +95,7 @@ def is_replay() -> bool:
     return KITARU_REPLAY_CONTEXT_ENV in os.environ
 
 
-def _lookup_override(mapping: dict[str, str], *keys: str | None) -> str | None:
+def _lookup_override(mapping: dict[str, Any], *keys: str | None) -> Any | None:
     for key in keys:
         if not key:
             continue
@@ -154,7 +154,29 @@ def resolve_model_override(*targets: str | None) -> str | None:
     context = get_replay_runtime_context()
     if context is None:
         return None
-    return _lookup_override(context.model_overrides, *targets)
+    value = _lookup_override(context.model_overrides, *targets)
+    return str(value) if value is not None else None
+
+
+def resolve_checkpoint_input_override(
+    *targets: str | None,
+    slot: str | None = None,
+) -> Any | None:
+    """Return replay-provided checkpoint input values for a target.
+
+    ``targets`` can include any identity the runtime has available: invocation
+    ID, checkpoint call ID, checkpoint name, or adapter-local name. If ``slot``
+    is passed, only that structural input value is returned.
+    """
+    context = get_replay_runtime_context()
+    if context is None:
+        return None
+    override = _lookup_override(context.input_overrides, *targets)
+    if not isinstance(override, dict):
+        return None
+    if slot is None:
+        return dict(override)
+    return override.get(slot)
 
 
 __all__ = [
@@ -162,6 +184,7 @@ __all__ = [
     "ReplayRuntimeContext",
     "get_replay_runtime_context",
     "is_replay",
+    "resolve_checkpoint_input_override",
     "resolve_model_override",
     "resolve_tool_override",
 ]

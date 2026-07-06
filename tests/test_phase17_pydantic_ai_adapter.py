@@ -26,6 +26,11 @@ from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.models.test import TestModel
 
 from kitaru import checkpoint, flow
+from kitaru._checkpoint_metadata import (
+    adapter_checkpoint_metadata,
+    checkpoint_metadata_from_step,
+    checkpoint_metadata_value,
+)
 from kitaru.adapters import pydantic_ai as kp
 from kitaru.adapters.pydantic_ai import KitaruAgent, _tracking, hitl_tool
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruUsageError
@@ -76,6 +81,17 @@ def _input_names_by_step(hydrated_run: Any) -> list[set[str]]:
 
 def _has_step_input(hydrated_run: Any, input_name: str) -> bool:
     return any(input_name in inputs for inputs in _input_names_by_step(hydrated_run))
+
+
+def _has_step_metadata(hydrated_run: Any, **expected: Any) -> bool:
+    for step in hydrated_run.steps.values():
+        metadata = checkpoint_metadata_from_step(step)
+        if all(
+            checkpoint_metadata_value(metadata, key) == value
+            for key, value in expected.items()
+        ):
+            return True
+    return False
 
 
 def _wait_for_hydrated_run(exec_id: str) -> Any:
@@ -776,6 +792,24 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
     assert len(hydrated_run.steps) >= 2
     assert _has_step_input(hydrated_run, "messages")
     assert _has_step_input(hydrated_run, "tool_args")
+    assert _has_step_metadata(
+        hydrated_run,
+        **adapter_checkpoint_metadata(
+            adapter="pydantic_ai",
+            kind="model_request",
+            input_slots=[],
+            output_slots=["output"],
+        ),
+    )
+    assert _has_step_metadata(
+        hydrated_run,
+        **adapter_checkpoint_metadata(
+            adapter="pydantic_ai",
+            kind="tool_call",
+            input_slots=["tool_args"],
+            output_slots=["output"],
+        ),
+    )
     assert not any(name.startswith("llm_call_1_prompt__") for name in artifact_names)
     assert not any(name.startswith("llm_call_1_response__") for name in artifact_names)
     assert not any(

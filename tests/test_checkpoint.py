@@ -108,6 +108,7 @@ def _build_checkpoint(
     runtime: StepRuntime | str | None = None,
     cache: bool | None = None,
     flow_result_candidate: bool | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -142,6 +143,7 @@ def _build_checkpoint(
             runtime=runtime,
             cache=cache,
             flow_result_candidate=flow_result_candidate,
+            metadata=metadata,
         )(func)
 
     return wrapped, captured
@@ -252,6 +254,49 @@ def test_checkpoint_private_flow_result_candidate_false_writes_metadata() -> Non
             "boundary": "checkpoint",
             "type": "tool_call",
             "flow_result_candidate": False,
+        }
+    }
+
+
+def test_checkpoint_metadata_cannot_override_reserved_keys() -> None:
+    _, captured = _build_checkpoint(
+        lambda: "ok",
+        checkpoint_type="tool_call",
+        flow_result_candidate=False,
+        metadata={
+            "boundary": "user-value",
+            "type": "user-type",
+            "flow_result_candidate": True,
+            "team": "platform",
+        },
+    )
+
+    assert captured["extra"] == {
+        "kitaru": {
+            "team": "platform",
+            "boundary": "checkpoint",
+            "type": "tool_call",
+            "flow_result_candidate": False,
+        }
+    }
+
+
+def test_checkpoint_metadata_cannot_define_reserved_keys_when_omitted() -> None:
+    _, captured = _build_checkpoint(
+        lambda: "ok",
+        checkpoint_type=None,
+        flow_result_candidate=None,
+        metadata={
+            "type": "user-type",
+            "flow_result_candidate": True,
+            "team": "platform",
+        },
+    )
+
+    assert captured["extra"] == {
+        "kitaru": {
+            "team": "platform",
+            "boundary": "checkpoint",
         }
     }
 
