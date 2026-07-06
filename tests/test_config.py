@@ -19,7 +19,7 @@ import pytest
 from zenml.config.docker_settings import DockerSettings
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 from zenml.enums import StackComponentType
-from zenml.exceptions import EntityExistsError, StackValidationError
+from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
 import kitaru.config as config_module
@@ -2740,10 +2740,10 @@ def test_create_modal_stack_operation_rejects_unpaired_token_override() -> None:
     client_mock.zen_store.create_stack.assert_not_called()
 
 
-def test_modal_stack_validation_uses_temporary_local_image_builder(
+def test_modal_stack_validation_accepts_missing_persisted_image_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ZenML should inject, not persist, the image builder Modal validation needs."""
+    """Modal requests should validate without storing an image builder component."""
     modal_pkg = types.ModuleType("modal")
     modal_pkg.__path__ = []
     modal_config = cast(Any, types.ModuleType("modal.config"))
@@ -2752,7 +2752,6 @@ def test_modal_stack_validation_uses_temporary_local_image_builder(
     monkeypatch.setitem(sys.modules, "modal.config", modal_config)
 
     from zenml.client import Client
-    from zenml.stack import Stack
 
     client = Client()
     stack_request = config_module._config_stacks._build_modal_stack_request(
@@ -2768,20 +2767,8 @@ def test_modal_stack_validation_uses_temporary_local_image_builder(
     client._validate_stack_configuration(stack_request)
     created_stack = client.zen_store.create_stack(stack_request)
 
-    stack = Stack.from_model(created_stack)
-    assert stack.image_builder is None
-    stack.validate()
-
-    assert stack.image_builder is not None
-    assert stack.image_builder.name == "temporary_default"
-    assert stack.image_builder.flavor == "local"
     assert StackComponentType.IMAGE_BUILDER not in stack_request.components
-
-    monkeypatch.setenv("ZENML_SKIP_IMAGE_BUILDER_DEFAULT", "true")
-    stack_without_default = Stack.from_model(created_stack)
-    stack_without_default._components.pop(StackComponentType.IMAGE_BUILDER, None)
-    with pytest.raises(StackValidationError, match="image_builder"):
-        stack_without_default.validate()
+    assert StackComponentType.IMAGE_BUILDER not in created_stack.components
 
 
 def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> None:
