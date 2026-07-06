@@ -13,16 +13,20 @@ from kitaru._client._mappers import (
     _to_plain_dict,
 )
 from kitaru._llm_usage import (
-    cache_status_for_checkpoint_status,
     execution_metadata_from_records,
     metadata_has_complete_usage_summary,
     metadata_matches_usage_metadata,
     usage_records_from_metadata,
+    usage_reuse_classification,
 )
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
 from kitaru.errors import KitaruBackendError
+from kitaru.replay import (
+    parse_replay_skipped_steps_metadata,
+    replay_step_invocation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,7 @@ def _persist_terminal_llm_usage_metadata(
     from kitaru.logging import log_to_execution
 
     run_metadata = _metadata_mapping(getattr(run, "run_metadata", None))
+    replay_skipped_steps = parse_replay_skipped_steps_metadata(run_metadata)
     client = zenml_client or Client()
     try:
         attempts_by_lineage = _list_checkpoint_attempts_for_run(run=run, client=client)
@@ -82,8 +87,9 @@ def _persist_terminal_llm_usage_metadata(
     )
     for attempts in attempts_by_lineage.values():
         for step in attempts:
-            cache_status = cache_status_for_checkpoint_status(
-                getattr(step, "status", None)
+            reused, reused_cache_status = usage_reuse_classification(
+                replay_reused=replay_step_invocation_id(step) in replay_skipped_steps,
+                checkpoint_status=getattr(step, "status", None),
             )
             records.extend(
                 usage_records_from_metadata(
@@ -92,8 +98,8 @@ def _persist_terminal_llm_usage_metadata(
                     default_checkpoint_name=_normalize_checkpoint_name(
                         str(getattr(step, "name", ""))
                     ),
-                    reused=cache_status is not None,
-                    reused_cache_status=cache_status or "checkpoint_cache_hit",
+                    reused=reused,
+                    reused_cache_status=reused_cache_status,
                 )
             )
     metadata = execution_metadata_from_records(records)

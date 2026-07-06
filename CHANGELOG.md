@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
 
 ## [0.19.0] - 2026-06-30
 
