@@ -40,7 +40,7 @@ from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     parse_deployment_snapshot_name,
 )
-from kitaru._client._mappers import _to_public_status
+from kitaru._client._mappers import _list_pending_wait_conditions, _to_public_status
 from kitaru._client._models import ExecutionStatus
 from kitaru._config._active_context import (
     ActiveConfigSelectionProvenance,
@@ -1514,6 +1514,17 @@ def _track_flow_submission_failure(
     track(AnalyticsEvent.FLOW_FAILED, metadata)
 
 
+@dataclass(frozen=True)
+class _FlowHandleWaitConditionClient:
+    """Provide the client shape needed to list wait conditions."""
+
+    zenml_client: Any
+    _project: str | None
+
+    def _client(self) -> Any:
+        return self.zenml_client
+
+
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
@@ -1632,7 +1643,7 @@ class FlowHandle:
         """Block until execution finishes and return its result.
 
         Raises:
-            KitaruStateError: If the execution is waiting for input.
+            KitaruStateError: If the execution is waiting for input or paused.
             KitaruExecutionError: If the run finishes unsuccessfully.
             KitaruRuntimeError: If result extraction fails after completion.
 
@@ -1652,12 +1663,38 @@ class FlowHandle:
                 return _extract_flow_result(run, project=self._project)
 
             if _to_public_status(run.status) == ExecutionStatus.WAITING:
+                wait_client = _FlowHandleWaitConditionClient(Client(), self._project)
+                try:
+                    pending_waits = _list_pending_wait_conditions(
+                        run=run,
+                        client=cast(Any, wait_client),
+                    )
+                except KitaruBackendError as exc:
+                    raise KitaruStateError(
+                        f"Execution '{run.id}' is paused/waiting, but Kitaru "
+                        "could not determine whether it has pending wait input: "
+                        f"{exc}\n\n"
+                        "If input is still pending, resolve it with:\n\n"
+                        f"  kitaru executions input {run.id} --value '<json>'\n\n"
+                        "If all wait input is already resolved, resume it with:\n\n"
+                        f"  kitaru executions resume {run.id}"
+                    ) from exc
+
+                if pending_waits:
+                    raise KitaruStateError(
+                        f"Execution '{run.id}' is waiting for input. "
+                        "`FlowHandle.wait()` cannot return a result until the "
+                        "pending wait is resolved.\n\n"
+                        "Provide the wait input with:\n\n"
+                        f"  kitaru executions input {run.id} --value '<json>'"
+                    )
+
                 raise KitaruStateError(
-                    f"Execution '{run.id}' is waiting for input. "
-                    "`FlowHandle.wait()` cannot return a result until the "
-                    "pending wait is resolved.\n\n"
-                    "Provide the wait input with:\n\n"
-                    f"  kitaru executions input {run.id} --value '<json>'"
+                    f"Execution '{run.id}' is paused, but Kitaru found no "
+                    "pending wait input to resolve. `FlowHandle.wait()` cannot "
+                    "resume it automatically.\n\n"
+                    "Resume the execution with:\n\n"
+                    f"  kitaru executions resume {run.id}"
                 )
 
             time.sleep(1)
