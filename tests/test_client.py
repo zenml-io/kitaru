@@ -5170,6 +5170,118 @@ def test_resume_rejects_when_pending_waits_exist() -> None:
             client.executions.resume(str(run.id))
 
 
+def test_resume_wraps_duplicate_wait_condition_configuration_error() -> None:
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    paused = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resuming = _DummyRun(
+        status=ZenMLExecutionStatus.RESUMING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    duplicate_error = EntityExistsError(
+        "A run wait condition with this name already exists for the run, "
+        "but with different configuration."
+    )
+    old_stack_id = uuid4()
+    active_stack = SimpleNamespace(
+        orchestrator=SimpleNamespace(resume_run=MagicMock(side_effect=duplicate_error))
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.zen_store.update_run.side_effect = [
+            _as_pipeline_run(resuming),
+            _as_pipeline_run(paused),
+        ]
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(paused),
+            _as_pipeline_run(resuming),
+        ]
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError) as exc_info:
+            client.executions.resume(str(run_id))
+
+    message = str(exc_info.value)
+    assert str(run_id) in message
+    assert "re-entered an existing wait" in message
+    assert "`name`" in message
+    assert "`question`" in message
+    assert "`type`" in message
+    assert "`schema`/`data_schema`" in message
+    assert isinstance(exc_info.value.__cause__, KitaruBackendError)
+
+
+def test_resume_preserves_backend_error_when_duplicate_wait_rollback_fails() -> None:
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    paused = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resuming = _DummyRun(
+        status=ZenMLExecutionStatus.RESUMING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    duplicate_error = EntityExistsError(
+        "A run wait condition with this name already exists for the run, "
+        "but with different configuration."
+    )
+    old_stack_id = uuid4()
+    active_stack = SimpleNamespace(
+        orchestrator=SimpleNamespace(resume_run=MagicMock(side_effect=duplicate_error))
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.zen_store.update_run.side_effect = [
+            _as_pipeline_run(resuming),
+            RuntimeError("rollback store unavailable"),
+        ]
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(paused),
+            _as_pipeline_run(resuming),
+        ]
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruBackendError) as exc_info:
+            client.executions.resume(str(run_id))
+
+    message = str(exc_info.value)
+    assert "A run wait condition with this name already exists" in message
+    assert "Additionally failed to roll back execution status" in message
+    assert "The execution may remain RESUMING" in message
+
+
 def test_resume_rejects_non_paused_execution() -> None:
     run = _DummyRun(
         status=ZenMLExecutionStatus.RUNNING,

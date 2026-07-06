@@ -1632,6 +1632,7 @@ class FlowHandle:
         """Block until execution finishes and return its result.
 
         Raises:
+            KitaruStateError: If the execution is waiting for input.
             KitaruExecutionError: If the run finishes unsuccessfully.
             KitaruRuntimeError: If result extraction fails after completion.
 
@@ -1649,6 +1650,16 @@ class FlowHandle:
                 self._track_terminal_once(run)
                 self._persist_terminal_llm_usage_once(run)
                 return _extract_flow_result(run, project=self._project)
+
+            if _to_public_status(run.status) == ExecutionStatus.WAITING:
+                raise KitaruStateError(
+                    f"Execution '{run.id}' is waiting for input. "
+                    "`FlowHandle.wait()` cannot return a result until the "
+                    "pending wait is resolved.\n\n"
+                    "Provide the wait input with:\n\n"
+                    f"  kitaru executions input {run.id} --value '<json>'"
+                )
+
             time.sleep(1)
 
     def get(self) -> Any:

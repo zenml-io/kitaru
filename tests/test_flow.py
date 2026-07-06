@@ -3891,6 +3891,28 @@ def test_flow_handle_wait_polls_until_complete() -> None:
     sleep_mock.assert_called_once_with(1)
 
 
+def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
+    run_id = uuid4()
+    waiting = _DummyRun(status=ExecutionStatus.PAUSED, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = waiting
+
+    handle = FlowHandle(_as_pipeline_run(waiting))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        handle.wait()
+
+    message = str(exc_info.value)
+    assert str(run_id) in message
+    assert "waiting for input" in message
+    assert f"kitaru executions input {run_id} --value" in message
+    assert "'<json>'" in message
+    sleep_mock.assert_not_called()
+
+
 def test_flow_handle_status_returns_kitaru_execution_status() -> None:
     running = _DummyRun(status=ExecutionStatus.RUNNING)
     client_mock = MagicMock()

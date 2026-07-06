@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
+### Fixed
+- `FlowHandle.wait()` now stops with input guidance when an execution is waiting, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
+
 ## [0.19.0] - 2026-06-30
 
 ### Added

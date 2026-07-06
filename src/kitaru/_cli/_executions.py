@@ -1528,16 +1528,38 @@ def retry_(
 @executions_app.command
 def resume_(
     exec_id: Annotated[
-        str,
+        str | None,
         Parameter(help="Execution ID."),
-    ],
+    ] = None,
+    *,
+    exec_id_option: Annotated[
+        str | None,
+        Parameter(name="--exec-id", help="Execution ID."),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Resume a paused execution when it did not continue automatically after input."""
     command = "executions.resume"
     output_format = _resolve_output_format(output)
+    if exec_id is None and exec_id_option is None:
+        _exit_with_error(
+            command,
+            "Execution ID is required. Provide it as an argument or with `--exec-id`.",
+            output=output_format,
+        )
+    if exec_id is not None and exec_id_option is not None:
+        _exit_with_error(
+            command,
+            "Execution ID can only be provided once. Use either the argument "
+            "or `--exec-id`.",
+            output=output_format,
+        )
+    resolved_exec_id = exec_id if exec_id is not None else exec_id_option
+    if resolved_exec_id is None:
+        raise AssertionError("Execution ID validation failed.")
+
     execution = run_with_cli_error_boundary(
-        lambda: cli_dependencies().kitaru_client().executions.resume(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.resume(resolved_exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
