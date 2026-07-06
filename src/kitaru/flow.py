@@ -28,7 +28,7 @@ from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.config.retry_config import StepRetryConfig
-from zenml.constants import DEFAULT_STACK_AND_COMPONENT_NAME
+from zenml.constants import DEFAULT_STACK_AND_COMPONENT_NAME, ENV_ZENML_ACTIVE_STACK_ID
 from zenml.enums import ArtifactType
 from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
@@ -221,13 +221,39 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
             yield
             return
 
+        had_stack_env = ENV_ZENML_ACTIVE_STACK_ID in os.environ
+        previous_stack_env = os.environ.pop(ENV_ZENML_ACTIVE_STACK_ID, None)
         client = Client()
-        old_stack_id = client.active_stack_model.id
-        client.activate_stack(stack_name_or_id)
+        old_stack_id: object | None = None
+
         try:
-            yield
+            try:
+                old_stack_id = client.active_stack_model.id
+            except Exception:
+                logger.debug("Could not capture previous active stack", exc_info=True)
+
+            client.activate_stack(stack_name_or_id)
+            active_stack_id = str(client.active_stack_model.id)
+            os.environ[ENV_ZENML_ACTIVE_STACK_ID] = active_stack_id
+
+            try:
+                yield
+            finally:
+                if old_stack_id is not None:
+                    try:
+                        client.activate_stack(old_stack_id)
+                    except Exception:
+                        logger.warning(
+                            "Failed to restore previous active stack %r after Kitaru "
+                            "flow submission.",
+                            old_stack_id,
+                            exc_info=True,
+                        )
         finally:
-            client.activate_stack(old_stack_id)
+            if had_stack_env and previous_stack_env is not None:
+                os.environ[ENV_ZENML_ACTIVE_STACK_ID] = previous_stack_env
+            else:
+                os.environ.pop(ENV_ZENML_ACTIVE_STACK_ID, None)
 
 
 def _preflight_active_stack_implementation_hydration(
