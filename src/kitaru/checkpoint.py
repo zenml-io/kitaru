@@ -60,6 +60,9 @@ _KITARU_EXTRA_NAMESPACE = KITARU_METADATA_NAMESPACE
 _CHECKPOINT_BOUNDARY_KEY = "boundary"
 _CHECKPOINT_BOUNDARY_VALUE = "checkpoint"
 _FLOW_RESULT_CANDIDATE_KEY = "flow_result_candidate"
+_RESERVED_CHECKPOINT_EXTRA_KEYS = frozenset(
+    {_CHECKPOINT_BOUNDARY_KEY, "type", _FLOW_RESULT_CANDIDATE_KEY}
+)
 
 
 def _is_checkpoint_output_handle(value: Any) -> bool:
@@ -251,13 +254,16 @@ def _build_checkpoint_extra(
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build namespaced step metadata for dashboard rendering."""
-    payload: dict[str, Any] = {_CHECKPOINT_BOUNDARY_KEY: _CHECKPOINT_BOUNDARY_VALUE}
+    payload: dict[str, Any] = {
+        key: value
+        for key, value in dict(metadata or {}).items()
+        if key not in _RESERVED_CHECKPOINT_EXTRA_KEYS
+    }
+    payload[_CHECKPOINT_BOUNDARY_KEY] = _CHECKPOINT_BOUNDARY_VALUE
     if checkpoint_type is not None:
         payload["type"] = checkpoint_type
     if flow_result_candidate is not None:
         payload[_FLOW_RESULT_CANDIDATE_KEY] = flow_result_candidate
-    if metadata:
-        payload.update(dict(metadata))
     return {_KITARU_EXTRA_NAMESPACE: payload}
 
 

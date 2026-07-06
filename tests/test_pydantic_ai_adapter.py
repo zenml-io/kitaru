@@ -1572,6 +1572,79 @@ class TestCachedCallsStrategyModelCheckpoints:
         assert checkpoint_inputs_seen == [{"tool_args": {"effective_on": "2026-01-02"}}]
 
     @pytest.mark.anyio
+    async def test_replay_tool_input_override_validates_tool_args(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai import FunctionToolset
+        from pydantic_ai.models.test import TestModel
+        from pydantic_ai.tools import RunContext
+        from pydantic_ai.usage import RunUsage
+
+        from kitaru.adapters.pydantic_ai import CapturePolicy
+        from kitaru.adapters.pydantic_ai import _toolset as toolset_module
+        from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+        from kitaru.replay_context import (
+            KITARU_REPLAY_CONTEXT_ENV,
+            ReplayRuntimeContext,
+            get_replay_runtime_context,
+        )
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        received_dates: list[date] = []
+        checkpoint_inputs_seen: list[dict[str, Any]] = []
+        toolset: FunctionToolset[None] = FunctionToolset()
+
+        @toolset.tool_plain
+        def lookup_policy(effective_on: date) -> dict[str, object]:
+            assert isinstance(effective_on, date)
+            received_dates.append(effective_on)
+            return {"effective_on": effective_on.isoformat()}
+
+        async def fake_checkpoint(**kwargs: Any) -> Any:
+            checkpoint_inputs = dict(kwargs.get("checkpoint_inputs") or {})
+            checkpoint_inputs_seen.append(checkpoint_inputs)
+            with _checkpoint_scope(
+                name=kwargs["step_name"],
+                checkpoint_type=kwargs["config"].get("type", "tool_call"),
+            ):
+                return await kwargs["body"](checkpoint_inputs["tool_args"])
+
+        monkeypatch.setattr(toolset_module, "run_async_in_checkpoint", fake_checkpoint)
+        wrapped = kitaruify_toolset(
+            toolset,
+            capture=CapturePolicy(correlate_otel_spans=False),
+            tool_checkpoint_config={},
+        )
+        ctx = _with_tool_call_id(
+            RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        )
+        tool = (await wrapped.get_tools(ctx))["lookup_policy"]
+        context = ReplayRuntimeContext(
+            at="lookup_policy_tool",
+            input_overrides={
+                "lookup_policy_tool": {"tool_args": {"effective_on": "2026-03-05"}}
+            },
+        )
+        monkeypatch.setenv(KITARU_REPLAY_CONTEXT_ENV, context.to_json())
+        get_replay_runtime_context.cache_clear()
+
+        try:
+            with _flow_scope(name="override_flow"):
+                result = await wrapped.call_tool(
+                    "lookup_policy",
+                    {"effective_on": date(2026, 1, 2)},
+                    ctx,
+                    tool,
+                )
+        finally:
+            get_replay_runtime_context.cache_clear()
+
+        assert result == {"effective_on": "2026-03-05"}
+        assert received_dates == [date(2026, 3, 5)]
+        assert checkpoint_inputs_seen == [{"tool_args": {"effective_on": "2026-03-05"}}]
+
+    @pytest.mark.anyio
     async def test_replay_tool_input_override_targets_second_call_before_cache_key(
         self,
         monkeypatch: pytest.MonkeyPatch,

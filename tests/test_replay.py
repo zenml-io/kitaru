@@ -17,12 +17,15 @@ from kitaru._checkpoint_metadata import (
 )
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import (
+    REPLAY_SKIPPED_STEPS_METADATA_KEY,
     ReplayPlanDocument,
     ReplayResultRow,
     ReplaySubmission,
     build_replay_plan,
+    parse_replay_skipped_steps_metadata,
     plan_requires_runtime_transport,
     replay_at_status,
+    replay_skipped_steps_metadata,
     safe_persist_replay_submission_metadata,
 )
 
@@ -961,6 +964,35 @@ def test_recorded_inputs_win_over_tool_call_type_guess() -> None:
     }
 
 
+def test_user_checkpoint_mixed_recorded_and_literal_inputs_pass_through() -> None:
+    step = _step(
+        name="transform",
+        invocation_id="transform",
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
+        inputs_v2={"data": []},
+    )
+
+    plan = build_replay_plan(
+        run=_run(step),
+        at="transform",
+        invocation_overrides={
+            "transform": {
+                "input": {
+                    "data": {"account_id": "acct-2"},
+                    "config": {"mode": "strict"},
+                }
+            }
+        },
+    )
+
+    assert plan.step_input_overrides == {
+        "transform": {
+            "data": {"account_id": "acct-2"},
+            "config": {"mode": "strict"},
+        }
+    }
+
+
 def test_explicit_empty_replay_input_slots_disable_type_guess() -> None:
     step = _step(
         name="redacted_tool",
@@ -1096,10 +1128,39 @@ def test_code_override_rejects_non_tool_checkpoint() -> None:
         )
 
 
+def test_replay_skipped_steps_metadata_is_deterministic() -> None:
+    assert replay_skipped_steps_metadata({"write", "fetch"}) == {
+        REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch", "write"]
+    }
+
+
+def test_parse_replay_skipped_steps_metadata_is_tolerant() -> None:
+    assert parse_replay_skipped_steps_metadata({}) == set()
+    assert parse_replay_skipped_steps_metadata(
+        {REPLAY_SKIPPED_STEPS_METADATA_KEY: '["fetch", "write"]'}
+    ) == {"fetch", "write"}
+    assert parse_replay_skipped_steps_metadata(
+        {REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch", 3, None, "write"]}
+    ) == {"fetch", "write"}
+    assert (
+        parse_replay_skipped_steps_metadata(
+            {REPLAY_SKIPPED_STEPS_METADATA_KEY: "not json"}
+        )
+        == set()
+    )
+    assert (
+        parse_replay_skipped_steps_metadata(
+            {REPLAY_SKIPPED_STEPS_METADATA_KEY: {"fetch": True}}
+        )
+        == set()
+    )
+
+
 def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
     monkeypatch,
 ) -> None:
     calls: dict[str, Any] = {}
+    logged: dict[str, Any] = {}
 
     class _Store:
         def update_run(self, **kwargs: Any) -> None:
@@ -1109,15 +1170,28 @@ def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
         zen_store = _Store()
 
     monkeypatch.setattr("zenml.client.Client", lambda: _Client())
-    monkeypatch.setattr("kitaru.logging.log_to_execution", lambda *_, **__: None)
+
+    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+        logged["run_id"] = run_id
+        logged.update(metadata)
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
 
     safe_persist_replay_submission_metadata(
         replay_exec_id="replay-a",
         original_exec_id="orig-a",
         submission_id="rs-test",
         tag="batch-eval",
+        steps_to_skip={"write", "fetch"},
     )
 
+    assert logged == {
+        "run_id": "replay-a",
+        "submission_id": "rs-test",
+        "original_exec_id": "orig-a",
+        "replay_tag": "batch-eval",
+        REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch", "write"],
+    }
     assert calls["run_id"] == "replay-a"
     assert isinstance(calls["run_update"], PipelineRunUpdate)
     assert calls["run_update"].add_tags == ["batch-eval"]

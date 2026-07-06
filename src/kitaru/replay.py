@@ -7,6 +7,7 @@ Kitaru checkpoints during the live replay tail.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -41,6 +42,8 @@ _PYDANTIC_AI_TOOL_CALL_KIND = "tool_call"
 _PYDANTIC_AI_MODEL_REQUEST_KIND = "model_request"
 _PYDANTIC_AI_TURN_KIND = "turn"
 logger = logging.getLogger(__name__)
+
+REPLAY_SKIPPED_STEPS_METADATA_KEY = "kitaru_replay_skipped_steps_v1"
 
 REPLAY_RESERVED_KWARGS = frozenset(
     {
@@ -274,12 +277,44 @@ def _safe_apply_replay_tag(replay_exec_id: str, tag: str | None) -> None:
         )
 
 
+def replay_skipped_steps_metadata(steps_to_skip: Iterable[str]) -> dict[str, Any]:
+    """Return deterministic replay skip metadata for an execution."""
+    skipped_steps = sorted(
+        {step for step in steps_to_skip if isinstance(step, str) and step}
+    )
+    return {REPLAY_SKIPPED_STEPS_METADATA_KEY: skipped_steps}
+
+
+def parse_replay_skipped_steps_metadata(metadata: Mapping[str, Any]) -> set[str]:
+    """Parse replay skip evidence from execution metadata safely."""
+    raw_value = metadata.get(REPLAY_SKIPPED_STEPS_METADATA_KEY)
+    if raw_value is None:
+        return set()
+    if isinstance(raw_value, str):
+        try:
+            raw_value = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return set()
+    if not isinstance(raw_value, list | tuple | set):
+        return set()
+    return {item for item in raw_value if isinstance(item, str) and item}
+
+
+def replay_step_invocation_id(step: StepRunResponse) -> str:
+    """Return the invocation ID Kitaru uses when planning replay skips."""
+    invocation_id = getattr(getattr(step, "spec", None), "invocation_id", None)
+    if not isinstance(invocation_id, str) or not invocation_id:
+        return step.name
+    return invocation_id
+
+
 def safe_persist_replay_submission_metadata(
     *,
     replay_exec_id: str,
     original_exec_id: str,
     submission_id: str,
     tag: str | None,
+    steps_to_skip: Iterable[str] | None = None,
 ) -> None:
     """Best-effort replay correlation metadata and tag persistence."""
     try:
@@ -289,6 +324,8 @@ def safe_persist_replay_submission_metadata(
             "submission_id": submission_id,
             "original_exec_id": original_exec_id,
         }
+        if steps_to_skip is not None:
+            metadata.update(replay_skipped_steps_metadata(steps_to_skip))
         if tag:
             metadata["replay_tag"] = tag
         log_to_execution(replay_exec_id, **metadata)
@@ -338,10 +375,7 @@ class _Checkpoint:
 
 
 def _checkpoint_invocation_id(step: StepRunResponse) -> str:
-    invocation_id = getattr(getattr(step, "spec", None), "invocation_id", None)
-    if not isinstance(invocation_id, str) or not invocation_id:
-        return step.name
-    return invocation_id
+    return replay_step_invocation_id(step)
 
 
 def _checkpoint_type(step: StepRunResponse) -> str | None:
@@ -775,7 +809,7 @@ def _normalize_checkpoint_input_value(
         matched_slots = slot_names.intersection(value.keys())
         if matched_slots:
             unknown_slots = set(value) - slot_names
-            if unknown_slots:
+            if unknown_slots and explicit_slot_names:
                 unknown = ", ".join(sorted(str(slot) for slot in unknown_slots))
                 available = ", ".join(sorted(slot_names)) or "none"
                 raise KitaruUsageError(
@@ -1216,6 +1250,7 @@ def build_replay_plan(
 
 __all__ = [
     "REPLAY_RESERVED_KWARGS",
+    "REPLAY_SKIPPED_STEPS_METADATA_KEY",
     "ReplayFailureRow",
     "ReplayPlan",
     "ReplayPlanDocument",
@@ -1226,9 +1261,12 @@ __all__ = [
     "build_replay_plan",
     "build_replay_request_document",
     "new_replay_submission_id",
+    "parse_replay_skipped_steps_metadata",
     "plan_requires_runtime_transport",
     "replay_at_skip_reason",
     "replay_at_status",
+    "replay_skipped_steps_metadata",
+    "replay_step_invocation_id",
     "safe_compare_url_for_executions",
     "safe_persist_replay_submission_metadata",
 ]

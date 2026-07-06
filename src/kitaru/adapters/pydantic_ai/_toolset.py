@@ -252,9 +252,11 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 isinstance(input_override, dict)
                 and ARTIFACT_SLOT_TOOL_ARGS in input_override
             ):
-                effective_initial_tool_args = _coerce_tool_args_mapping(
-                    input_override[ARTIFACT_SLOT_TOOL_ARGS],
-                    tool_name=name,
+                effective_initial_tool_args = tool.args_validator.validate_python(
+                    _coerce_tool_args_mapping(
+                        input_override[ARTIFACT_SLOT_TOOL_ARGS],
+                        tool_name=name,
+                    )
                 )
             initial_safe_args = (
                 _json_safe(effective_initial_tool_args)
