@@ -4324,6 +4324,30 @@ def test_executions_resume_reports_success(
     assert "Status: running" in output
 
 
+def test_executions_resume_accepts_exec_id_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions resume --exec-id` should match positional behavior."""
+    fake_client = Mock()
+    fake_client.executions.resume.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "resume", "--exec-id", "kr-123"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.resume.assert_called_once_with("kr-123")
+    output = capsys.readouterr().out
+    assert "Resumed execution: kr-123" in output
+    assert "Status: running" in output
+
+
 def test_executions_retry_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

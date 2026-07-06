@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
 - Plain user checkpoint input overrides can again mix recorded artifact input names with literal parameter overrides, while adapter-declared replay input slots still reject unknown keys.

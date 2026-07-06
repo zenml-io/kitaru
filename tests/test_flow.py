@@ -310,6 +310,26 @@ class _DummyRun:
     def get_hydrated_version(self) -> _DummyRun:
         return self
 
+    def get_resources(self) -> object:
+        return self.resources or SimpleNamespace(active_wait_condition=None)
+
+
+def _dummy_wait_condition(
+    *,
+    name: str = "approve_release",
+    question: str = "Approve release?",
+    data_schema: Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        name=name,
+        question=question,
+        data_schema=data_schema,
+        run_metadata=dict(metadata or {}),
+        created=None,
+    )
+
 
 def _add_linked_flow_result_metadata(
     run: _DummyRun,
@@ -4343,6 +4363,93 @@ def test_flow_handle_wait_polls_until_complete() -> None:
 
     assert result == 42
     sleep_mock.assert_called_once_with(1)
+
+
+def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
+    run_id = uuid4()
+    wait_condition = _dummy_wait_condition()
+    waiting = _DummyRun(
+        status=ExecutionStatus.PAUSED,
+        run_id=run_id,
+        resources=SimpleNamespace(active_wait_condition=wait_condition),
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = waiting
+    client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+    handle = FlowHandle(_as_pipeline_run(waiting))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        handle.wait()
+
+    message = str(exc_info.value)
+    assert str(run_id) in message
+    assert "waiting for input" in message
+    assert f"kitaru executions input {run_id} --value" in message
+    assert "'<json>'" in message
+    assert f"kitaru executions resume {run_id}" not in message
+    client_mock.list_run_wait_conditions.assert_called_once_with(
+        pipeline_run=run_id,
+        project=None,
+        status="pending",
+        hydrate=True,
+        sort_by="asc:created",
+        size=200,
+    )
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_paused_without_pending_waits_guides_resume() -> None:
+    run_id = uuid4()
+    waiting = _DummyRun(status=ExecutionStatus.PAUSED, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = waiting
+    client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+    handle = FlowHandle(_as_pipeline_run(waiting))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        handle.wait()
+
+    message = str(exc_info.value)
+    assert str(run_id) in message
+    assert "found no pending wait input" in message
+    assert f"kitaru executions resume {run_id}" in message
+    assert f"kitaru executions input {run_id}" not in message
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_pending_wait_lookup_failure_gives_cautious_guidance() -> None:
+    run_id = uuid4()
+    waiting = _DummyRun(status=ExecutionStatus.PAUSED, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = waiting
+    client_mock.list_run_wait_conditions.side_effect = RuntimeError(
+        "backend unavailable"
+    )
+
+    handle = FlowHandle(_as_pipeline_run(waiting))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        handle.wait()
+
+    message = str(exc_info.value)
+    assert str(run_id) in message
+    assert "could not determine whether it has pending wait input" in message
+    assert "backend unavailable" in message
+    assert f"kitaru executions input {run_id} --value '<json>'" in message
+    assert f"kitaru executions resume {run_id}" in message
+    assert isinstance(exc_info.value.__cause__, KitaruBackendError)
+    sleep_mock.assert_not_called()
 
 
 def test_flow_handle_status_returns_kitaru_execution_status() -> None:
