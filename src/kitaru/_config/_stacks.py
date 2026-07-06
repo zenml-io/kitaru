@@ -3130,9 +3130,13 @@ def use_stack(
     name_or_id: str,
     *,
     client_factory: Callable[[], Any] = Client,
-    current_stack_getter: Callable[[], StackInfo] | None = None,
 ) -> StackInfo:
-    """Set the active stack and return the resulting active stack info."""
+    """Set the active stack and return the activated stack info.
+
+    Activation returns the stack model that was just resolved and activated.
+    Re-reading the active stack after activation can fail when the current
+    process has a stale ``ZENML_ACTIVE_STACK_ID`` environment override.
+    """
     selector = _normalize_stack_selector(name_or_id)
     client = client_factory()
     resolved_stack = _resolve_stack_for_show(client, selector)
@@ -3142,7 +3146,7 @@ def use_stack(
         raise KitaruBackendError(
             f"Failed to activate stack '{selector}': {exc}"
         ) from exc
-    active_stack_getter = (
-        current_stack if current_stack_getter is None else current_stack_getter
+    return _stack_info_from_model(
+        resolved_stack,
+        active_stack_id=str(resolved_stack.id),
     )
-    return active_stack_getter()

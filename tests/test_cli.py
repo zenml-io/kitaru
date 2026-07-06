@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
+from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
@@ -4326,6 +4327,30 @@ def test_executions_resume_reports_success(
     assert "Status: running" in output
 
 
+def test_executions_resume_accepts_exec_id_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions resume --exec-id` should match positional behavior."""
+    fake_client = Mock()
+    fake_client.executions.resume.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "resume", "--exec-id", "kr-123"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.resume.assert_called_once_with("kr-123")
+    output = capsys.readouterr().out
+    assert "Resumed execution: kr-123" in output
+    assert "Status: running" in output
+
+
 def test_executions_retry_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -6163,6 +6188,60 @@ def test_stack_use_delegates_to_config(
     output = capsys.readouterr().out
     assert "Activated stack: prod" in output
     assert "Stack ID: stack-prod-id" in output
+
+
+def test_stack_use_warns_when_zenml_active_stack_env_overrides_saved_config(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`stack use` should warn when an env var still overrides saved config."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+
+    with (
+        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_stack.return_value = SimpleNamespace(
+            id="stack-default-id",
+            name="default",
+            is_active=True,
+        )
+        app(["stack", "use", "default"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "Activated stack: default" in captured.out
+    assert "Stack ID: stack-default-id" in captured.out
+    assert ENV_ZENML_ACTIVE_STACK_ID in captured.err
+    assert "stale-stack-id" in captured.err
+    assert "Unset" in captured.err
+
+
+def test_stack_use_json_warns_on_stderr_when_env_overrides_saved_config(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON `stack use` output should remain parseable when warning."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+
+    with (
+        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_stack.return_value = SimpleNamespace(
+            id="stack-default-id",
+            name="default",
+            is_active=True,
+        )
+        app(["stack", "use", "default", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["command"] == "stack.use"
+    assert payload["item"]["id"] == "stack-default-id"
+    assert ENV_ZENML_ACTIVE_STACK_ID in captured.err
+    assert "stale-stack-id" in captured.err
 
 
 def test_stack_use_surfaces_validation_errors(
@@ -9808,7 +9887,7 @@ def _snapshot_with_active_context_provenance() -> RuntimeSnapshot:
             effective_id="repo-stack-id",
             resolved_id="resolved-stack-id",
             resolved_name="prod",
-            environment_variable="ZENML_ACTIVE_STACK_ID",
+            environment_variable=ENV_ZENML_ACTIVE_STACK_ID,
             environment_id=None,
             repository_root="/work/repo",
             repository_config_path="/work/repo/.kitaru/config.yaml",

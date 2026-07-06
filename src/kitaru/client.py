@@ -205,6 +205,18 @@ _RETRY_RESUMING_REASON = "Manual retry requested by user."
 _RETRY_ROLLBACK_REASON = "Retry submission failed."
 _RESUME_RESUMING_REASON = "Manual resume requested by user."
 _RESUME_ROLLBACK_REASON = "Manual resume failed."
+_DUPLICATE_WAIT_CONDITION_CONFIGURATION_ERROR = (
+    "A run wait condition with this name already exists for the run, "
+    "but with different configuration."
+)
+_OPERATIONAL_RESUME_FAILURE_MARKERS = (
+    "Additionally failed to roll back execution status",
+    "Could not verify whether the execution is still RESUMING",
+    "The execution may remain RESUMING",
+    "Additionally failed to restore the previous active Kitaru stack",
+    "restoring the previous active Kitaru stack failed",
+    "The execution may continue",
+)
 _REPLAY_IMPORT_LOCK = threading.RLock()
 
 
@@ -794,6 +806,54 @@ def _raise_if_running_source(run: PipelineRunResponse, execution: str) -> None:
 def _run_status_value(run: PipelineRunResponse) -> str:
     """Return a pipeline run status as a plain string."""
     return str(getattr(run.status, "value", run.status))
+
+
+def _exception_chain_contains(exc: BaseException, markers: tuple[str, ...]) -> bool:
+    """Return whether an exception, cause, or context contains any marker."""
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+
+        if any(marker in str(current) for marker in markers):
+            return True
+
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return False
+
+
+def _is_duplicate_wait_condition_configuration_error(exc: BaseException) -> bool:
+    """Return whether an exception chain contains ZenML's duplicate wait error."""
+    return _exception_chain_contains(
+        exc,
+        (_DUPLICATE_WAIT_CONDITION_CONFIGURATION_ERROR,),
+    )
+
+
+def _has_operational_resume_failure_context(exc: BaseException) -> bool:
+    """Return whether resume failure text includes operational recovery warnings."""
+    return _exception_chain_contains(exc, _OPERATIONAL_RESUME_FAILURE_MARKERS)
+
+
+def _duplicate_wait_condition_resume_message(exec_id: str) -> str:
+    """Build the duplicate wait-condition resume failure message."""
+    return (
+        f"Unable to resume execution '{exec_id}' because the resumed run "
+        "re-entered an existing wait condition, but the execution backend "
+        "reported that the wait condition now has different configuration. "
+        "Keep wait `name`, "
+        "`question`, `type`, and `schema`/`data_schema` stable across resume. "
+        "If the execution is still waiting for unresolved input, resolve that "
+        "input first with:\n\n"
+        f"  kitaru executions input {exec_id} --value '<json>'"
+    )
 
 
 def _rollback_reopened_run(
@@ -1456,14 +1516,23 @@ class _ExecutionsAPI:
                 f"Execution '{exec_id}' is currently '{run_status_value}'."
             )
 
-        _restart_run_from_snapshot(
-            run=run,
-            client=self._client_ref,
-            operation_name="resume",
-            resuming_reason=_RESUME_RESUMING_REASON,
-            rollback_status=ZenMLExecutionStatus.PAUSED,
-            rollback_reason=_RESUME_ROLLBACK_REASON,
-        )
+        try:
+            _restart_run_from_snapshot(
+                run=run,
+                client=self._client_ref,
+                operation_name="resume",
+                resuming_reason=_RESUME_RESUMING_REASON,
+                rollback_status=ZenMLExecutionStatus.PAUSED,
+                rollback_reason=_RESUME_ROLLBACK_REASON,
+            )
+        except KitaruBackendError as exc:
+            if _has_operational_resume_failure_context(exc):
+                raise
+            if _is_duplicate_wait_condition_configuration_error(exc):
+                raise KitaruStateError(
+                    _duplicate_wait_condition_resume_message(exec_id)
+                ) from exc
+            raise
         track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
 

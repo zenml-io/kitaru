@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
+from kitaru._config._active_stack_env import active_stack_env_override_warning
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_stacks import (
     CLI_STACK_OPTION_LABELS,
@@ -38,6 +39,7 @@ from ._helpers import (
     _emit_json_items,
     _emit_pagination_note,
     _emit_snapshot,
+    _emit_warning,
     _exit_with_error,
     _paginate_items,
     _print_success,
@@ -316,14 +318,25 @@ def use(
         exit_with_error=_exit_with_error,
     )
 
+    warning = active_stack_env_override_warning(
+        selected_stack_name=selected_stack.name,
+        selected_stack_id=str(selected_stack.id),
+    )
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
+        if warning is not None:
+            message, detail = warning
+            _emit_warning(message, output=output_format, detail=detail)
         return
 
     _print_success(
         f"Activated stack: {selected_stack.name}",
         detail=f"Stack ID: {selected_stack.id}",
     )
+    if warning is not None:
+        message, detail = warning
+        _emit_warning(message, output=output_format, detail=detail)
 
 
 @stack_app.command
