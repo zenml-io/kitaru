@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -13,15 +14,31 @@ def _run_smoke_script(
     *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
-    merged_env.update(env or {})
-    return subprocess.run(
-        ["bash", str(SMOKE_SCRIPT), *args],
-        cwd=REPO_ROOT,
-        env=merged_env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    explicit_env = env or {}
+    merged_env.update(explicit_env)
+
+    if "PATH" in explicit_env:
+        return subprocess.run(
+            ["bash", str(SMOKE_SCRIPT), *args],
+            cwd=REPO_ROOT,
+            env=merged_env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="kitaru-smoke-test-bin-") as fake_bin_raw:
+        fake_bin = Path(fake_bin_raw)
+        _write_fake_uv(fake_bin / "uv", Path(os.devnull))
+        merged_env["PATH"] = f"{fake_bin}{os.pathsep}{merged_env['PATH']}"
+        return subprocess.run(
+            ["bash", str(SMOKE_SCRIPT), *args],
+            cwd=REPO_ROOT,
+            env=merged_env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
 
 def test_smoke_script_has_valid_bash_syntax() -> None:
