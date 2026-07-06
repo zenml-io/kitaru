@@ -1,4 +1,9 @@
-"""Private importable flow used by release remote-stack smoke tests."""
+"""Private importable flow used by release remote-stack smoke tests.
+
+The release smoke runner submits this flow to a remote stack by dotted module
+path. It lives under ``src/kitaru`` for importability only; it is not part of
+the public SDK.
+"""
 
 import logging
 import time

@@ -334,8 +334,8 @@ def test_remote_flow_marker_mismatch_raises() -> None:
         )
 
 
-def test_private_smoke_flow_is_importable_by_module_path() -> None:
-    module = importlib.import_module("kitaru._remote_smoke_flow")
+def test_private_release_smoke_flow_is_importable_by_module_path() -> None:
+    module = importlib.import_module("kitaru._release_smoke.remote_stack_flow")
 
     assert callable(module.remote_stack_release_smoke.run)
     assert callable(module.build_remote_smoke_marker)

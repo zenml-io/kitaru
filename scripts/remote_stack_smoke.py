@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 from kitaru import KitaruClient
 from kitaru._client._models import ExecutionStatus
-from kitaru._remote_smoke_flow import (
+from kitaru._release_smoke.remote_stack_flow import (
     build_remote_smoke_marker,
     remote_stack_release_smoke,
 )
