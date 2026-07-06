@@ -15,6 +15,6 @@ icon: https://kitaru.ai/kitaru-logo.svg
 
 dependencies:
   - name: zenml
-    version: "0.95.1"
+    version: "0.96.1"
     repository: "oci://public.ecr.aws/zenml"
     alias: kitaru

@@ -21,6 +21,7 @@ from kitaru.config import (
     CloudProvider,
     ImageSettings,
     KubernetesStackSpec,
+    ProjectInfo,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackInfo,
@@ -52,6 +53,10 @@ from kitaru.mcp.server import (
     kitaru_executions_run,
     kitaru_executions_statistics,
     kitaru_info,
+    kitaru_projects_current,
+    kitaru_projects_list,
+    kitaru_projects_show,
+    kitaru_projects_use,
     kitaru_secrets_create,
     kitaru_stacks_list,
     kitaru_start_local_server,
@@ -88,6 +93,10 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_start_local_server,
     kitaru_stop_local_server,
     kitaru_status,
+    kitaru_projects_list,
+    kitaru_projects_current,
+    kitaru_projects_show,
+    kitaru_projects_use,
     kitaru_stacks_list,
     manage_stack,
     kitaru_info,
@@ -185,6 +194,24 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     assert "llm_model" not in replay_properties
     assert "flow_inputs" not in replay_properties
 
+    projects_list_schema = tool_schemas["kitaru_projects_list"]
+    assert projects_list_schema.get("required", []) == []
+    assert projects_list_schema.get("properties", {}) == {}
+
+    projects_current_schema = tool_schemas["kitaru_projects_current"]
+    assert projects_current_schema.get("required", []) == []
+    assert projects_current_schema.get("properties", {}) == {}
+
+    projects_show_schema = tool_schemas["kitaru_projects_show"]
+    assert set(projects_show_schema["properties"]) == {"name_or_id"}
+    assert projects_show_schema["required"] == ["name_or_id"]
+
+    projects_use_schema = tool_schemas["kitaru_projects_use"]
+    assert set(projects_use_schema["properties"]) == {"name_or_id"}
+    assert projects_use_schema["required"] == ["name_or_id"]
+
+    assert "kitaru_projects_create" not in tool_schemas
+    assert "kitaru_projects_delete" not in tool_schemas
     assert "kitaru_executions_diff_matrix" in tool_schemas
     assert "kitaru_executions_diff_cohort" not in tool_schemas
 
@@ -1555,6 +1582,108 @@ def test_status_delegates_snapshot_serialization_to_inspection() -> None:
 
     mock_serialize.assert_called_once_with(snapshot)
     assert payload == {"connection": "delegated", "source": "inspection"}
+
+
+def test_projects_list_delegates_to_shared_helpers_and_serializer() -> None:
+    projects = [
+        ProjectInfo(
+            id="project-prod-id",
+            name="production",
+            display_name="Production",
+            description=None,
+            is_active=True,
+        ),
+        ProjectInfo(
+            id="project-stage-id",
+            name="staging",
+            display_name=None,
+            description="Test changes safely",
+            is_active=False,
+        ),
+    ]
+
+    with patch(
+        "kitaru._config._projects.list_projects", return_value=projects
+    ) as mock_list:
+        payload = kitaru_projects_list()
+
+    mock_list.assert_called_once_with()
+    assert payload == [
+        {
+            "id": "project-prod-id",
+            "name": "production",
+            "display_name": "Production",
+            "description": None,
+            "is_active": True,
+        },
+        {
+            "id": "project-stage-id",
+            "name": "staging",
+            "display_name": None,
+            "description": "Test changes safely",
+            "is_active": False,
+        },
+    ]
+
+
+def test_projects_current_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-prod-id",
+        name="production",
+        display_name="Production",
+        description=None,
+        is_active=True,
+    )
+
+    with patch(
+        "kitaru._config._projects.current_project",
+        return_value=project,
+    ) as mock_current:
+        payload = kitaru_projects_current()
+
+    mock_current.assert_called_once_with()
+    assert payload["name"] == "production"
+    assert payload["is_active"] is True
+
+
+def test_projects_show_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-stage-id",
+        name="staging",
+        display_name=None,
+        description=None,
+        is_active=False,
+    )
+
+    with patch(
+        "kitaru._config._projects.get_project",
+        return_value=project,
+    ) as mock_get:
+        payload = kitaru_projects_show("staging")
+
+    mock_get.assert_called_once_with("staging")
+    assert payload["id"] == "project-stage-id"
+    assert payload["is_active"] is False
+
+
+def test_projects_use_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-prod-id",
+        name="production",
+        display_name=None,
+        description=None,
+        is_active=True,
+    )
+
+    with patch(
+        "kitaru._config._projects.use_project",
+        return_value=project,
+    ) as mock_use:
+        payload = kitaru_projects_use("production")
+
+    mock_use.assert_called_once_with("production")
+    assert payload["name"] == "production"
+    assert payload["is_active"] is True
 
 
 def test_manage_stack_create_returns_structured_result() -> None:

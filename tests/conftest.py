@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
+import time
+import uuid
 from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,10 @@ _LIVE_PROVIDER_MARKERS = (
     "live_anthropic",
     "live_gemini",
 )
+_PROVIDER_CALL_GUARD_ACTIVE = False
+_PROVIDER_CALL_GUARD_NODEID: str | None = None
+_SPEED_PROBE_SESSION_ID_ENV = "KITARU_TEST_SPEED_SESSION_ID"
+_SPEED_PROBE_SESSION_ID: str | None = None
 _EARLY_TEST_ENV_VARS = (
     "KITARU_SERVER_URL",
     "KITARU_AUTH_TOKEN",
@@ -109,15 +116,82 @@ from kitaru.config import (
 )
 
 
+def _speed_probe_enabled() -> bool:
+    return os.environ.get("KITARU_TEST_SPEED_PROBE") == "1"
+
+
+def _speed_report_dir() -> Path:
+    return Path(
+        os.environ.get(
+            "KITARU_TEST_SPEED_REPORT_DIR",
+            "prompt-exports/test-speed/probe",
+        )
+    )
+
+
+def _speed_worker_id() -> str:
+    return os.environ.get("PYTEST_XDIST_WORKER", "master")
+
+
+def _speed_probe_session_id() -> str:
+    global _SPEED_PROBE_SESSION_ID
+    if _SPEED_PROBE_SESSION_ID is not None:
+        return _SPEED_PROBE_SESSION_ID
+
+    session_id = os.environ.get(_SPEED_PROBE_SESSION_ID_ENV)
+    if not session_id:
+        session_id = os.environ.get("PYTEST_XDIST_TESTRUNUID")
+    if not session_id:
+        session_id = (
+            f"{int(time.time() * 1_000_000)}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        )
+
+    _SPEED_PROBE_SESSION_ID = session_id
+    os.environ[_SPEED_PROBE_SESSION_ID_ENV] = session_id
+    return session_id
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    del config
+    if _speed_probe_enabled():
+        _speed_probe_session_id()
+
+
+def _record_speed_event(kind: str, payload: dict[str, Any]) -> None:
+    if not _speed_probe_enabled():
+        return
+
+    report_dir = _speed_report_dir()
+    report_dir.mkdir(parents=True, exist_ok=True)
+    worker = _speed_worker_id()
+    pid = os.getpid()
+    event = {
+        "kind": kind,
+        "session_id": _speed_probe_session_id(),
+        "worker": worker,
+        "pid": pid,
+        "timestamp": time.time(),
+        **payload,
+    }
+    event_path = report_dir / f"events-{worker}-{pid}.jsonl"
+    with event_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(event, sort_keys=True) + "\n")
+
+
 @pytest.fixture(autouse=True)
 def isolated_zenml_global_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[Path]:
     """Isolate ZenML and Kitaru config so tests never touch real user state.
 
     Mirrors the production init hook: both Kitaru and ZenML share a single
     unified config directory.
     """
+    speed_probe = _speed_probe_enabled()
+    setup_started = time.perf_counter() if speed_probe else 0.0
     config_dir = tmp_path / "kitaru-config"
     config_dir.mkdir(parents=True)
 
@@ -182,13 +256,43 @@ def isolated_zenml_global_config(
     GlobalConfiguration._reset_instance()
     Client._reset_instance()
 
+    if speed_probe:
+        _record_speed_event(
+            "fixture_setup",
+            {
+                "fixture": "isolated_zenml_global_config",
+                "nodeid": request.node.nodeid,
+                "seconds": time.perf_counter() - setup_started,
+            },
+        )
+
     yield config_dir
 
+    teardown_started = time.perf_counter() if speed_probe else 0.0
     Client._reset_instance()
     GlobalConfiguration._reset_instance()
     set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
+    if speed_probe:
+        _record_speed_event(
+            "fixture_teardown",
+            {
+                "fixture": "isolated_zenml_global_config",
+                "nodeid": request.node.nodeid,
+                "seconds": time.perf_counter() - teardown_started,
+            },
+        )
+
+
+def _set_provider_call_guard_state(*, active: bool, nodeid: str | None) -> None:
+    global _PROVIDER_CALL_GUARD_ACTIVE, _PROVIDER_CALL_GUARD_NODEID
+    _PROVIDER_CALL_GUARD_ACTIVE = active
+    _PROVIDER_CALL_GUARD_NODEID = nodeid
+
+
+def _clear_provider_call_guard_state() -> None:
+    _set_provider_call_guard_state(active=False, nodeid=None)
 
 
 def _is_live_provider_test(item: pytest.Item) -> bool:
@@ -289,6 +393,39 @@ def pytest_collection_modifyitems(
     errors = _validate_live_marker_contract(marker_items)
     if errors:
         raise pytest.UsageError("\n\n".join(errors))
+    _record_speed_event(
+        "collection_finished",
+        {"item_count": len(items)},
+    )
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if not _speed_probe_enabled():
+        return
+    if _speed_worker_id() == "master" and hasattr(report, "worker_id"):
+        return
+    _record_speed_event(
+        "test_phase",
+        {
+            "nodeid": report.nodeid,
+            "phase": report.when,
+            "outcome": report.outcome,
+            "seconds": report.duration,
+        },
+    )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if not _speed_probe_enabled():
+        return
+    _record_speed_event(
+        "session_finished",
+        {
+            "exitstatus": exitstatus,
+            "testsfailed": session.testsfailed,
+            "testscollected": session.testscollected,
+        },
+    )
 
 
 def _is_azure_openai_host(normalized: str) -> bool:
@@ -322,12 +459,42 @@ def _provider_name_for_url(url: Any) -> str | None:
     return _provider_name_for_host(parsed.hostname)
 
 
-def _fail_provider_call(provider_name: str) -> None:
-    raise AssertionError(
-        f"Blocked {provider_name} provider call from an unmarked deterministic "
-        "pytest test. Mark paid/provider tests with @pytest.mark.live_llm and "
-        "the provider-specific marker, for example @pytest.mark.live_openai."
+def _provider_name_for_possibly_relative_url(
+    url: Any,
+    base_url: Any | None = None,
+    *,
+    fallback: str | None = None,
+) -> str | None:
+    raw_url = str(url)
+    parsed = urlparse(raw_url)
+    if parsed.hostname is not None:
+        return _provider_name_for_host(parsed.hostname)
+    if base_url is not None:
+        return _provider_name_for_url(urljoin(str(base_url), raw_url))
+    return fallback
+
+
+def _provider_name_for_httpx_request(client: Any, url: Any) -> str | None:
+    return _provider_name_for_possibly_relative_url(
+        url,
+        getattr(client, "base_url", None),
     )
+
+
+def _fail_provider_call(provider_name: str) -> None:
+    nodeid = _PROVIDER_CALL_GUARD_NODEID
+    location = f" in {nodeid}" if nodeid else ""
+    raise AssertionError(
+        f"Blocked {provider_name} provider call{location} from an unmarked "
+        "deterministic pytest test. Mark paid/provider tests with "
+        "@pytest.mark.live_llm and the provider-specific marker, for example "
+        "@pytest.mark.live_openai."
+    )
+
+
+def _guard_provider_call_if_active(provider_name: str | None) -> None:
+    if _PROVIDER_CALL_GUARD_ACTIVE and provider_name is not None:
+        _fail_provider_call(provider_name)
 
 
 def _resolve_attr_target(dotted_path: str) -> tuple[Any, str] | None:
@@ -359,11 +526,11 @@ def _provider_name_for_sdk_request(
     base_url = getattr(client, "base_url", None)
 
     if raw_url is not None:
-        raw_url_string = str(raw_url)
-        if urlparse(raw_url_string).hostname is not None:
-            return _provider_name_for_url(raw_url_string)
-        if base_url is not None:
-            return _provider_name_for_url(urljoin(str(base_url), raw_url_string))
+        return _provider_name_for_possibly_relative_url(
+            raw_url,
+            base_url,
+            fallback=default_provider,
+        )
 
     if base_url is not None:
         return _provider_name_for_url(base_url)
@@ -392,8 +559,7 @@ def _patch_sdk_request_if_available(
             provider_name = _provider_name_for_sdk_request(
                 self, args, kwargs, default_provider=default_provider
             )
-            if provider_name is not None:
-                _fail_provider_call(provider_name)
+            _guard_provider_call_if_active(provider_name)
             return await original(self, *args, **kwargs)
 
         monkeypatch.setattr(target, attr_name, guarded_async_request, raising=False)
@@ -403,8 +569,7 @@ def _patch_sdk_request_if_available(
         provider_name = _provider_name_for_sdk_request(
             self, args, kwargs, default_provider=default_provider
         )
-        if provider_name is not None:
-            _fail_provider_call(provider_name)
+        _guard_provider_call_if_active(provider_name)
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(target, attr_name, guarded_request, raising=False)
@@ -435,17 +600,15 @@ def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
         def guarded_httpx_request(
             self: Any, method: str, url: Any, **kwargs: Any
         ) -> Any:
-            provider_name = _provider_name_for_url(url)
-            if provider_name is not None:
-                _fail_provider_call(provider_name)
+            provider_name = _provider_name_for_httpx_request(self, url)
+            _guard_provider_call_if_active(provider_name)
             return original_client_request(self, method, url, **kwargs)
 
         async def guarded_httpx_request_async(
             self: Any, method: str, url: Any, **kwargs: Any
         ) -> Any:
-            provider_name = _provider_name_for_url(url)
-            if provider_name is not None:
-                _fail_provider_call(provider_name)
+            provider_name = _provider_name_for_httpx_request(self, url)
+            _guard_provider_call_if_active(provider_name)
             return await original_async_client_request(self, method, url, **kwargs)
 
         monkeypatch.setattr(httpx.Client, "request", guarded_httpx_request)
@@ -462,8 +625,7 @@ def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
             self: Any, method: str, url: Any, **kwargs: Any
         ) -> Any:
             provider_name = _provider_name_for_url(url)
-            if provider_name is not None:
-                _fail_provider_call(provider_name)
+            _guard_provider_call_if_active(provider_name)
             return original_requests_request(self, method, url, **kwargs)
 
         monkeypatch.setattr(
@@ -481,8 +643,7 @@ def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 
         def guarded_urllib3_urlopen(self: Any, *args: Any, **kwargs: Any) -> Any:
             provider_name = _provider_name_for_host(getattr(self, "host", None))
-            if provider_name is not None:
-                _fail_provider_call(provider_name)
+            _guard_provider_call_if_active(provider_name)
             return original_urlopen(self, *args, **kwargs)
 
         monkeypatch.setattr(
@@ -492,20 +653,64 @@ def _install_provider_call_guard(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def provider_call_guard_installation() -> Generator[None]:
+    """Install provider-call wrappers once in each pytest worker process."""
+    speed_probe = _speed_probe_enabled()
+    started = time.perf_counter() if speed_probe else 0.0
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        _install_provider_call_guard(monkeypatch)
+    finally:
+        if speed_probe:
+            _record_speed_event(
+                "fixture_setup",
+                {
+                    "fixture": "provider_call_guard_installation",
+                    "seconds": time.perf_counter() - started,
+                },
+            )
+
+    try:
+        yield
+    finally:
+        _clear_provider_call_guard_state()
+        monkeypatch.undo()
+
+
 @pytest.fixture(autouse=True)
-def provider_spend_guard(
-    request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def provider_spend_guard(request: pytest.FixtureRequest) -> Generator[None]:
     """Block accidental provider calls unless a test is explicitly live-marked."""
-    if _is_live_provider_test(request.node):
-        _skip_if_live_provider_keys_are_missing(request.node)
-        return
-    _install_provider_call_guard(monkeypatch)
+    speed_probe = _speed_probe_enabled()
+    started = time.perf_counter() if speed_probe else 0.0
+    is_live = _is_live_provider_test(request.node)
+    _clear_provider_call_guard_state()
+    try:
+        if is_live:
+            _skip_if_live_provider_keys_are_missing(request.node)
+            _set_provider_call_guard_state(active=False, nodeid=request.node.nodeid)
+        else:
+            _set_provider_call_guard_state(active=True, nodeid=request.node.nodeid)
+    finally:
+        if speed_probe:
+            _record_speed_event(
+                "fixture_setup",
+                {
+                    "fixture": "provider_spend_guard",
+                    "is_live_provider_test": is_live,
+                    "nodeid": request.node.nodeid,
+                    "seconds": time.perf_counter() - started,
+                },
+            )
+
+    try:
+        yield
+    finally:
+        _clear_provider_call_guard_state()
 
 
 @pytest.fixture()
-def primed_zenml() -> None:
+def primed_zenml(request: pytest.FixtureRequest) -> None:
     """Eagerly initialize ZenML's store so flow-running tests avoid lazy-init races.
 
     Only request this fixture in tests that actually execute flows, use
@@ -513,4 +718,14 @@ def primed_zenml() -> None:
     runtime.  Lightweight unit/mock tests should NOT use this fixture —
     keeping them free of ZenML bootstrap is what makes xdist parallelism fast.
     """
+    speed_probe = _speed_probe_enabled()
+    started = time.perf_counter() if speed_probe else 0.0
     _ = Client().zen_store
+    if speed_probe:
+        _record_speed_event(
+            "primed_zenml_setup",
+            {
+                "nodeid": request.node.nodeid,
+                "seconds": time.perf_counter() - started,
+            },
+        )

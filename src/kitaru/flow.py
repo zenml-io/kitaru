@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, Literal, cast, overload
-from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ConfigDict, create_model
@@ -37,7 +36,10 @@ from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
-from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
+    parse_deployment_snapshot_name,
+)
 from kitaru._client._mappers import _to_public_status
 from kitaru._client._models import ExecutionStatus
 from kitaru._config._active_context import (
@@ -46,12 +48,14 @@ from kitaru._config._active_context import (
     stringify_config_id,
     with_resolved_selection,
 )
+from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV, _temporary_env
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
     resolve_deployment_selector,
     validate_deployment_selector,
 )
+from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
@@ -65,6 +69,11 @@ from kitaru._terminal_usage import (
     _persist_terminal_llm_usage_metadata as _shared_persist_terminal_llm_usage_metadata,
 )
 from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
+from kitaru._ui_urls import (
+    UiUrlContext,
+    build_execution_url_from_context,
+    resolve_ui_url_context,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -116,9 +125,87 @@ from kitaru.replay_context import (
 from kitaru.runtime import _flow_scope, _get_current_execution_id
 
 ImageSetting = ImageInput
-_STACK_BINDING_LOCK = threading.RLock()
+_ACTIVE_ZENML_STATE_LOCK = threading.RLock()
 _REPLAY_RUNTIME_CONTEXT_LOCK = threading.RLock()
 logger = logging.getLogger(__name__)
+
+
+def _connection_project(resolved_connection: Any) -> str | None:
+    """Return the project selected by a resolved connection object."""
+    return cast(str | None, getattr(resolved_connection, "project", None))
+
+
+@contextmanager
+def _temporary_active_project(project_name_or_id: str | None) -> Iterator[None]:
+    """Temporarily activate a project for one ZenML write operation.
+
+    ZenML writes runs and snapshots into its active project. Kitaru resolves a
+    project independently, so this helper briefly makes ZenML's active project
+    match Kitaru's resolved project and then restores the previous state.
+
+    Args:
+        project_name_or_id: Optional project name or ID. When ``None`` or blank,
+            the currently active ZenML project is used unchanged.
+    """
+    with _ACTIVE_ZENML_STATE_LOCK:
+        if not project_name_or_id or not str(project_name_or_id).strip():
+            yield
+            return
+
+        client = Client()
+        previous_project_id: str | None = None
+
+        try:
+            previous_project = client.active_project
+            previous_project_id = str(previous_project.id)
+        except Exception:
+            logger.debug("Could not capture previous active project", exc_info=True)
+
+        try:
+            target_project = client.get_project(
+                str(project_name_or_id).strip(),
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to activate project {project_name_or_id!r}: {exc}"
+            ) from exc
+
+        target_project_id = str(target_project.id)
+        with _temporary_env({ZENML_ACTIVE_PROJECT_ID_ENV: target_project_id}):
+            try:
+                # ZenML persists this active-project change; the restore below is
+                # best-effort if the process exits before the context manager unwinds.
+                client.set_active_project(target_project_id)
+            except Exception as exc:
+                raise KitaruBackendError(
+                    f"Failed to activate project {project_name_or_id!r}: {exc}"
+                ) from exc
+
+            body_error: BaseException | None = None
+            try:
+                yield
+            except BaseException as exc:
+                body_error = exc
+                raise
+            finally:
+                restore_error: BaseException | None = None
+                try:
+                    if previous_project_id is not None:
+                        client.set_active_project(previous_project_id)
+                except BaseException as exc:
+                    restore_error = exc
+                    logger.warning(
+                        "Failed to restore previous active project after Kitaru write.",
+                        exc_info=True,
+                    )
+
+                if restore_error is not None and body_error is None:
+                    raise KitaruBackendError(
+                        "Failed to restore the previous active project after "
+                        f"the Kitaru write: {restore_error}"
+                    ) from restore_error
 
 
 @contextmanager
@@ -129,7 +216,7 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         stack_name_or_id: Optional stack name or ID. When ``None``, the
             currently active ZenML stack is used unchanged.
     """
-    with _STACK_BINDING_LOCK:
+    with _ACTIVE_ZENML_STATE_LOCK:
         if not stack_name_or_id:
             yield
             return
@@ -740,14 +827,67 @@ def _extract_run_pipeline_id(run: PipelineRunResponse) -> str | None:
     return None
 
 
+def _resolve_execution_flow_version(run: PipelineRunResponse) -> str:
+    """Resolve the Kitaru deployment version for an execution URL."""
+    snapshot_name_getters = (
+        lambda: getattr(getattr(run, "source_snapshot", None), "name", None),
+        lambda: getattr(
+            getattr(getattr(run, "resources", None), "source_snapshot", None),
+            "name",
+            None,
+        ),
+    )
+    for getter in snapshot_name_getters:
+        try:
+            parsed = parse_deployment_snapshot_name(getter())
+        except Exception:
+            logger.debug(
+                "Failed to read deployment snapshot name from run %s.",
+                getattr(run, "id", "<unknown>"),
+                exc_info=True,
+            )
+            continue
+        if parsed is not None:
+            return str(parsed.version)
+
+    try:
+        metadata = getattr(run, "run_metadata", None)
+    except Exception:
+        logger.debug(
+            "Failed to read deployment metadata from run %s.",
+            getattr(run, "id", "<unknown>"),
+            exc_info=True,
+        )
+        metadata = None
+    metadata_mapping = metadata if isinstance(metadata, Mapping) else {}
+    nested = metadata_mapping.get("kitaru_deployment")
+    nested_mapping = nested if isinstance(nested, Mapping) else {}
+    for key in ("deployment_version", "kitaru_deployment_version"):
+        value = metadata_mapping.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    nested_version = nested_mapping.get("version")
+    if nested_version is not None and str(nested_version).strip():
+        return str(nested_version).strip()
+
+    return "local"
+
+
 def _build_kitaru_execution_url(
     run: PipelineRunResponse,
     *,
-    server_url: str | None,
+    ui_context: UiUrlContext | None = None,
+    server_url: str | None = None,
 ) -> str | None:
     """Build the Kitaru-native execution detail URL for a run if possible."""
-    if server_url is None or not str(server_url).strip():
-        return None
+    if ui_context is None:
+        if server_url is None or not str(server_url).strip():
+            return None
+        ui_context = UiUrlContext(
+            base_url=str(server_url).strip().rstrip("/"),
+            route_kind="legacy",
+            source="connection_config",
+        )
 
     execution_id_value = getattr(run, "id", None)
     if execution_id_value is None:
@@ -760,10 +900,17 @@ def _build_kitaru_execution_url(
     if flow_id is None:
         return None
 
-    base_url = str(server_url).strip().rstrip("/")
-    flow_segment = quote(flow_id, safe="")
-    execution_segment = quote(execution_id, safe="")
-    return f"{base_url}/flows/{flow_segment}/executions/{execution_segment}"
+    return build_execution_url_from_context(
+        ui_context,
+        flow_id=flow_id,
+        execution_id=execution_id,
+        project_name_or_id=extract_run_project_identity(
+            run,
+            logger=logger,
+            allow_lazy_project_lookup=True,
+        ).name_or_id,
+        version=_resolve_execution_flow_version(run),
+    )
 
 
 def _emit_kitaru_execution_url(
@@ -771,11 +918,9 @@ def _emit_kitaru_execution_url(
 ) -> None:
     """Log a Kitaru-native execution URL without risking flow execution."""
     try:
-        from kitaru._ui_urls import resolve_ui_base_url
-
         url = _build_kitaru_execution_url(
             run,
-            server_url=resolve_ui_base_url(),
+            ui_context=resolve_ui_url_context(),
         )
     except Exception:
         logger.debug(
@@ -1138,7 +1283,11 @@ def _tuple_metadata_length_from_output(output: _FlowResultOutput) -> int | None:
 _FLOW_RESULT_NOT_FOUND = object()
 
 
-def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
+def _load_referenced_flow_result(
+    run: PipelineRunResponse,
+    *,
+    project: str | None = None,
+) -> Any:
     """Load the flow result linked via execution metadata, if present.
 
     Returns ``_FLOW_RESULT_NOT_FOUND`` when the run has no linked result (e.g. it
@@ -1148,7 +1297,7 @@ def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
     artifact_id = metadata.get(_FLOW_RESULT_REF_METADATA_KEY)
     if isinstance(artifact_id, str) and artifact_id:
         try:
-            return Client().get_artifact_version(artifact_id).load()
+            return Client().get_artifact_version(artifact_id, project=project).load()
         except Exception as exc:
             raise KitaruRuntimeError(
                 f"Could not load the linked flow result artifact {artifact_id!r}: {exc}"
@@ -1158,7 +1307,11 @@ def _load_referenced_flow_result(run: PipelineRunResponse) -> Any:
     return _FLOW_RESULT_NOT_FOUND
 
 
-def _extract_flow_result(run: PipelineRunResponse) -> Any:
+def _extract_flow_result(
+    run: PipelineRunResponse,
+    *,
+    project: str | None = None,
+) -> Any:
     """Extract user-facing flow return value from a finished pipeline run.
 
     Args:
@@ -1174,7 +1327,7 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     if not outputs:
         outputs = _extract_outputs_from_output_specs(run)
     if not outputs:
-        referenced = _load_referenced_flow_result(run)
+        referenced = _load_referenced_flow_result(run, project=project)
         if referenced is not _FLOW_RESULT_NOT_FOUND:
             return referenced
     if not outputs:
@@ -1336,6 +1489,31 @@ def _persist_terminal_llm_usage_metadata(
     )
 
 
+def _flow_submission_attempt_metadata() -> dict[str, Any]:
+    """Return privacy-safe metadata for direct SDK flow submission attempts."""
+    return {"submission_path": "flow_wrapper"}
+
+
+def _track_flow_submission_failure(
+    exc: Exception,
+    *,
+    deployment_metadata: Mapping[str, Any] | None,
+    failure_origin: FailureOrigin | None = None,
+) -> None:
+    """Emit privacy-safe analytics for failures before a run exists."""
+    origin = failure_origin or classify_failure_origin(
+        status_reason=str(exc),
+        traceback=None,
+        default=FailureOrigin.BACKEND,
+    )
+    metadata: dict[str, Any] = _flow_submission_attempt_metadata()
+    if deployment_metadata is not None:
+        metadata.update(deployment_metadata)
+    metadata["error_type"] = type(exc).__name__
+    metadata["failure_origin"] = origin.value
+    track(AnalyticsEvent.FLOW_FAILED, metadata)
+
+
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
@@ -1343,6 +1521,7 @@ class FlowHandle:
         self,
         run: PipelineRunResponse,
         *,
+        project: str | None = None,
         observed_started_at: float | None = None,
         analytics_metadata: dict[str, Any] | None = None,
         track_terminal_if_finished: bool = False,
@@ -1351,6 +1530,7 @@ class FlowHandle:
 
         Args:
             run: Initial pipeline run response.
+            project: Kitaru project where this run was created, if known.
             observed_started_at: SDK-observed start time from ``time.perf_counter``.
             analytics_metadata: Privacy-safe metadata captured at submission time.
             track_terminal_if_finished: Emit terminal analytics immediately when
@@ -1358,6 +1538,7 @@ class FlowHandle:
         """
         self._run = run
         self._run_id = run.id
+        self._project = project
         self._terminal_event_emitted = False
         self._terminal_llm_usage_metadata_persisted = False
         self._observed_started_at = (
@@ -1430,6 +1611,7 @@ class FlowHandle:
             aggregation_run = zenml_client.get_pipeline_run(
                 run.id,
                 allow_name_prefix_match=False,
+                project=self._project,
             )
         except Exception:
             logger.debug(
@@ -1466,7 +1648,7 @@ class FlowHandle:
                     _raise_for_unsuccessful_run(run, failure_origin=origin)
                 self._track_terminal_once(run)
                 self._persist_terminal_llm_usage_once(run)
-                return _extract_flow_result(run)
+                return _extract_flow_result(run, project=self._project)
             time.sleep(1)
 
     def get(self) -> Any:
@@ -1492,7 +1674,7 @@ class FlowHandle:
             _raise_for_unsuccessful_run(run, failure_origin=origin)
         self._track_terminal_once(run)
         self._persist_terminal_llm_usage_once(run)
-        return _extract_flow_result(run)
+        return _extract_flow_result(run, project=self._project)
 
     def _refresh(self) -> PipelineRunResponse:
         """Refresh the cached run model from the server."""
@@ -1500,6 +1682,7 @@ class FlowHandle:
             self._run = Client().get_pipeline_run(
                 self._run_id,
                 allow_name_prefix_match=False,
+                project=self._project,
             )
         except Exception as exc:
             raise KitaruBackendError(
@@ -1644,6 +1827,8 @@ class _FlowDefinition:
             resolved_execution=resolved_execution,
             raw_active_stack_provenance=raw_active_stack_provenance,
         )
+        resolved_connection = resolve_connection_config(validate_for_use=True)
+        resolved_project = _connection_project(resolved_connection)
         transport_image, _ = _prepare_model_registry_transport(resolved_execution.image)
         configured_pipeline = self._pipeline.with_options(
             **_build_pipeline_options(
@@ -1654,7 +1839,10 @@ class _FlowDefinition:
         deployments_api, flow_name = self._deployments_api_and_flow_name()
         source_name = f"kitaru-source::{flow_name}::{uuid4().hex}"
 
-        with _temporary_active_stack(resolved_execution.stack):
+        with (
+            _temporary_active_project(resolved_project),
+            _temporary_active_stack(resolved_execution.stack),
+        ):
             stack_client = Client()
             ensure_stack_is_server_runnable(
                 zen_store=stack_client.zen_store,
@@ -1668,10 +1856,10 @@ class _FlowDefinition:
                     configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
                 raise KitaruDeploymentInputValuesError(
-                    "Unable to create this deployment because Kitaru needs concrete "
-                    "input values to prepare the saved deployment snapshot. Pass "
-                    "representative input values when calling flow.deploy(...), then "
-                    "override them later when invoking it."
+                    "Unable to create this deployment because Kitaru needs "
+                    "concrete input values to prepare the saved deployment "
+                    "snapshot. Pass representative input values when calling "
+                    "flow.deploy(...), then override them later when invoking it."
                 ) from exc
 
             metadata = _deployment_extra_metadata(
@@ -1770,6 +1958,7 @@ class _FlowDefinition:
                     name_id_or_prefix=execution,
                     allow_name_prefix_match=False,
                     hydrate=True,
+                    project=_connection_project(resolved_connection),
                 )
             except Exception as exc:
                 raise KitaruBackendError(
@@ -1822,7 +2011,11 @@ class _FlowDefinition:
             )
         )
 
-        with _temporary_active_stack(resolved_execution.stack):
+        resolved_project = _connection_project(resolved_connection)
+        with (
+            _temporary_active_project(resolved_project),
+            _temporary_active_stack(resolved_execution.stack),
+        ):
             _preflight_active_stack_implementation_hydration()
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
@@ -1871,22 +2064,22 @@ class _FlowDefinition:
                     f"Failed to replay execution '{execution}': {exc}"
                 ) from exc
 
-        if replayed_run is None:
-            track(
-                AnalyticsEvent.REPLAY_FAILED,
-                {
-                    **replay_metadata,
-                    "error_type": "KitaruRuntimeError",
-                    "failure_origin": FailureOrigin.RUNTIME.value,
-                },
+            if replayed_run is None:
+                track(
+                    AnalyticsEvent.REPLAY_FAILED,
+                    {
+                        **replay_metadata,
+                        "error_type": "KitaruRuntimeError",
+                        "failure_origin": FailureOrigin.RUNTIME.value,
+                    },
+                )
+                raise KitaruRuntimeError("Replay did not produce a pipeline run.")
+            persist_frozen_execution_spec(
+                run_id=replayed_run.id,
+                frozen_execution_spec=frozen_execution_spec,
             )
-            raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
         _emit_kitaru_execution_url(replayed_run)
-        persist_frozen_execution_spec(
-            run_id=replayed_run.id,
-            frozen_execution_spec=frozen_execution_spec,
-        )
 
         track(
             AnalyticsEvent.FLOW_REPLAYED,
@@ -1895,6 +2088,7 @@ class _FlowDefinition:
         handle = FlowHandle(
             replayed_run,
             observed_started_at=observed_started_at,
+            project=resolved_project,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )
@@ -1952,6 +2146,7 @@ class _FlowDefinition:
                     name_id_or_prefix=exec_ref,
                     allow_name_prefix_match=False,
                     hydrate=True,
+                    project=_connection_project(validated_connection),
                 )
                 original_id = str(original_run.id)
                 if resolved_on_error == "collect":
@@ -1996,12 +2191,15 @@ class _FlowDefinition:
                 if resolved_wait:
                     handle.wait()
                     row_status = "completed"
-                safe_persist_replay_submission_metadata(
-                    replay_exec_id=replay_exec_id,
-                    original_exec_id=original_id,
-                    submission_id=submission_id,
-                    tag=tag,
-                )
+                with _temporary_active_project(
+                    _connection_project(validated_connection)
+                ):
+                    safe_persist_replay_submission_metadata(
+                        replay_exec_id=replay_exec_id,
+                        original_exec_id=original_id,
+                        submission_id=submission_id,
+                        tag=tag,
+                    )
                 row_compare_url = safe_compare_url_for_executions(
                     [original_id, replay_exec_id]
                 )
@@ -2057,53 +2255,81 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
-        raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
-        resolved_execution = resolve_execution_config(
-            decorator_overrides=self._decorator_config,
-            invocation_overrides=invocation_overrides,
-        )
-        _guard_implicit_active_stack_fallback(
-            operation="run this flow",
-            resolved_execution=resolved_execution,
-            raw_active_stack_provenance=raw_active_stack_provenance,
-        )
-        resolved_connection = resolve_connection_config(validate_for_use=True)
-        transport_image, effective_model_registry = _prepare_model_registry_transport(
-            resolved_execution.image
-        )
-        frozen_execution_spec = build_frozen_execution_spec(
-            resolved_execution=resolved_execution,
-            flow_defaults=self._decorator_config,
-            connection=resolved_connection,
-            model_registry=effective_model_registry,
-        )
-        configured_pipeline = self._pipeline.with_options(
-            **_build_pipeline_options(
+        track(AnalyticsEvent.FLOW_ATTEMPTED, _flow_submission_attempt_metadata())
+        deployment_metadata: dict[str, Any] | None = None
+        failure_origin: FailureOrigin | None = None
+        # Submission has succeeded the moment a run object exists. Failures after
+        # that point (URL emission, spec persistence) must not be tracked as
+        # submission failures, while every setup failure before it must be.
+        submitted = False
+        try:
+            raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
+            resolved_execution = resolve_execution_config(
+                decorator_overrides=self._decorator_config,
+                invocation_overrides=invocation_overrides,
+            )
+            _guard_implicit_active_stack_fallback(
+                operation="run this flow",
                 resolved_execution=resolved_execution,
-                transport_image=transport_image,
+                raw_active_stack_provenance=raw_active_stack_provenance,
             )
-        )
-
-        with _temporary_active_stack(resolved_execution.stack):
-            _preflight_active_stack_implementation_hydration()
-            deployment_metadata = _deployment_metadata_for_stack(
-                resolved_execution.stack
+            resolved_connection = resolve_connection_config(validate_for_use=True)
+            resolved_project = _connection_project(resolved_connection)
+            transport_image, effective_model_registry = (
+                _prepare_model_registry_transport(resolved_execution.image)
             )
-            observed_started_at = time.perf_counter()
-            run = configured_pipeline(*args, **kwargs)
+            frozen_execution_spec = build_frozen_execution_spec(
+                resolved_execution=resolved_execution,
+                flow_defaults=self._decorator_config,
+                connection=resolved_connection,
+                model_registry=effective_model_registry,
+            )
+            configured_pipeline = self._pipeline.with_options(
+                **_build_pipeline_options(
+                    resolved_execution=resolved_execution,
+                    transport_image=transport_image,
+                )
+            )
 
-        if run is None:
-            raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
+            # The resolved project stays active across both the run submission and
+            # the post-submit spec persistence so ZenML writes them into the same
+            # project. Activating it can fail (deleted/mistyped project); that is a
+            # pre-submission setup failure and is tracked by the handler below.
+            with _temporary_active_project(resolved_project):
+                with _temporary_active_stack(resolved_execution.stack):
+                    _preflight_active_stack_implementation_hydration()
+                    deployment_metadata = _deployment_metadata_for_stack(
+                        resolved_execution.stack
+                    )
+                    observed_started_at = time.perf_counter()
+                    run = configured_pipeline(*args, **kwargs)
 
-        _emit_kitaru_execution_url(run)
-        track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
-        persist_frozen_execution_spec(
-            run_id=run.id,
-            frozen_execution_spec=frozen_execution_spec,
-        )
+                if run is None:
+                    failure_origin = FailureOrigin.RUNTIME
+                    raise KitaruRuntimeError(
+                        "Flow execution did not produce a pipeline run."
+                    )
+
+                submitted = True
+                _emit_kitaru_execution_url(run)
+                track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
+                persist_frozen_execution_spec(
+                    run_id=run.id,
+                    frozen_execution_spec=frozen_execution_spec,
+                )
+        except Exception as exc:
+            if not submitted:
+                _track_flow_submission_failure(
+                    exc,
+                    deployment_metadata=deployment_metadata,
+                    failure_origin=failure_origin,
+                )
+            raise
+
         return FlowHandle(
             run,
             observed_started_at=observed_started_at,
+            project=resolved_project,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )

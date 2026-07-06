@@ -26,6 +26,7 @@ from kitaru._inspection_runtime import RuntimeSnapshot
 from kitaru.config import (
     ActiveStackLogStore,
     ModelAliasEntry,
+    ProjectInfo,
     ResolvedLogStore,
     StackComponentDetails,
     StackDetails,
@@ -308,6 +309,17 @@ def serialize_flow_deployment_summary(
         "default_version": default_version,
         "tags": public_tags,
         "deployments": [serialize_deployment(deployment) for deployment in ordered],
+    }
+
+
+def serialize_project(project: ProjectInfo) -> dict[str, Any]:
+    """Serialize project information for structured output."""
+    return {
+        "id": project.id,
+        "name": project.name,
+        "display_name": project.display_name,
+        "description": project.description,
+        "is_active": project.is_active,
     }
 
 

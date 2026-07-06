@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
+- Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
+- Added Python 3.14 as a supported and tested runtime.
 
 ### Changed
 - PydanticAI tool-checkpoint replay input overrides now rerun the tool body with edited `tool_args`. Users still pass the public `input` override field; shorthand tool arguments and explicit `{"tool_args": ...}` input-slot overrides are both supported.
 - Replay planning now uses recorded replay input slots and real step inputs before falling back to older type-based guesses, so a hand-written `type="tool_call"` checkpoint is no longer treated as a PydanticAI tool checkpoint unless it actually exposes replayable tool arguments.
+- Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ## [0.19.0] - 2026-06-30
 
