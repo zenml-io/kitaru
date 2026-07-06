@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
+- Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
 
 ### Changed
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.

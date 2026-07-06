@@ -9,8 +9,8 @@ description: >-
   release that will be bundled into the Python package and then copied
   into the Docker image, suggest a version bump, update CHANGELOG.md, run the
   smoke test, trigger the release workflow via gh, and rewrite the
-  auto-generated GitHub Release notes into structured
-  Highlights / Changed / Fixed sections. Interactive — pauses for user
+  auto-generated GitHub Release notes into structured Highlights / Added /
+  Changed / Fixed / Infrastructure sections. Interactive — pauses for user
   confirmation at version choice, CHANGELOG diff, smoke-test result,
   and release-notes draft. Use when the user invokes
   /kitaru-release, or says "cut a release", "make a release",
@@ -200,6 +200,9 @@ Read `CHANGELOG.md` and locate the `## [Unreleased]` heading. Under it, organize
 
 ### Fixed
 - [bug fixes]
+
+### Infrastructure
+- [release process, CI, packaging, smoke, or test infrastructure changes]
 ```
 
 Rules:
@@ -250,9 +253,10 @@ Never push without that explicit confirmation — the release workflow reads `CH
   [--required-provider-area research-bot]
 ```
 
-Expected runtime: 3-5 minutes. The script:
+Expected runtime: 3-5 minutes for local smoke. Remote-stack smoke adds remote execution time and depends on the operator's configured infrastructure. The script:
 
 - Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `gemini`, `langgraph`)
+- Optionally, when `--remote-stack-smoke` / `KITARU_REMOTE_SMOKE=1` is set, logs into an operator-provided remote server, inspects the configured remote stacks, submits the private importable smoke flow, waits for success, reads execution/artifact/log evidence, and then continues into the normal local smoke path
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
 - Exercises CLI, SDK flows (including replay), MCP tools, the adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions, and isolated Google ADK checks), and an end-to-end LLM flow
 - Tears down the server
@@ -261,6 +265,21 @@ Expected runtime: 3-5 minutes. The script:
 - In `--release` mode, fails when an explicitly required provider area skips
 
 Only pass `--required-provider-area ...` for provider areas classified in Step 2 as changed/release-relevant. If no provider-backed behavior changed, run `--release --json-out smoke-results.json` without required-provider flags; provider skips are still reported, but they do not block the release.
+
+**Remote-stack smoke is expected before every normal runtime release.** It remains opt-in at the command level so local development stays fast and private infrastructure is never required by default, but a normal Kitaru release should prove both remote stack shapes unless the release is explicitly docs-only/no-runtime or the release conversation records a waiver. Stack/server/image values are operator-provided config: source them from shell env or an untracked local file, never from committed files. Prerequisites are a reachable remote Kitaru server, an existing Kubernetes-backed stack, an existing local-runner stack with remote artifact storage, any needed cloud integrations installed locally, and a pushed flow image for the Kubernetes run. Build the image with `just dev-image REPO=<operator-image-repo>`, then pass the pushed image reference.
+
+Example remote opt-in shape, with placeholder values only:
+
+```bash
+export KITARU_REMOTE_SMOKE=1
+export KITARU_REMOTE_SMOKE_SERVER_URL=<remote-kitaru-server-url>
+export KITARU_REMOTE_SMOKE_KUBERNETES_STACK=<existing-kubernetes-stack>
+export KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK=<existing-local-runner-remote-artifact-stack>
+export KITARU_REMOTE_SMOKE_FLOW_IMAGE=<pushed-dev-flow-image>
+./scripts/smoke-test.sh --release --json-out smoke-results.json --remote-stack-smoke
+```
+
+Remote smoke failures block the release when policy requires remote evidence or when the operator opted in, unless the release conversation records an explicit waiver. The structured JSON records safe evidence such as execution IDs, statuses, artifact counts, and log-readback success; it must not contain private server URLs, stack names, buckets, registries, account IDs, or credential names. Before publishing, run the manual privacy scan with local private patterns if you have them: `KITARU_REMOTE_SMOKE_PRIVATE_VALUE_PATTERNS="<pattern1>:<pattern2>" uv run pytest tests/test_remote_stack_smoke.py -k private`.
 
 **Set credentials before running, or most provider work is SKIPPED.** The five adapter examples are always present, but only the ones with a credential actually exercise a real model call — without keys they degrade to a `--help`/import smoke or are skipped outright. For a full provider run, export the relevant credentials first:
 
@@ -375,6 +394,7 @@ Parse the final summary and `smoke-results.json`. **Any non-zero `Failed:` count
 - Surface the failing check names to the user
 - Surface skipped check names and reasons to the user
 - Surface the provider attestation: required provider areas, credentials detected, and each required area's passed/failed/skipped counts
+- Surface whether remote-stack smoke ran, whether both remote stack shapes passed, or why remote evidence was waived/skipped
 - Do NOT proceed to the release trigger on an unexplained failure
 - If a required provider area skipped, ask the user to either rerun with the needed credentials/opt-in or explicitly record a waiver in the release conversation
 - Offer to investigate individual failures
@@ -550,6 +570,9 @@ Auto-notes list every merged PR including site-only ones. Rewrite into:
 
 ## Fixed
 - [use bullet text from CHANGELOG]
+
+## Infrastructure
+- [use Infrastructure bullet text from CHANGELOG]
 
 **Full Changelog**: https://github.com/zenml-io/kitaru/compare/v<prev>...v<VERSION>
 ```

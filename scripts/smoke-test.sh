@@ -17,6 +17,24 @@
 #                        gemini-sandbox-function, gemini-antigravity,
 #                        google-adk, research-bot
 #   --json-out PATH      Write structured smoke results to PATH
+#   --remote-stack-smoke
+#                        Opt into remote stack smoke using operator-provided config
+#   --remote-server-url URL
+#                        Remote Kitaru server URL for remote stack smoke
+#   --remote-kubernetes-stack STACK
+#                        Existing Kubernetes-backed stack to validate remotely
+#   --remote-local-remote-artifact-stack STACK
+#                        Existing local-runner stack with remote artifact storage
+#   --remote-flow-image IMAGE
+#                        Pushed image used by Kubernetes remote flow execution
+#   --remote-login-timeout SECONDS
+#                        Timeout for remote login (default: 60)
+#   --remote-execution-timeout SECONDS
+#                        Timeout for each remote flow execution (default: 900)
+#   --remote-log-timeout SECONDS
+#                        Timeout for remote log readback (default: 60)
+#   --remote-run-prefix PREFIX
+#                        Non-secret prefix for generated remote smoke markers
 #   -h, --help           Show this help message
 
 # No -e: we deliberately continue past failures to collect all results.
@@ -46,6 +64,36 @@ Options:
                        gemini-sandbox-function, gemini-antigravity,
                        google-adk, research-bot
   --json-out PATH      Write structured smoke results to PATH
+  --remote-stack-smoke
+                       Opt into remote stack smoke. Also settable with
+                       KITARU_REMOTE_SMOKE=1.
+  --remote-server-url URL
+                       Remote Kitaru server URL. Also settable with
+                       KITARU_REMOTE_SMOKE_SERVER_URL.
+  --remote-kubernetes-stack STACK
+                       Existing Kubernetes-backed stack. Also settable with
+                       KITARU_REMOTE_SMOKE_KUBERNETES_STACK.
+  --remote-local-remote-artifact-stack STACK
+                       Existing local-runner stack with remote artifact storage.
+                       Also settable with
+                       KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK.
+  --remote-flow-image IMAGE
+                       Pushed image for Kubernetes execution. Build one with
+                       `just dev-image REPO=<operator-image-repo>` and pass the
+                       resulting image reference. Also settable with
+                       KITARU_REMOTE_SMOKE_FLOW_IMAGE.
+  --remote-login-timeout SECONDS
+                       Timeout for remote login. Also settable with
+                       KITARU_REMOTE_SMOKE_LOGIN_TIMEOUT. Default: 60.
+  --remote-execution-timeout SECONDS
+                       Timeout for each remote flow execution. Also settable
+                       with KITARU_REMOTE_SMOKE_EXECUTION_TIMEOUT. Default: 900.
+  --remote-log-timeout SECONDS
+                       Timeout for remote log readback. Also settable with
+                       KITARU_REMOTE_SMOKE_LOG_TIMEOUT. Default: 60.
+  --remote-run-prefix PREFIX
+                       Non-secret prefix for generated remote smoke markers.
+                       Also settable with KITARU_REMOTE_SMOKE_RUN_PREFIX.
   -h, --help           Show this help message
 EOF
 }
@@ -60,6 +108,28 @@ VERBOSE=false
 RELEASE_MODE=false
 JSON_OUT=""
 REQUIRED_PROVIDER_AREAS=()
+REMOTE_STACK_SMOKE=false
+REMOTE_SMOKE_SERVER_URL="${KITARU_REMOTE_SMOKE_SERVER_URL:-}"
+REMOTE_SMOKE_KUBERNETES_STACK="${KITARU_REMOTE_SMOKE_KUBERNETES_STACK:-}"
+REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK="${KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK:-}"
+REMOTE_SMOKE_FLOW_IMAGE="${KITARU_REMOTE_SMOKE_FLOW_IMAGE:-}"
+REMOTE_SMOKE_LOGIN_TIMEOUT="${KITARU_REMOTE_SMOKE_LOGIN_TIMEOUT:-60}"
+REMOTE_SMOKE_EXECUTION_TIMEOUT="${KITARU_REMOTE_SMOKE_EXECUTION_TIMEOUT:-900}"
+REMOTE_SMOKE_LOG_TIMEOUT="${KITARU_REMOTE_SMOKE_LOG_TIMEOUT:-60}"
+REMOTE_SMOKE_RUN_PREFIX="${KITARU_REMOTE_SMOKE_RUN_PREFIX:-kitaru-remote-smoke}"
+
+is_truthy_env_value() {
+    local value
+    value=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+    case "$value" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if is_truthy_env_value "${KITARU_REMOTE_SMOKE:-}"; then
+    REMOTE_STACK_SMOKE=true
+fi
 
 find_json_out_arg() {
     while [[ $# -gt 0 ]]; do
@@ -156,6 +226,82 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             JSON_OUT="$2"
+            shift 2
+            ;;
+        --remote-stack-smoke)
+            REMOTE_STACK_SMOKE=true
+            shift
+            ;;
+        --remote-server-url)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-server-url requires a URL" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-server-url requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_SERVER_URL="$2"
+            shift 2
+            ;;
+        --remote-kubernetes-stack)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-kubernetes-stack requires a stack name" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-kubernetes-stack requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_KUBERNETES_STACK="$2"
+            shift 2
+            ;;
+        --remote-local-remote-artifact-stack)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-local-remote-artifact-stack requires a stack name" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-local-remote-artifact-stack requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK="$2"
+            shift 2
+            ;;
+        --remote-flow-image)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-flow-image requires an image reference" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-flow-image requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_FLOW_IMAGE="$2"
+            shift 2
+            ;;
+        --remote-login-timeout)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-login-timeout requires seconds" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-login-timeout requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_LOGIN_TIMEOUT="$2"
+            shift 2
+            ;;
+        --remote-execution-timeout)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-execution-timeout requires seconds" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-execution-timeout requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_EXECUTION_TIMEOUT="$2"
+            shift 2
+            ;;
+        --remote-log-timeout)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-log-timeout requires seconds" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-log-timeout requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_LOG_TIMEOUT="$2"
+            shift 2
+            ;;
+        --remote-run-prefix)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --remote-run-prefix requires a prefix" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--remote-run-prefix requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            REMOTE_SMOKE_RUN_PREFIX="$2"
             shift 2
             ;;
         --required-provider-area)
@@ -297,13 +443,33 @@ record_check() {
             ;;
     esac
 
+    local evidence_json="${7:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
+
     python3 - "$RESULT_RECORDS_FILE" \
         "$label" "$status" "$CURRENT_SECTION" "$reason" "$provider_area" \
-        "$required_env" "$release_relevant" "$duration_seconds" <<'PY'
+        "$required_env" "$release_relevant" "$duration_seconds" "$evidence_json" <<'PY'
 import json
 import sys
 
-path, label, status, section, reason, provider_area, required_env, release_relevant, duration = sys.argv[1:]
+(
+    path,
+    label,
+    status,
+    section,
+    reason,
+    provider_area,
+    required_env,
+    release_relevant,
+    duration,
+    evidence_json,
+) = sys.argv[1:]
+try:
+    evidence = json.loads(evidence_json)
+except json.JSONDecodeError:
+    evidence = {"parse_error": "invalid evidence JSON"}
+if not isinstance(evidence, dict):
+    evidence = {"parse_error": "evidence JSON was not an object"}
 record = {
     "label": label,
     "status": status,
@@ -313,6 +479,7 @@ record = {
     "required_env": [item for item in required_env.split(",") if item],
     "release_relevant": release_relevant == "true",
     "duration_seconds": int(duration or 0),
+    "evidence": evidence,
 }
 with open(path, "a", encoding="utf-8") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -332,6 +499,14 @@ record_pass() {
     record_check "$label" "passed" "" "$provider_area" "$required_env" "$duration_seconds"
 }
 
+record_pass_evidence() {
+    local label="$1"
+    local evidence_json="${2:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
+    local duration_seconds="${3:-0}"
+    record_check "$label" "passed" "" "none" "" "$duration_seconds" "$evidence_json"
+}
+
 record_failure() {
     local label="$1"
     local reason="${2:-}"
@@ -339,6 +514,15 @@ record_failure() {
     local required_env="${4:-}"
     local duration_seconds="${5:-0}"
     record_check "$label" "failed" "$reason" "$provider_area" "$required_env" "$duration_seconds"
+}
+
+record_failure_evidence() {
+    local label="$1"
+    local reason="${2:-}"
+    local evidence_json="${3:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
+    local duration_seconds="${4:-0}"
+    record_check "$label" "failed" "$reason" "none" "" "$duration_seconds" "$evidence_json"
 }
 
 skip_test() {
@@ -575,13 +759,255 @@ run_expected_failure() {
     return 0
 }
 
-is_truthy_env_value() {
-    local value
-    value=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
-    case "$value" in
-        1|true|yes|on) return 0 ;;
-        *) return 1 ;;
-    esac
+remote_required_env_names() {
+    printf '%s' "KITARU_REMOTE_SMOKE_SERVER_URL,KITARU_REMOTE_SMOKE_KUBERNETES_STACK,KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK"
+}
+
+redact_remote_output() {
+    python3 -c '
+import sys
+values = sys.argv[1:]
+text = sys.stdin.read()
+for value in values:
+    if value:
+        text = text.replace(value, "[redacted]")
+sys.stdout.write(text)
+' \
+        "$REMOTE_SMOKE_SERVER_URL" \
+        "$REMOTE_SMOKE_KUBERNETES_STACK" \
+        "$REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK" \
+        "$REMOTE_SMOKE_FLOW_IMAGE"
+}
+
+remote_evidence_field() {
+    local raw_json="$1"
+    python3 -c '
+import json
+import sys
+try:
+    payload = json.loads(sys.argv[1])
+except json.JSONDecodeError:
+    print("{}")
+else:
+    evidence = payload.get("evidence") if isinstance(payload, dict) else None
+    print(json.dumps(evidence if isinstance(evidence, dict) else {}, sort_keys=True))
+' "$raw_json"
+}
+
+is_positive_integer() {
+    [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+remote_timeout_env_names() {
+    printf '%s' "KITARU_REMOTE_SMOKE_LOGIN_TIMEOUT,KITARU_REMOTE_SMOKE_EXECUTION_TIMEOUT,KITARU_REMOTE_SMOKE_LOG_TIMEOUT"
+}
+
+validate_remote_timeout_config() {
+    local invalid=()
+    is_positive_integer "$REMOTE_SMOKE_LOGIN_TIMEOUT" || invalid+=("KITARU_REMOTE_SMOKE_LOGIN_TIMEOUT")
+    is_positive_integer "$REMOTE_SMOKE_EXECUTION_TIMEOUT" || invalid+=("KITARU_REMOTE_SMOKE_EXECUTION_TIMEOUT")
+    is_positive_integer "$REMOTE_SMOKE_LOG_TIMEOUT" || invalid+=("KITARU_REMOTE_SMOKE_LOG_TIMEOUT")
+
+    if [[ ${#invalid[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    local reason="remote smoke timeouts must be positive integers: ${invalid[*]}"
+    printf "  ${RED}✗${RESET} remote smoke timeout configuration\n"
+    printf "    %s\n" "$reason"
+    record_failure "remote smoke timeout configuration" "$reason" "none" "$(remote_timeout_env_names)" 0
+    return 1
+}
+
+run_remote_stack_inspection() {
+    local label="$1"
+    local category="$2"
+    local stack_name="$3"
+    local output
+    local show_error
+    local show_stderr_file
+    local validation_output
+    local start=$SECONDS
+
+    show_stderr_file=$(mktemp)
+    output=$(timed 60 $UV_RUN kitaru stack show "$stack_name" --output json 2>"$show_stderr_file")
+    local show_rc=$?
+    show_error=$(cat "$show_stderr_file")
+    rm -f "$show_stderr_file"
+    local duration=$((SECONDS - start))
+    if [[ $show_rc -ne 0 ]]; then
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        if [[ -n "$show_error" ]]; then
+            echo "$show_error" | redact_remote_output | tail -30 | sed 's/^/    /'
+        else
+            echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        fi
+        record_failure "$label" "stack show failed with exit status $show_rc" "none" "" "$duration"
+        return 1
+    fi
+
+    validation_output=$(printf '%s' "$output" \
+        | $UV_RUN python scripts/remote_stack_smoke.py validate-stack --category "$category" 2>&1)
+    local validation_rc=$?
+    duration=$((SECONDS - start))
+    local evidence
+    evidence=$(remote_evidence_field "$validation_output")
+    if [[ $validation_rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        record_pass_evidence "$label" "$evidence" "$duration"
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$validation_output" | redact_remote_output | sed 's/^/    /'
+        fi
+        return 0
+    fi
+
+    printf "  ${RED}✗${RESET} %s\n" "$label"
+    echo "$validation_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    record_failure_evidence "$label" "stack shape did not match $category" "$evidence" "$duration"
+    return 1
+}
+
+run_remote_flow_smoke() {
+    local label="$1"
+    local category="$2"
+    local stack_name="$3"
+    local image_arg=()
+    local output
+    local error_output
+    local stderr_file
+    local start=$SECONDS
+
+    if [[ "$category" == "kubernetes" && -z "$REMOTE_SMOKE_FLOW_IMAGE" ]]; then
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        printf "    KITARU_REMOTE_SMOKE_FLOW_IMAGE or --remote-flow-image is required for Kubernetes remote smoke.\n"
+        record_failure "$label" "missing Kubernetes flow image" "none" "KITARU_REMOTE_SMOKE_FLOW_IMAGE" 0
+        return 1
+    fi
+
+    if [[ "$category" == "kubernetes" && -n "$REMOTE_SMOKE_FLOW_IMAGE" ]]; then
+        image_arg=(--image "$REMOTE_SMOKE_FLOW_IMAGE")
+    fi
+
+    stderr_file=$(mktemp)
+    output=$(timed "$((REMOTE_SMOKE_EXECUTION_TIMEOUT + REMOTE_SMOKE_LOG_TIMEOUT + 60))" \
+        $UV_RUN python scripts/remote_stack_smoke.py run-flow \
+            --stack "$stack_name" \
+            --category "$category" \
+            "${image_arg[@]}" \
+            --timeout "$REMOTE_SMOKE_EXECUTION_TIMEOUT" \
+            --log-timeout "$REMOTE_SMOKE_LOG_TIMEOUT" \
+            --run-prefix "$REMOTE_SMOKE_RUN_PREFIX" \
+            2>"$stderr_file")
+    local rc=$?
+    error_output=$(cat "$stderr_file")
+    rm -f "$stderr_file"
+    local duration=$((SECONDS - start))
+    local evidence
+    evidence=$(remote_evidence_field "$output")
+
+    if [[ $rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        record_pass_evidence "$label" "$evidence" "$duration"
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | redact_remote_output | sed 's/^/    /'
+            if [[ -n "$error_output" ]]; then
+                echo "$error_output" | redact_remote_output | sed 's/^/    /'
+            fi
+        fi
+        return 0
+    fi
+    if [[ $rc -eq 124 ]]; then
+        printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
+        record_failure_evidence "$label" "TIMEOUT" "$evidence" "$duration"
+        return 1
+    fi
+
+    printf "  ${RED}✗${RESET} %s\n" "$label"
+    if [[ -n "$error_output" ]]; then
+        echo "$error_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    else
+        echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    fi
+    record_failure_evidence "$label" "exit status $rc" "$evidence" "$duration"
+    return 1
+}
+
+run_remote_stack_smoke_section() {
+    section_header "Remote stack smoke"
+
+    if [[ "$REMOTE_STACK_SMOKE" != true ]]; then
+        skip_test "remote stack smoke" "not opted in; set KITARU_REMOTE_SMOKE=1 or pass --remote-stack-smoke for remote stack release evidence"
+        return 0
+    fi
+
+
+    local missing=()
+    [[ -n "$REMOTE_SMOKE_SERVER_URL" ]] || missing+=("KITARU_REMOTE_SMOKE_SERVER_URL")
+    [[ -n "$REMOTE_SMOKE_KUBERNETES_STACK" ]] || missing+=("KITARU_REMOTE_SMOKE_KUBERNETES_STACK")
+    [[ -n "$REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK" ]] || missing+=("KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        local reason="missing required remote smoke config: ${missing[*]}"
+        printf "  ${RED}✗${RESET} remote smoke configuration\n"
+        printf "    %s\n" "$reason"
+        record_failure "remote smoke configuration" "$reason" "none" "$(remote_required_env_names)" 0
+        return 0
+    fi
+
+    validate_remote_timeout_config || return 0
+
+    record_pass_evidence "remote smoke configuration" \
+        '{"remote_server_configured":true,"kubernetes_stack_configured":true,"local_remote_artifact_stack_configured":true}' \
+        0
+    printf "  ${GREEN}✓${RESET} remote smoke configuration\n"
+
+    local login_output
+    local login_start=$SECONDS
+    login_output=$(timed "$REMOTE_SMOKE_LOGIN_TIMEOUT" \
+        $UV_RUN kitaru login "$REMOTE_SMOKE_SERVER_URL" --timeout "$REMOTE_SMOKE_LOGIN_TIMEOUT" 2>&1)
+    local login_rc=$?
+    local login_duration=$((SECONDS - login_start))
+    if [[ $login_rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} remote kitaru login\n"
+        record_pass_evidence "remote kitaru login" \
+            '{"remote_server_configured":true}' "$login_duration"
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$login_output" | redact_remote_output | sed 's/^/    /'
+        fi
+    else
+        printf "  ${RED}✗${RESET} remote kitaru login\n"
+        echo "$login_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        record_failure "remote kitaru login" "exit status $login_rc" "none" "KITARU_REMOTE_SMOKE_SERVER_URL" "$login_duration"
+        return 0
+    fi
+
+    local kubernetes_stack_ok=false
+    if run_remote_stack_inspection \
+        "remote Kubernetes stack inspection" \
+        "kubernetes" \
+        "$REMOTE_SMOKE_KUBERNETES_STACK"; then
+        kubernetes_stack_ok=true
+    fi
+    if [[ "$kubernetes_stack_ok" == true ]]; then
+        run_remote_flow_smoke \
+            "remote Kubernetes flow execution/readback" \
+            "kubernetes" \
+            "$REMOTE_SMOKE_KUBERNETES_STACK" || true
+    fi
+
+    local local_remote_artifact_stack_ok=false
+    if run_remote_stack_inspection \
+        "remote local-runner remote-artifact stack inspection" \
+        "local-remote-artifact" \
+        "$REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK"; then
+        local_remote_artifact_stack_ok=true
+    fi
+    if [[ "$local_remote_artifact_stack_ok" == true ]]; then
+        run_remote_flow_smoke \
+            "remote local-runner remote-artifact flow execution/readback" \
+            "local-remote-artifact" \
+            "$REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK" || true
+    fi
 }
 
 # The sandbox example checks run with ZENML_REPOSITORY_PATH=$PWD (so ZenML can
@@ -702,6 +1128,23 @@ if [[ "$RELEASE_MODE" == true ]]; then
     fi
 fi
 
+if [[ "$REMOTE_STACK_SMOKE" == true ]]; then
+    printf "  Remote stack smoke: enabled (operator-provided config)\n"
+fi
+
+# Internal test hook: exercise the remote section without running local install/server smoke.
+if [[ "${KITARU_SMOKE_TEST_RUN_REMOTE_SECTION_ONLY:-}" == "1" ]]; then
+    run_remote_stack_smoke_section
+    if [[ -n "$JSON_OUT" ]] && ! write_json_results; then
+        printf "  ${RED}Failed to write structured results: %s${RESET}\n" "$JSON_OUT" >&2
+        exit 1
+    fi
+    if [[ ${#FAILED[@]} -gt 0 ]]; then
+        exit 1
+    fi
+    exit 0
+fi
+
 # ---------------------------------------------------------------------------
 # Install from source
 # ---------------------------------------------------------------------------
@@ -771,6 +1214,11 @@ else
             uv run --python "$PY" --no-dev --extra google-adk --with pytest \
             pytest -o addopts='-vv' tests/live/test_google_adk_provider_core.py -m "live_gemini"
 fi
+
+# ---------------------------------------------------------------------------
+# Remote stack smoke
+# ---------------------------------------------------------------------------
+run_remote_stack_smoke_section
 
 # ---------------------------------------------------------------------------
 # Clear state
