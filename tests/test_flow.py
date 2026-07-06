@@ -4710,13 +4710,19 @@ def test_submit_emits_flow_submitted_event() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_SUBMITTED,
-        {
-            "kitaru_deployment_type": "local",
-            "deployment_type_source": "kitaru_stack_inference",
-        },
-    )
+    assert track_mock.call_args_list == [
+        call(
+            AnalyticsEvent.FLOW_ATTEMPTED,
+            {"submission_path": "flow_wrapper"},
+        ),
+        call(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "kitaru_deployment_type": "local",
+                "deployment_type_source": "kitaru_stack_inference",
+            },
+        ),
+    ]
 
 
 def test_submit_emits_terminal_event_when_run_already_completed() -> None:
@@ -4745,8 +4751,9 @@ def test_submit_emits_terminal_event_when_run_already_completed() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 2
-    submitted_call, terminal_call = track_mock.call_args_list
+    assert track_mock.call_count == 3
+    attempted_call, submitted_call, terminal_call = track_mock.call_args_list
+    assert attempted_call.args[0] == AnalyticsEvent.FLOW_ATTEMPTED
     assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
     assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
     terminal_metadata = terminal_call.args[1]
@@ -4784,8 +4791,9 @@ def test_submit_emits_terminal_event_with_failure_origin_when_run_already_failed
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 2
-    submitted_call, terminal_call = track_mock.call_args_list
+    assert track_mock.call_count == 3
+    attempted_call, submitted_call, terminal_call = track_mock.call_args_list
+    assert attempted_call.args[0] == AnalyticsEvent.FLOW_ATTEMPTED
     assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
     assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
     terminal_metadata = terminal_call.args[1]
@@ -4825,6 +4833,7 @@ def test_submit_time_terminal_event_is_not_reemitted_by_wait_or_get() -> None:
         handle.get()
 
     events = [call_args.args[0] for call_args in track_mock.call_args_list]
+    assert events.count(AnalyticsEvent.FLOW_ATTEMPTED) == 1
     assert events.count(AnalyticsEvent.FLOW_SUBMITTED) == 1
     assert events.count(AnalyticsEvent.FLOW_TERMINAL) == 1
 
@@ -4852,8 +4861,10 @@ def test_submit_defers_terminal_event_when_run_still_running() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 1
-    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_SUBMITTED
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_SUBMITTED,
+    ]
 
 
 def test_submit_classification_failure_does_not_break_flow_execution() -> None:
@@ -4884,19 +4895,58 @@ def test_submit_classification_failure_does_not_break_flow_execution() -> None:
         handle = wrapped.run(123)
 
     assert isinstance(handle, FlowHandle)
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_SUBMITTED,
-        {
-            "kitaru_deployment_type": "unknown",
-            "deployment_type_source": "kitaru_stack_inference_failed",
-        },
-    )
-    metadata = track_mock.call_args.args[1]
+    assert track_mock.call_args_list == [
+        call(
+            AnalyticsEvent.FLOW_ATTEMPTED,
+            {"submission_path": "flow_wrapper"},
+        ),
+        call(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "kitaru_deployment_type": "unknown",
+                "deployment_type_source": "kitaru_stack_inference_failed",
+            },
+        ),
+    ]
+    metadata = track_mock.call_args_list[1].args[1]
     assert "private-stack-name" not in metadata.values()
 
 
-def test_submit_does_not_emit_when_run_is_none() -> None:
-    """FLOW_SUBMITTED should NOT fire when the pipeline returns None."""
+def test_submit_does_not_emit_flow_failed_after_run_exists() -> None:
+    """Post-run persistence failures should not become FLOW_FAILED events."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch(
+            "kitaru.flow.persist_frozen_execution_spec",
+            side_effect=RuntimeError("persistence backend failed"),
+        ),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="persistence backend failed"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_SUBMITTED,
+    ]
+
+
+def test_submit_failed_event_when_run_is_none() -> None:
+    """FLOW_FAILED should fire when the pipeline returns None."""
     configured_pipeline = MagicMock(return_value=None)
     base_pipeline = MagicMock()
     base_pipeline.with_options.return_value = configured_pipeline
@@ -4918,7 +4968,125 @@ def test_submit_does_not_emit_when_run_is_none() -> None:
         wrapped = flow(lambda: None)
         wrapped.run()
 
-    track_mock.assert_not_called()
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "KitaruRuntimeError"
+    assert failed_metadata["failure_origin"] == FailureOrigin.RUNTIME.value
+    assert failed_metadata["kitaru_deployment_type"] == "local"
+    assert failed_metadata["deployment_type_source"] == "kitaru_stack_inference"
+
+
+def test_submit_failed_event_when_project_activation_fails() -> None:
+    """Activating a bad resolved project is a tracked pre-submission failure."""
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="ghost"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru.flow._temporary_active_project",
+            side_effect=KitaruBackendError("Failed to activate project 'ghost'"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruBackendError, match="ghost"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    configured_pipeline.assert_not_called()
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "KitaruBackendError"
+
+
+def test_submit_failed_event_when_configured_pipeline_raises() -> None:
+    """Submission exceptions before a run exists should emit FLOW_FAILED."""
+    configured_pipeline = MagicMock(
+        side_effect=RuntimeError("backend crash with private-stack-name and /tmp/path")
+    )
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="private-stack-name"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="backend crash"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_metadata
+    assert failed_metadata["kitaru_deployment_type"] == "local"
+    assert failed_metadata["deployment_type_source"] == "kitaru_stack_inference"
+    assert "private-stack-name" not in failed_metadata.values()
+    assert "/tmp/path" not in failed_metadata.values()
+
+
+def test_submit_failed_event_when_setup_fails_before_deployment_metadata() -> None:
+    """Early setup failures should still emit attempted + failed analytics."""
+    zenml_decorator = MagicMock(return_value=MagicMock())
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            side_effect=RuntimeError("private-stack-name and /tmp/path"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="private-stack-name"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_metadata
+    assert "kitaru_deployment_type" not in failed_metadata
+    assert "deployment_type_source" not in failed_metadata
+    assert "private-stack-name" not in failed_metadata.values()
+    assert "/tmp/path" not in failed_metadata.values()
 
 
 def test_replay_success_emits_requested_and_replayed_events() -> None:
