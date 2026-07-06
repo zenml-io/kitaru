@@ -27,7 +27,9 @@ schema:
       audit.
     live_provider: Real provider coverage metadata for release/operator checks. weekly_workflow,
       local_release_smoke, and manual_command_available distinguish scheduled automation
-      from local/manual command availability.
+      from local/manual command availability. manual_github_workflow records trusted
+      GitHub workflow evidence that must be manually dispatched rather than scheduled;
+      kitaru_ref is the release branch, tag, SHA, or approved ref under test.
     waiver: Required for missing, planned, and manual_only coverage statuses; reason
       explains why automation is incomplete, and reviewer_action tells a release reviewer
       what to do if that example changed.
@@ -310,10 +312,34 @@ examples:
         requires_server: true
         timeout_seconds: 60
       live_provider:
-        status: not_applicable
-        required: false
+        status: smoke_only
+        provider: openai
+        command: gh workflow run llm-integration.yml -f suite=provider-extended -f kitaru_ref=<RELEASE_REF_OR_SHA> -f include_openai=true -f include_anthropic=false -f include_research_bot=false -f include_google_adk=false
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: true
+          include_anthropic: false
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_openai) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_openai_adapter_behavior.py
+          test_names:
+            - test_pydantic_ai_live_tool_and_structured_output_metadata
+        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
+      waiver_allowed: true
   - id: pydantic-ai-streaming
     path: examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
@@ -395,6 +421,22 @@ examples:
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
         cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: true
+          include_anthropic: false
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_openai) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_openai_adapter_behavior.py
+          test_names:
+            - test_openai_agents_live_tool_call_records_result_evidence
+        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -455,6 +497,22 @@ examples:
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
         cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: true
+          include_anthropic: false
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_openai) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_openai_adapter_behavior.py
+          test_names:
+            - test_openai_agents_live_streaming_records_lifecycle_evidence
+        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -484,6 +542,22 @@ examples:
         required_env: [ANTHROPIC_API_KEY]
         timeout_seconds: 120
         cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: false
+          include_anthropic: true
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_anthropic) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_anthropic_adapter_behavior.py
+          test_names:
+            - test_claude_agent_sdk_live_capture_records_result_artifacts
+        notes: Manual provider-extended GitHub evidence dispatches the full Anthropic
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -550,6 +624,22 @@ examples:
         required_env: [ANTHROPIC_API_KEY]
         timeout_seconds: 120
         cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: false
+          include_anthropic: true
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_anthropic) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_anthropic_adapter_behavior.py
+          test_names:
+            - test_claude_agent_sdk_live_streaming_records_event_artifacts
+        notes: Manual provider-extended GitHub evidence dispatches the full Anthropic
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -591,7 +681,9 @@ examples:
         cost_class: medium
         notes: requires the opt-in env plus either GEMINI_API_KEY/GOOGLE_API_KEY
           for Gemini Developer API or Vertex ADC config with GOOGLE_GENAI_USE_VERTEXAI,
-          GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION=global
+          GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION=global. This ticket does
+          not add Gemini Interactions to the trusted GitHub live workflow; evidence
+          remains local release-smoke or opt-in manual execution only.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -624,7 +716,20 @@ examples:
         opt_in_env: [KITARU_SMOKE_GOOGLE_ADK]
         timeout_seconds: 180
         cost_class: low
-        notes: hosted/release smoke evidence remains API-key-only and requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY; the smoke script runs the isolated no-dev ADK/Gemini pytest command. For local/manual live runs outside hosted release evidence, the direct example and live pytest also accept Vertex ADC env shape with GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION; ADK / Google GenAI performs the real authentication.
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: false
+          include_anthropic: false
+          include_research_bot: false
+          include_google_adk: true
+          marker_expression: live_gemini and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_google_adk_provider_behavior.py
+          test_names:
+            - test_google_adk_runner_call_with_gemini_captures_function_call
+        notes: hosted/release smoke evidence remains API-key-only and requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY; the smoke script runs the isolated no-dev ADK/Gemini pytest command. Manual provider-extended GitHub evidence dispatches the full Google ADK provider-extended marker group when include_google_adk is enabled and the live-provider-tests environment has Gemini/Google credentials; the listed test is the relevant evidence for this example. For local/manual live runs outside hosted release evidence, the direct example and live pytest also accept Vertex ADC env shape with GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, and GOOGLE_CLOUD_LOCATION; ADK / Google GenAI performs the real authentication. This is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -692,7 +797,9 @@ examples:
         notes: requires the opt-in env plus GEMINI_API_KEY or GOOGLE_API_KEY;
           Vertex ADC is not supported because this mode uses raw model interactions.
           The release smoke script creates a temporary local sandbox stack and
-          points KITARU_STACK at it for the smoke command.
+          points KITARU_STACK at it for the smoke command. This ticket does not add
+          Gemini Interactions to the trusted GitHub live workflow; evidence remains
+          local release-smoke or opt-in manual execution only.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -724,6 +831,22 @@ examples:
         required_env: [OPENAI_API_KEY]
         timeout_seconds: 120
         cost_class: low
+        manual_github_workflow:
+          workflow: .github/workflows/llm-integration.yml
+          suite: provider-extended
+          kitaru_ref: <RELEASE_REF_OR_SHA>
+          include_openai: true
+          include_anthropic: false
+          include_research_bot: false
+          include_google_adk: false
+          marker_expression: (live_openai) and provider_extended
+          scope: full provider-extended marker group
+          test_file: tests/live/test_openai_adapter_behavior.py
+          test_names:
+            - test_langgraph_live_calls_mode_records_model_and_tool_evidence
+        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
+          provider-extended marker group; the listed test is the relevant evidence
+          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
