@@ -864,7 +864,6 @@ def use_stack(name_or_id: str) -> StackInfo:
     result = _config_stacks.use_stack(
         name_or_id,
         client_factory=Client,
-        current_stack_getter=current_stack,
     )
 
     from kitaru.analytics import AnalyticsEvent, track

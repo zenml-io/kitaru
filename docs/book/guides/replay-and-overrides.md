@@ -35,9 +35,10 @@ When you replay an execution, Kitaru follows this sequence:
 2. Kitaru resolves `at` to one recorded checkpoint invocation, tool call, or model call. If the selector points to several calls, replay fails and asks for a more specific selector.
 3. Checkpoints before `at` reuse their recorded outputs. Their Python functions do not run again.
 4. The checkpoint at `at`, and checkpoints that depend on it, run again unless an override changes that behavior.
-5. An override with an `"output"` value injects that value and does not run the targeted checkpoint.
-6. An override with a `"code"` value imports a replacement callable before the checkpoint reruns.
-7. An override with a `"model"` value changes the model only for supported LLM checkpoint calls. If the target is not a supported LLM checkpoint, Kitaru fails validation before submission.
+5. An override with an `"input"` value changes the targeted checkpoint's recorded inputs, then reruns that checkpoint with those changed inputs.
+6. An override with an `"output"` value injects that value and does not run the targeted checkpoint.
+7. An override with a `"code"` value imports a replacement callable before the checkpoint reruns.
+8. An override with a `"model"` value changes the model only for supported LLM checkpoint calls. If the target is not a supported LLM checkpoint, Kitaru fails validation before submission.
 
 So the replay is not a mutation of the old execution. The source execution stays as evidence. The replay is a new execution with metadata that points back to the source.
 
@@ -94,6 +95,38 @@ Checkpoint and invocation overrides can contain these fields:
 
 If a checkpoint override and an invocation override both target the same recorded call, the invocation override wins because it is more specific.
 
+### Input override vs output override
+
+`"input"` and `"output"` both change a replay, but they change it in opposite ways.
+
+Use `"input"` when you want the checkpoint body to run again with changed inputs. A concrete story: the original run called `lookup_policy_tool` with `{"account_id": "acct-1"}`. You replay with an input override for `{"account_id": "acct-2"}`. Kitaru reruns `lookup_policy_tool`, the tool receives `acct-2`, and later checkpoints receive whatever that rerun returned. If the tool calls a paid API, writes a file, or sends a message, that action happens again unless your tool code guards it.
+
+Use `"output"` when you do **not** want the checkpoint body to run. Kitaru pretends the checkpoint returned the value you supplied, then passes that value to later checkpoints. A concrete story: the original `lookup_policy_tool` returned `{"policy": "standard"}`. You replay with `{"output": {"policy": "manual approval required"}}`. Kitaru does not call the tool; it injects the edited result into the next checkpoint.
+
+For PydanticAI tool checkpoints created by `checkpoint_strategy="calls"`, the replayable input is named `tool_args`, and the replayable result is named `output`. You still use the public `input` override field; `tool_args` is the recorded checkpoint input inside that field, not a new top-level override field.
+
+PydanticAI model-request and whole-turn checkpoints may record their original inputs for inspection, but they do not currently accept edited `input` replay values. Use an `output` override for those checkpoints unless the checkpoint inspection output lists a replayable input slot.
+
+These two forms are equivalent for a PydanticAI tool checkpoint whose only replayable input is `tool_args`:
+
+```python
+# Shorthand: Kitaru knows this tool checkpoint's input slot is `tool_args`.
+checkpoint_overrides={
+    "lookup_policy_tool": {
+        "input": {"account_id": "acct-2"},
+    },
+}
+
+# Explicit form: useful when you want to show the recorded input name.
+checkpoint_overrides={
+    "lookup_policy_tool": {
+        "input": {"tool_args": {"account_id": "acct-2"}},
+    },
+}
+```
+
+If the checkpoint does not expose replayable inputs, Kitaru fails before starting replay instead of guessing. This matters for hand-written checkpoints with `type="tool_call"`: they are not treated as adapter-generated PydanticAI tool checkpoints unless they actually record a compatible replay input such as `tool_args`.
+
 ### How each override level matches calls
 
 `flow_overrides` set top-level flow parameters for the whole replay run. `flow_overrides={"model": ...}` only changes the model when your flow actually exposes `model` as a top-level parameter that its checkpoints read. If the model is chosen inside a checkpoint or by an adapter, a flow override named `model` does nothing useful; target the LLM call with a checkpoint or invocation override instead.
@@ -126,7 +159,7 @@ print(row.original_exec_id)  # points to the source execution
 
 ## Replay with one overridden input
 
-Override exactly one thing — a flow input, a checkpoint output, a single model call — while reproducing everything else. The forked run then differs from the baseline only by that change.
+Override exactly one thing — a flow input, a checkpoint input, a checkpoint output, or a single model call — while reproducing everything else. The forked run then differs from the baseline only by that change.
 
 Replay one execution with flow and checkpoint overrides:
 
@@ -159,6 +192,22 @@ submission = client.executions.replay(
     },
 )
 ```
+
+Replay a PydanticAI tool call with edited arguments:
+
+```python
+submission = client.executions.replay(
+    "kr-a8f3c2",
+    at="lookup_policy_tool",
+    checkpoint_overrides={
+        "lookup_policy_tool": {
+            "input": {"account_id": "acct-2"},
+        },
+    },
+)
+```
+
+In that last example, Kitaru reruns the `lookup_policy_tool` checkpoint. The PydanticAI tool body receives `account_id="acct-2"`, and the `tool_args` input artifact recorded on the replay reflects the edited arguments.
 
 Use invocation IDs or call IDs when a checkpoint name appears more than once in an execution. For example, if `lookup_policy_tool` ran three times, a checkpoint override changes all three calls. An invocation override changes only the one ID you name.
 
@@ -248,6 +297,11 @@ kitaru executions replay kr-a8f3c2 \
   --at write_draft \
   --flow-overrides '{"topic":"New topic"}' \
   --checkpoint-overrides '{"research":{"output":"Edited notes"}}'
+
+# Rerun a PydanticAI tool checkpoint with edited tool arguments
+kitaru executions replay kr-a8f3c2 \
+  --at lookup_policy_tool \
+  --checkpoint-overrides '{"lookup_policy_tool":{"input":{"account_id":"acct-2"}}}'
 ```
 
 Replay several explicit executions:

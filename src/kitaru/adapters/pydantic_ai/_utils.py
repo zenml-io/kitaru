@@ -8,16 +8,19 @@ import asyncio
 import hashlib
 import json
 import sys
-from collections.abc import Coroutine, Iterator, Mapping
+from collections.abc import Coroutine, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, TypedDict, cast
 
+from kitaru._checkpoint_metadata import adapter_checkpoint_metadata
 from kitaru._source_aliases import build_checkpoint_source_alias
 from kitaru.checkpoint import _synthetic_checkpoint
 from kitaru.errors import KitaruUsageError
 from pydantic_core import to_jsonable_python
+
+from ._constants import ADAPTER_ID
 
 CheckpointRuntime = Literal["inline", "isolated"]
 CheckpointStrategy = Literal["calls", "turn"]
@@ -31,11 +34,14 @@ class CheckpointConfig(TypedDict, total=False):
     runtime: CheckpointRuntime
     retries: int
     type: str
+    metadata: Mapping[str, Any]
 
 
 ToolCheckpointOverride = CheckpointConfig | Literal[False]
 ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
-_ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({"cache", "runtime", "retries", "type"})
+_ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset(
+    {"cache", "metadata", "runtime", "retries", "type"}
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,29 @@ def with_default_type(config: CheckpointConfig, default_type: str) -> Checkpoint
     if "type" in config:
         return config
     return {**config, "type": default_type}
+
+
+def with_adapter_checkpoint_metadata(
+    config: CheckpointConfig,
+    *,
+    kind: str,
+    input_slots: Sequence[str] = (),
+    output_slots: Sequence[str] = (),
+) -> CheckpointConfig:
+    """Return ``config`` with PydanticAI adapter checkpoint metadata."""
+    existing_metadata = config.get("metadata")
+    metadata: dict[str, Any] = (
+        dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
+    )
+    metadata.update(
+        adapter_checkpoint_metadata(
+            adapter=ADAPTER_ID,
+            kind=kind,
+            input_slots=input_slots,
+            output_slots=output_slots,
+        )
+    )
+    return {**config, "metadata": metadata}
 
 
 @contextmanager
@@ -224,6 +253,11 @@ def validate_checkpoint_config(
             f"Unsupported keys in {context}: {unknown}. Allowed keys are: {allowed}."
         )
     validated = cast(CheckpointConfig, dict(config))
+    metadata = validated.get("metadata")
+    if metadata is not None and not isinstance(metadata, Mapping):
+        raise KitaruUsageError(
+            f"Unsupported metadata in {context}: expected a mapping."
+        )
     reject_isolated_runtime(validated)
     return validated
 
@@ -270,7 +304,7 @@ def _build_checkpoint_step(
     *,
     config: CheckpointConfig,
     step_name: str,
-    body: Callable[[], Any],
+    body: Callable[..., Any],
     checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Callable[..., Any]:
     reject_isolated_runtime(config)
@@ -316,7 +350,7 @@ def _build_checkpoint_step(
             tool_args: Any,
             _cache_key: str | None = None,
         ) -> Any:
-            return body()
+            return body(tool_args)
 
         turn = _turn_with_tool_args
     elif input_names == {"messages"}:
@@ -353,7 +387,7 @@ def run_sync_in_checkpoint(
     *,
     config: CheckpointConfig,
     step_name: str,
-    body: Callable[[], Any],
+    body: Callable[..., Any],
     cache_key: str | None = None,
     checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
@@ -373,7 +407,7 @@ async def run_async_in_checkpoint(
     *,
     config: CheckpointConfig,
     step_name: str,
-    body: Callable[[], Coroutine[Any, Any, Any]],
+    body: Callable[..., Coroutine[Any, Any, Any]],
     cache_key: str | None = None,
     checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
@@ -385,7 +419,7 @@ async def run_async_in_checkpoint(
     checkpoint_def = _build_checkpoint_step(
         config=config,
         step_name=step_name,
-        body=lambda: asyncio.run(body()),
+        body=lambda *args: asyncio.run(body(*args)),
         checkpoint_inputs=checkpoint_inputs,
     )
     step_output = await asyncio.to_thread(

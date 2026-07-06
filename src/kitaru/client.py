@@ -1740,10 +1740,11 @@ class _ExecutionsAPI:
                 )
                 if plan_requires_runtime_transport(replay_plan):
                     raise KitaruRuntimeError(
-                        "Replay request includes runtime-only overrides (`code` or "
-                        "targeted `model`), but Kitaru could not resolve the flow "
-                        "wrapper needed to transport KITARU_REPLAY_CONTEXT. Run "
-                        "replay from the project directory or remove those overrides."
+                        "Replay request includes runtime-only overrides (`code`, "
+                        "targeted `model`, or adapter `input`), but Kitaru could "
+                        "not resolve the flow wrapper needed to transport "
+                        "KITARU_REPLAY_CONTEXT. Run replay from the project "
+                        "directory or remove those overrides."
                     )
                 plan_document = replay_plan.document
 

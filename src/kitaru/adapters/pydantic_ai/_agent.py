@@ -45,6 +45,10 @@ from pydantic_ai.output import OutputDataT, OutputSpec
 from pydantic_ai.tools import AgentDepsT, AgentNativeTool, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 
+from ._constants import (
+    ADAPTER_CHECKPOINT_KIND_TURN,
+    ARTIFACT_SLOT_OUTPUT,
+)
 from ._events import PydanticAIUsageSummary
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
@@ -70,6 +74,7 @@ from ._utils import (
     run_sync_in_checkpoint,
     turn_cache_key,
     validate_checkpoint_config,
+    with_adapter_checkpoint_metadata,
     validate_checkpoint_strategy,
     validate_tool_checkpoint_overrides,
 )
@@ -833,8 +838,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
             checkpoint_body = _marked_body
 
+        config = with_adapter_checkpoint_metadata(
+            checkpoint_config or self._turn_checkpoint_config,
+            kind=ADAPTER_CHECKPOINT_KIND_TURN,
+            input_slots=[],
+            output_slots=[ARTIFACT_SLOT_OUTPUT],
+        )
         return await run_async_in_checkpoint(
-            config=checkpoint_config or self._turn_checkpoint_config,
+            config=config,
             step_name=self._name or "agent",
             body=checkpoint_body,
             cache_key=cache_key,
@@ -861,8 +872,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
             checkpoint_body = _marked_body
 
+        config = with_adapter_checkpoint_metadata(
+            checkpoint_config or self._turn_checkpoint_config,
+            kind=ADAPTER_CHECKPOINT_KIND_TURN,
+            input_slots=[],
+            output_slots=[ARTIFACT_SLOT_OUTPUT],
+        )
         return run_sync_in_checkpoint(
-            config=checkpoint_config or self._turn_checkpoint_config,
+            config=config,
             step_name=self._name or "agent",
             body=checkpoint_body,
             cache_key=cache_key,
