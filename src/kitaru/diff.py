@@ -7,10 +7,13 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
 
 from kitaru._client._models import CheckpointCall, Execution
-from kitaru._ui_urls import resolve_ui_base_url
+from kitaru._ui_urls import (
+    UiUrlContext,
+    build_compare_url_from_context,
+    resolve_ui_url_context,
+)
 from kitaru.client import KitaruClient
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
@@ -47,9 +50,14 @@ class CohortDiff:
     rows: list[ExecutionDiff] = field(default_factory=list)
 
 
-def _client_server_url(client: KitaruClient) -> str | None:
-    """Return an HTTP(S) dashboard base URL for UI compare links."""
-    return resolve_ui_base_url(client)
+def _client_ui_url_context(client: KitaruClient) -> UiUrlContext | None:
+    """Return route-aware UI context for compare links."""
+    return resolve_ui_url_context(client)
+
+
+def _execution_project_name_or_id(execution: Execution) -> str | None:
+    """Return the best project route value available on an execution."""
+    return execution.project_name or execution.project_id
 
 
 def compare_urls_for_replay(
@@ -60,12 +68,15 @@ def compare_urls_for_replay(
 ) -> list[str]:
     """Build UI compare URLs for one original execution and its replay."""
     original_execution = client.executions.get(original_exec_id)
+    ui_context = _client_ui_url_context(client)
     compare_url = build_compare_url(
-        server_url=_client_server_url(client),
+        server_url=None,
         flow_id=original_execution.flow_id,
         original_exec_id=original_exec_id,
         replay_exec_id=replay_exec_id,
         flow_version=_resolve_compare_flow_version(original_execution),
+        project_name_or_id=_execution_project_name_or_id(original_execution),
+        ui_context=ui_context,
     )
     if compare_url is None:
         return []
@@ -74,10 +85,12 @@ def compare_urls_for_replay(
 
 def build_compare_url_for_executions(
     *,
-    server_url: str | None,
     flow_id: str | None,
     exec_ids: Sequence[str],
+    server_url: str | None = None,
     flow_version: str = DEFAULT_COMPARE_FLOW_VERSION,
+    project_name_or_id: str | None = None,
+    ui_context: UiUrlContext | None = None,
 ) -> str | None:
     """Build a Kitaru UI compare URL for two or more executions.
 
@@ -88,28 +101,43 @@ def build_compare_url_for_executions(
     normalized = [str(exec_id).strip() for exec_id in exec_ids if str(exec_id).strip()]
     if len(normalized) < 2:
         return None
-    if server_url is None or flow_id is None:
+    if flow_id is None:
         return None
 
-    flow_segment = quote(str(flow_id), safe="")
-    version_segment = quote(
-        flow_version.strip() or DEFAULT_COMPARE_FLOW_VERSION,
-        safe="",
+    if ui_context is not None:
+        return build_compare_url_from_context(
+            ui_context,
+            flow_id=str(flow_id),
+            exec_ids=normalized,
+            project_name_or_id=project_name_or_id,
+            version=flow_version,
+        )
+
+    if server_url is None or not str(server_url).strip():
+        return None
+
+    legacy_context = UiUrlContext(
+        base_url=str(server_url).strip().rstrip("/"),
+        route_kind="legacy",
+        source="connection_config",
     )
-    execution_segment = quote(",".join(normalized), safe=",")
-    return (
-        f"{server_url.rstrip('/')}/flows/{flow_segment}/v/{version_segment}/compare"
-        f"?executions={execution_segment}"
+    return build_compare_url_from_context(
+        legacy_context,
+        flow_id=str(flow_id),
+        exec_ids=normalized,
+        version=flow_version,
     )
 
 
 def build_compare_url(
     *,
-    server_url: str | None,
     flow_id: str | None,
     original_exec_id: str,
     replay_exec_id: str,
+    server_url: str | None = None,
     flow_version: str = DEFAULT_COMPARE_FLOW_VERSION,
+    project_name_or_id: str | None = None,
+    ui_context: UiUrlContext | None = None,
 ) -> str | None:
     """Build the Kitaru UI compare URL for an original vs one replay execution.
 
@@ -122,6 +150,8 @@ def build_compare_url(
         flow_id=flow_id,
         exec_ids=[original_exec_id, replay_exec_id],
         flow_version=flow_version,
+        project_name_or_id=project_name_or_id,
+        ui_context=ui_context,
     )
 
 
@@ -137,21 +167,26 @@ def compare_url_for_executions(
 
     resolved_client = client or KitaruClient()
     anchor = resolved_client.executions.get(normalized[0])
+    ui_context = _client_ui_url_context(resolved_client)
     return build_compare_url_for_executions(
-        server_url=_client_server_url(resolved_client),
+        server_url=None,
         flow_id=anchor.flow_id,
         exec_ids=normalized,
         flow_version=_resolve_compare_flow_version(anchor),
+        project_name_or_id=_execution_project_name_or_id(anchor),
+        ui_context=ui_context,
     )
 
 
 def build_compare_urls(
     *,
-    server_url: str | None,
     flow_id: str | None,
     original_exec_id: str,
     replay_exec_ids: Sequence[str],
+    server_url: str | None = None,
     flow_version: str = DEFAULT_COMPARE_FLOW_VERSION,
+    project_name_or_id: str | None = None,
+    ui_context: UiUrlContext | None = None,
 ) -> list[str]:
     """Build one UI compare URL per original-vs-replay pair."""
     urls: list[str] = []
@@ -162,6 +197,8 @@ def build_compare_urls(
             original_exec_id=original_exec_id,
             replay_exec_id=replay_exec_id,
             flow_version=flow_version,
+            project_name_or_id=project_name_or_id,
+            ui_context=ui_context,
         )
         if url is not None:
             urls.append(url)
@@ -417,15 +454,19 @@ def _diff_impl(
         ]
         compared.append((replay_exec_id, checkpoint_diffs))
 
-    server_url = _client_server_url(client)
+    ui_context = _client_ui_url_context(client)
+    server_url = None
     flow_id = original_execution.flow_id
     flow_version = _resolve_compare_flow_version(original_execution)
+    project_name_or_id = _execution_project_name_or_id(original_execution)
     if compared_exec_ids:
         multi_url = build_compare_url_for_executions(
             server_url=server_url,
             flow_id=flow_id,
             exec_ids=[original, *compared_exec_ids],
             flow_version=flow_version,
+            project_name_or_id=project_name_or_id,
+            ui_context=ui_context,
         )
         compare_urls = [multi_url] if multi_url else []
     else:
