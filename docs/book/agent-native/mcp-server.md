@@ -1,5 +1,5 @@
 ---
-description: Query and manage Kitaru executions, deployments, artifacts, stacks, and secret creation through Model Context Protocol tools
+description: Query and manage Kitaru executions, deployments, artifacts, projects, stacks, and secret creation through Model Context Protocol tools
 icon: plug
 ---
 
@@ -13,8 +13,8 @@ text, so it can read execution state, change one variable, and measure the
 result without a human in the loop.
 
 The same tools also cover the supporting surface: querying executions,
-publishing and invoking deployments, inspecting artifacts, and managing stacks
-and secrets.
+publishing and invoking deployments, inspecting artifacts, switching projects,
+and managing stacks and secrets.
 
 ## Install MCP support
 
@@ -164,6 +164,17 @@ Secret tools:
 names, and missing-value status. The MCP server intentionally does not expose a
 secret delete tool; use the CLI or Python SDK for deletion.
 
+Project tools:
+
+- `kitaru_projects_list`
+- `kitaru_projects_current`
+- `kitaru_projects_show`
+- `kitaru_projects_use`
+
+The MCP server exposes project read/switch operations only. It intentionally does
+not expose project create/delete tools in this first pass; use the CLI or Python
+SDK for durable project creation and deletion.
+
 Connection tools:
 
 - `kitaru_start_local_server`
@@ -237,6 +248,12 @@ Manage a local stack:
 
 ```text
 Create a local Kitaru stack named local-dev if it does not already exist, then show me the current Kitaru status.
+```
+
+Check or switch projects:
+
+```text
+Check the current Kitaru project. If it is not production, switch to production, then list the five latest executions.
 ```
 
 Deploy and invoke a shared flow route:

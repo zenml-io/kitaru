@@ -9,6 +9,7 @@
 #   -k, --keep-server    Keep the local server running after the test
 #   -s, --skip-install   Skip the uv sync step (use current install)
 #   -v, --verbose        Print command output even on success
+#   --python VERSION     Python version to run smoke commands with (default: 3.12)
 #   --release            Enforce release-grade preflight and required provider skips
 #   --required-provider-area AREA
 #                        Mark a provider area as required for this release.
@@ -37,6 +38,7 @@ Options:
   -k, --keep-server    Keep the local server running after the test
   -s, --skip-install   Skip the uv sync step (use current install)
   -v, --verbose        Print command output even on success
+  --python VERSION     Python version to run smoke commands with (default: 3.12)
   --release            Enforce release-grade preflight and required provider skips
   --required-provider-area AREA
                        Mark a provider area as required for this release.
@@ -131,6 +133,21 @@ while [[ $# -gt 0 ]]; do
         -k|--keep-server)  KEEP_SERVER=true; shift ;;
         -s|--skip-install) SKIP_INSTALL=true; shift ;;
         -v|--verbose)      VERBOSE=true; shift ;;
+        --python)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --python requires a version" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--python requires a version" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            if [[ ! "$2" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+                echo "Error: --python must be a numeric version like 3.14" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--python must be a numeric version like 3.14" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            PY="$2"
+            UV_RUN="uv run --python $PY"
+            shift 2
+            ;;
         --release)         RELEASE_MODE=true; shift ;;
         --json-out)
             if [[ $# -lt 2 ]]; then
@@ -821,6 +838,11 @@ run_test "kitaru status"                 $UV_RUN kitaru status
 run_test "kitaru info"                   $UV_RUN kitaru info
 run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
 run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
+run_test "kitaru project --help"         $UV_RUN kitaru project --help
+run_test "kitaru project list"           $UV_RUN kitaru project list
+run_test "kitaru project list -o json"   $UV_RUN kitaru project list -o json
+run_test "kitaru project current"        $UV_RUN kitaru project current
+run_test "SDK project-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_project_management(); projects = client.projects.list(); current = client.projects.current(); assert isinstance(projects, list); assert current.name'
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru stack create --help"    $UV_RUN kitaru stack create --help
@@ -1247,6 +1269,12 @@ run_test "MCP: kitaru_status" \
 
 run_test "MCP: kitaru_stacks_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_stacks_list --json
+
+run_test "MCP: kitaru_projects_list" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_list --json
+
+run_test "MCP: kitaru_projects_current" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_current --json
 
 run_test "MCP: kitaru_executions_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_executions_list \

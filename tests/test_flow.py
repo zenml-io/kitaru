@@ -6,8 +6,8 @@ import os
 import sys
 import threading
 from collections import namedtuple
-from collections.abc import Callable, Mapping
-from contextlib import nullcontext
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -24,6 +24,9 @@ from zenml.models import PipelineRunResponse
 import kitaru
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru._config._core import ExecutionStackSource
+from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV
+from kitaru._run_identity import extract_run_project_identity
+from kitaru._ui_urls import UiUrlContext
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.config import (
@@ -68,6 +71,7 @@ from kitaru.flow import (
     _is_flow_result_candidate_step,
     _is_multiple_terminal_steps_output_error,
     _suspend_flow_return_coercion,
+    _temporary_active_project,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
@@ -184,7 +188,9 @@ class _DummyRun:
         pipeline: object | None = None,
         snapshot_pipeline_id: object | None = None,
         snapshot_pipeline: object | None = None,
+        source_snapshot: object | None = None,
         resources: object | None = None,
+        project: object | None = None,
         status_reason: str | None = None,
         traceback: str | None = None,
         start_time: datetime | None = None,
@@ -193,6 +199,8 @@ class _DummyRun:
         self.id = run_id or uuid4()
         self.pipeline_id = pipeline_id
         self.pipeline = pipeline
+        self.project = project
+        self.source_snapshot = source_snapshot
         self.status = status
         self.start_time = start_time
         self.end_time = end_time
@@ -293,7 +301,7 @@ def _assert_linked_flow_result_loaded(
     client_mock: MagicMock,
     artifact_id: str = "result-art-id",
 ) -> None:
-    client_mock.get_artifact_version.assert_called_once_with(artifact_id)
+    client_mock.get_artifact_version.assert_called_once_with(artifact_id, project=None)
 
 
 def _zero_output_terminal_run() -> _DummyRun:
@@ -318,6 +326,49 @@ def _stale_default_stack_provenance() -> ActiveConfigSelectionProvenance:
         repository_config_path="/work/repo/.kitaru/config.yaml",
         repository_id="stale-stack-id",
     )
+
+
+def test_extract_run_project_identity_does_not_touch_lazy_project() -> None:
+    class LazyProjectRun:
+        id = "run-123"
+        project_id = "project-direct"
+        resources = None
+
+        @property
+        def project(self) -> object:
+            raise AssertionError("default extraction must not lazy-load project")
+
+        def get_body(self) -> SimpleNamespace:
+            return SimpleNamespace(project_id="project-body")
+
+    identity = extract_run_project_identity(LazyProjectRun())
+
+    assert identity.project_id == "project-direct"
+    assert identity.project_name is None
+    assert identity.name_or_id == "project-direct"
+
+
+def test_extract_run_project_identity_can_lazy_load_for_one_off_logging() -> None:
+    class LazyProjectRun:
+        id = "run-123"
+        project_id = "project-direct"
+        resources = None
+
+        @property
+        def project(self) -> SimpleNamespace:
+            return SimpleNamespace(name="default")
+
+        def get_body(self) -> SimpleNamespace:
+            return SimpleNamespace(project_id="project-body")
+
+    identity = extract_run_project_identity(
+        LazyProjectRun(),
+        allow_lazy_project_lookup=True,
+    )
+
+    assert identity.project_id == "project-direct"
+    assert identity.project_name == "default"
+    assert identity.name_or_id == "default"
 
 
 def test_extract_run_pipeline_id_prefers_direct_pipeline_id() -> None:
@@ -353,6 +404,71 @@ def test_build_kitaru_execution_url_uses_flow_execution_route() -> None:
         )
         == "http://127.0.0.1:8383/flows/flow%20456/executions/run%2F123"
     )
+
+
+def test_build_kitaru_execution_url_uses_local_when_metadata_unavailable() -> None:
+    class NonHydratedRun:
+        id = "run-123"
+        pipeline_id = "flow-456"
+        source_snapshot = None
+        resources = None
+
+        @property
+        def run_metadata(self) -> object:
+            raise RuntimeError("metadata is not hydrated yet")
+
+    assert (
+        _build_kitaru_execution_url(
+            cast(PipelineRunResponse, NonHydratedRun()),
+            server_url="http://127.0.0.1:8383/",
+        )
+        == "http://127.0.0.1:8383/flows/flow-456/executions/run-123"
+    )
+
+
+def test_build_kitaru_execution_url_uses_pro_route_when_context_is_pro() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run/123",
+        pipeline_id="flow 456",
+        project=SimpleNamespace(name="default"),
+    )
+
+    assert _build_kitaru_execution_url(
+        _as_pipeline_run(run),
+        ui_context=UiUrlContext(
+            base_url="https://staging.cloud.zenml.io",
+            route_kind="pro",
+            source="server_info",
+            workspace="kitaru-dev",
+        ),
+    ) == (
+        "https://staging.cloud.zenml.io/kitaru-workspaces/kitaru-dev"
+        "/projects/default/flows/flow%20456/v/local/executions/run%2F123"
+    )
+
+
+def test_build_kitaru_execution_url_uses_deployment_snapshot_version() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+        project=SimpleNamespace(name="default"),
+        source_snapshot=SimpleNamespace(name="kitaru::support_copilot_flow::v3"),
+    )
+
+    url = _build_kitaru_execution_url(
+        _as_pipeline_run(run),
+        ui_context=UiUrlContext(
+            base_url="https://staging.cloud.zenml.io",
+            route_kind="pro",
+            source="server_info",
+            workspace="kitaru-dev",
+        ),
+    )
+
+    assert url is not None
+    assert "/v/3/executions/run-123" in url
 
 
 def test_build_kitaru_execution_url_returns_none_when_required_data_missing() -> None:
@@ -502,6 +618,52 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     assert "enable_cache" not in call_kwargs.kwargs
 
 
+def test_flow_run_activates_resolved_project_for_submission() -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    project_events: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        project_events.append(("enter", project))
+        try:
+            yield
+        finally:
+            project_events.append(("exit", project))
+
+    def _submit_pipeline(*_args: Any, **_kwargs: Any) -> _DummyRun:
+        assert project_events == [("enter", "production")]
+        return run
+
+    def _persist_spec(**_kwargs: Any) -> None:
+        assert project_events == [("enter", "production")]
+
+    configured_pipeline = MagicMock(side_effect=_submit_pipeline)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config", return_value=_resolved_execution()
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="production"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec", side_effect=_persist_spec),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow._preflight_active_stack_implementation_hydration"),
+    ):
+        wrapped = flow(lambda: None)
+        handle = wrapped.run()
+
+    assert handle._project == "production"
+    assert project_events == [("enter", "production"), ("exit", "production")]
+
+
 def test_implicit_default_stack_fallback_guard_fails_closed() -> None:
     client = SimpleNamespace(
         active_stack_model=SimpleNamespace(name="default", id="default-stack-id")
@@ -648,6 +810,10 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
             return_value=_resolved_execution(stack="prod"),
         ),
         patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch(
             "kitaru.flow._prepare_model_registry_transport",
             return_value=(None, ModelRegistryConfig()),
         ),
@@ -679,6 +845,63 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
         source_snapshot=source_snapshot,
         tags={"canary": False},
     )
+
+
+def test_flow_deploy_activates_resolved_project_for_snapshot_creation() -> None:
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    project_events: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        project_events.append(("enter", project))
+        try:
+            yield
+        finally:
+            project_events.append(("exit", project))
+
+    def _prepare(*_args: Any, **_kwargs: Any) -> None:
+        assert project_events == [("enter", "production")]
+
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    configured_pipeline.prepare.side_effect = _prepare
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=object()))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config", return_value=_resolved_execution()
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="production"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.deploy()
+
+    assert project_events == [("enter", "production"), ("exit", "production")]
+    configured_pipeline._create_snapshot.assert_called_once()
 
 
 def test_flow_deploy_prepare_does_not_persist_flow_result_artifacts() -> None:
@@ -714,6 +937,10 @@ def test_flow_deploy_prepare_does_not_persist_flow_result_artifacts() -> None:
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
         ),
         patch(
             "kitaru.flow._prepare_model_registry_transport",
@@ -795,6 +1022,10 @@ def test_flow_deploy_resolves_invocation_image_and_threads_it_to_with_options() 
             return_value=resolved,
         ) as resolve_execution_config_mock,
         patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch(
             "kitaru.flow._prepare_model_registry_transport",
             return_value=(
                 ImageSettings(
@@ -856,6 +1087,10 @@ def test_flow_deploy_can_skip_first_deploy_default_publish() -> None:
             return_value=_resolved_execution(stack="prod"),
         ),
         patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch(
             "kitaru.flow._prepare_model_registry_transport",
             return_value=(None, ModelRegistryConfig()),
         ),
@@ -897,6 +1132,10 @@ def test_flow_deploy_rejects_non_server_runnable_stack_before_prepare() -> None:
             return_value=_resolved_execution(stack="local"),
         ),
         patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch(
             "kitaru.flow._prepare_model_registry_transport",
             return_value=(None, ModelRegistryConfig()),
         ),
@@ -934,6 +1173,10 @@ def test_deploy_translates_active_stack_hydration_import_error_before_prepare() 
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
         ),
         patch(
             "kitaru.flow._prepare_model_registry_transport",
@@ -990,6 +1233,10 @@ def test_flow_deploy_rewords_input_defaults_error() -> None:
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project=None),
         ),
         patch(
             "kitaru.flow._prepare_model_registry_transport",
@@ -1847,6 +2094,7 @@ def test_flow_handle_persists_terminal_llm_usage_once(monkeypatch) -> None:
     client_mock.get_pipeline_run.assert_called_once_with(
         run.id,
         allow_name_prefix_match=False,
+        project=None,
     )
 
 
@@ -1899,6 +2147,7 @@ def test_flow_handle_aggregates_fresh_run_even_when_summary_exists(
     client_mock.get_pipeline_run.assert_called_once_with(
         "run-1",
         allow_name_prefix_match=False,
+        project=None,
     )
     assert handle._run is fresh_run
     assert aggregation_calls == [(fresh_run, client_mock)]
@@ -2252,6 +2501,7 @@ def test_terminal_llm_usage_metadata_marks_empty_successful_fetch_done(
     client_mock.get_pipeline_run.assert_called_once_with(
         "run-1",
         allow_name_prefix_match=False,
+        project=None,
     )
     assert _persist_terminal_llm_usage_metadata(run) is True
 
@@ -2850,8 +3100,12 @@ def test_run_logs_kitaru_native_execution_url() -> None:
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
         ),
         patch(
-            "kitaru.config.resolve_connection_config",
-            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="http://127.0.0.1:8383",
+                route_kind="legacy",
+                source="connection_config",
+            ),
         ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
@@ -2864,6 +3118,86 @@ def test_run_logs_kitaru_native_execution_url() -> None:
         "Execution URL: %s",
         "http://127.0.0.1:8383/flows/flow-456/executions/run-123",
     )
+
+
+def test_run_logs_kitaru_pro_execution_url() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+        project=SimpleNamespace(name="default"),
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
+        patch(
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="https://staging.cloud.zenml.io",
+                route_kind="pro",
+                source="server_info",
+                workspace="kitaru-dev",
+            ),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "https://staging.cloud.zenml.io/kitaru-workspaces/kitaru-dev"
+        "/projects/default/flows/flow-456/v/local/executions/run-123",
+    )
+
+
+def test_run_skips_execution_url_when_ui_context_is_missing() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+        project=SimpleNamespace(name="default"),
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(
+                server_url="https://67e44b28-zenml.staging.cloudinfra.zenml.io"
+            ),
+        ),
+        patch("kitaru.flow.resolve_ui_url_context", return_value=None),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    logger_info_mock.assert_not_called()
 
 
 def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> None:
@@ -3011,6 +3345,89 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     assert "KITARU_REPLAY_CONTEXT" in docker_settings.environment
 
 
+def test_replay_uses_resolved_project_for_source_lookup_and_replay_write() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    project_events: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        project_events.append(("enter", project))
+        try:
+            yield
+        finally:
+            project_events.append(("exit", project))
+
+    def _replay(**_kwargs: Any) -> _DummyRun:
+        assert project_events == [("enter", "production")]
+        return replayed_run
+
+    def _persist_spec(**_kwargs: Any) -> None:
+        assert project_events == [("enter", "production")]
+
+    def _persist_submission(**_kwargs: Any) -> None:
+        assert project_events == [
+            ("enter", "production"),
+            ("exit", "production"),
+            ("enter", "production"),
+        ]
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.side_effect = _replay
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config", return_value=_resolved_execution()
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="production"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec", side_effect=_persist_spec),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch(
+            "kitaru.flow.safe_persist_replay_submission_metadata",
+            side_effect=_persist_submission,
+        ),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow._preflight_active_stack_implementation_hydration"),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        submission = wrapped.replay("source-run-id", at="write", wait=False)
+
+    client_instance.get_pipeline_run.assert_called_once_with(
+        name_id_or_prefix="source-run-id",
+        allow_name_prefix_match=False,
+        hydrate=True,
+        project="production",
+    )
+    replay_handle = submission.results[0].handle
+    assert replay_handle is not None
+    assert replay_handle._project == "production"
+    assert project_events == [
+        ("enter", "production"),
+        ("exit", "production"),
+        ("enter", "production"),
+        ("exit", "production"),
+    ]
+
+
 def test_replay_sets_process_runtime_context_during_local_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3106,8 +3523,12 @@ def test_replay_logs_kitaru_native_execution_url() -> None:
             return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
         ),
         patch(
-            "kitaru.config.resolve_connection_config",
-            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+            "kitaru.flow.resolve_ui_url_context",
+            return_value=UiUrlContext(
+                base_url="http://127.0.0.1:8383",
+                route_kind="legacy",
+                source="connection_config",
+            ),
         ),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
@@ -3302,6 +3723,51 @@ def test_replay_fails_closed_before_submitting_on_implicit_default_fallback() ->
     configured_pipeline.replay.assert_not_called()
 
 
+def test_temporary_active_project_sets_env_and_restores_previous_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Temporary project activation should restore env and persisted state."""
+    monkeypatch.setenv(ZENML_ACTIVE_PROJECT_ID_ENV, "previous-env-project")
+    previous = SimpleNamespace(id="old-project-id", name="default")
+    production = SimpleNamespace(id="prod-project-id", name="production")
+    activation_order: list[str] = []
+
+    class _ProjectClient:
+        def __init__(self) -> None:
+            self.active_project = previous
+
+        def get_project(
+            self,
+            selector: str,
+            *,
+            allow_name_prefix_match: bool,
+            hydrate: bool,
+        ) -> object:
+            assert (allow_name_prefix_match, hydrate) == (False, True)
+            assert selector == "production"
+            return production
+
+        def set_active_project(self, project_id: str) -> object:
+            activation_order.append(project_id)
+            self.active_project = (
+                production if project_id == "prod-project-id" else previous
+            )
+            return self.active_project
+
+    client = _ProjectClient()
+
+    with (
+        patch("kitaru.flow.Client", return_value=client),
+        _temporary_active_project("production"),
+    ):
+        assert os.environ[ZENML_ACTIVE_PROJECT_ID_ENV] == "prod-project-id"
+        assert client.active_project is production
+
+    assert os.environ[ZENML_ACTIVE_PROJECT_ID_ENV] == "previous-env-project"
+    assert client.active_project is previous
+    assert activation_order == ["prod-project-id", "old-project-id"]
+
+
 def test_temporary_active_stack_serializes_concurrent_bindings() -> None:
     """Concurrent temporary stack bindings should not interleave within one process."""
     first_entered = threading.Event()
@@ -3462,6 +3928,22 @@ def test_flow_handle_status_returns_kitaru_execution_status() -> None:
     assert status.is_successful is False
 
 
+def test_flow_handle_refresh_uses_handle_project() -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running), project="production")
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        assert handle.status == KitaruExecutionStatus.RUNNING
+
+    client_mock.get_pipeline_run.assert_called_once_with(
+        running.id,
+        allow_name_prefix_match=False,
+        project="production",
+    )
+
+
 def test_execution_status_compatibility_helpers() -> None:
     assert KitaruExecutionStatus.RUNNING.is_finished is False
     assert KitaruExecutionStatus.WAITING.is_finished is False
@@ -3599,7 +4081,9 @@ def test_flow_result_linked_none_beats_terminal_fallback() -> None:
         result = _extract_flow_result(_as_pipeline_run(run))
 
     assert result is None
-    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+    client_mock.get_artifact_version.assert_called_once_with(
+        "result-art-id", project=None
+    )
 
 
 def test_flow_result_linked_plain_value_beats_terminal_fallback() -> None:
@@ -3618,7 +4102,9 @@ def test_flow_result_linked_plain_value_beats_terminal_fallback() -> None:
         result = _extract_flow_result(_as_pipeline_run(run))
 
     assert result == {"answer": 42}
-    client_mock.get_artifact_version.assert_called_once_with("result-art-id")
+    client_mock.get_artifact_version.assert_called_once_with(
+        "result-art-id", project=None
+    )
 
 
 def test_flow_result_recovered_from_metadata_when_terminals_non_candidate() -> None:
@@ -4300,13 +4786,19 @@ def test_submit_emits_flow_submitted_event() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_SUBMITTED,
-        {
-            "kitaru_deployment_type": "local",
-            "deployment_type_source": "kitaru_stack_inference",
-        },
-    )
+    assert track_mock.call_args_list == [
+        call(
+            AnalyticsEvent.FLOW_ATTEMPTED,
+            {"submission_path": "flow_wrapper"},
+        ),
+        call(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "kitaru_deployment_type": "local",
+                "deployment_type_source": "kitaru_stack_inference",
+            },
+        ),
+    ]
 
 
 def test_submit_emits_terminal_event_when_run_already_completed() -> None:
@@ -4335,8 +4827,9 @@ def test_submit_emits_terminal_event_when_run_already_completed() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 2
-    submitted_call, terminal_call = track_mock.call_args_list
+    assert track_mock.call_count == 3
+    attempted_call, submitted_call, terminal_call = track_mock.call_args_list
+    assert attempted_call.args[0] == AnalyticsEvent.FLOW_ATTEMPTED
     assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
     assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
     terminal_metadata = terminal_call.args[1]
@@ -4374,8 +4867,9 @@ def test_submit_emits_terminal_event_with_failure_origin_when_run_already_failed
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 2
-    submitted_call, terminal_call = track_mock.call_args_list
+    assert track_mock.call_count == 3
+    attempted_call, submitted_call, terminal_call = track_mock.call_args_list
+    assert attempted_call.args[0] == AnalyticsEvent.FLOW_ATTEMPTED
     assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
     assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
     terminal_metadata = terminal_call.args[1]
@@ -4415,6 +4909,7 @@ def test_submit_time_terminal_event_is_not_reemitted_by_wait_or_get() -> None:
         handle.get()
 
     events = [call_args.args[0] for call_args in track_mock.call_args_list]
+    assert events.count(AnalyticsEvent.FLOW_ATTEMPTED) == 1
     assert events.count(AnalyticsEvent.FLOW_SUBMITTED) == 1
     assert events.count(AnalyticsEvent.FLOW_TERMINAL) == 1
 
@@ -4442,8 +4937,10 @@ def test_submit_defers_terminal_event_when_run_still_running() -> None:
         wrapped = flow(lambda x: x)
         wrapped.run(123)
 
-    assert track_mock.call_count == 1
-    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_SUBMITTED
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_SUBMITTED,
+    ]
 
 
 def test_submit_classification_failure_does_not_break_flow_execution() -> None:
@@ -4474,19 +4971,58 @@ def test_submit_classification_failure_does_not_break_flow_execution() -> None:
         handle = wrapped.run(123)
 
     assert isinstance(handle, FlowHandle)
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_SUBMITTED,
-        {
-            "kitaru_deployment_type": "unknown",
-            "deployment_type_source": "kitaru_stack_inference_failed",
-        },
-    )
-    metadata = track_mock.call_args.args[1]
+    assert track_mock.call_args_list == [
+        call(
+            AnalyticsEvent.FLOW_ATTEMPTED,
+            {"submission_path": "flow_wrapper"},
+        ),
+        call(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "kitaru_deployment_type": "unknown",
+                "deployment_type_source": "kitaru_stack_inference_failed",
+            },
+        ),
+    ]
+    metadata = track_mock.call_args_list[1].args[1]
     assert "private-stack-name" not in metadata.values()
 
 
-def test_submit_does_not_emit_when_run_is_none() -> None:
-    """FLOW_SUBMITTED should NOT fire when the pipeline returns None."""
+def test_submit_does_not_emit_flow_failed_after_run_exists() -> None:
+    """Post-run persistence failures should not become FLOW_FAILED events."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch(
+            "kitaru.flow.persist_frozen_execution_spec",
+            side_effect=RuntimeError("persistence backend failed"),
+        ),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="persistence backend failed"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_SUBMITTED,
+    ]
+
+
+def test_submit_failed_event_when_run_is_none() -> None:
+    """FLOW_FAILED should fire when the pipeline returns None."""
     configured_pipeline = MagicMock(return_value=None)
     base_pipeline = MagicMock()
     base_pipeline.with_options.return_value = configured_pipeline
@@ -4508,7 +5044,125 @@ def test_submit_does_not_emit_when_run_is_none() -> None:
         wrapped = flow(lambda: None)
         wrapped.run()
 
-    track_mock.assert_not_called()
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "KitaruRuntimeError"
+    assert failed_metadata["failure_origin"] == FailureOrigin.RUNTIME.value
+    assert failed_metadata["kitaru_deployment_type"] == "local"
+    assert failed_metadata["deployment_type_source"] == "kitaru_stack_inference"
+
+
+def test_submit_failed_event_when_project_activation_fails() -> None:
+    """Activating a bad resolved project is a tracked pre-submission failure."""
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="ghost"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru.flow._temporary_active_project",
+            side_effect=KitaruBackendError("Failed to activate project 'ghost'"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruBackendError, match="ghost"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    configured_pipeline.assert_not_called()
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "KitaruBackendError"
+
+
+def test_submit_failed_event_when_configured_pipeline_raises() -> None:
+    """Submission exceptions before a run exists should emit FLOW_FAILED."""
+    configured_pipeline = MagicMock(
+        side_effect=RuntimeError("backend crash with private-stack-name and /tmp/path")
+    )
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="private-stack-name"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="backend crash"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_metadata
+    assert failed_metadata["kitaru_deployment_type"] == "local"
+    assert failed_metadata["deployment_type_source"] == "kitaru_stack_inference"
+    assert "private-stack-name" not in failed_metadata.values()
+    assert "/tmp/path" not in failed_metadata.values()
+
+
+def test_submit_failed_event_when_setup_fails_before_deployment_metadata() -> None:
+    """Early setup failures should still emit attempted + failed analytics."""
+    zenml_decorator = MagicMock(return_value=MagicMock())
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            side_effect=RuntimeError("private-stack-name and /tmp/path"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(RuntimeError, match="private-stack-name"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.FLOW_ATTEMPTED,
+        AnalyticsEvent.FLOW_FAILED,
+    ]
+    failed_metadata = track_mock.call_args_list[1].args[1]
+    assert failed_metadata["submission_path"] == "flow_wrapper"
+    assert failed_metadata["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_metadata
+    assert "kitaru_deployment_type" not in failed_metadata
+    assert "deployment_type_source" not in failed_metadata
+    assert "private-stack-name" not in failed_metadata.values()
+    assert "/tmp/path" not in failed_metadata.values()
 
 
 def test_replay_success_emits_requested_and_replayed_events() -> None:

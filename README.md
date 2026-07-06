@@ -181,13 +181,19 @@ kitaru status
 
 ### Optional: connect to an existing remote Kitaru server
 
-If you already have a deployed Kitaru server, connect to it explicitly:
+If you already have a deployed Kitaru server, connect to it explicitly and choose
+the project you want later commands to use:
 
 ```bash
-kitaru login https://my-server.example.com
-# add --project <PROJECT> or other remote-login flags if your setup requires them
+kitaru login https://my-server.example.com --project production
+kitaru project list
+kitaru project use production
 kitaru status
 ```
+
+For CI, Docker, and other headless environments, set `KITARU_PROJECT` alongside
+`KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` instead of relying on persisted local
+state.
 
 ### Initialize your project
 

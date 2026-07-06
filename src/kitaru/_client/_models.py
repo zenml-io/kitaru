@@ -495,6 +495,8 @@ class Execution:
     checkpoints: list[CheckpointCall]
     artifacts: list[ArtifactRef]
     _client: KitaruClient = field(repr=False, compare=False)
+    project_id: str | None = None
+    project_name: str | None = None
 
     @property
     def llm_usage_summary(self) -> dict[str, Any] | None:
