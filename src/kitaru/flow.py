@@ -224,10 +224,19 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         client = Client()
         old_stack_id = client.active_stack_model.id
         client.activate_stack(stack_name_or_id)
+
         try:
             yield
         finally:
-            client.activate_stack(old_stack_id)
+            try:
+                client.activate_stack(old_stack_id)
+            except Exception:
+                logger.warning(
+                    "Failed to restore previous active stack %r after Kitaru "
+                    "flow submission.",
+                    old_stack_id,
+                    exc_info=True,
+                )
 
 
 def _preflight_active_stack_implementation_hydration(

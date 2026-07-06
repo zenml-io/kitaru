@@ -3080,6 +3080,120 @@ def test_run_restores_previous_stack_if_submission_fails() -> None:
     ]
 
 
+def _client_with_stale_previous_stack_restore() -> MagicMock:
+    """Return a client whose saved previous stack id no longer exists."""
+    client_mock = MagicMock()
+    client_mock.active_stack_model = SimpleNamespace(id="2")
+
+    def _activate_stack(stack_name_or_id: object) -> None:
+        if stack_name_or_id == "2":
+            raise RuntimeError("Stack with id=2 does not exist")
+
+    client_mock.activate_stack.side_effect = _activate_stack
+    return client_mock
+
+
+def test_run_preserves_handle_if_previous_stack_restore_is_stale() -> None:
+    """A successful submission should not fail because the old stack id vanished."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client_mock = _client_with_stale_previous_stack_restore()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch("kitaru.flow._deployment_metadata_for_stack", return_value={}),
+        patch("kitaru.flow._emit_kitaru_execution_url"),
+        patch("kitaru.flow.track"),
+        patch("kitaru.flow.logger.warning") as warning_mock,
+    ):
+        wrapped = flow(lambda: None)
+        handle = wrapped.run(stack="prod")
+
+    assert isinstance(handle, FlowHandle)
+    assert handle.exec_id == str(run.id)
+    configured_pipeline.assert_called_once_with()
+    persist_mock.assert_called_once()
+    assert client_mock.activate_stack.call_args_list == [call("prod"), call("2")]
+    warning_mock.assert_called_once()
+    warning_message = warning_mock.call_args.args[0]
+    assert "Failed to restore previous active stack" in warning_message
+    assert warning_mock.call_args.args[1] == "2"
+
+
+def test_run_preserves_submission_error_if_stack_restore_also_fails() -> None:
+    configured_pipeline = MagicMock(side_effect=RuntimeError("submission failed"))
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client_mock = _client_with_stale_previous_stack_restore()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._deployment_metadata_for_stack", return_value={}),
+        patch("kitaru.flow.track"),
+        patch("kitaru.flow.logger.warning") as warning_mock,
+        pytest.raises(RuntimeError, match="submission failed") as exc_info,
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    assert str(exc_info.value) == "submission failed"
+    assert client_mock.activate_stack.call_args_list == [call("prod"), call("2")]
+    warning_mock.assert_called_once()
+
+
+def test_run_propagates_requested_stack_activation_failure_before_submission() -> None:
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    client_mock = MagicMock()
+    client_mock.active_stack_model = SimpleNamespace(id="old-stack-id")
+    client_mock.activate_stack.side_effect = RuntimeError(
+        "Stack with name=prod does not exist"
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.warning") as warning_mock,
+        pytest.raises(RuntimeError, match="Stack with name=prod does not exist"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    configured_pipeline.assert_not_called()
+    client_mock.activate_stack.assert_called_once_with("prod")
+    warning_mock.assert_not_called()
+
+
 def test_run_translates_active_stack_hydration_import_error() -> None:
     """Missing active-stack integration dependencies should fail before submit."""
     configured_pipeline = MagicMock()
