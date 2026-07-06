@@ -20,6 +20,7 @@ from kitaru._client._models import (
     FailureInfo,
     PendingWait,
 )
+from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
     CHECKPOINT_SOURCE_ALIAS_PREFIX as _CHECKPOINT_SOURCE_ALIAS_PREFIX,
 )
@@ -664,6 +665,8 @@ def _map_execution(
     if run.stack is not None:
         stack_name = run.stack.name
 
+    project_identity = extract_run_project_identity(run)
+
     return Execution(
         exec_id=str(run.id),
         flow_id=flow_id,
@@ -683,6 +686,8 @@ def _map_execution(
         checkpoints=checkpoints,
         artifacts=artifacts,
         _client=client,
+        project_id=project_identity.project_id,
+        project_name=project_identity.project_name,
     )
 
 
