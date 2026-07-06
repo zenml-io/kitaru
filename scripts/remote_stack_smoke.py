@@ -29,6 +29,7 @@ _REMOTE_STORAGE_BACKENDS = {
     "azure",
     "azure_blob",
     "azureml",
+    "gcp",
     "gcs",
     "s3",
 }
@@ -269,6 +270,8 @@ def run_log_readback_with_timeout(
     count = result.get("count") if isinstance(result, dict) else None
     if not isinstance(count, int):
         raise RemoteSmokeError("execution log lookup failed: invalid result count")
+    if count < 1:
+        raise RemoteSmokeError("execution log lookup returned no step log entries")
     return count
 
 

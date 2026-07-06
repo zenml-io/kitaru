@@ -132,6 +132,7 @@ if [[ "${{1:-}}" == "kitaru" && "${{2:-}}" == "login" ]]; then
 fi
 if [[ "${{1:-}}" == "kitaru" && "${{2:-}}" == "stack" && "${{3:-}}" == "show" ]]; then
     stack_name="${{4:-}}"
+    printf 'stack show diagnostic on stderr\\n' >&2
     if [[ "$stack_name" == "k8s-stack" ]]; then
         cat <<'JSON'
 {{"command":"stack.show","item":{{"stack_type":"kubernetes","components":[{{"role":"runner","backend":"kubernetes"}},{{"role":"storage","backend":"s3"}}]}}}}
@@ -146,12 +147,19 @@ fi
 if [[ "${{1:-}}" == "python" && "${{2:-}}" == "scripts/remote_stack_smoke.py" ]]; then
     shift 2
     if [[ "${{1:-}}" == "validate-stack" ]]; then
-        cat >/dev/null
-        printf '{{"evidence":{{"category":"%s"}},"valid":true}}\\n' "${{3:-unknown}}"
-        exit 0
+        payload=$(cat)
+        python - "$payload" "${{3:-unknown}}" <<'PY'
+import json
+import sys
+
+json.loads(sys.argv[1])
+print(json.dumps({{"evidence": {{"category": sys.argv[2]}}, "valid": True}}))
+PY
+        exit $?
     fi
     if [[ "${{1:-}}" == "run-flow" ]]; then
         printf '%s\\n' "$*" >> {command_log}
+        printf 'run-flow diagnostic on stderr\\n' >&2
         printf '{{"evidence":{{"category":"remote-test","status":"completed"}}}}\\n'
         exit 0
     fi
@@ -272,3 +280,15 @@ def test_remote_flow_image_is_only_passed_to_kubernetes_lane(tmp_path: Path) -> 
     assert "--image private-registry.example/team/image:latest" in kubernetes_command
     assert "--category local-remote-artifact" in local_remote_artifact_command
     assert "--image" not in local_remote_artifact_command
+
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    flow_checks = [
+        check
+        for check in payload["checks"]
+        if "flow execution/readback" in check["label"]
+    ]
+    assert len(flow_checks) == 2
+    assert all(
+        check["evidence"] == {"category": "remote-test", "status": "completed"}
+        for check in flow_checks
+    )

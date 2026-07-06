@@ -125,6 +125,10 @@ def successful_log_command() -> list[str]:
     return [sys.executable, "-c", "import json; print(json.dumps({'count': 1}))"]
 
 
+def empty_log_command() -> list[str]:
+    return [sys.executable, "-c", "import json; print(json.dumps({'count': 0}))"]
+
+
 def failing_log_command() -> list[str]:
     return [
         sys.executable,
@@ -180,6 +184,18 @@ def test_local_runner_remote_artifact_stack_shape_is_accepted() -> None:
     assert validation.valid is True
     assert validation.evidence["runner_backend"] == "local"
     assert validation.evidence["storage_backend"] == "gcs"
+
+
+def test_local_runner_gcp_storage_stack_shape_is_accepted() -> None:
+    validation = validate_stack_show_payload(
+        _stack_payload(
+            stack_type="local", runner_backend="local", storage_backend="gcp"
+        ),
+        category="local-remote-artifact",
+    )
+
+    assert validation.valid is True
+    assert validation.evidence["storage_backend"] == "gcp"
 
 
 def test_local_runner_local_storage_is_rejected_for_remote_artifact_stack() -> None:
@@ -302,6 +318,23 @@ def test_remote_flow_log_lookup_failure_raises() -> None:
             flow=flow,
             client_factory=FakeClient,
             log_command=failing_log_command(),
+        )
+
+
+def test_remote_flow_zero_log_entries_raises() -> None:
+    flow = FakeFlow()
+
+    with pytest.raises(RemoteSmokeError, match="no step log entries"):
+        run_remote_flow_check(
+            stack="stack",
+            category="kubernetes",
+            image="image",
+            execution_timeout=5,
+            log_timeout=5,
+            run_prefix="test",
+            flow=flow,
+            client_factory=FakeClient,
+            log_command=empty_log_command(),
         )
 
 

@@ -443,7 +443,8 @@ record_check() {
             ;;
     esac
 
-    local evidence_json="${7:-{}}"
+    local evidence_json="${7:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
 
     python3 - "$RESULT_RECORDS_FILE" \
         "$label" "$status" "$CURRENT_SECTION" "$reason" "$provider_area" \
@@ -500,7 +501,8 @@ record_pass() {
 
 record_pass_evidence() {
     local label="$1"
-    local evidence_json="${2:-{}}"
+    local evidence_json="${2:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
     local duration_seconds="${3:-0}"
     record_check "$label" "passed" "" "none" "" "$duration_seconds" "$evidence_json"
 }
@@ -517,7 +519,8 @@ record_failure() {
 record_failure_evidence() {
     local label="$1"
     local reason="${2:-}"
-    local evidence_json="${3:-{}}"
+    local evidence_json="${3:-}"
+    [[ -n "$evidence_json" ]] || evidence_json="{}"
     local duration_seconds="${4:-0}"
     record_check "$label" "failed" "$reason" "none" "" "$duration_seconds" "$evidence_json"
 }
@@ -821,15 +824,24 @@ run_remote_stack_inspection() {
     local category="$2"
     local stack_name="$3"
     local output
+    local show_error
+    local show_stderr_file
     local validation_output
     local start=$SECONDS
 
-    output=$(timed 60 $UV_RUN kitaru stack show "$stack_name" --output json 2>&1)
+    show_stderr_file=$(mktemp)
+    output=$(timed 60 $UV_RUN kitaru stack show "$stack_name" --output json 2>"$show_stderr_file")
     local show_rc=$?
+    show_error=$(cat "$show_stderr_file")
+    rm -f "$show_stderr_file"
     local duration=$((SECONDS - start))
     if [[ $show_rc -ne 0 ]]; then
         printf "  ${RED}✗${RESET} %s\n" "$label"
-        echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        if [[ -n "$show_error" ]]; then
+            echo "$show_error" | redact_remote_output | tail -30 | sed 's/^/    /'
+        else
+            echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        fi
         record_failure "$label" "stack show failed with exit status $show_rc" "none" "" "$duration"
         return 1
     fi
@@ -861,6 +873,8 @@ run_remote_flow_smoke() {
     local stack_name="$3"
     local image_arg=()
     local output
+    local error_output
+    local stderr_file
     local start=$SECONDS
 
     if [[ "$category" == "kubernetes" && -z "$REMOTE_SMOKE_FLOW_IMAGE" ]]; then
@@ -874,6 +888,7 @@ run_remote_flow_smoke() {
         image_arg=(--image "$REMOTE_SMOKE_FLOW_IMAGE")
     fi
 
+    stderr_file=$(mktemp)
     output=$(timed "$((REMOTE_SMOKE_EXECUTION_TIMEOUT + REMOTE_SMOKE_LOG_TIMEOUT + 60))" \
         $UV_RUN python scripts/remote_stack_smoke.py run-flow \
             --stack "$stack_name" \
@@ -882,8 +897,10 @@ run_remote_flow_smoke() {
             --timeout "$REMOTE_SMOKE_EXECUTION_TIMEOUT" \
             --log-timeout "$REMOTE_SMOKE_LOG_TIMEOUT" \
             --run-prefix "$REMOTE_SMOKE_RUN_PREFIX" \
-            2>&1)
+            2>"$stderr_file")
     local rc=$?
+    error_output=$(cat "$stderr_file")
+    rm -f "$stderr_file"
     local duration=$((SECONDS - start))
     local evidence
     evidence=$(remote_evidence_field "$output")
@@ -893,6 +910,9 @@ run_remote_flow_smoke() {
         record_pass_evidence "$label" "$evidence" "$duration"
         if [[ "$VERBOSE" == true ]]; then
             echo "$output" | redact_remote_output | sed 's/^/    /'
+            if [[ -n "$error_output" ]]; then
+                echo "$error_output" | redact_remote_output | sed 's/^/    /'
+            fi
         fi
         return 0
     fi
@@ -903,7 +923,11 @@ run_remote_flow_smoke() {
     fi
 
     printf "  ${RED}✗${RESET} %s\n" "$label"
-    echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    if [[ -n "$error_output" ]]; then
+        echo "$error_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    else
+        echo "$output" | redact_remote_output | tail -30 | sed 's/^/    /'
+    fi
     record_failure_evidence "$label" "exit status $rc" "$evidence" "$duration"
     return 1
 }
