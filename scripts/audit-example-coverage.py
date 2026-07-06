@@ -37,6 +37,15 @@ PROVIDER_STATUSES_REQUIRING_METADATA = {
 }
 STATUSES_REQUIRING_WAIVER = {"missing", "planned", "manual_only"}
 ALLOWED_COST_CLASSES = {"none", "low", "medium", "high"}
+ALLOWED_MANUAL_WORKFLOW_SUITES = {"provider-core", "provider-extended"}
+EXPECTED_MANUAL_WORKFLOW_SCOPE = "full provider-extended marker group"
+LLM_INTEGRATION_WORKFLOW_PATH = ".github/workflows/llm-integration.yml"
+LLM_INTEGRATION_PROVIDER_INPUTS = (
+    "include_openai",
+    "include_anthropic",
+    "include_research_bot",
+    "include_google_adk",
+)
 EXAMPLE_PATH_RE = re.compile(
     r"(?:https://github\.com/zenml-io/kitaru/(?:tree|blob)/develop/)?"
     r"(examples/[A-Za-z0-9_./#-]+)"
@@ -248,6 +257,13 @@ def _audit_command(section: dict[str, Any], context: str, field_name: str) -> li
             f"{context}: {field_name}.command_paths must list the script path for "
             "cd ... && uv run python ... commands"
         )
+    if _is_llm_integration_manual_command(command) and not _command_sets_input(
+        command, "kitaru_ref"
+    ):
+        errors.append(
+            f"{context}: {field_name}.command must pass "
+            "-f kitaru_ref=<RELEASE_REF_OR_SHA> for llm-integration.yml"
+        )
 
     referenced_paths = set(_command_paths(command))
     declared_command_paths: list[str] = []
@@ -324,6 +340,127 @@ def _audit_live_provider(section: dict[str, Any], context: str) -> list[str]:
                 "live_provider entries must list opt_in_env"
             )
 
+    manual_workflow = section.get("manual_github_workflow")
+    if manual_workflow is not None:
+        if not isinstance(manual_workflow, dict):
+            errors.append(f"{context}: manual_github_workflow must be a mapping")
+        else:
+            errors.extend(
+                _audit_manual_github_workflow(
+                    cast(dict[str, Any], manual_workflow), context
+                )
+            )
+
+    return errors
+
+
+def _audit_manual_github_workflow(workflow: dict[str, Any], context: str) -> list[str]:
+    errors: list[str] = []
+    workflow_path = workflow.get("workflow")
+    if not isinstance(workflow_path, str) or not workflow_path:
+        errors.append(f"{context}: manual_github_workflow.workflow is required")
+    elif not (ROOT / workflow_path).is_file():
+        errors.append(
+            f"{context}: manual_github_workflow.workflow does not exist: "
+            f"{workflow_path}"
+        )
+
+    suite = workflow.get("suite")
+    if suite not in ALLOWED_MANUAL_WORKFLOW_SUITES:
+        errors.append(
+            f"{context}: manual_github_workflow.suite must be one of "
+            f"{sorted(ALLOWED_MANUAL_WORKFLOW_SUITES)}; got {suite!r}"
+        )
+
+    if workflow_path == LLM_INTEGRATION_WORKFLOW_PATH:
+        kitaru_ref = workflow.get("kitaru_ref")
+        if not isinstance(kitaru_ref, str) or not kitaru_ref.strip():
+            errors.append(
+                f"{context}: manual_github_workflow.kitaru_ref must be explicitly "
+                "set for llm-integration.yml"
+            )
+
+    marker_expression = workflow.get("marker_expression")
+    if not isinstance(marker_expression, str) or not marker_expression.strip():
+        errors.append(
+            f"{context}: manual_github_workflow.marker_expression is required"
+        )
+    elif suite == "provider-extended" and "provider_extended" not in marker_expression:
+        errors.append(
+            f"{context}: provider-extended manual_github_workflow must use a "
+            "provider_extended marker_expression"
+        )
+
+    scope = workflow.get("scope")
+    if suite == "provider-extended" and scope != EXPECTED_MANUAL_WORKFLOW_SCOPE:
+        errors.append(
+            f"{context}: provider-extended manual_github_workflow.scope must be "
+            f"{EXPECTED_MANUAL_WORKFLOW_SCOPE!r} to show the dispatch runs "
+            "the full group"
+        )
+
+    provider_input_values: dict[str, bool] = {}
+    for flag_name in LLM_INTEGRATION_PROVIDER_INPUTS:
+        flag_value = workflow.get(flag_name)
+        if workflow_path == LLM_INTEGRATION_WORKFLOW_PATH and not isinstance(
+            flag_value, bool
+        ):
+            errors.append(
+                f"{context}: manual_github_workflow.{flag_name} must be explicitly "
+                "set to true or false for llm-integration.yml"
+            )
+            continue
+        if flag_value is not None and not isinstance(flag_value, bool):
+            errors.append(
+                f"{context}: manual_github_workflow.{flag_name} must be true or false"
+            )
+            continue
+        if isinstance(flag_value, bool):
+            provider_input_values[flag_name] = flag_value
+
+    if workflow_path == LLM_INTEGRATION_WORKFLOW_PATH:
+        enabled_provider_inputs = [
+            flag_name
+            for flag_name, flag_value in provider_input_values.items()
+            if flag_value
+        ]
+        if len(enabled_provider_inputs) != 1:
+            errors.append(
+                f"{context}: llm-integration.yml manual_github_workflow must enable "
+                "exactly one provider input; got "
+                f"{enabled_provider_inputs or 'none'}"
+            )
+
+    test_file = workflow.get("test_file")
+    test_names = workflow.get("test_names")
+    if not isinstance(test_file, str) or not test_file:
+        errors.append(f"{context}: manual_github_workflow.test_file is required")
+        return errors
+    test_path = ROOT / test_file
+    if not test_path.is_file():
+        errors.append(
+            f"{context}: manual_github_workflow.test_file does not exist: {test_file}"
+        )
+        return errors
+    if not _is_non_empty_string_list(test_names):
+        errors.append(
+            f"{context}: manual_github_workflow.test_names must list at least one test"
+        )
+        return errors
+
+    available_tests = set(
+        re.findall(
+            r"^def (test_[A-Za-z0-9_]+)\(",
+            test_path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+    )
+    for test_name in cast(list[str], test_names):
+        if test_name not in available_tests:
+            errors.append(
+                f"{context}: manual_github_workflow.test_names references missing "
+                f"test {test_name!r} in {test_file}"
+            )
     return errors
 
 
@@ -350,6 +487,30 @@ def _is_non_empty_string_list(value: object) -> bool:
 
 def _requires_declared_command_paths(command: str) -> bool:
     return command.strip().startswith("cd ") and "uv run python" in command
+
+
+def _is_llm_integration_manual_command(command: str) -> bool:
+    parts = shlex.split(command)
+    return (
+        "gh" in parts
+        and "workflow" in parts
+        and "run" in parts
+        and ("llm-integration.yml" in parts or LLM_INTEGRATION_WORKFLOW_PATH in parts)
+    )
+
+
+def _command_sets_input(command: str, input_name: str) -> bool:
+    parts = shlex.split(command)
+    for index, part in enumerate(parts):
+        if part in {"-f", "--field"}:
+            next_part = parts[index + 1] if index + 1 < len(parts) else ""
+            if next_part.startswith(f"{input_name}="):
+                return True
+        if part.startswith(f"-f{input_name}="):
+            return True
+        if part.startswith(f"--field={input_name}="):
+            return True
+    return False
 
 
 def _public_example_paths_from_docs() -> set[str]:
