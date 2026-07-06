@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 from typing import get_type_hints
@@ -22,7 +22,10 @@ from pydantic_ai.toolsets import (
 from pydantic_ai.toolsets.function import FunctionToolsetTool
 
 from kitaru.errors import KitaruContextError, KitaruUsageError
-from kitaru.replay_context import resolve_tool_override
+from kitaru.replay_context import (
+    resolve_checkpoint_input_override,
+    resolve_tool_override,
+)
 from kitaru.runtime import (
     _get_current_checkpoint_id,
     _get_current_checkpoint_name,
@@ -35,12 +38,18 @@ from ._constants import (
     ADAPTER_METADATA_KEY,
     ARTIFACT_ROLE_ARGS,
     ARTIFACT_ROLE_RESULT,
+    ADAPTER_CHECKPOINT_KIND_MCP_CALL,
+    ADAPTER_CHECKPOINT_KIND_TOOL_CALL,
     ARTIFACT_SLOT_OUTPUT,
     ARTIFACT_SLOT_TOOL_ARGS,
 )
 from ._events import DeferredKind, ToolsetKind
 from ._hitl import HitlConfig, hitl_config_from_tool_metadata, resolve_hitl_question
-from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._kitaru_internal import (
+    is_inside_checkpoint,
+    is_inside_flow,
+    next_repeated_checkpoint_name,
+)
 from ._logging import logger
 from ._otel import attach_tool_correlation
 from ._policy import CapturePolicy
@@ -57,6 +66,7 @@ from ._utils import (
     resolve_tool_checkpoint_config,
     run_async_in_checkpoint,
     suspend_adapter_streaming_fallback_checkpoint,
+    with_adapter_checkpoint_metadata,
     with_default_type,
 )
 
@@ -78,6 +88,22 @@ def _json_safe(value: Any) -> Any:
             "python_type": value.__class__.__name__,
             "serialization_error": "json_safe_failed",
         }
+
+
+def _coerce_tool_args_mapping(value: Any, *, tool_name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise KitaruUsageError(
+            "Replay input for PydanticAI tool "
+            f"{tool_name!r} must provide mapping tool_args, got "
+            f"{type(value).__name__}."
+        )
+    non_string_keys = [key for key in value if not isinstance(key, str)]
+    if non_string_keys:
+        raise KitaruUsageError(
+            "Replay input for PydanticAI tool "
+            f"{tool_name!r} must use string tool argument names."
+        )
+    return dict(value)
 
 
 def _is_ordinary_sync_function_tool(tool: ToolsetTool[Any]) -> bool:
@@ -212,43 +238,86 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         ):
             assert checkpoint_config is not None
             capture_mode = self.capture.capture_mode_for_tool(name)
+            step_name = next_repeated_checkpoint_name(f"{name}_tool")
             input_artifacts: dict[str, str] = {}
             output_artifacts: dict[str, str] = {}
             checkpoint_inputs: dict[str, Any] = {}
-            safe_args = _json_safe(tool_args) if capture_mode == "full" else None
+            effective_initial_tool_args = tool_args
+            input_override = resolve_checkpoint_input_override(
+                step_name,
+                name,
+                getattr(ctx, "tool_call_id", None),
+            )
+            if (
+                isinstance(input_override, dict)
+                and ARTIFACT_SLOT_TOOL_ARGS in input_override
+            ):
+                effective_initial_tool_args = tool.args_validator.validate_python(
+                    _coerce_tool_args_mapping(
+                        input_override[ARTIFACT_SLOT_TOOL_ARGS],
+                        tool_name=name,
+                    )
+                )
+            initial_safe_args = (
+                _json_safe(effective_initial_tool_args)
+                if capture_mode == "full"
+                else None
+            )
             if capture_mode == "full":
                 input_artifacts[ARTIFACT_ROLE_ARGS] = ARTIFACT_SLOT_TOOL_ARGS
                 output_artifacts[ARTIFACT_ROLE_RESULT] = ARTIFACT_SLOT_OUTPUT
                 checkpoint_inputs[ARTIFACT_SLOT_TOOL_ARGS] = checkpoint_input_value(
-                    safe_args
+                    initial_safe_args
                 )
 
-            async def _in_checkpoint() -> Any:
+            async def _in_checkpoint(_received_tool_args: Any | None = None) -> Any:
+                # ``_received_tool_args`` is the ZenML-visible structural input.
+                # In a normal run it is the JSON-safe artifact copy, so it must
+                # not replace the original Python values that PydanticAI passed
+                # to the tool. Replay input overrides are resolved before this
+                # checkpoint runs and stored in ``effective_initial_tool_args``.
+                effective_tool_args = effective_initial_tool_args
+                effective_safe_args = initial_safe_args
                 with adapter_checkpoint_artifact_refs(
                     input_artifacts=input_artifacts,
                     output_artifacts=output_artifacts,
                 ):
                     return await self._call_tool_tracked(
                         name,
-                        tool_args,
+                        effective_tool_args,
                         ctx,
                         tool,
                         hitl_config,
-                        safe_args=safe_args,
+                        safe_args=effective_safe_args,
                     )
 
+            checkpoint_type = self._default_checkpoint_type
+            replay_input_slots = (
+                [ARTIFACT_SLOT_TOOL_ARGS]
+                if ARTIFACT_SLOT_TOOL_ARGS in checkpoint_inputs
+                else []
+            )
+            checkpoint_kind = (
+                ADAPTER_CHECKPOINT_KIND_MCP_CALL
+                if checkpoint_type == "mcp_call"
+                else ADAPTER_CHECKPOINT_KIND_TOOL_CALL
+            )
+            config = with_adapter_checkpoint_metadata(
+                with_default_type(checkpoint_config, checkpoint_type),
+                kind=checkpoint_kind,
+                input_slots=replay_input_slots,
+                output_slots=[ARTIFACT_SLOT_OUTPUT],
+            )
             return await run_async_in_checkpoint(
-                config=with_default_type(
-                    checkpoint_config, self._default_checkpoint_type
-                ),
-                step_name=f"{name}_tool",
+                config=config,
+                step_name=step_name,
                 body=_in_checkpoint,
                 cache_key=checkpoint_cache_key(
                     {
                         "tool_name": name,
-                        ARTIFACT_SLOT_TOOL_ARGS: safe_args
+                        ARTIFACT_SLOT_TOOL_ARGS: initial_safe_args
                         if capture_mode == "full"
-                        else tool_args,
+                        else effective_initial_tool_args,
                         "tool_call_id": ctx.tool_call_id,
                         "retry": ctx.retry,
                     }

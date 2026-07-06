@@ -462,6 +462,11 @@ class CheckpointCall:
     attempts: list[CheckpointAttempt]
     artifacts: list[ArtifactRef]
     checkpoint_type: str | None = None
+    checkpoint_origin: Literal["user", "adapter"] = "user"
+    adapter: str | None = None
+    adapter_checkpoint_kind: str | None = None
+    replay_input_slots: list[str] = field(default_factory=list)
+    replay_output_slots: list[str] = field(default_factory=list)
 
     @property
     def llm_usage_records(self) -> list[dict[str, Any]]:

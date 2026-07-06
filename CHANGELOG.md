@@ -8,14 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
 
 ### Changed
+- PydanticAI tool-checkpoint replay input overrides now rerun the tool body with edited `tool_args`. Users still pass the public `input` override field; shorthand tool arguments and explicit `{"tool_args": ...}` input-slot overrides are both supported.
+- **Breaking:** Replay planning now uses recorded replay input slots and real step inputs before falling back to older type-based guesses, so a hand-written `type="tool_call"` checkpoint is no longer treated as a PydanticAI tool checkpoint unless it actually exposes replayable tool arguments. Input overrides against older recordings without replay input-slot metadata now fail loudly instead of silently doing nothing.
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
+- Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
+- Plain user checkpoint input overrides can again mix recorded artifact input names with literal parameter overrides, while adapter-declared replay input slots still reject unknown keys.
 - `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
 - Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
 
