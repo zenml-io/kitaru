@@ -173,6 +173,13 @@ def test_core_funnel_event_canonical_strings() -> None:
     )
 
 
+def test_project_event_canonical_strings() -> None:
+    """Project events should carry the expected canonical strings."""
+    assert AnalyticsEvent.PROJECT_CREATED == "Kitaru project created"
+    assert AnalyticsEvent.PROJECT_ACTIVATED == "Kitaru project activated"
+    assert AnalyticsEvent.PROJECT_DELETED == "Kitaru project deleted"
+
+
 def test_deployment_event_canonical_strings() -> None:
     """Deployment events should carry the expected canonical strings."""
     assert AnalyticsEvent.DEPLOYMENT_BUILT == "Kitaru deployment built"
