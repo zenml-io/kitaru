@@ -14,6 +14,8 @@ from kitaru._ui_urls import (
     resolve_ui_url_context,
 )
 
+_CLOUDINFRA_BACKEND_URL = "https://67e44b28-zenml.staging.cloudinfra.zenml.io"
+
 
 def _pro_server_info(
     *,
@@ -178,6 +180,105 @@ def test_resolve_ui_url_context_returns_none_for_cloud_with_missing_workspace(
             ),
         ),
     ):
+        context = resolve_ui_url_context()
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_returns_none_for_cloudinfra_connection_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with (
+        patch("kitaru._ui_urls._server_info_from_client", return_value=None),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url=_CLOUDINFRA_BACKEND_URL),
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_returns_none_when_cloudinfra_metadata_lookup_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+    fake_client = MagicMock()
+    fake_client._client.return_value.zen_store.get_store_info.side_effect = RuntimeError
+
+    with patch(
+        "kitaru.config.resolve_connection_config",
+        return_value=SimpleNamespace(server_url=f"{_CLOUDINFRA_BACKEND_URL}/api/v1"),
+    ):
+        context = resolve_ui_url_context(fake_client)
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_returns_none_for_cloudinfra_client_store_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+    fake_client = MagicMock()
+    fake_client._client.return_value.zen_store.get_store_info.return_value = None
+    fake_client._client.return_value.zen_store.url = f"{_CLOUDINFRA_BACKEND_URL}/"
+
+    with patch("kitaru.config.resolve_connection_config", side_effect=RuntimeError):
+        context = resolve_ui_url_context(fake_client)
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_preserves_local_connection_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with (
+        patch("kitaru._ui_urls._server_info_from_client", return_value=None),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "http://127.0.0.1:8383"
+    assert context.route_kind == "legacy"
+    assert context.source == "connection_config"
+
+
+def test_resolve_ui_url_context_preserves_custom_legacy_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_UI_URL_ENV, "https://preview.demo.kitaru.zenml.io/")
+
+    with (
+        patch("kitaru._ui_urls._server_info_from_client", return_value=None),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(server_url=_CLOUDINFRA_BACKEND_URL),
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://preview.demo.kitaru.zenml.io"
+    assert context.route_kind == "legacy"
+    assert context.source == "env"
+    assert context.explicit_override is True
+
+
+def test_resolve_ui_url_context_returns_none_for_cloudinfra_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(KITARU_UI_URL_ENV, _CLOUDINFRA_BACKEND_URL)
+
+    with patch("kitaru._ui_urls._server_info_from_client", return_value=None):
         context = resolve_ui_url_context()
 
     assert context is None

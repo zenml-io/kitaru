@@ -49,6 +49,22 @@ def _http_origin(value: str | None) -> str | None:
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
+def _is_known_cloudinfra_backend_url(value: str | None) -> bool:
+    """Return whether a URL points at a known ZenML Pro backend host."""
+    base_url = _normalize_http_base_url(value)
+    if base_url is None:
+        return False
+
+    hostname = urlsplit(base_url).hostname
+    if hostname is None:
+        return False
+
+    normalized = hostname.lower()
+    return normalized == "cloudinfra.zenml.io" or normalized.endswith(
+        ".cloudinfra.zenml.io"
+    )
+
+
 def _non_empty_string(value: Any) -> str | None:
     """Return a stripped string when the value has visible content."""
     if value is None:
@@ -188,6 +204,8 @@ def resolve_ui_url_context(client: KitaruClient | None = None) -> UiUrlContext |
         return None
 
     if override is not None:
+        if _is_known_cloudinfra_backend_url(override):
+            return None
         return _legacy_context_from_base_url(
             override,
             source="env",
@@ -196,6 +214,8 @@ def resolve_ui_url_context(client: KitaruClient | None = None) -> UiUrlContext |
 
     connection_base_url = _connection_config_base_url()
     if connection_base_url is not None:
+        if _is_known_cloudinfra_backend_url(connection_base_url):
+            return None
         return _legacy_context_from_base_url(
             connection_base_url,
             source="connection_config",
@@ -203,6 +223,8 @@ def resolve_ui_url_context(client: KitaruClient | None = None) -> UiUrlContext |
 
     client_store_base_url = _client_store_base_url(client)
     if client_store_base_url is not None:
+        if _is_known_cloudinfra_backend_url(client_store_base_url):
+            return None
         return _legacy_context_from_base_url(
             client_store_base_url,
             source="client_store",
