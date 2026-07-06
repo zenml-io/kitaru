@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
+### Fixed
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
+
 ## [0.19.0] - 2026-06-30
 
 ### Added

@@ -995,6 +995,183 @@ def test_cached_checkpoint_attempt_public_records_are_marked_reused() -> None:
     assert "_source_attempt_id" not in records[0]
 
 
+def test_replay_like_mapped_attempt_preserves_persisted_incurred_record() -> None:
+    from kitaru._client._mappers import _map_checkpoint_attempt
+
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="mapped-replay-tail-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempt = _map_checkpoint_attempt(
+        cast(
+            Any,
+            SimpleNamespace(
+                id="attempt-mapped-tail",
+                name="write",
+                status="replay_reused",
+                start_time=None,
+                end_time=None,
+                run_metadata={
+                    LLM_USAGE_METADATA_KEY: {"mapped-replay-tail-call": record}
+                },
+                exception_info=None,
+            ),
+        )
+    )
+
+    records = attempt.llm_usage_records
+
+    assert attempt.status is ExecutionStatus.COMPLETED
+    assert len(records) == 1
+    assert records[0]["billing_effect"] == "incurred"
+    assert records[0]["cache_status"] == "executed"
+
+
+def test_mapped_execution_uses_replay_skip_metadata_for_public_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru._client._mappers import _map_execution
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    fetch_record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="fetch-call",
+        total_tokens=13,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    write_record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="write-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    fetch_step = SimpleNamespace(
+        id="fetch-attempt",
+        name="fetch",
+        status="replay_reused",
+        start_time=None,
+        end_time=None,
+        run_metadata={LLM_USAGE_METADATA_KEY: {"fetch-call": fetch_record}},
+        exception_info=None,
+        spec=SimpleNamespace(invocation_id="fetch"),
+        original_step_run_id=None,
+        parent_step_ids=[],
+        inputs={},
+        outputs={},
+        type=None,
+    )
+    write_step = SimpleNamespace(
+        id="write-attempt",
+        name="write",
+        status="replay_reused",
+        start_time=None,
+        end_time=None,
+        run_metadata={LLM_USAGE_METADATA_KEY: {"write-call": write_record}},
+        exception_info=None,
+        spec=SimpleNamespace(invocation_id="write"),
+        original_step_run_id=None,
+        parent_step_ids=[],
+        inputs={},
+        outputs={},
+        type=None,
+    )
+    run = SimpleNamespace(
+        id="replay-run",
+        status="completed",
+        status_reason=None,
+        exception_info=None,
+        run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+        steps={"fetch": fetch_step, "write": write_step},
+        pipeline=SimpleNamespace(id="flow-1", name="sample_flow"),
+        original_run=None,
+        stack=SimpleNamespace(name="local"),
+        start_time=None,
+        end_time=None,
+    )
+    monkeypatch.setattr(
+        "kitaru._client._mappers._list_checkpoint_attempts_for_run",
+        lambda *, run, client: {
+            "fetch-attempt": [fetch_step],
+            "write-attempt": [write_step],
+        },
+    )
+
+    execution = _map_execution(
+        run=cast(Any, run),
+        client=cast(Any, SimpleNamespace()),
+        include_details=True,
+    )
+    records_by_id = {
+        record["record_id"]: record for record in execution.llm_usage_records
+    }
+
+    assert records_by_id["fetch-call"]["billing_effect"] == "reused_not_incurred"
+    assert records_by_id["fetch-call"]["cache_status"] == "replay_reused"
+    assert records_by_id["write-call"]["billing_effect"] == "incurred"
+    assert records_by_id["write-call"]["cache_status"] == "executed"
+
+
+def test_replay_like_raw_status_preserves_persisted_incurred_record() -> None:
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="replay-tail-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempt = CheckpointAttempt(
+        attempt_id="attempt-tail",
+        status=ExecutionStatus.COMPLETED,
+        started_at=None,
+        ended_at=None,
+        metadata={LLM_USAGE_METADATA_KEY: {"replay-tail-call": record}},
+        failure=None,
+        _raw_status="replay_reused",
+    )
+
+    records = attempt.llm_usage_records
+
+    assert len(records) == 1
+    assert records[0]["billing_effect"] == "incurred"
+    assert records[0]["cache_status"] == "executed"
+
+
+def test_replay_skipped_attempt_public_records_are_marked_reused() -> None:
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="replay-upstream-call",
+        total_tokens=37,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempt = CheckpointAttempt(
+        attempt_id="attempt-upstream",
+        status=ExecutionStatus.COMPLETED,
+        started_at=None,
+        ended_at=None,
+        metadata={LLM_USAGE_METADATA_KEY: {"replay-upstream-call": record}},
+        failure=None,
+        _raw_status="replay_reused",
+        _replay_reused=True,
+    )
+
+    records = attempt.llm_usage_records
+
+    assert len(records) == 1
+    assert records[0]["billing_effect"] == "reused_not_incurred"
+    assert records[0]["cache_status"] == "replay_reused"
+
+
 def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
     checkpoint_record = build_usage_record(
         adapter="pydantic_ai",
