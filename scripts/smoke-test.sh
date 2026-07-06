@@ -838,6 +838,11 @@ run_test "kitaru status"                 $UV_RUN kitaru status
 run_test "kitaru info"                   $UV_RUN kitaru info
 run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
 run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
+run_test "kitaru project --help"         $UV_RUN kitaru project --help
+run_test "kitaru project list"           $UV_RUN kitaru project list
+run_test "kitaru project list -o json"   $UV_RUN kitaru project list -o json
+run_test "kitaru project current"        $UV_RUN kitaru project current
+run_test "SDK project-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_project_management(); projects = client.projects.list(); current = client.projects.current(); assert isinstance(projects, list); assert current.name'
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru stack create help mentions modal" \
@@ -1265,6 +1270,12 @@ run_test "MCP: kitaru_status" \
 
 run_test "MCP: kitaru_stacks_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_stacks_list --json
+
+run_test "MCP: kitaru_projects_list" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_list --json
+
+run_test "MCP: kitaru_projects_current" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_current --json
 
 run_test "MCP: kitaru_executions_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_executions_list \

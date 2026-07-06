@@ -20,6 +20,7 @@ from kitaru._client._models import (
     FailureInfo,
     PendingWait,
 )
+from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
     CHECKPOINT_SOURCE_ALIAS_PREFIX as _CHECKPOINT_SOURCE_ALIAS_PREFIX,
 )
@@ -44,6 +45,10 @@ from kitaru.errors import (
     traceback_exception_type,
     traceback_last_line,
 )
+from kitaru.replay import (
+    parse_replay_skipped_steps_metadata,
+    replay_step_invocation_id,
+)
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
@@ -62,7 +67,14 @@ _RAW_STATUSES_BY_PUBLIC_STATUS: dict[ExecutionStatus, tuple[str, ...]] = {
         "stopping",
     ),
     ExecutionStatus.WAITING: ("paused",),
-    ExecutionStatus.COMPLETED: ("completed", "cached", "skipped"),
+    ExecutionStatus.COMPLETED: (
+        "completed",
+        "cached",
+        "skipped",
+        "replay_reused",
+        "reused",
+        "reused_not_incurred",
+    ),
     ExecutionStatus.FAILED: ("failed", "retried"),
     ExecutionStatus.CANCELLED: ("cancelled", "stopped"),
 }
@@ -240,7 +252,11 @@ def _list_checkpoint_attempts_for_run(
     )
 
 
-def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
+def _map_checkpoint_attempt(
+    step: StepRunResponse,
+    *,
+    replay_skipped_steps: set[str] | None = None,
+) -> CheckpointAttempt:
     """Map one step run model into a checkpoint-attempt entry."""
     public_status = _to_public_status(step.status)
     checkpoint_name = _normalize_checkpoint_name(step.name)
@@ -264,6 +280,10 @@ def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
         _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
+        _replay_reused=(
+            replay_skipped_steps is not None
+            and replay_step_invocation_id(step) in replay_skipped_steps
+        ),
     )
 
 
@@ -314,6 +334,7 @@ def _map_checkpoint_call(
     step: StepRunResponse,
     client: KitaruClient,
     attempts_by_lineage: Mapping[str, list[StepRunResponse]],
+    replay_skipped_steps: set[str] | None = None,
 ) -> CheckpointCall:
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
@@ -369,7 +390,13 @@ def _map_checkpoint_call(
 
     lineage_key = _checkpoint_lineage_key(step)
     attempt_steps = attempts_by_lineage.get(lineage_key, [step])
-    attempts = [_map_checkpoint_attempt(attempt) for attempt in attempt_steps]
+    attempts = [
+        _map_checkpoint_attempt(
+            attempt,
+            replay_skipped_steps=replay_skipped_steps,
+        )
+        for attempt in attempt_steps
+    ]
 
     failure = None
     if attempts:
@@ -575,6 +602,9 @@ def _map_execution(
             fallback_message=f"Execution {run.id} failed.",
         )
 
+    metadata = _to_plain_dict(run.run_metadata)
+    replay_skipped_steps = parse_replay_skipped_steps_metadata(metadata)
+
     checkpoints: list[CheckpointCall] = []
     artifacts: list[ArtifactRef] = []
     if include_details:
@@ -603,6 +633,7 @@ def _map_execution(
                     step=step,
                     client=client,
                     attempts_by_lineage=attempts_by_lineage,
+                    replay_skipped_steps=replay_skipped_steps,
                 )
             )
 
@@ -619,8 +650,6 @@ def _map_execution(
                 if existing.direction == "input" and artifact.direction == "output":
                     artifacts[existing_index] = artifact
 
-    metadata = _to_plain_dict(run.run_metadata)
-
     flow_id: str | None = None
     flow_name: str | None = None
     if run.pipeline is not None:
@@ -635,6 +664,8 @@ def _map_execution(
     stack_name: str | None = None
     if run.stack is not None:
         stack_name = run.stack.name
+
+    project_identity = extract_run_project_identity(run)
 
     return Execution(
         exec_id=str(run.id),
@@ -655,6 +686,8 @@ def _map_execution(
         checkpoints=checkpoints,
         artifacts=artifacts,
         _client=client,
+        project_id=project_identity.project_id,
+        project_name=project_identity.project_name,
     )
 
 

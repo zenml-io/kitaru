@@ -419,7 +419,7 @@ def _kitaru_config_path() -> Path:
 def test_apply_env_translations_sets_zenml_mirrors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Public KITARU env vars should populate the equivalent ZenML vars."""
+    """Public KITARU env vars should populate safe ZenML mirror vars."""
     monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
     monkeypatch.setenv("KITARU_PROJECT", "demo-project")
@@ -431,10 +431,33 @@ def test_apply_env_translations_sets_zenml_mirrors(
 
     assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
     assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
-    assert os.environ["ZENML_ACTIVE_PROJECT_ID"] == "demo-project"
+    assert ENV_ZENML_ACTIVE_PROJECT_ID not in os.environ
     assert os.environ["ZENML_DEBUG"] == "false"
     assert os.environ["ZENML_ANALYTICS_OPT_IN"] == "true"
     assert os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] == "kitaru-cli"
+
+
+def test_apply_env_translations_keeps_project_names_kitaru_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Name selectors should not poison ZenML's UUID-only project env var."""
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "production")
+
+    apply_env_translations()
+
+    assert ENV_ZENML_ACTIVE_PROJECT_ID not in os.environ
+
+
+def test_apply_env_translations_copies_project_uuid_for_zenml_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UUID project selectors should still populate ZenML's compatibility env var."""
+    project_id = "12345678-1234-5678-1234-567812345678"
+    monkeypatch.setenv(KITARU_PROJECT_ENV, project_id)
+
+    apply_env_translations()
+
+    assert os.environ[ENV_ZENML_ACTIVE_PROJECT_ID] == project_id
 
 
 def test_apply_env_translations_warns_and_overwrites_conflicts(
@@ -3959,13 +3982,32 @@ def test_configure_sets_runtime_project_override() -> None:
     assert resolved.project == "staging-project"
 
 
-def test_configure_clears_runtime_project_override() -> None:
-    """configure(project=None) should clear a previously set project override."""
+def test_configure_clears_runtime_project_override_without_persisted_project() -> None:
+    """Clearing the runtime project override should reveal no saved project."""
     configure(project="staging-project")
     configure(project=None)
 
-    resolved = resolve_connection_config()
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(),
+    ):
+        resolved = resolve_connection_config()
+
     assert resolved.project is None
+
+
+def test_configure_clears_runtime_project_override_to_persisted_project() -> None:
+    """Clearing the runtime project override should reveal the saved project."""
+    configure(project="staging-project")
+    configure(project=None)
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(project="persisted-project"),
+    ):
+        resolved = resolve_connection_config()
+
+    assert resolved.project == "persisted-project"
 
 
 def test_configure_project_independent_of_execution() -> None:
@@ -3980,12 +4022,114 @@ def test_configure_project_independent_of_execution() -> None:
     assert conn_resolved.project == "staging-project"
 
 
-def test_global_connection_config_does_not_infer_project() -> None:
-    """Global connection config should not include inferred project."""
+def test_global_connection_config_includes_persisted_active_project() -> None:
+    """Global connection config should include the saved active project."""
     from kitaru.config import _read_global_connection_config
 
-    config = _read_global_connection_config()
-    assert config.project is None
+    store = SimpleNamespace(
+        url="https://persisted.example.com",
+        api_key="persisted-token",
+    )
+    with (
+        patch(
+            "kitaru.config.GlobalConfiguration",
+            return_value=SimpleNamespace(store=store),
+        ),
+        patch(
+            "kitaru.config._read_persisted_active_project", return_value="project-id"
+        ),
+    ):
+        config = _read_global_connection_config()
+
+    assert config.server_url == "https://persisted.example.com"
+    assert config.auth_token == "persisted-token"
+    assert config.project == "project-id"
+
+
+def test_persisted_active_project_prefers_repo_local_config() -> None:
+    """Persisted active project should follow repo-local then global precedence."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_client = SimpleNamespace(
+        _config=SimpleNamespace(active_project=SimpleNamespace(id="repo-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=fake_client),
+        patch("kitaru.config.GlobalConfiguration") as global_config,
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "repo-project-id"
+    global_config.assert_not_called()
+
+
+def test_persisted_active_project_falls_back_to_global_config() -> None:
+    """Global active project should be used when repo-local config is absent."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_client = SimpleNamespace(_config=None)
+    fake_global = SimpleNamespace(
+        get_active_project=Mock(return_value=SimpleNamespace(id="global-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=fake_client),
+        patch("kitaru.config.GlobalConfiguration", return_value=fake_global),
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "global-project-id"
+
+
+def test_persisted_active_project_falls_back_to_global_when_client_fails() -> None:
+    """A repo-local lookup failure should not erase a valid global project."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_global = SimpleNamespace(
+        get_active_project=Mock(return_value=SimpleNamespace(id="global-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", side_effect=RuntimeError("local config failed")),
+        patch("kitaru.config.GlobalConfiguration", return_value=fake_global),
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "global-project-id"
+
+
+def test_persisted_active_project_ignores_direct_zenml_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persisted project reads should not initialize an env-driven remote store."""
+    from kitaru.config import _read_persisted_active_project
+
+    monkeypatch.setenv("ZENML_STORE_URL", "https://server.example.com")
+
+    with patch("kitaru.config.Client") as client_cls:
+        result = _read_persisted_active_project()
+
+    assert result is None
+    client_cls.assert_not_called()
+
+
+def test_persisted_active_project_keeps_api_key_only_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token-only env var should not suppress persisted project reads."""
+    from kitaru.config import _read_persisted_active_project
+
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    fake_client = SimpleNamespace(
+        _config=SimpleNamespace(active_project=SimpleNamespace(id="repo-project-id"))
+    )
+
+    with patch("kitaru.config.Client", return_value=fake_client) as client_cls:
+        result = _read_persisted_active_project()
+
+    assert result == "repo-project-id"
+    client_cls.assert_called_once_with()
 
 
 def test_kitaru_config_path_uses_kitaru_dir() -> None:
@@ -4826,6 +4970,69 @@ def test_connection_validation_requires_project_for_env_remote_server(
 
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
         resolve_connection_config(validate_for_use=True)
+
+
+def test_blank_zenml_project_env_does_not_satisfy_env_remote_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank compatibility project env should not count as explicit project."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_PROJECT_ID, "   ")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_validation_rejects_persisted_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved project must not complete a fresh env-driven remote connection."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with (
+        patch(
+            "kitaru.config._read_global_connection_config",
+            return_value=KitaruConfig(project="persisted-project"),
+        ),
+        pytest.raises(KitaruUsageError, match="KITARU_PROJECT"),
+    ):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_resolution_drops_persisted_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project-management clients should not inherit saved project for env server."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(project="persisted-project"),
+    ):
+        resolved = resolve_connection_config(
+            validate_for_use=True,
+            require_project=False,
+        )
+
+    assert resolved.server_url == "https://server.example.com"
+    assert resolved.auth_token == "token-123"
+    assert resolved.project is None
+
+
+def test_connection_validation_accepts_runtime_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime project selection should satisfy env-driven remote validation."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    configure(project="runtime-project")
+
+    resolved = resolve_connection_config(validate_for_use=True)
+
+    assert resolved.project == "runtime-project"
 
 
 def test_connection_validation_accepts_zenml_project_fallback(

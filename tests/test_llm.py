@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -77,13 +79,57 @@ def _mock_openai_chat_client(
     return mock_client, mock_openai_cls
 
 
-def _tracked_llm_metadata(track_mock: MagicMock) -> dict[str, object]:
-    """Return the analytics metadata emitted by one LLM call."""
-    track_mock.assert_called_once()
-    event, metadata = track_mock.call_args.args
-    assert event == AnalyticsEvent.LLM_CALLED
+def _assert_llm_attempted_call(
+    track_mock: MagicMock, *, inside_checkpoint: bool
+) -> None:
+    """Assert the first analytics call is the shared LLM attempt event."""
+    event, metadata = track_mock.call_args_list[0].args
+    assert event == AnalyticsEvent.LLM_ATTEMPTED
+    assert metadata == {
+        "llm_path": "direct_llm",
+        "inside_checkpoint": inside_checkpoint,
+    }
+
+
+def _tracked_llm_metadata(
+    track_mock: MagicMock, *, inside_checkpoint: bool = True
+) -> dict[str, object]:
+    """Return the success analytics metadata emitted by one LLM call."""
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.LLM_ATTEMPTED,
+        AnalyticsEvent.LLM_CALLED,
+    ]
+    _assert_llm_attempted_call(track_mock, inside_checkpoint=inside_checkpoint)
+    metadata = track_mock.call_args_list[1].args[1]
     assert isinstance(metadata, dict)
     return metadata
+
+
+def _tracked_llm_failure_metadata(
+    track_mock: MagicMock, *, inside_checkpoint: bool = True
+) -> dict[str, object]:
+    """Return the failure analytics metadata emitted by one failed LLM call."""
+    assert [call_args.args[0] for call_args in track_mock.call_args_list] == [
+        AnalyticsEvent.LLM_ATTEMPTED,
+        AnalyticsEvent.LLM_FAILED,
+    ]
+    _assert_llm_attempted_call(track_mock, inside_checkpoint=inside_checkpoint)
+    metadata = track_mock.call_args_list[1].args[1]
+    assert isinstance(metadata, dict)
+    return metadata
+
+
+def _assert_metadata_excludes(
+    metadata: Mapping[str, object],
+    *,
+    keys: Sequence[str] = (),
+    values: Sequence[object] = (),
+) -> None:
+    """Assert analytics metadata excludes privacy-sensitive keys and values."""
+    for key in keys:
+        assert key not in metadata
+    for value in values:
+        assert value not in metadata.values()
 
 
 def _install_fake_genai_prices(
@@ -1479,13 +1525,189 @@ def test_llm_analytics_includes_model_alias_for_explicit_model() -> None:
     assert metadata["resolved_model"] == "openai/gpt-4o-mini"
     assert metadata["model"] == "openai/gpt-4o-mini"
     assert metadata["model"] == metadata["resolved_model"]
-    assert "prompt" not in metadata
-    assert "system" not in metadata
-    assert "call_name" not in metadata
-    assert "name" not in metadata
-    assert "private prompt text" not in metadata.values()
-    assert "private system text" not in metadata.values()
-    assert "private_call_name" not in metadata.values()
+    _assert_metadata_excludes(
+        metadata,
+        keys=("prompt", "system", "call_name", "name"),
+        values=("private prompt text", "private system text", "private_call_name"),
+    )
+
+
+def test_llm_failed_analytics_is_not_duplicated_in_flow_body_path() -> None:
+    """Flow-body failures should not emit a second outer LLM_FAILED event."""
+    llm_module = importlib.import_module("kitaru.llm")
+
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+        secret=None,
+    )
+    credential_error = KitaruRuntimeError(
+        "No provider credentials found for private-secret-name and sk-private-value"
+    )
+
+    def _run_synthetic_checkpoint(request: _LLMRequest, *, id: str) -> str:
+        assert id == "private_call_name"
+        return llm_module._execute_llm_call(request)
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=str(uuid4())),
+        patch("kitaru.llm.resolve_model_selection", return_value=model_selection),
+        patch("kitaru.llm._resolve_credential_overlay", side_effect=credential_error),
+        patch("kitaru.llm._llm_checkpoint_call", side_effect=_run_synthetic_checkpoint),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        pytest.raises(KitaruRuntimeError, match="No provider credentials"),
+    ):
+        llm("private prompt text", model="fast", name="private_call_name")
+
+    metadata = _tracked_llm_failure_metadata(track_mock, inside_checkpoint=False)
+    assert metadata["error_type"] == "KitaruRuntimeError"
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    _assert_metadata_excludes(
+        metadata,
+        values=("private-secret-name", "sk-private-value"),
+    )
+
+
+def test_llm_failed_analytics_for_missing_credentials_is_privacy_safe() -> None:
+    """Credential failures should emit coarse failure metadata only."""
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+        secret="private-secret-name",
+    )
+    credential_error = KitaruRuntimeError(
+        "No provider credentials found for private-secret-name and sk-private-value"
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch("kitaru.llm._resolve_credential_overlay", side_effect=credential_error),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        pytest.raises(KitaruRuntimeError, match="No provider credentials"),
+    ):
+        llm(
+            "private prompt text",
+            model="fast",
+            system="private system text",
+            name="private_call_name",
+        )
+
+    metadata = _tracked_llm_failure_metadata(track_mock)
+    assert metadata["llm_path"] == "direct_llm"
+    assert metadata["error_type"] == "KitaruRuntimeError"
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    assert metadata["model"] == "openai/gpt-4o-mini"
+    _assert_metadata_excludes(
+        metadata,
+        keys=(
+            "credential_source",
+            "prompt",
+            "system",
+            "call_name",
+            "name",
+            "requested_model",
+            "alias",
+        ),
+        values=(
+            "private prompt text",
+            "private system text",
+            "private_call_name",
+            "fast",
+            "private-secret-name",
+            "sk-private-value",
+        ),
+    )
+
+
+def test_llm_failed_analytics_for_unsupported_provider_is_privacy_safe() -> None:
+    """Unsupported providers should emit one coarse failure event."""
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="gemini/gemini-2.0-flash",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        pytest.raises(KitaruUsageError, match="not supported"),
+    ):
+        llm("private prompt text", model="fast", name="private_call_name")
+
+    metadata = _tracked_llm_failure_metadata(track_mock)
+    assert metadata["error_type"] == "KitaruUsageError"
+    assert metadata["resolved_model"] == "gemini/gemini-2.0-flash"
+    assert metadata["model"] == "gemini/gemini-2.0-flash"
+    assert metadata["credential_source"] == "environment"
+    assert metadata["mocked"] is False
+    _assert_metadata_excludes(
+        metadata,
+        values=("fast", "private prompt text", "private_call_name"),
+    )
+
+
+def test_llm_failed_analytics_for_missing_sdk_is_privacy_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing provider SDK failures should not put install text in analytics."""
+    monkeypatch.setitem(sys.modules, "openai", None)
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        pytest.raises(KitaruUsageError, match=r"kitaru\[openai\]"),
+    ):
+        llm("private prompt text", model="openai/gpt-4o-mini", name="private_call_name")
+
+    metadata = _tracked_llm_failure_metadata(track_mock)
+    assert metadata["error_type"] == "KitaruUsageError"
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    assert metadata["credential_source"] == "environment"
+    assert metadata["mocked"] is False
+    _assert_metadata_excludes(
+        metadata,
+        values=("kitaru[openai]", "private prompt text", "private_call_name"),
+    )
+
+
+def test_llm_failed_analytics_for_provider_error_is_privacy_safe() -> None:
+    """Provider errors should not put provider text or usage records in analytics."""
+    provider_error = KitaruBackendError(
+        "provider said authentication failed for sk-private-provider-value"
+    )
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (_mock_save, mock_log),
+        patch("kitaru.llm._call_openai", side_effect=provider_error),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        pytest.raises(KitaruBackendError, match="authentication failed"),
+    ):
+        llm(
+            "private prompt text",
+            model="openai/gpt-4o-mini",
+            system="private system text",
+            name="private_call_name",
+        )
+
+    mock_log.assert_not_called()
+    metadata = _tracked_llm_failure_metadata(track_mock)
+    assert metadata["error_type"] == "KitaruBackendError"
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    assert metadata["credential_source"] == "environment"
+    assert metadata["mocked"] is False
+    _assert_metadata_excludes(
+        metadata,
+        values=(
+            "sk-private-provider-value",
+            "private prompt text",
+            "private system text",
+            "private_call_name",
+        ),
+    )
 
 
 def test_llm_analytics_includes_model_alias_in_mock_alias_mode(
@@ -1511,12 +1733,11 @@ def test_llm_analytics_includes_model_alias_in_mock_alias_mode(
     assert metadata["model"] == "openai/gpt-4o-mini"
     assert metadata["model"] == metadata["resolved_model"]
     assert metadata["mocked"] is True
-    assert "prompt" not in metadata
-    assert "system" not in metadata
-    assert "call_name" not in metadata
-    assert "name" not in metadata
-    assert "private prompt text" not in metadata.values()
-    assert "private_call_name" not in metadata.values()
+    _assert_metadata_excludes(
+        metadata,
+        keys=("prompt", "system", "call_name", "name"),
+        values=("private prompt text", "private_call_name"),
+    )
 
 
 # ---------------------------------------------------------------------------

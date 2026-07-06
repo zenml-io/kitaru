@@ -23,6 +23,7 @@ from kitaru._client._deployments import (
     resolve_deployment_exclusive,
 )
 from kitaru._client._statistics import validate_statistics_max_groups
+from kitaru._config import _projects as project_ops
 from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
@@ -641,6 +642,41 @@ def kitaru_status() -> dict[str, Any]:
         return inspection.serialize_runtime_snapshot(snapshot)
 
     return run_with_mcp_error_boundary(_status)
+
+
+@tracked_mcp_tool
+def kitaru_projects_list() -> list[dict[str, Any]]:
+    """List Kitaru projects visible to the current user."""
+    return run_with_mcp_error_boundary(
+        lambda: [
+            inspection.serialize_project(project)
+            for project in project_ops.list_projects()
+        ]
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_current() -> dict[str, Any]:
+    """Return the active Kitaru project."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.current_project())
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_show(name_or_id: str) -> dict[str, Any]:
+    """Show a Kitaru project by name or ID."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.get_project(name_or_id))
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_use(name_or_id: str) -> dict[str, Any]:
+    """Use a Kitaru project as the active default by name or ID."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.use_project(name_or_id))
+    )
 
 
 @tracked_mcp_tool
