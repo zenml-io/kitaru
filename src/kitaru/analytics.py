@@ -43,7 +43,9 @@ class AnalyticsEvent(StrEnum):
     LOCAL_SERVER_STOPPED = "Kitaru local server stopped"
 
     # Flow lifecycle
+    FLOW_ATTEMPTED = "Kitaru flow attempted"
     FLOW_SUBMITTED = "Kitaru flow submitted"
+    FLOW_FAILED = "Kitaru flow failed"
     FLOW_TERMINAL = "Kitaru flow terminal"
     FLOW_REPLAYED = "Kitaru flow replayed"
     REPLAY_REQUESTED = "Kitaru flow replay requested"
@@ -61,13 +63,18 @@ class AnalyticsEvent(StrEnum):
     EXECUTION_STATISTICS_QUERIED = "Kitaru execution statistics queried"
 
     # Feature adoption
+    LLM_ATTEMPTED = "Kitaru LLM attempted"
     LLM_CALLED = "Kitaru LLM called"
+    LLM_FAILED = "Kitaru LLM failed"
     ARTIFACT_SAVED = "Kitaru artifact saved"
     ARTIFACT_LOADED = "Kitaru artifact loaded"
     SECRET_UPSERTED = "Kitaru secret upserted"
     SECRET_READ = "Kitaru secret read"
     STACK_CREATED = "Kitaru stack created"
     STACK_ACTIVATED = "Kitaru stack activated"
+    PROJECT_CREATED = "Kitaru project created"
+    PROJECT_ACTIVATED = "Kitaru project activated"
+    PROJECT_DELETED = "Kitaru project deleted"
     MODEL_ALIAS_REGISTERED = "Kitaru model alias registered"
     LOG_STORE_CONFIGURED = "Kitaru log store configured"
     CHECKPOINT_INVOKED = "Kitaru checkpoint invoked"

@@ -217,18 +217,19 @@ jobs:
             echo "::error::Select at least one provider check."
             exit 1
           fi
+          suite_marker_suffix="provider_extended"
+          if [ "$suite" = "provider-core" ]; then
+            suite_marker_suffix="not provider_extended"
+          fi
           marker_expr=""
           if [ "${#provider_markers[@]}" -gt 0 ]; then
             provider_expr="${provider_markers[0]}"
             for marker in "${provider_markers[@]:1}"; do
               provider_expr="$provider_expr or $marker"
             done
-            if [ "$suite" = "provider-core" ]; then
-              marker_expr="($provider_expr) and not provider_extended"
-            else
-              marker_expr="($provider_expr) and provider_extended"
-            fi
+            marker_expr="($provider_expr) and $suite_marker_suffix"
           fi
+          google_adk_marker_expr="live_gemini and $suite_marker_suffix"
           providers_csv=$(IFS=,; echo "${providers[*]}")
           {
             printf 'suite=%s\n' "$suite"
@@ -238,6 +239,7 @@ jobs:
             printf 'include_google_adk=%s\n' "$include_google_adk"
             printf 'providers=%s\n' "$providers_csv"
             printf 'marker_expr=%s\n' "$marker_expr"
+            printf 'google_adk_marker_expr=%s\n' "$google_adk_marker_expr"
           } >> "$GITHUB_OUTPUT"
       - name: Record tested identity
         id: identity
@@ -303,9 +305,17 @@ jobs:
         id: install_dependencies
         if: ${{ steps.secret_preflight.outputs.ready == 'true' }}
         working-directory: kitaru
-        run: >-
-          uv sync --frozen --extra local --extra llm --extra openai-agents
-          --extra claude-agent-sdk
+        shell: bash
+        env:
+          SUITE: ${{ steps.plan.outputs.suite }}
+          INCLUDE_OPENAI: ${{ steps.plan.outputs.include_openai }}
+        run: |
+          set -euo pipefail
+          extras=(--extra local --extra llm --extra openai-agents --extra claude-agent-sdk)
+          if [ "$SUITE" = "provider-extended" ] && [ "$INCLUDE_OPENAI" = "true" ]; then
+            extras+=(--extra pydantic-ai --extra langgraph-openai)
+          fi
+          uv sync --frozen "${extras[@]}"
       - name: Initialize Kitaru project marker
         id: init_project
         if: ${{ steps.secret_preflight.outputs.ready == 'true' }}
@@ -393,15 +403,22 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SUITE: ${{ steps.plan.outputs.suite }}
+          ADK_MARKER_EXPR: ${{ steps.plan.outputs.google_adk_marker_expr }}
         run: |
           set +euo pipefail
           log_path="../llm-integration-results/logs/google-adk.log"
           junit_path="../llm-integration-results/google-adk.junit.xml"
           counts_path="../llm-integration-results/google-adk.counts.env"
+          adk_test_file="tests/live/test_google_adk_provider_behavior.py"
+          if [ "$SUITE" = "provider-core" ]; then
+            adk_test_file="tests/live/test_google_adk_provider_core.py"
+          fi
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/kitaru-google-adk-live-env" \
-            uv run --python 3.12 --no-dev --extra google-adk --with pytest \
-            pytest -o addopts='-vv' tests/live/test_google_adk_provider_core.py \
-            -m "live_gemini" --tb=short --durations=10 \
+            uv run --frozen --python 3.12 --no-dev --extra google-adk --with pytest \
+            pytest -o addopts='-vv' \
+            "$adk_test_file" \
+            -m "$ADK_MARKER_EXPR" --tb=short --durations=10 \
             --junitxml="$junit_path" 2>&1 | tee "$log_path"
           status=${PIPESTATUS[0]}
           set -euo pipefail

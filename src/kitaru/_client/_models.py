@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from kitaru._llm_usage import (
     LLM_USAGE_SUMMARY_METADATA_KEY,
-    cache_status_for_checkpoint_status,
     parse_usage_summary,
     strip_usage_record_bookkeeping,
     usage_records_from_metadata,
+    usage_reuse_classification,
 )
 from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin, KitaruUsageError
@@ -403,20 +403,22 @@ class CheckpointAttempt:
     metadata: dict[str, Any]
     failure: FailureInfo | None
     _raw_status: str | None = field(default=None, repr=False, compare=False)
+    _replay_reused: bool = field(default=False, repr=False, compare=False)
 
     @property
     def llm_usage_records(self) -> list[dict[str, Any]]:
         """Canonical LLM usage records persisted on this attempt."""
-        cache_status = cache_status_for_checkpoint_status(
-            self._raw_status or self.status
+        reused, reused_cache_status = usage_reuse_classification(
+            replay_reused=self._replay_reused,
+            checkpoint_status=self._raw_status or self.status,
         )
         return [
             strip_usage_record_bookkeeping(record)
             for record in usage_records_from_metadata(
                 self.metadata,
                 source_attempt_id=self.attempt_id,
-                reused=cache_status is not None,
-                reused_cache_status=cache_status or "checkpoint_cache_hit",
+                reused=reused,
+                reused_cache_status=reused_cache_status,
             )
         ]
 
@@ -495,6 +497,8 @@ class Execution:
     checkpoints: list[CheckpointCall]
     artifacts: list[ArtifactRef]
     _client: KitaruClient = field(repr=False, compare=False)
+    project_id: str | None = None
+    project_name: str | None = None
 
     @property
     def llm_usage_summary(self) -> dict[str, Any] | None:

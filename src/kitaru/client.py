@@ -142,11 +142,33 @@ from kitaru._source_aliases import (
 )
 from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
 from kitaru._telemetry import deployment_metadata_for_stack_model
+from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
+    ProjectCreateResult,
+    ProjectDeleteResult,
+    ProjectInfo,
     active_stack_log_store,
     resolve_connection_config,
     resolve_log_store,
+)
+from kitaru.config import (
+    create_project as _create_project,
+)
+from kitaru.config import (
+    current_project as _current_project,
+)
+from kitaru.config import (
+    delete_project as _delete_project,
+)
+from kitaru.config import (
+    get_project as _get_project,
+)
+from kitaru.config import (
+    list_projects as _list_projects,
+)
+from kitaru.config import (
+    use_project as _use_project,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -1454,9 +1476,36 @@ class _ExecutionsAPI:
         ):
             handle = handle_or_run
         else:
-            handle = FlowHandle(handle_or_run)
+            handle = FlowHandle(handle_or_run, project=self._client_ref._project)
         handle.wait()
         return str(handle.exec_id)
+
+    def _persist_replay_terminal_llm_usage_if_terminal(self, exec_id: str) -> None:
+        """Best-effort terminal LLM rollup after replay metadata exists."""
+        try:
+            run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        except Exception:
+            logger.debug(
+                "Failed to refresh replay execution before terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        if not getattr(getattr(run, "status", None), "is_finished", False):
+            return
+        try:
+            zenml_client = self._client_ref._client()
+        except Exception:
+            logger.debug(
+                "Failed to create ZenML client for replay terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        _safe_persist_terminal_llm_usage_metadata(
+            run,
+            zenml_client=zenml_client,
+        )
 
     def replay(
         self,
@@ -1565,6 +1614,8 @@ class _ExecutionsAPI:
         prefetched_runs: Mapping[str, PipelineRunResponse] | None = None,
     ) -> ReplaySubmission:
         """Replay through ZenML pipeline fallback when no Kitaru flow wrapper exists."""
+        from kitaru.flow import FlowHandle, _temporary_active_project
+
         submission_id = new_replay_submission_id()
         request_document = build_replay_request_document(
             flow_overrides=flow_overrides,
@@ -1634,13 +1685,15 @@ class _ExecutionsAPI:
                 track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
 
                 try:
-                    replayed_run = replay_pipeline.replay(
-                        pipeline_run=source_run.id,
-                        skip=replay_plan.steps_to_skip,
-                        skip_successful_steps=False,
-                        input_overrides=replay_plan.input_overrides or None,
-                        step_input_overrides=replay_plan.step_input_overrides or None,
-                    )
+                    with _temporary_active_project(self._client_ref._project):
+                        replayed_run = replay_pipeline.replay(
+                            pipeline_run=source_run.id,
+                            skip=replay_plan.steps_to_skip,
+                            skip_successful_steps=False,
+                            input_overrides=replay_plan.input_overrides or None,
+                            step_input_overrides=replay_plan.step_input_overrides
+                            or None,
+                        )
                 except Exception as exc:
                     failure_origin = classify_failure_origin(
                         status_reason=str(exc),
@@ -1685,16 +1738,28 @@ class _ExecutionsAPI:
                     AnalyticsEvent.FLOW_REPLAYED,
                     {"replay_path": "pipeline_fallback"},
                 )
+                replay_handle = FlowHandle(
+                    replayed_run,
+                    project=self._client_ref._project,
+                )
+                with _temporary_active_project(self._client_ref._project):
+                    safe_persist_replay_submission_metadata(
+                        replay_exec_id=replayed_exec_id,
+                        original_exec_id=original_id,
+                        submission_id=submission_id,
+                        tag=tag,
+                        steps_to_skip=replay_plan.steps_to_skip,
+                    )
                 row_status: Literal["submitted", "completed", "failed"] = "submitted"
                 if wait:
-                    replayed_exec_id = self._await_replay_completion(replayed_run)
+                    replayed_exec_id = self._await_replay_completion(replay_handle)
                     row_status = "completed"
-                safe_persist_replay_submission_metadata(
-                    replay_exec_id=replayed_exec_id,
-                    original_exec_id=original_id,
-                    submission_id=submission_id,
-                    tag=tag,
-                )
+                elif getattr(
+                    getattr(replayed_run, "status", None), "is_finished", False
+                ):
+                    self._persist_replay_terminal_llm_usage_if_terminal(
+                        replayed_exec_id
+                    )
                 compare_ids.extend([original_id, replayed_exec_id])
                 results.append(
                     ReplayResultRow(
@@ -1705,7 +1770,7 @@ class _ExecutionsAPI:
                         compare_url=safe_compare_url_for_executions(
                             [original_id, replayed_exec_id]
                         ),
-                        handle=None if wait else replayed_run,
+                        handle=None if wait else replay_handle,
                     )
                 )
             except Exception as exc:
@@ -2349,6 +2414,7 @@ class _DeploymentsAPI:
             )
         return FlowHandle(
             run,
+            project=self._client_ref._project,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )
@@ -2917,8 +2983,62 @@ class _APIKeysAPI:
             ) from exc
 
 
+class _ProjectScopedAPIUnavailable:
+    """Placeholder for project-scoped APIs before a project is selected."""
+
+    def __getattr__(self, name: str) -> NoReturn:
+        raise KitaruUsageError(
+            "This Kitaru client has no active project. Set KITARU_PROJECT "
+            "before using execution, artifact, or deployment APIs."
+        )
+
+
+class _ProjectsAPI:
+    """Project-management operations for a Kitaru client."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+
+    def current(self) -> ProjectInfo:
+        """Return the active Kitaru project."""
+        return _current_project(client_factory=self._client_ref._client)
+
+    def list(self) -> builtins.list[ProjectInfo]:
+        """List Kitaru projects visible to the current user."""
+        return _list_projects(client_factory=self._client_ref._client)
+
+    def get(self, name_or_id: str) -> ProjectInfo:
+        """Return a Kitaru project by name or ID."""
+        return _get_project(name_or_id, client_factory=self._client_ref._client)
+
+    def create(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        display_name: str | None = None,
+        activate: bool = True,
+    ) -> ProjectCreateResult:
+        """Create a Kitaru project and optionally activate it."""
+        return _create_project(
+            name,
+            description=description,
+            display_name=display_name,
+            activate=activate,
+            client_factory=self._client_ref._client,
+        )
+
+    def use(self, name_or_id: str) -> ProjectInfo:
+        """Set the active Kitaru project."""
+        return _use_project(name_or_id, client_factory=self._client_ref._client)
+
+    def delete(self, name_or_id: str) -> ProjectDeleteResult:
+        """Delete a Kitaru project."""
+        return _delete_project(name_or_id, client_factory=self._client_ref._client)
+
+
 class KitaruClient:
-    """Client for Kitaru executions, artifacts, deployments, and auth."""
+    """Client for Kitaru executions, artifacts, deployments, projects, and auth."""
 
     def __init__(
         self,
@@ -2963,9 +3083,16 @@ class KitaruClient:
         self._project = resolved_connection.project
 
         self.auth = _AuthAPI(self)
-        self.executions = _ExecutionsAPI(self)
-        self.artifacts = _ArtifactsAPI(self)
-        self.deployments = _DeploymentsAPI(self)
+        self.projects = _ProjectsAPI(self)
+        if not _require_project and self._project is None:
+            unavailable = _ProjectScopedAPIUnavailable()
+            self.executions = unavailable
+            self.artifacts = unavailable
+            self.deployments = unavailable
+        else:
+            self.executions = _ExecutionsAPI(self)
+            self.artifacts = _ArtifactsAPI(self)
+            self.deployments = _DeploymentsAPI(self)
 
     @classmethod
     def for_auth_management(cls) -> KitaruClient:
@@ -2975,6 +3102,16 @@ class KitaruClient:
         project for env-driven remote connections. Auth management is
         server-level, so this constructor validates server/auth pairing while
         intentionally skipping project validation.
+        """
+        return cls(_require_project=False)
+
+    @classmethod
+    def for_project_management(cls) -> KitaruClient:
+        """Create a client for project-management operations.
+
+        Listing, creating, or choosing projects happens before a project-scoped
+        operation can run, so this constructor validates server/auth pairing
+        while intentionally skipping the active-project requirement.
         """
         return cls(_require_project=False)
 

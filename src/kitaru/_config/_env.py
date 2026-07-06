@@ -184,7 +184,7 @@ def _read_zenml_connection_env_config() -> KitaruConfig:
     if raw_auth_token is not None:
         values["auth_token"] = raw_auth_token
 
-    raw_project = os.environ.get(ENV_ZENML_ACTIVE_PROJECT_ID)
+    raw_project = _normalized_kitaru_env(ENV_ZENML_ACTIVE_PROJECT_ID)
     if raw_project is not None:
         values["project"] = raw_project
 
@@ -269,6 +269,7 @@ def _validate_connection_config_for_use(
     resolved: ResolvedConnectionConfig,
     *,
     require_project: bool = True,
+    project_from_non_persisted_source: bool | None = None,
 ) -> None:
     """Validate connection config at first use."""
     has_remote_server = _environment_has_remote_server_override()
@@ -286,7 +287,12 @@ def _validate_connection_config_for_use(
             "set KITARU_AUTH_TOKEN or run `kitaru login`."
         )
 
-    if require_project and has_remote_server and not resolved.project:
+    project_is_safe_for_env_remote = (
+        bool(resolved.project)
+        if project_from_non_persisted_source is None
+        else project_from_non_persisted_source
+    )
+    if require_project and has_remote_server and not project_is_safe_for_env_remote:
         raise KitaruUsageError(
             "A remote Kitaru server is configured via environment variables, but "
             "no project is active. Set KITARU_PROJECT (preferred) or "
@@ -353,22 +359,43 @@ def resolve_connection_config_impl(
     validate_connection_config_for_use: Callable[..., None],
 ) -> ResolvedConnectionConfig:
     """Resolve connection configuration with connection-specific precedence."""
+    persisted_layer = read_global_connection_config()
+    zenml_env_layer = read_zenml_connection_env_config()
+    kitaru_env_layer = read_connection_env_config()
+    runtime_layer = read_runtime_connection_config()
+    explicit_layer = explicit or KitaruConfig()
+    env_server_override = (
+        zenml_env_layer.server_url is not None
+        or kitaru_env_layer.server_url is not None
+    )
+    if env_server_override and persisted_layer.project is not None:
+        persisted_layer = persisted_layer.model_copy(update={"project": None})
     resolved = _apply_layers(
         ResolvedConnectionConfig(),
         (
-            read_global_connection_config(),
-            read_zenml_connection_env_config(),
-            read_connection_env_config(),
-            read_runtime_connection_config(),
-            explicit or KitaruConfig(),
+            persisted_layer,
+            zenml_env_layer,
+            kitaru_env_layer,
+            runtime_layer,
+            explicit_layer,
         ),
         _merge_connection_layer,
     )
 
     if validate_for_use:
+        project_from_non_persisted_source = any(
+            layer.project is not None and bool(layer.project.strip())
+            for layer in (
+                zenml_env_layer,
+                kitaru_env_layer,
+                runtime_layer,
+                explicit_layer,
+            )
+        )
         validate_connection_config_for_use(
             resolved,
             require_project=require_project,
+            project_from_non_persisted_source=project_from_non_persisted_source,
         )
 
     return resolved

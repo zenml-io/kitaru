@@ -10,6 +10,7 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import uuid4
@@ -64,6 +65,7 @@ _CREDENTIAL_KEY_PARTS = {
     "SECRET",
     "TOKEN",
 }
+_LLM_FAILURE_ANALYTICS_MARKER = "_kitaru_llm_failure_analytics_tracked"
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
 _OpenAITokenLimitParam = Literal["max_tokens", "max_completion_tokens"]
@@ -855,6 +857,75 @@ def _dispatch_provider_call(
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
 
 
+def _track_llm_attempt_analytics(*, inside_checkpoint: bool) -> None:
+    """Emit privacy-safe analytics for a direct LLM call attempt."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LLM_ATTEMPTED,
+        {
+            "llm_path": "direct_llm",
+            "inside_checkpoint": inside_checkpoint,
+        },
+    )
+
+
+def _mark_llm_failure_tracked(exc: Exception) -> None:
+    """Mark an exception after emitting LLM failure analytics."""
+    with suppress(Exception):
+        setattr(exc, _LLM_FAILURE_ANALYTICS_MARKER, True)
+
+
+def _llm_failure_already_tracked(exc: Exception) -> bool:
+    """Return whether LLM failure analytics were already emitted."""
+    return bool(getattr(exc, _LLM_FAILURE_ANALYTICS_MARKER, False))
+
+
+def _llm_analytics_metadata(
+    *,
+    model_selection: ResolvedModelSelection | None = None,
+    credential_source: str | None = None,
+    mocked: bool | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build shared privacy-safe metadata for direct LLM analytics."""
+    metadata: dict[str, Any] = {}
+    if model_selection is not None:
+        metadata["resolved_model"] = model_selection.resolved_model
+        metadata["model"] = model_selection.resolved_model  # dashboard compat alias
+    if credential_source is not None:
+        metadata["credential_source"] = credential_source
+    if mocked is not None:
+        metadata["mocked"] = mocked
+    if extra_metadata is not None:
+        metadata.update(
+            {key: value for key, value in extra_metadata.items() if value is not None}
+        )
+    return metadata
+
+
+def _track_llm_failure_analytics(
+    *,
+    exc: Exception,
+    model_selection: ResolvedModelSelection | None = None,
+    credential_source: str | None = None,
+    mocked: bool | None = None,
+) -> None:
+    """Emit privacy-safe analytics for direct LLM call failures."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    metadata = {
+        "llm_path": "direct_llm",
+        "error_type": type(exc).__name__,
+        **_llm_analytics_metadata(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=mocked,
+        ),
+    }
+    track(AnalyticsEvent.LLM_FAILED, metadata)
+
+
 def _track_llm_call_analytics(
     *,
     model_selection: ResolvedModelSelection,
@@ -865,123 +936,135 @@ def _track_llm_call_analytics(
     """Emit the canonical `LLM_CALLED` analytics event."""
     from kitaru.analytics import AnalyticsEvent, track
 
-    metadata: dict[str, Any] = {
-        "resolved_model": model_selection.resolved_model,
-        "model": model_selection.resolved_model,  # dashboard compat alias
-        "credential_source": credential_source,
-        "mocked": mocked,
-    }
-    if extra_metadata is not None:
-        metadata.update(
-            {key: value for key, value in extra_metadata.items() if value is not None}
-        )
-    track(AnalyticsEvent.LLM_CALLED, metadata)
+    track(
+        AnalyticsEvent.LLM_CALLED,
+        _llm_analytics_metadata(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=mocked,
+            extra_metadata=extra_metadata,
+        ),
+    )
 
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
-    model_override = resolve_model_override(
-        request.call_name,
-        _get_current_checkpoint_name(),
-        _get_current_checkpoint_id(),
-    )
-    if model_override:
-        request = request.model_copy(update={"model": model_override})
-
-    model_selection = resolve_model_selection(request.model)
-    messages = _normalize_messages(request.prompt, system=request.system)
-
-    # Mock short-circuit: skip credential resolution and provider SDK entirely
-    if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
-        result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
-        env_overlay: dict[str, str] = {}
-        credential_source = "environment"
-        latency_ms = 0.0
-        is_mocked = True
-    else:
-        env_overlay, credential_source = _resolve_credential_overlay(model_selection)
-        started_at = time.perf_counter()
-        result = _dispatch_provider_call(
-            model_selection=model_selection,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            env_overlay=env_overlay,
+    model_selection: ResolvedModelSelection | None = None
+    credential_source: str | None = None
+    is_mocked: bool | None = None
+    try:
+        model_override = resolve_model_override(
+            request.call_name,
+            _get_current_checkpoint_name(),
+            _get_current_checkpoint_id(),
         )
-        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
-        is_mocked = False
+        if model_override:
+            request = request.model_copy(update={"model": model_override})
 
-    response_text = result.response_text
-    usage = result.usage
-    usage_warnings: list[str] = []
-    cost_estimate = _estimate_direct_llm_cost(
-        resolved_model=model_selection.resolved_model,
-        usage=usage,
-        warnings=usage_warnings,
-    )
+        model_selection = resolve_model_selection(request.model)
+        messages = _normalize_messages(request.prompt, system=request.system)
 
-    _safe_save(
-        f"{request.call_name}_prompt",
-        messages,
-        artifact_type="prompt",
-        save_func=save,
-    )
-    _safe_save(
-        f"{request.call_name}_response",
-        response_text,
-        artifact_type="response",
-        save_func=save,
-    )
+        # Mock short-circuit: skip credential resolution and provider SDK entirely
+        if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
+            is_mocked = True
+            result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
+            credential_source = "environment"
+            latency_ms = 0.0
+        else:
+            env_overlay, credential_source = _resolve_credential_overlay(
+                model_selection
+            )
+            is_mocked = False
+            started_at = time.perf_counter()
+            result = _dispatch_provider_call(
+                model_selection=model_selection,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+            )
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-    llm_metadata: dict[str, Any] = {
-        "requested_model": model_selection.requested_model,
-        "alias": model_selection.alias,
-        "resolved_model": model_selection.resolved_model,
-        "credential_source": credential_source,
-        "latency_ms": latency_ms,
-        "tokens_input": usage.prompt_tokens,
-        "tokens_output": usage.completion_tokens,
-        "total_tokens": usage.total_tokens,
-        "estimated_cost_usd": cost_estimate.estimated_cost_usd,
-    }
-    filtered_metadata = {
-        key: value for key, value in llm_metadata.items() if value is not None
-    }
-    usage_record = build_usage_record(
-        adapter="kitaru.llm",
-        surface="direct_llm",
-        call_name=request.call_name,
-        record_id=f"{request.call_name}:{uuid4().hex}",
-        requested_model=model_selection.requested_model,
-        resolved_model=model_selection.resolved_model,
-        model=model_selection.resolved_model,
-        provider=_provider_name(model_selection.resolved_model),
-        input_tokens=usage.prompt_tokens,
-        output_tokens=usage.completion_tokens,
-        total_tokens=usage.total_tokens,
-        cached_input_tokens=usage.cached_input_tokens,
-        reasoning_tokens=usage.reasoning_tokens,
-        raw_usage=usage.raw_usage,
-        estimated_cost_usd=cost_estimate.estimated_cost_usd,
-        cost_source_label=cost_estimate.cost_source_label,
-        pricing_version=cost_estimate.pricing_version,
-        latency_ms=latency_ms,
-        billing_effect="unknown" if is_mocked else "incurred",
-        cache_status="unknown" if is_mocked else "executed",
-        warnings=usage_warnings,
-    )
-    log(
-        llm_calls={request.call_name: filtered_metadata},
-        **usage_record_metadata(usage_record),
-    )
+        response_text = result.response_text
+        usage = result.usage
+        usage_warnings: list[str] = []
+        cost_estimate = _estimate_direct_llm_cost(
+            resolved_model=model_selection.resolved_model,
+            usage=usage,
+            warnings=usage_warnings,
+        )
 
-    _track_llm_call_analytics(
-        model_selection=model_selection,
-        credential_source=credential_source,
-        mocked=is_mocked,
-    )
+        _safe_save(
+            f"{request.call_name}_prompt",
+            messages,
+            artifact_type="prompt",
+            save_func=save,
+        )
+        _safe_save(
+            f"{request.call_name}_response",
+            response_text,
+            artifact_type="response",
+            save_func=save,
+        )
 
-    return response_text
+        llm_metadata: dict[str, Any] = {
+            "requested_model": model_selection.requested_model,
+            "alias": model_selection.alias,
+            "resolved_model": model_selection.resolved_model,
+            "credential_source": credential_source,
+            "latency_ms": latency_ms,
+            "tokens_input": usage.prompt_tokens,
+            "tokens_output": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "estimated_cost_usd": cost_estimate.estimated_cost_usd,
+        }
+        filtered_metadata = {
+            key: value for key, value in llm_metadata.items() if value is not None
+        }
+        usage_record = build_usage_record(
+            adapter="kitaru.llm",
+            surface="direct_llm",
+            call_name=request.call_name,
+            record_id=f"{request.call_name}:{uuid4().hex}",
+            requested_model=model_selection.requested_model,
+            resolved_model=model_selection.resolved_model,
+            model=model_selection.resolved_model,
+            provider=_provider_name(model_selection.resolved_model),
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
+            raw_usage=usage.raw_usage,
+            estimated_cost_usd=cost_estimate.estimated_cost_usd,
+            cost_source_label=cost_estimate.cost_source_label,
+            pricing_version=cost_estimate.pricing_version,
+            latency_ms=latency_ms,
+            billing_effect="unknown" if is_mocked else "incurred",
+            cache_status="unknown" if is_mocked else "executed",
+            warnings=usage_warnings,
+        )
+        log(
+            llm_calls={request.call_name: filtered_metadata},
+            **usage_record_metadata(usage_record),
+        )
+
+        _track_llm_call_analytics(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=is_mocked,
+        )
+
+        return response_text
+    except Exception as exc:
+        _track_llm_failure_analytics(
+            exc=exc,
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=is_mocked,
+        )
+        _mark_llm_failure_tracked(exc)
+        raise
 
 
 @checkpoint(type="llm_call")
@@ -1022,16 +1105,25 @@ def llm(
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)
-    request = _LLMRequest(
-        prompt=prompt,
-        model=model,
-        system=system,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        call_name=_normalize_call_name(name),
-    )
 
-    if _is_inside_checkpoint():
-        return _execute_llm_call(request)
+    inside_checkpoint = _is_inside_checkpoint()
+    _track_llm_attempt_analytics(inside_checkpoint=inside_checkpoint)
+    try:
+        request = _LLMRequest(
+            prompt=prompt,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            call_name=_normalize_call_name(name),
+        )
 
-    return _llm_checkpoint_call(request, id=request.call_name)
+        if inside_checkpoint:
+            return _execute_llm_call(request)
+
+        return _llm_checkpoint_call(request, id=request.call_name)
+    except Exception as exc:
+        if not _llm_failure_already_tracked(exc):
+            _track_llm_failure_analytics(exc=exc)
+            _mark_llm_failure_tracked(exc)
+        raise

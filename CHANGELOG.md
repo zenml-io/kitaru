@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Infrastructure
+### Added
+- Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
+- Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
+
+### Changed
+- Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
+
+### Fixed
+- `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
 
 ## [0.19.0] - 2026-06-30
 
