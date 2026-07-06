@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -62,13 +63,6 @@ from zenml.integrations.gcp.flavors.vertex_orchestrator_flavor import (
 from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
     KubernetesOrchestratorFlavor,
 )
-from zenml.integrations.modal import MODAL_ORCHESTRATOR_FLAVOR
-from zenml.integrations.modal.flavors.modal_orchestrator_flavor import (
-    ModalOrchestratorFlavor,
-)
-from zenml.integrations.modal.flavors.modal_sandbox_flavor import (
-    ModalSandboxFlavor,
-)
 from zenml.integrations.s3.flavors.s3_artifact_store_flavor import (
     S3ArtifactStoreFlavor,
 )
@@ -82,6 +76,12 @@ from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
 
 _STACK_MANAGED_LABEL_KEY = "kitaru.managed"
 _STACK_MANAGED_LABEL_VALUE = "true"
+MODAL_ORCHESTRATOR_FLAVOR = "modal"
+_MODAL_INSTALL_HINT = (
+    "Modal stack support requires the Modal Python dependencies. "
+    'Install them with `uv add "kitaru[modal]"` or '
+    '`pip install "kitaru[modal]"`, then rerun the Modal stack command.'
+)
 
 
 class StackInfo(BaseModel):
@@ -298,8 +298,6 @@ def _build_component_validation_registry() -> dict[
         VertexOrchestratorFlavor(),
         SagemakerOrchestratorFlavor(),
         AzureMLOrchestratorFlavor(),
-        ModalOrchestratorFlavor(),
-        ModalSandboxFlavor(),
         LocalArtifactStoreFlavor(),
         S3ArtifactStoreFlavor(),
         GCPArtifactStoreFlavor(),
@@ -318,6 +316,69 @@ def _build_component_validation_registry() -> dict[
 
 
 _COMPONENT_VALIDATION_METADATA = _build_component_validation_registry()
+
+
+def _is_missing_modal_dependency(exc: BaseException) -> bool:
+    """Return whether an exception represents a missing Modal package import."""
+    if not isinstance(exc, ModuleNotFoundError):
+        return False
+    missing_name = getattr(exc, "name", None)
+    return missing_name == "modal" or (
+        isinstance(missing_name, str) and missing_name.startswith("modal.")
+    )
+
+
+def _exception_chain_has_missing_modal_dependency(exc: BaseException) -> bool:
+    """Return whether any exception in the chain is a missing Modal import."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if _is_missing_modal_dependency(current):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+@lru_cache(maxsize=1)
+def _load_modal_component_validation_metadata() -> dict[
+    tuple[StackComponentType, str], _ComponentValidationMetadata
+]:
+    """Load Modal validation metadata only when Modal support is requested."""
+    try:
+        __import__("modal")
+        from zenml.integrations.modal.flavors.modal_orchestrator_flavor import (
+            ModalOrchestratorFlavor,
+        )
+        from zenml.integrations.modal.flavors.modal_sandbox_flavor import (
+            ModalSandboxFlavor,
+        )
+    except ModuleNotFoundError as exc:
+        if _is_missing_modal_dependency(exc):
+            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        raise
+
+    flavors = (ModalOrchestratorFlavor(), ModalSandboxFlavor())
+    return {
+        (flavor.type, flavor.name): _ComponentValidationMetadata(
+            config_class=flavor.config_class,
+            docs_url=flavor.docs_url,
+        )
+        for flavor in flavors
+    }
+
+
+def _require_modal_stack_support() -> None:
+    """Raise a clear Kitaru error when Modal stack dependencies are missing."""
+    try:
+        __import__("modal")
+        _load_modal_component_validation_metadata()
+    except ModuleNotFoundError as exc:
+        if _is_missing_modal_dependency(exc):
+            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        raise
+    except KitaruUsageError:
+        raise
 
 
 def _merge_configuration_dicts(
@@ -393,6 +454,13 @@ def _component_validation_metadata(
     metadata = _COMPONENT_VALIDATION_METADATA.get((component_type, flavor))
     if metadata is not None:
         return metadata
+
+    if flavor == MODAL_ORCHESTRATOR_FLAVOR:
+        modal_metadata = _load_modal_component_validation_metadata().get(
+            (component_type, flavor)
+        )
+        if modal_metadata is not None:
+            return modal_metadata
 
     if target == StackComponentTarget.SANDBOX:
         sandbox_metadata = _sandbox_components.local_sandbox_validation_metadata(
@@ -1473,7 +1541,15 @@ def _create_remote_stack_operation(
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     stack_label = _stack_type_display_name(stack_type)
 
-    _prevalidate_stack_request_components(stack_request)
+    try:
+        _prevalidate_stack_request_components(stack_request)
+    except Exception as exc:
+        if (
+            stack_type == StackType.MODAL
+            and _exception_chain_has_missing_modal_dependency(exc)
+        ):
+            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        raise
 
     if connector_spec is not None:
         try:
@@ -1495,12 +1571,22 @@ def _create_remote_stack_operation(
     try:
         client._validate_stack_configuration(stack_request)
     except (ValueError, ValidationError) as exc:
+        if (
+            stack_type == StackType.MODAL
+            and _exception_chain_has_missing_modal_dependency(exc)
+        ):
+            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
         raise KitaruUsageError(
             f"Invalid {stack_label} stack configuration for '{selector}'. "
             f"ZenML rejected the final stack request after Kitaru prevalidated "
             f"the component defaults: {exc}"
         ) from exc
     except Exception as exc:
+        if (
+            stack_type == StackType.MODAL
+            and _exception_chain_has_missing_modal_dependency(exc)
+        ):
+            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
         raise KitaruBackendError(
             f"Failed to validate {stack_label} stack '{selector}': {exc}"
         ) from exc
@@ -2529,6 +2615,7 @@ def _create_modal_stack_operation(
 ) -> _StackCreateResult:
     """Create a Modal-backed stack via ZenML's one-shot stack API."""
     selector = _normalize_stack_selector(name)
+    _require_modal_stack_support()
     provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
     stack_request = _build_modal_stack_request(
         selector,

@@ -348,7 +348,10 @@ def create(
     type: Annotated[
         str | None,
         Parameter(
-            help="Stack type: local, kubernetes, vertex, sagemaker, azureml, or modal."
+            help=(
+                "Stack type: local, kubernetes, vertex, sagemaker, azureml, "
+                "or modal. Modal creation requires `kitaru[modal]`."
+            )
         ),
     ] = None,
     artifact_store: Annotated[

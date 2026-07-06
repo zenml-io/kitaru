@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ import pytest
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+import kitaru.config as config_module
 from kitaru._cli._executions import _execution_statistics_table
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru._client._statistics import (
@@ -7023,6 +7025,36 @@ def test_stack_create_modal_builds_spec_with_sandbox_and_overrides() -> None:
         "container_registry": {},
         "sandbox": {"timeout": 1800},
     }
+
+
+def test_stack_create_modal_missing_dependency_shows_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI should show the Modal extra hint instead of a raw import error."""
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+    monkeypatch.setitem(sys.modules, "modal", None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "kitaru[modal]" in stderr
+    assert "Traceback" not in stderr
+    assert "No module named 'modal'" not in stderr
 
 
 def test_stack_create_modal_rejects_region_and_cloud_connector_flags(

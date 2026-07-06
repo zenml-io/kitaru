@@ -119,9 +119,9 @@ connect first with `kitaru login ...` and verify with `kitaru status`.
 
 Kitaru assembles the stack definition for you. For Kubernetes, Vertex,
 SageMaker, and AzureML stacks it also creates the cloud service connector. Modal
-stacks are connectorless in this first path, so the bucket, registry, and the
-credentials needed to use them must already be available in the environments that
-build and run your flow.
+stacks are an edge case: install `kitaru[modal]` first, and make sure the bucket,
+registry, and credentials needed to use them are already available in the
+environments that build and run your flow.
 
 ### Kubernetes example
 
@@ -178,6 +178,13 @@ kitaru stack create prod-azureml \
 AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
 ### Modal example
+
+Install the Modal extra before creating Modal stacks:
+
+```bash
+uv add "kitaru[modal]"
+# or: pip install "kitaru[modal]"
+```
 
 ```bash
 kitaru stack create prod-modal \

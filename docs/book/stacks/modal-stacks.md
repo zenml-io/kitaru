@@ -14,6 +14,7 @@ Modal is a managed-runner path, so there is no `--cluster` or `--namespace` flag
 Before creating the stack, make sure these already exist:
 
 - a Kitaru server you are connected to with `kitaru login ...`
+- Kitaru installed with the Modal extra: `uv add "kitaru[modal]"` or `pip install "kitaru[modal]"`
 - a Modal account with authentication configured (see the [Modal token docs](https://modal.com/docs/reference/cli/token))
 - a remote storage URI for artifacts, such as `s3://my-bucket/kitaru`, `gs://my-bucket/kitaru`, or `az://my-container/kitaru`
 - a remote container registry that Modal can pull from, such as an ECR, Artifact Registry, or ACR repository
@@ -21,6 +22,10 @@ Before creating the stack, make sure these already exist:
 - cloud permissions for the bucket and registry you point at
 
 Kitaru creates the stack definition and component records. It does not create your bucket, registry repository, Modal account, IAM permissions, or cloud credentials for you.
+
+The `kitaru[modal]` extra installs the Python packages needed for Kitaru to
+validate and create Modal components. It does not create or configure your Modal
+account, Modal token, bucket, registry, Docker setup, or cloud permissions.
 
 ### Cloud and registry credentials
 

@@ -37,11 +37,15 @@ This gives you the full SDK, CLI, and everything you need to run flows locally.
 |---|---|
 | `local` | Local server and UI for browsing executions in a local web UI |
 | `mcp` | MCP server for querying executions from AI assistants |
+| `modal` | Dependencies needed to create and validate Modal-backed stacks |
 | `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
 
 ```bash
 uv add "kitaru[mcp,pydantic-ai,local]"
 # or: pip install "kitaru[mcp,pydantic-ai,local]"
+
+# Modal stacks: uv add "kitaru[modal]"
+# or: pip install "kitaru[modal]"
 ```
 
 If you use Claude Code or another MCP-capable assistant, install

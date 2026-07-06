@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+import tomllib
 import types
 import warnings
 from collections.abc import Iterator
@@ -87,6 +88,25 @@ from kitaru.config import (
     use_stack,
 )
 from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+
+
+def _install_fake_modal_package(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install enough fake Modal modules for ZenML Modal config validation."""
+    modal_pkg = types.ModuleType("modal")
+    modal_pkg.__path__ = []
+    modal_config = cast(Any, types.ModuleType("modal.config"))
+    modal_config.config = {}
+    monkeypatch.setitem(sys.modules, "modal", modal_pkg)
+    monkeypatch.setitem(sys.modules, "modal.config", modal_config)
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+
+
+def test_pyproject_declares_modal_optional_extra() -> None:
+    """Package metadata should expose Modal as an explicit optional extra."""
+    pyproject_path = Path(__file__).parents[1] / "pyproject.toml"
+    pyproject = tomllib.loads(pyproject_path.read_text())
+
+    assert pyproject["project"]["optional-dependencies"]["modal"] == ["modal>=1.4,<2"]
 
 
 class _FakeStackPage:
@@ -2605,8 +2625,74 @@ def test_create_modal_stack_dispatcher_routes_modal_requests() -> None:
     )
 
 
-def test_create_modal_stack_operation_creates_stack_without_connector() -> None:
+def test_create_modal_stack_operation_requires_modal_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing Modal dependencies should fail before Kitaru opens a client."""
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+    monkeypatch.setitem(sys.modules, "modal", None)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match=r"kitaru\[modal\]"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rewrites_late_missing_modal_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZenML validation import failures should keep the Kitaru install hint."""
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock._validate_stack_configuration.side_effect = ModuleNotFoundError(
+        "No module named 'modal'",
+        name="modal",
+    )
+
+    monkeypatch.setattr(
+        config_module._config_stacks,
+        "_require_modal_stack_support",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        config_module._config_stacks,
+        "_prevalidate_stack_request_components",
+        lambda stack_request: None,
+    )
+
+    with pytest.raises(KitaruUsageError, match=r"kitaru\[modal\]"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            client_factory=lambda: client_mock,
+        )
+
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_creates_stack_without_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Modal create should build runner/storage/registry and optional sandbox only."""
+    _install_fake_modal_package(monkeypatch)
     spec = ModalStackSpec(
         artifact_store="s3://bucket/path",
         container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
@@ -2711,8 +2797,11 @@ def test_create_modal_stack_operation_creates_stack_without_connector() -> None:
     }
 
 
-def test_create_modal_stack_operation_rejects_unpaired_token_override() -> None:
+def test_create_modal_stack_operation_rejects_unpaired_token_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Modal token overrides should use ZenML's pair validation before backend calls."""
+    _install_fake_modal_package(monkeypatch)
     spec = ModalStackSpec(
         artifact_store="gs://bucket/path",
         container_registry="us-central1-docker.pkg.dev/demo/repo",
@@ -2744,12 +2833,7 @@ def test_modal_stack_validation_accepts_missing_persisted_image_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Modal requests should validate without storing an image builder component."""
-    modal_pkg = types.ModuleType("modal")
-    modal_pkg.__path__ = []
-    modal_config = cast(Any, types.ModuleType("modal.config"))
-    modal_config.config = {}
-    monkeypatch.setitem(sys.modules, "modal", modal_pkg)
-    monkeypatch.setitem(sys.modules, "modal.config", modal_config)
+    _install_fake_modal_package(monkeypatch)
 
     from zenml.client import Client
 
