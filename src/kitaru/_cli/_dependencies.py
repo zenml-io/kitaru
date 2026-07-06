@@ -27,12 +27,18 @@ from kitaru.config import (
     _delete_stack_operation,
     _list_stack_entries,
     _show_stack_operation,
+    create_project,
+    current_project,
+    delete_project,
+    get_project,
     list_model_aliases,
+    list_projects,
     login_to_server,
     register_model_alias,
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+    use_project,
 )
 from kitaru.config import current_stack as get_current_stack
 from kitaru.config import list_stacks as get_available_stacks
@@ -66,6 +72,12 @@ _ORIGINAL_LEGACY_ATTRS: dict[str, Any] = {
     "_show_stack_operation": _show_stack_operation,
     "_create_stack_operation": _create_stack_operation,
     "_delete_stack_operation": _delete_stack_operation,
+    "current_project": current_project,
+    "list_projects": list_projects,
+    "get_project": get_project,
+    "create_project": create_project,
+    "use_project": use_project,
+    "delete_project": delete_project,
     "register_model_alias": register_model_alias,
     "list_model_aliases": list_model_aliases,
     "_resolve_secret_exact": _resolve_secret_exact,
@@ -222,6 +234,30 @@ class CLIDependencies:
             *args,
             **kwargs,
         )
+
+    def current_project(self) -> Any:
+        """Return the active Kitaru project."""
+        return self._legacy_attr("current_project", current_project)()
+
+    def list_projects(self, *args: Any, **kwargs: Any) -> Any:
+        """Return all Kitaru projects visible to the current user."""
+        return self._legacy_attr("list_projects", list_projects)(*args, **kwargs)
+
+    def get_project(self, *args: Any, **kwargs: Any) -> Any:
+        """Return one Kitaru project by name or ID."""
+        return self._legacy_attr("get_project", get_project)(*args, **kwargs)
+
+    def create_project(self, *args: Any, **kwargs: Any) -> Any:
+        """Create a Kitaru project."""
+        return self._legacy_attr("create_project", create_project)(*args, **kwargs)
+
+    def use_project(self, *args: Any, **kwargs: Any) -> Any:
+        """Set the active Kitaru project."""
+        return self._legacy_attr("use_project", use_project)(*args, **kwargs)
+
+    def delete_project(self, *args: Any, **kwargs: Any) -> Any:
+        """Delete a Kitaru project."""
+        return self._legacy_attr("delete_project", delete_project)(*args, **kwargs)
 
     def register_model_alias(self, *args: Any, **kwargs: Any) -> Any:
         """Persist a model alias."""

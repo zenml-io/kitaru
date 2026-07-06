@@ -446,6 +446,49 @@ def test_diff_omits_pro_compare_url_when_project_identity_is_missing() -> None:
     assert result.urls == []
 
 
+def test_diff_omits_compare_url_when_cloud_url_metadata_is_incomplete() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
+    )
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-2",
+                name="lookup_policy_tool",
+                original_call_id="cp-1",
+            )
+        ],
+    )
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+    fake_client.executions.list.return_value = []
+    fake_client._client.return_value.zen_store.url = (
+        "https://67e44b28-zenml.staging.cloudinfra.zenml.io"
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._ui_urls._server_info_from_client",
+            return_value=SimpleNamespace(
+                deployment_type="cloud",
+                pro_dashboard_url="https://staging.cloud.zenml.io",
+                pro_workspace_name=None,
+                pro_workspace_id=None,
+                metadata={},
+            ),
+        ),
+    ):
+        result = diff("kr-original", "kr-replay")
+
+    assert result.compared[0][0] == "kr-replay"
+    assert result.urls == []
+
+
 def test_diff_discovers_replay_beyond_first_200_candidates() -> None:
     original = _execution(
         "kr-original",

@@ -157,6 +157,78 @@ def test_resolve_ui_url_context_uses_workspace_id_when_name_is_absent(
     assert context.workspace == "59f7a3b3-f50f-405c-b4fe-ea341cd0ffed"
 
 
+def test_resolve_ui_url_context_returns_none_for_cloud_with_missing_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(KITARU_UI_URL_ENV, raising=False)
+
+    with (
+        patch(
+            "kitaru._ui_urls._server_info_from_client",
+            return_value=_pro_server_info(
+                pro_workspace_name=None,
+                pro_workspace_id=None,
+                metadata={},
+            ),
+        ),
+        patch(
+            "kitaru.config.resolve_connection_config",
+            return_value=SimpleNamespace(
+                server_url="https://67e44b28-zenml.staging.cloudinfra.zenml.io"
+            ),
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_skips_incomplete_cloud_despite_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        KITARU_UI_URL_ENV,
+        "https://preview.demo.kitaru.zenml.io",
+    )
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(
+            pro_workspace_name=None,
+            pro_workspace_id=None,
+            metadata={},
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is None
+
+
+def test_resolve_ui_url_context_uses_override_as_pro_origin_when_cloud_workspace_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        KITARU_UI_URL_ENV,
+        "https://preview.demo.kitaru.zenml.io",
+    )
+
+    with patch(
+        "kitaru._ui_urls._server_info_from_client",
+        return_value=_pro_server_info(
+            pro_dashboard_url=None,
+            dashboard_url=None,
+            pro_workspace_name="kitaru-dev",
+        ),
+    ):
+        context = resolve_ui_url_context()
+
+    assert context is not None
+    assert context.base_url == "https://preview.demo.kitaru.zenml.io"
+    assert context.route_kind == "pro"
+    assert context.workspace == "kitaru-dev"
+    assert context.explicit_override is True
+
+
 def test_kitaru_ui_url_override_preserves_pro_route_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -28,6 +28,10 @@ stack_app = cyclopts.App(
     name="stack",
     help="Inspect, create, delete, and switch stacks.",
 )
+project_app = cyclopts.App(
+    name="project",
+    help="Inspect, create, delete, and switch Kitaru projects.",
+)
 secrets_app = cyclopts.App(
     name="secrets",
     help="Manage centralized runtime secrets.",
@@ -76,6 +80,7 @@ flow_deployments_app = cyclopts.App(
 
 app.command(log_store_app)
 app.command(stack_app)
+app.command(project_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
@@ -110,6 +115,7 @@ from . import (  # noqa: F401,E402
     _flows,
     _init,
     _models,
+    _projects,
     _secrets,
     _stacks,
     _status,
@@ -129,6 +135,7 @@ __all__ = [
     "log_store_app",
     "main",
     "model_app",
+    "project_app",
     "secrets_app",
     "stack_app",
 ]

@@ -174,13 +174,18 @@ def resolve_ui_url_context(client: KitaruClient | None = None) -> UiUrlContext |
 
     ``KITARU_UI_URL`` still wins as the origin. If server metadata also says the
     connected backend is Pro, Kitaru keeps that override origin but builds the
-    Pro path because the metadata provides the workspace route segment.
+    Pro path because the metadata provides the workspace route segment. If the
+    backend is known to be Pro but route metadata is incomplete, Kitaru returns
+    ``None`` rather than emitting the known-broken legacy server URL.
     """
     override = _normalize_http_base_url(_normalized_kitaru_env(KITARU_UI_URL_ENV))
     server_info = _server_info_from_client(client)
     pro_context = _pro_context_from_server_info(server_info, override=override)
     if pro_context is not None:
         return pro_context
+
+    if server_info is not None and _is_cloud_server(server_info):
+        return None
 
     if override is not None:
         return _legacy_context_from_base_url(

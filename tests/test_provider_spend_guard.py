@@ -2,7 +2,33 @@
 
 from __future__ import annotations
 
-from tests.conftest import _provider_name_for_host, _validate_live_marker_contract
+import asyncio
+import threading
+from typing import cast
+
+import pytest
+
+from tests.conftest import (
+    _guard_provider_call_if_active,
+    _missing_live_provider_auth_messages,
+    _provider_name_for_host,
+    _set_provider_call_guard_state,
+    _validate_live_marker_contract,
+)
+
+
+class _FakePytestItem:
+    def __init__(self, marker_names: set[str]) -> None:
+        self._marker_names = marker_names
+
+    def get_closest_marker(self, marker_name: str) -> object | None:
+        if marker_name in self._marker_names:
+            return object()
+        return None
+
+
+def _fake_pytest_item(marker_names: set[str]) -> pytest.Item:
+    return cast(pytest.Item, _FakePytestItem(marker_names))
 
 
 def _assert_marker_contract_accepts(*items: tuple[str, set[str]]) -> None:
@@ -15,6 +41,147 @@ def _assert_marker_contract_rejects(
 ) -> None:
     errors = _validate_live_marker_contract(items)
     assert any(match in error for error in errors)
+
+
+def test_provider_spend_guard_fixture_activates_for_non_live_tests() -> None:
+    with pytest.raises(AssertionError, match="Blocked OpenAI provider call"):
+        _guard_provider_call_if_active("OpenAI")
+
+
+def test_provider_spend_guard_inactive_state_allows_provider_calls() -> None:
+    _set_provider_call_guard_state(active=False, nodeid="tests/live/test_example.py")
+    _guard_provider_call_if_active("OpenAI")
+
+
+def test_provider_spend_guard_state_is_visible_to_background_threads() -> None:
+    errors: list[BaseException] = []
+
+    def attempt_provider_call() -> None:
+        try:
+            _guard_provider_call_if_active("Anthropic")
+        except BaseException as exc:
+            errors.append(exc)
+
+    _set_provider_call_guard_state(active=True, nodeid="tests/test_example.py")
+    thread = threading.Thread(target=attempt_provider_call)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], AssertionError)
+    assert "Blocked Anthropic provider call" in str(errors[0])
+
+
+def test_live_openai_auth_message_reports_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    missing = _missing_live_provider_auth_messages(_fake_pytest_item({"live_openai"}))
+
+    assert missing == ["OPENAI_API_KEY"]
+
+
+def test_live_openai_auth_message_accepts_present_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    missing = _missing_live_provider_auth_messages(_fake_pytest_item({"live_openai"}))
+
+    assert missing == []
+
+
+def test_provider_spend_guard_blocks_httpx_provider_request_before_transport() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(AssertionError, match="Blocked OpenAI provider call"),
+    ):
+        client.get("https://api.openai.com/v1/models")
+
+    assert requests_seen == []
+
+
+def test_provider_spend_guard_allows_httpx_localhost_request() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = client.get("http://127.0.0.1:9999/health")
+
+    assert response.status_code == 200
+    assert len(requests_seen) == 1
+
+
+def test_provider_spend_guard_blocks_httpx_provider_base_url_before_transport() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(
+            base_url="https://api.openai.com",
+            transport=httpx.MockTransport(handler),
+        ) as client,
+        pytest.raises(AssertionError, match="Blocked OpenAI provider call"),
+    ):
+        client.get("/v1/models")
+
+    assert requests_seen == []
+
+
+def test_provider_spend_guard_blocks_async_httpx_base_url_before_transport() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    async def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    async def request_models() -> None:
+        async with httpx.AsyncClient(
+            base_url="https://api.openai.com",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await client.get("/v1/models")
+
+    with pytest.raises(AssertionError, match="Blocked OpenAI provider call"):
+        asyncio.run(request_models())
+
+    assert requests_seen == []
+
+
+def test_provider_spend_guard_allows_httpx_localhost_base_url_request() -> None:
+    httpx = pytest.importorskip("httpx")
+    requests_seen: list[object] = []
+
+    def handler(request: object) -> object:
+        requests_seen.append(request)
+        return httpx.Response(200)
+
+    with httpx.Client(
+        base_url="http://127.0.0.1:9999",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert len(requests_seen) == 1
 
 
 def test_provider_spend_guard_matches_vertex_global_and_regional_hosts() -> None:
