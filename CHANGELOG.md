@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
 - Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
+- Added Modal stack cloud credential support for private S3/ECR, GCS/GAR/GCR, and Azure Blob/ADLS/ACR resources by linking provider service connectors to the artifact-store and container-registry components.
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.

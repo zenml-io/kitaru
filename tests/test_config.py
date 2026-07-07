@@ -2856,6 +2856,410 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
     }
 
 
+def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS-backed Modal credentials should link S3/ECR but not Modal components."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry=("123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"),
+        region="eu-central-1",
+        credentials="aws-profile:ml-team",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component("art-id", "modal-dev-artifacts", flavor="s3")
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component("reg-id", "modal-dev-registry", flavor="aws")
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
+            ],
+        },
+    )
+    connector = SimpleNamespace(name="modal-dev-aws")
+    hydrated_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            sandbox_flavor="modal",
+        )
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-dev",
+        connector_type="aws",
+        resource_type="aws-generic",
+        auth_method="implicit",
+        configuration={"region": "eu-central-1", "profile_name": "ml-team"},
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert len(stack_request.service_connectors) == 1
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "aws"
+    assert connector_info.auth_method == "implicit"
+    assert connector_info.configuration == {
+        "region": "eu-central-1",
+        "profile_name": "ml-team",
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "modal"
+    assert getattr(orchestrator, "service_connector_index", None) is None
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "s3"
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "aws"
+    assert container_registry.configuration == {
+        "uri": "123456789012.dkr.ecr.eu-central-1.amazonaws.com",
+        "default_repository": "kitaru",
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+
+    sandbox = stack_request.components[StackComponentType.SANDBOX][0]
+    assert getattr(sandbox, "service_connector_index", None) is None
+    client_mock.get_stack.assert_called_once_with("stack-modal-id", hydrate=True)
+    assert result.service_connectors_created == ("modal-dev-aws",)
+    assert result.resources == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": (
+            "123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"
+        ),
+        "region": "eu-central-1",
+        "sandbox": "modal",
+    }
+
+
+def test_create_modal_stack_operation_attaches_gcp_connector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """GCP-backed Modal credentials should reuse the existing GCP connector flow."""
+    _install_fake_modal_package(monkeypatch)
+    service_account_path = tmp_path / "modal-gcp.json"
+    service_account_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "demo-project",
+            "client_email": "demo@demo-project.iam.gserviceaccount.com",
+        }
+    )
+    service_account_path.write_text(service_account_json, encoding="utf-8")
+    spec = ModalStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/kitaru-images",
+        region="us-central1",
+        credentials=f"gcp-service-account:{service_account_path}",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    connector = SimpleNamespace(name="modal-gcp")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-gcp",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-gcp-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-gcp-artifacts",
+                    flavor="gcp",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-gcp-registry",
+                    flavor="gcp",
+                    connector=connector,
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation("modal-gcp", spec=spec, activate=False)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-gcp",
+        connector_type="gcp",
+        resource_type="gcp-generic",
+        auth_method="service-account",
+        configuration={
+            "project_id": "demo-project",
+            "service_account_json": service_account_json,
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.service_connector_resource_id == "gs://bucket"
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert (
+        container_registry.service_connector_resource_id
+        == "us-central1-docker.pkg.dev/demo-project/kitaru-images"
+    )
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert getattr(orchestrator, "service_connector_index", None) is None
+    assert result.service_connectors_created == ("modal-gcp",)
+    assert result.resources == {
+        "provider": "gcp",
+        "artifact_store": "gs://bucket/path",
+        "container_registry": "us-central1-docker.pkg.dev/demo-project/kitaru-images",
+        "region": "us-central1",
+    }
+
+
+def test_create_modal_stack_operation_attaches_azure_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure-backed Modal credentials should reuse the Azure connector flow."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        container_registry="demo.azurecr.io/kitaru",
+        subscription_id="00000000-0000-0000-0000-000000000123",
+        credentials="azure-access-token:token-123",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    connector = SimpleNamespace(name="modal-azure")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-azure",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-azure-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-azure-artifacts",
+                    flavor="azure",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-azure-registry",
+                    flavor="azure",
+                    connector=connector,
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation("modal-azure", spec=spec)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-azure",
+        connector_type="azure",
+        resource_type="azure-generic",
+        auth_method="access-token",
+        configuration={
+            "subscription_id": "00000000-0000-0000-0000-000000000123",
+            "token": "token-123",
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.configuration == {
+        "path": "abfs://container@demo.dfs.core.windows.net/kitaru/path"
+    }
+    assert (
+        artifact_store.service_connector_resource_id
+        == "abfs://container@demo.dfs.core.windows.net"
+    )
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.service_connector_resource_id == "demo.azurecr.io"
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert getattr(orchestrator, "service_connector_index", None) is None
+    assert result.service_connectors_created == ("modal-azure",)
+    assert result.resources == {
+        "provider": "azure",
+        "artifact_store": "abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        "container_registry": "demo.azurecr.io/kitaru",
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+    }
+
+
+def test_create_modal_stack_operation_rejects_aws_credentials_without_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS Modal connector requests need a cloud region."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="AWS-backed Modal cloud credentials"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                credentials="aws-profile:ml-team",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_no_verify_without_connector_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal verify=False should not create a cloud connector by itself."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="only applies when Kitaru is creating"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                verify=False,
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_mismatched_credentialed_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Credentialed Modal stacks should not mix cloud storage and registry providers."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="same cloud provider"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="gs://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                region="us-east-1",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_mismatched_connectorless_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal storage and registry providers must match even without a connector."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="same cloud provider"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="gs://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
 def test_create_modal_stack_operation_rejects_unpaired_token_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

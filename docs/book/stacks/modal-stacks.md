@@ -21,21 +21,25 @@ Before creating the stack, make sure these already exist:
 - a Docker / image-build environment on the machine where you submit flows (see the image-builder note below)
 - cloud permissions for the bucket and registry you point at
 
-Kitaru creates the stack definition and component records. It does not create your bucket, registry repository, Modal account, IAM permissions, or cloud credentials for you.
+Kitaru creates the stack definition and component records. It does not create your bucket, registry repository, Modal account, or IAM permissions for you. When you pass cloud credential flags, Kitaru creates a cloud service connector and links it to the storage and registry components in the stack.
 
 The `kitaru[modal]` extra installs the Python packages needed for Kitaru to
 validate and create Modal components. It does not create or configure your Modal
 account, Modal token, bucket, registry, Docker setup, or cloud permissions.
 
-### Cloud and registry credentials
+### Modal credentials and cloud credentials are different
 
-The first Modal stack path is connectorless: `kitaru stack create --type modal` does not create an AWS, GCP, or Azure service connector. That means the cloud resources you pass must already be reachable from the places that use them:
+There are two separate credential channels:
 
-- The machine that submits the flow must be able to build the image, push it to the registry, and write build metadata. For private registries, make sure Docker is already authenticated before submitting the flow.
-- The Modal runtime must be able to pull the image and read/write the artifact store. Public resources work as-is; private resources need credentials to be available to the ZenML/Kitaru runtime environment or configured through advanced component settings.
-- Modal credentials are separate from cloud credentials. Use `--extra orchestrator.token_id=...` and `--extra orchestrator.token_secret=...` only for Modal API authentication.
+- **Modal API credentials** let Kitaru ask Modal to run work. Use your normal Modal CLI configuration, or pass `--extra orchestrator.token_id=...` and `--extra orchestrator.token_secret=...` together.
+- **Cloud credentials** let Kitaru attach credentials to the storage and registry components. Later, when a run starts, ZenML can hand registry credentials to Modal so Modal can pull the private image instead of trying an anonymous pull.
 
-A good failure story to keep in mind: the stack can be created successfully, then the first run fails because Modal cannot pull `123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru:...` or cannot write to `s3://my-bucket/kitaru`. If that happens, fix the registry/cloud credentials first; the stack definition itself may be fine.
+If you do not pass cloud credential flags, Modal stack creation stays connectorless. That keeps public resources and manually configured environments working exactly as before. In that connectorless setup:
+
+- The machine that submits the flow must be able to build the image, push it to the registry, and write build metadata.
+- The Modal runtime must be able to pull the image and read/write the artifact store by some other means.
+
+A good failure story to keep in mind: your laptop builds and pushes `123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru:...` successfully, then Modal starts remotely and tries to pull that image anonymously. The run fails with an authentication error even though the stack was created successfully. Passing the matching cloud credential flags avoids that failure: Kitaru links the connector to the artifact store and registry components, not to the Modal runner.
 
 ### Why Modal needs an image builder
 
@@ -54,6 +58,8 @@ kitaru stack create prod-modal \
   --type modal \
   --artifact-store s3://my-bucket/kitaru \
   --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru \
+  --region eu-west-1 \
+  --credentials aws-profile:ml-team \
   --sandbox modal
 ```
 {% endtab %}
@@ -64,6 +70,8 @@ kitaru stack create prod-modal \
   --type modal \
   --artifact-store gs://my-bucket/kitaru \
   --container-registry us-central1-docker.pkg.dev/my-project/kitaru-images \
+  --region us-central1 \
+  --credentials gcp-service-account:/path/to/key.json \
   --sandbox modal
 ```
 {% endtab %}
@@ -74,6 +82,8 @@ kitaru stack create prod-modal \
   --type modal \
   --artifact-store az://my-container/kitaru \
   --container-registry myregistry.azurecr.io/kitaru \
+  --subscription-id 00000000-0000-0000-0000-000000000123 \
+  --credentials azure-access-token:YOUR_TOKEN \
   --sandbox modal
 ```
 {% endtab %}
@@ -88,7 +98,16 @@ The required Modal fields are:
 | `--artifact-store` | Remote storage URI where Kitaru writes checkpoint outputs and saved artifacts |
 | `--container-registry` | Remote registry where Kitaru pushes the flow image |
 
-Modal does not use `--region`. If you want to steer where Modal places work, set it through `--extra orchestrator.region=...` / `--extra orchestrator.cloud=...` instead.
+The cloud credential fields are optional, but if you use private storage or a private registry you normally want them:
+
+| Field | Meaning |
+|---|---|
+| `--region` | Cloud provider region when the provider needs one. For AWS-backed Modal stacks, this is the S3/ECR connector region and must match the ECR registry host. For GCP-backed Modal stacks, Kitaru can check it against GAR/GCR when the registry host includes a location. |
+| `--subscription-id` | Azure subscription ID for Azure Blob/ADLS + ACR Modal stacks |
+| `--credentials` | Cloud credential reference, such as `aws-profile:ml-team`, `gcp-service-account:/path/to/key.json`, or `azure-access-token:...` |
+| `--no-verify` | Skip cloud connector verification when Kitaru is creating a connector. It does not request a connector by itself; pair it with the needed cloud input, such as `--region`, `--subscription-id`, or `--credentials`. |
+
+Top-level `--region` is **not** Modal placement. If you want to steer where Modal places work, set it through `--extra orchestrator.region=...` / `--extra orchestrator.cloud=...` instead.
 
 ## Set advanced Modal defaults
 

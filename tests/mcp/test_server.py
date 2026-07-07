@@ -2018,6 +2018,10 @@ def test_manage_stack_create_modal_dispatches_structured_spec() -> None:
     assert modal_spec.model_dump(mode="json") == {
         "artifact_store": "gs://my-bucket/kitaru",
         "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+        "region": None,
+        "subscription_id": None,
+        "credentials": None,
+        "verify": True,
     }
     overrides = mock_create_stack.call_args.kwargs["component_overrides"]
     assert isinstance(overrides, StackComponentConfigOverrides)
@@ -2063,11 +2067,70 @@ def test_manage_stack_create_modal_requires_storage_and_registry() -> None:
     mock_create_stack.assert_not_called()
 
 
-def test_manage_stack_create_modal_rejects_region() -> None:
-    """Modal placement should use extra.orchestrator.region, not region."""
+def test_manage_stack_create_modal_accepts_aws_cloud_credentials() -> None:
+    """MCP Modal create should pass AWS cloud credentials separately from tokens."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "prod-modal (orchestrator)",
+                "prod-modal (artifact_store)",
+                "prod-modal (container_registry)",
+            ),
+            stack_type="modal",
+            service_connectors_created=("prod-modal-aws",),
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://my-bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
+                ),
+                "region": "eu-west-1",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            region="eu-west-1",
+            credentials="aws-profile:ml-team",
+            verify=False,
+            extra={
+                "orchestrator": {
+                    "token_id": "ak-test",
+                    "token_secret": "as-test",
+                }
+            },
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://my-bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        "region": "eu-west-1",
+        "subscription_id": None,
+        "credentials": "aws-profile:ml-team",
+        "verify": False,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.orchestrator == {
+        "token_id": "ak-test",
+        "token_secret": "as-test",
+    }
+    assert payload["service_connectors_created"] == ["prod-modal-aws"]
+
+
+def test_manage_stack_create_modal_rejects_aws_credentials_without_region() -> None:
+    """AWS-backed Modal connector requests need region; Modal placement stays extra."""
     with (
         patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
-        pytest.raises(ValueError, match="`region`"),
+        pytest.raises(ValueError, match="AWS-backed Modal cloud credentials"),
     ):
         manage_stack(
             "create",
@@ -2075,10 +2138,114 @@ def test_manage_stack_create_modal_rejects_region() -> None:
             stack_type="modal",
             artifact_store="s3://my-bucket/kitaru",
             container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
-            region="us-east-1",
+            credentials="aws-profile:ml-team",
         )
 
     mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -> None:
+    """MCP Modal verify=False should not request a cloud connector by itself."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="only applies when Kitaru is creating"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            verify=False,
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_rejects_mismatched_connectorless_resources() -> None:
+    """MCP Modal create should reject mixed providers without connector inputs."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="same cloud provider"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_accepts_gcp_cloud_credentials() -> None:
+    """MCP Modal create should pass GCP connector inputs through."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="gcp-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=("gcp-modal-gcp",),
+            resources={},
+        )
+
+        manage_stack(
+            "create",
+            "gcp-modal",
+            stack_type="modal",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/repo",
+            region="us-central1",
+            credentials="gcp-service-account:/tmp/key.json",
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+        "region": "us-central1",
+        "subscription_id": None,
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": True,
+    }
+
+
+def test_manage_stack_create_modal_accepts_azure_cloud_credentials() -> None:
+    """MCP Modal create should pass Azure connector inputs through."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="azure-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=("azure-modal-azure",),
+            resources={},
+        )
+
+        manage_stack(
+            "create",
+            "azure-modal",
+            stack_type="modal",
+            artifact_store="az://container/kitaru",
+            container_registry="demo.azurecr.io/kitaru",
+            subscription_id="00000000-0000-0000-0000-000000000123",
+            credentials="azure-access-token:token-123",
+            verify=False,
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "az://container/kitaru",
+        "container_registry": "demo.azurecr.io/kitaru",
+        "region": None,
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "credentials": "azure-access-token:token-123",
+        "verify": False,
+    }
 
 
 def test_manage_stack_create_kubernetes_passes_explicit_sandbox() -> None:
@@ -2179,8 +2346,8 @@ _REMOTE_STACK_TYPE_ERROR = (
 )
 _CLOUD_CONNECTOR_STACK_TYPE_ERROR = (
     'Remote stack options require `stack_type="kubernetes"`, '
-    '`stack_type="vertex"`, `stack_type="sagemaker"`, or '
-    '`stack_type="azureml"`'
+    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
+    '`stack_type="azureml"`, or `stack_type="modal"`'
 )
 
 
@@ -2736,7 +2903,8 @@ def test_manage_stack_create_local_rejects_azureml_only_options() -> None:
         pytest.raises(
             ValueError,
             match=(
-                'AzureML-only options require `stack_type="azureml"`: `subscription_id`'
+                'Stack-specific options require `stack_type="azureml"` or '
+                '`stack_type="modal"`: `subscription_id`'
             ),
         ),
     ):

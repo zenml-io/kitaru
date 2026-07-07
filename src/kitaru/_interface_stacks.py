@@ -25,6 +25,11 @@ from kitaru._config._stacks import (
     StackType,
     VertexStackSpec,
 )
+from kitaru._modal_registry import (
+    ecr_region_from_registry,
+    gcp_location_from_registry,
+    infer_modal_registry_provider,
+)
 
 _CREATE_ALLOWED_STACK_TYPES = (
     StackType.LOCAL,
@@ -90,15 +95,15 @@ _FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
     "artifact_store": frozenset(_REMOTE_STACK_TYPES),
     "container_registry": frozenset(_REMOTE_STACK_TYPES),
     "cluster": frozenset({StackType.KUBERNETES}),
-    "region": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
-    "subscription_id": frozenset({StackType.AZUREML}),
+    "region": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
+    "subscription_id": frozenset({StackType.AZUREML, StackType.MODAL}),
     "resource_group": frozenset({StackType.AZUREML}),
     "workspace": frozenset({StackType.AZUREML}),
     "execution_role": frozenset({StackType.SAGEMAKER}),
     "namespace": frozenset({StackType.KUBERNETES}),
-    "credentials": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
+    "credentials": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
     "sandbox": frozenset(_CREATE_ALLOWED_STACK_TYPES),
-    "verify": frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
+    "verify": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
 }
 _FIXED_PROVIDER_BY_STACK_TYPE = {
     StackType.VERTEX: CloudProvider.GCP,
@@ -369,6 +374,111 @@ def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
     )
 
 
+def _modal_cloud_connector_inputs_requested(
+    *,
+    region: str | None,
+    subscription_id: str | None,
+    credentials: str | None,
+) -> bool:
+    """Return whether Modal stack inputs request a Kitaru cloud connector."""
+    return bool(
+        region is not None or subscription_id is not None or credentials is not None
+    )
+
+
+def _validate_modal_cloud_connector_inputs(
+    *,
+    provider: CloudProvider,
+    artifact_store: str,
+    container_registry: str,
+    region: str | None,
+    subscription_id: str | None,
+    credentials: str | None,
+    verify: bool,
+    labels: StackOptionLabels,
+) -> None:
+    """Reject impossible Modal cloud credential combinations early."""
+    registry_provider = infer_modal_registry_provider(container_registry)
+    if registry_provider != provider.value:
+        raise ValueError(
+            "Modal stacks must use an artifact store and container registry "
+            "from the same cloud provider. "
+            f"Artifact store '{artifact_store}' is {provider.value}, but registry "
+            f"'{container_registry}' is {registry_provider}."
+        )
+
+    if not _modal_cloud_connector_inputs_requested(
+        region=region,
+        subscription_id=subscription_id,
+        credentials=credentials,
+    ):
+        if not verify:
+            raise ValueError(
+                f"{labels.field_labels['verify']} only applies when Kitaru is "
+                "creating a cloud connector for a Modal stack. Add the needed "
+                "cloud connector input, such as "
+                f"{labels.field_labels['region']}, "
+                f"{labels.field_labels['subscription_id']}, or "
+                f"{labels.field_labels['credentials']}, or remove "
+                f"{labels.field_labels['verify']}."
+            )
+        return
+
+    region_label = labels.field_labels["region"]
+    subscription_label = labels.field_labels["subscription_id"]
+    if provider == CloudProvider.AWS:
+        if subscription_id is not None:
+            raise ValueError(
+                f"AWS-backed Modal stacks do not use {subscription_label}. Use "
+                f"{region_label} for the AWS/ECR region, or use an Azure artifact "
+                "store and ACR registry for Azure credentials."
+            )
+        if region is None:
+            raise ValueError(
+                f"AWS-backed Modal cloud credentials require {region_label}. "
+                "This is the AWS/ECR region for the S3/ECR connector. Modal "
+                "placement still uses `--extra orchestrator.region=...`."
+            )
+        ecr_region = ecr_region_from_registry(container_registry)
+        if ecr_region is not None and ecr_region != region:
+            raise ValueError(
+                f"AWS-backed Modal cloud credentials require {region_label} to "
+                "match the ECR registry host. "
+                f"{region_label} was '{region}', but the registry host uses "
+                f"'{ecr_region}'. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+    if provider == CloudProvider.GCP:
+        if subscription_id is not None:
+            raise ValueError(
+                f"GCP-backed Modal stacks do not use {subscription_label}. Use a "
+                "gs:// artifact store and a GAR/GCR registry; Kitaru infers the "
+                "GCP project from the registry URI."
+            )
+        gcp_location = gcp_location_from_registry(container_registry)
+        if region is not None and gcp_location is not None and region != gcp_location:
+            raise ValueError(
+                f"GCP-backed Modal cloud credentials require {region_label} to "
+                "match the GAR/GCR registry host when both are provided. "
+                f"{region_label} was '{region}', but the registry host uses "
+                f"'{gcp_location}'. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+    if provider == CloudProvider.AZURE:
+        if subscription_id is None:
+            raise ValueError(
+                f"Azure-backed Modal cloud credentials require {subscription_label} "
+                "so Kitaru can create the Azure service connector for Blob/ADLS "
+                "and ACR. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+
 def _render_field_labels(field_names: list[str], *, labels: StackOptionLabels) -> str:
     """Render interface-specific labels for one or more stack fields."""
     return ", ".join(labels.field_labels[field_name] for field_name in field_names)
@@ -393,6 +503,7 @@ def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
     if allowed_stack_types in {
         frozenset(_REMOTE_STACK_TYPES),
         frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
+        frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
     }:
         return "Remote stack options"
     if len(allowed_stack_types) == 1:
@@ -949,9 +1060,23 @@ def build_remote_stack_spec(
         )
 
     if stack_type == StackType.MODAL:
+        _validate_modal_cloud_connector_inputs(
+            provider=provider,
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            region=normalized_region,
+            subscription_id=normalized_subscription_id,
+            credentials=normalized_credentials,
+            verify=verify,
+            labels=labels,
+        )
         return ModalStackSpec(
             artifact_store=normalized_artifact_store,
             container_registry=normalized_container_registry,
+            region=normalized_region,
+            subscription_id=normalized_subscription_id,
+            credentials=normalized_credentials,
+            verify=verify,
         )
 
     raise ValueError(f"Unsupported stack type: {stack_type.value}")

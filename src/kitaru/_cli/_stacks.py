@@ -404,15 +404,22 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Cloud region for Kubernetes, Vertex, SageMaker, or AzureML "
-                "stacks. Optional for AzureML. Modal placement uses "
+                "Cloud provider region for Kubernetes, Vertex, SageMaker, "
+                "AzureML, or credentialed Modal stack components. Optional for "
+                "AzureML. For Modal, this is the cloud artifact/registry region "
+                "where applicable; Modal placement uses "
                 "--extra orchestrator.region=... instead."
             )
         ),
     ] = None,
     subscription_id: Annotated[
         str | None,
-        Parameter(help="Azure subscription ID for AzureML stacks."),
+        Parameter(
+            help=(
+                "Azure subscription ID for AzureML stacks or credentialed "
+                "Azure-backed Modal stack components."
+            )
+        ),
     ] = None,
     resource_group: Annotated[
         str | None,
@@ -435,8 +442,10 @@ def create(
         Parameter(
             help=(
                 "Optional cloud credentials reference for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks. Modal credentials use "
-                "--extra orchestrator.token_id=... and token_secret=... instead."
+                "SageMaker, AzureML, or credentialed Modal stack components. "
+                "Modal API credentials are separate: use "
+                "--extra orchestrator.token_id=... and token_secret=... for "
+                "Modal tokens."
             )
         ),
     ] = None,
@@ -468,7 +477,7 @@ def create(
         Parameter(
             help=(
                 "Skip cloud connector verification for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks."
+                "SageMaker, AzureML, or credentialed Modal stack components."
             )
         ),
     ] = None,

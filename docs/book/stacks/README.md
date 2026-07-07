@@ -119,9 +119,10 @@ connect first with `kitaru login ...` and verify with `kitaru status`.
 
 Kitaru assembles the stack definition for you. For Kubernetes, Vertex,
 SageMaker, and AzureML stacks it also creates the cloud service connector. Modal
-stacks are an edge case: install `kitaru[modal]` first, and make sure the bucket,
-registry, and credentials needed to use them are already available in the
-environments that build and run your flow.
+stacks split that responsibility: the Modal runner itself is connectorless, but
+private S3/GCS/Azure storage and private ECR/GAR/GCR/ACR registries can use the
+same top-level cloud credential flags to create and link a cloud service
+connector to the storage and registry components.
 
 ### Kubernetes example
 
@@ -191,10 +192,12 @@ kitaru stack create prod-modal \
   --type modal \
   --artifact-store s3://my-bucket/kitaru \
   --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru \
+  --region eu-west-1 \
+  --credentials aws-profile:ml-team \
   --sandbox modal
 ```
 
-Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants and the image-builder requirement, see [Modal](modal-stacks.md).
+Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. `--region` in this example is the AWS/ECR region for the cloud connector; Modal placement still goes through `--extra orchestrator.region=...`. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants and the image-builder requirement, see [Modal](modal-stacks.md).
 
 You can also keep the same inputs in a YAML file and create the stack with:
 
