@@ -901,6 +901,39 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
+  - id: agentu-record-replay
+    path: examples/integrations/agentu_agent/agentu_record_replay.py
+    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    owner_area: agentu integration record/replay and inner-call tracing
+    coverage:
+      deterministic_pytest:
+        status: missing
+        waiver:
+          reason: agentu is a third-party package that is not a managed extra of
+            this project, and the example needs a live OpenAI-compatible model
+            endpoint (local Ollama by default), so no provider-free pytest exists
+            yet.
+          reviewer_action: If this example changes, run it locally with agentu
+            installed against Ollama or an OpenAI-compatible endpoint and confirm
+            the replayed reply differs from the original while triage is skipped.
+      local_smoke:
+        status: manual_only
+        waiver:
+          reason: Requires installing the external agentu package and a running
+            OpenAI-compatible model endpoint, so it is not safe as unattended
+            local smoke.
+          reviewer_action: Run the documented command with AGENTU_* env vars
+            pointing at an available model before release if this example
+            changed.
+        command: uv run --with agentu python examples/integrations/agentu_agent/agentu_record_replay.py
+        requires_server: true
+        required_env: [AGENTU_API_BASE, AGENTU_API_KEY, AGENTU_MODEL]
+        timeout_seconds: 180
+      live_provider:
+        status: not_applicable
+        required: false
+    release_policy:
+      required_when_changed: true
   - id: openai-research-bot
     path: examples/end_to_end/openai_research_bot/research_bot.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

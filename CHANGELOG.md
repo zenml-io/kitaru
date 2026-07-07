@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
+- Added an agentu integration example (`examples/integrations/agentu_agent/`): a researcher fan-out → analyst → writer workflow with plain `agentu.Agent` calls as checkpoints, an agentu middleware that records every inner LLM prompt/response as Kitaru artifacts, and two replay forks of the writer step (counterfactual analysis and model swap).
 
 ### Changed
 - PydanticAI tool-checkpoint replay input overrides now rerun the tool body with edited `tool_args`. Users still pass the public `input` override field; shorthand tool arguments and explicit `{"tool_args": ...}` input-slot overrides are both supported.
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- Replay now preserves recorded flow parameters that have signature defaults: unoverridden flow inputs such as `model=None` no longer silently revert to their declared defaults during replay, while explicit `flow_overrides` still take precedence.
 - `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
