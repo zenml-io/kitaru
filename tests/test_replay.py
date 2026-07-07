@@ -67,7 +67,7 @@ def _step(
 
 def _run(
     *steps: Any,
-    parameters: Mapping[str, Any] | None = None,
+    parameters: Mapping[Any, Any] | None = None,
 ) -> PipelineRunResponse:
     kwargs: dict[str, Any] = {
         "id": uuid4(),
@@ -203,6 +203,65 @@ def test_replay_plan_flow_overrides_win_on_same_key() -> None:
 
     assert plan.input_overrides == {"topic": "new topic", "model": "model-a"}
     assert plan.document.flow_overrides == {"topic": "new topic"}
+
+
+def test_replay_plan_missing_config_parameters_are_empty() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+    run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(
+            id=uuid4(), steps={write.name: write}, config=SimpleNamespace()
+        ),
+    )
+
+    plan = build_replay_plan(run=run, at="write")
+
+    assert plan.input_overrides == {}
+    assert plan.document.flow_overrides == {}
+
+
+def test_replay_plan_rejects_malformed_recorded_flow_parameters() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+    run = cast(
+        PipelineRunResponse,
+        SimpleNamespace(
+            id=uuid4(),
+            steps={write.name: write},
+            config=SimpleNamespace(parameters=["not", "a", "mapping"]),
+        ),
+    )
+
+    with pytest.raises(KitaruStateError, match="must be a mapping"):
+        build_replay_plan(run=run, at="write")
+
+
+def test_replay_plan_stringifies_recorded_flow_parameter_keys() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+
+    plan = build_replay_plan(
+        run=_run(write, parameters={1: "recorded value"}),
+        at="write",
+    )
+
+    assert plan.input_overrides == {"1": "recorded value"}
+    assert plan.document.flow_overrides == {}
+
+
+def test_replay_plan_none_flow_override_wins_over_recorded_parameter() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+
+    plan = build_replay_plan(
+        run=_run(write, parameters={"model": "model-a"}),
+        at="write",
+        flow_overrides={"model": None},
+    )
+
+    assert plan.input_overrides == {"model": None}
+    assert plan.document.flow_overrides == {"model": None}
 
 
 def test_leaf_output_override_explains_no_downstream_consumer() -> None:
