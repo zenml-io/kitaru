@@ -6,7 +6,7 @@ import inspect
 import json
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -231,6 +231,7 @@ class _DummyRun:
         status_reason: str | None = None,
         exception_traceback: str | None = None,
         active_wait_condition: Any = None,
+        parameters: Mapping[str, Any] | None = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
@@ -238,6 +239,8 @@ class _DummyRun:
         self.start_time = None
         self.end_time = None
         self.run_metadata = run_metadata or {}
+        if parameters is not None:
+            self.config = SimpleNamespace(parameters=dict(parameters))
         self.pipeline = SimpleNamespace(name=flow_name, id=flow_id or uuid4())
         self.stack = SimpleNamespace(name=stack_name) if stack_name else None
         self.snapshot = snapshot
@@ -5949,6 +5952,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
 def _replay_fallback_source_and_pipeline(
     *,
     replayed_status: ZenMLExecutionStatus,
+    parameters: Mapping[str, Any] | None = None,
 ) -> tuple[_DummyRun, _DummyRun, SimpleNamespace, SimpleNamespace]:
     fetch_step = _DummyStep(
         name="fetch",
@@ -5982,6 +5986,7 @@ def _replay_fallback_source_and_pipeline(
                 )
             )
         ),
+        parameters=parameters,
     )
     replayed_run = _DummyRun(
         status=replayed_status,
@@ -5994,6 +5999,48 @@ def _replay_fallback_source_and_pipeline(
         __kitaru_pipeline_source_sample_flow=replay_pipeline,
     )
     return source_run, replayed_run, replay_pipeline, replay_module
+
+
+def test_replay_fallback_preserves_unoverridden_recorded_flow_parameters() -> None:
+    source_run, _replayed_run, replay_pipeline, replay_module = (
+        _replay_fallback_source_and_pipeline(
+            replayed_status=ZenMLExecutionStatus.RUNNING,
+            parameters={"topic": "recorded topic", "model": "model-a"},
+        )
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.safe_persist_replay_submission_metadata"),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(
+            source_run
+        )
+
+        KitaruClient().executions.replay(
+            str(source_run.id),
+            at="write",
+            flow_overrides={"topic": "new topic"},
+            wait=False,
+        )
+
+    replay_pipeline.replay.assert_called_once()
+    replay_kwargs = replay_pipeline.replay.call_args.kwargs
+    assert replay_kwargs["pipeline_run"] == source_run.id
+    assert replay_kwargs["skip"] == {"fetch"}
+    assert replay_kwargs["input_overrides"] == {
+        "topic": "new topic",
+        "model": "model-a",
+    }
 
 
 def test_replay_fallback_wait_persists_metadata_before_wait_aggregation() -> None:

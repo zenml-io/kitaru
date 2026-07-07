@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Modal stack creation now reuses matching server-side service connectors for artifact stores and container registries when explicit cloud credentials are not provided, avoiding remote-server failures caused by local-only credential inputs such as AWS SSO profiles.
+- Replay now preserves recorded flow parameters when submitting a replay, so overriding one flow argument no longer lets defaulted arguments such as `model=None` silently replace recorded values.
 - `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
