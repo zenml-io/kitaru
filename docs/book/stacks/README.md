@@ -195,7 +195,7 @@ kitaru stack create prod-modal \
   --sandbox modal
 ```
 
-Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. Without explicit cloud credential flags, Kitaru first tries to reuse matching server-side service connectors for the bucket and registry; if none exist, it creates a connectorless stack for public or manually configured resources. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants, connector reuse, explicit credential caveats, and the image-builder requirement, see [Modal](modal-stacks.md).
+Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. Without explicit cloud credential flags, Kitaru first tries to reuse matching server-side service connectors for the bucket and registry; if none exist, it creates a connectorless stack for public or manually configured resources. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants, connector reuse, explicit credential caveats, and the Docker CLI/BuildKit image-builder requirement, see [Modal](modal-stacks.md).
 
 You can also keep the same inputs in a YAML file and create the stack with:
 

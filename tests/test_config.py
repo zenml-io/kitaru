@@ -154,6 +154,19 @@ def _stack_component(
     )
 
 
+def _modal_image_builder_component(
+    component_id: str = "img-id",
+    name: str = "modal-image-builder",
+) -> SimpleNamespace:
+    """Return the persisted local image builder used by Modal stack tests."""
+    return _stack_component(
+        component_id,
+        name,
+        flavor="local",
+        configuration={"use_subprocess_call": True},
+    )
+
+
 def _service_connector_model(
     *,
     connector_id: str,
@@ -1558,6 +1571,9 @@ def test_show_stack_operation_reconstructs_registry_default_repository() -> None
                     },
                 )
             ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-image-builder")
+            ],
         },
     )
     client_mock = Mock()
@@ -1569,9 +1585,17 @@ def test_show_stack_operation_reconstructs_registry_default_repository() -> None
         details = _show_stack_operation("my-modal")
 
     assert details.stack_type == "modal"
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+        "image_builder",
+    ]
     assert details.components[2].details == (
         ("location", "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"),
     )
+    assert details.components[3].backend == "local"
+    assert details.components[3].details == (("use_subprocess_call", "True"),)
 
 
 def test_show_stack_operation_returns_azureml_stack_details() -> None:
@@ -2770,7 +2794,7 @@ def test_create_modal_stack_operation_rewrites_late_missing_modal_import(
 def test_create_modal_stack_operation_creates_stack_without_connector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Modal create should build runner/storage/registry and optional sandbox only."""
+    """Modal create should build runner/storage/registry/image-builder/sandbox."""
     _install_fake_modal_package(monkeypatch)
     spec = ModalStackSpec(
         artifact_store="s3://bucket/path",
@@ -2789,6 +2813,9 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
             ],
             StackComponentType.CONTAINER_REGISTRY: [
                 _stack_component("reg-id", "modal-dev-registry", flavor="aws")
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
             ],
             StackComponentType.SANDBOX: [
                 _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
@@ -2829,7 +2856,9 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
     stack_request = client_mock._validate_stack_configuration.call_args.args[0]
     assert stack_request.name == "modal-dev"
     assert stack_request.service_connectors == []
-    assert StackComponentType.IMAGE_BUILDER not in stack_request.components
+    image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert image_builder.flavor == "local"
+    assert image_builder.configuration == {"use_subprocess_call": True}
 
     orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
     assert orchestrator.flavor == "modal"
@@ -2868,6 +2897,13 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
     }
 
     assert result.stack_type == "modal"
+    assert result.components_created == (
+        "modal-dev-orchestrator (orchestrator)",
+        "modal-dev-artifacts (artifact_store)",
+        "modal-dev-registry (container_registry)",
+        "modal-dev-image-builder (image_builder)",
+        "modal-dev-sandbox (sandbox)",
+    )
     assert result.service_connectors_created == ()
     assert result.resources == {
         "provider": "aws",
@@ -2929,6 +2965,9 @@ def test_create_modal_stack_operation_reuses_existing_aws_connectors(
                     flavor="aws",
                     connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
                 )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
             ],
         },
     )
@@ -3045,6 +3084,9 @@ def test_create_modal_stack_operation_prefers_specific_over_unscoped_connectors(
                     connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
                 )
             ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
         },
     )
     client_mock = Mock()
@@ -3118,6 +3160,9 @@ def test_create_modal_stack_operation_reuses_shared_unscoped_connector_once(
                     flavor="aws",
                     connector=SimpleNamespace(name="aws_connector"),
                 )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
             ],
         },
     )
@@ -3331,6 +3376,9 @@ def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_regi
             StackComponentType.CONTAINER_REGISTRY: [
                 _stack_component("reg-id", "modal-dev-registry", flavor="aws")
             ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
             StackComponentType.SANDBOX: [
                 _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
             ],
@@ -3359,6 +3407,9 @@ def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_regi
                     flavor="aws",
                     connector=connector,
                 )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
             ],
             StackComponentType.SANDBOX: [
                 _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
@@ -3489,6 +3540,9 @@ def test_create_modal_stack_operation_attaches_gcp_connector(
                     connector=connector,
                 )
             ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-gcp-image-builder")
+            ],
         },
     )
     client_mock = Mock()
@@ -3574,6 +3628,9 @@ def test_create_modal_stack_operation_attaches_azure_connector(
                     flavor="azure",
                     connector=connector,
                 )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-azure-image-builder")
             ],
         },
     )
@@ -3743,10 +3800,10 @@ def test_create_modal_stack_operation_rejects_unpaired_token_override(
     client_mock.zen_store.create_stack.assert_not_called()
 
 
-def test_modal_stack_validation_accepts_missing_persisted_image_builder(
+def test_modal_stack_validation_persists_local_subprocess_image_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Modal requests should validate without storing an image builder component."""
+    """Modal requests should validate with a stored subprocess image builder."""
     _install_fake_modal_package(monkeypatch)
 
     from zenml.client import Client
@@ -3761,12 +3818,18 @@ def test_modal_stack_validation_accepts_missing_persisted_image_builder(
         labels=None,
     )
 
-    assert StackComponentType.IMAGE_BUILDER not in stack_request.components
+    image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert image_builder.flavor == "local"
+    assert image_builder.configuration == {"use_subprocess_call": True}
+
     client._validate_stack_configuration(stack_request)
     created_stack = client.zen_store.create_stack(stack_request)
 
-    assert StackComponentType.IMAGE_BUILDER not in stack_request.components
-    assert StackComponentType.IMAGE_BUILDER not in created_stack.components
+    persisted_image_builder = created_stack.components[
+        StackComponentType.IMAGE_BUILDER
+    ][0]
+    assert persisted_image_builder.flavor.name == "local"
+    assert persisted_image_builder.configuration["use_subprocess_call"] is True
 
 
 def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> None:
@@ -4559,15 +4622,18 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
         orchestrator_id="orc-dev-id",
         artifact_store_id="art-dev-id",
         components={
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-dev-id", "dev-image-builder")
+            ],
             StackComponentType.SANDBOX: [
                 _stack_component("sandbox-dev-id", "dev", flavor="local")
-            ]
+            ],
         },
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
     client_mock.get_stack.return_value = dev
-    client_mock.list_stacks.side_effect = [[dev], [dev], [dev]]
+    client_mock.list_stacks.side_effect = [[dev], [dev], [dev], [dev]]
 
     with patch("kitaru.config.Client", return_value=client_mock):
         result = _delete_stack_operation("dev", recursive=True)
@@ -4578,6 +4644,7 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
     assert result.components_deleted == (
         "dev (orchestrator)",
         "dev (artifact_store)",
+        "dev-image-builder (image_builder)",
         "dev (sandbox)",
     )
     assert result.recursive is True

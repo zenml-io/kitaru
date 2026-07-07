@@ -6086,6 +6086,35 @@ def test_stack_show_renders_translated_component_snapshot(
     assert "container_registry" not in output
 
 
+def test_stack_show_renders_image_builder_component(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack show` should label Modal image builders clearly."""
+    with (
+        patch("kitaru.cli._show_stack_operation") as mock_show_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_show_stack.return_value = _stack_details_stub(
+            name="my-modal",
+            stack_type="modal",
+            components=[
+                SimpleNamespace(
+                    role="image_builder",
+                    name="my-modal-image-builder",
+                    backend="local",
+                    details=(("use_subprocess_call", "True"),),
+                    purpose=None,
+                )
+            ],
+        )
+        app(["stack", "show", "my-modal"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Image builder: my-modal-image-builder (local)" in output
+    assert "use subprocess call: True" in output
+
+
 def test_stack_show_json_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -7917,6 +7946,13 @@ def test_stack_create_modal_text_output(
         mock_create_stack.return_value = _stack_create_result_stub(
             name="my-modal",
             stack_type="modal",
+            components_created=(
+                "my-modal-orchestrator (orchestrator)",
+                "my-modal-artifacts (artifact_store)",
+                "my-modal-registry (container_registry)",
+                "my-modal-image-builder (image_builder)",
+                "my-modal-sandbox (sandbox)",
+            ),
             resources={
                 "provider": "aws",
                 "artifact_store": "s3://bucket/kitaru",
@@ -7951,6 +7987,8 @@ def test_stack_create_modal_text_output(
         "Registry:" in output
         and "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru" in output
     )
+    assert "Image builder:" in output
+    assert "my-modal-image-builder (image_builder)" in output
     assert "Sandbox:" in output and "modal" in output
     assert "Active stack: default → my-modal" in output
 

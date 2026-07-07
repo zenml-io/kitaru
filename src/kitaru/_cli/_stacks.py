@@ -113,6 +113,14 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
 
+    image_builder_components = [
+        component_label
+        for component_label in getattr(result, "components_created", ())
+        if str(component_label).endswith(" (image_builder)")
+    ]
+    if image_builder_components:
+        rows.append(("Image builder:", ", ".join(image_builder_components)))
+
     sandbox = resources.get("sandbox")
     if sandbox:
         rows.append(("Sandbox:", str(sandbox)))
@@ -168,6 +176,7 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
         "runner": "Runner",
         "storage": "Storage",
         "image_registry": "Image registry",
+        "image_builder": "Image builder",
         "sandbox": "Sandbox",
         "additional_component": "Additional component",
     }

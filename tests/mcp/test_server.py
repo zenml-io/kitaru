@@ -1977,6 +1977,7 @@ def test_manage_stack_create_modal_dispatches_structured_spec() -> None:
                 "prod-modal (orchestrator)",
                 "prod-modal (artifact_store)",
                 "prod-modal (container_registry)",
+                "prod-modal-image-builder (image_builder)",
                 "prod-modal (sandbox)",
             ),
             stack_type="modal",
@@ -2044,6 +2045,7 @@ def test_manage_stack_create_modal_dispatches_structured_spec() -> None:
             "prod-modal (orchestrator)",
             "prod-modal (artifact_store)",
             "prod-modal (container_registry)",
+            "prod-modal-image-builder (image_builder)",
             "prod-modal (sandbox)",
         ],
         "stack_type": "modal",
@@ -2077,6 +2079,7 @@ def test_manage_stack_create_modal_accepts_aws_cloud_credentials() -> None:
                 "prod-modal (orchestrator)",
                 "prod-modal (artifact_store)",
                 "prod-modal (container_registry)",
+                "prod-modal-image-builder (image_builder)",
             ),
             stack_type="modal",
             service_connectors_created=("prod-modal-aws",),
@@ -2123,6 +2126,12 @@ def test_manage_stack_create_modal_accepts_aws_cloud_credentials() -> None:
         "token_id": "ak-test",
         "token_secret": "as-test",
     }
+    assert payload["components_created"] == [
+        "prod-modal (orchestrator)",
+        "prod-modal (artifact_store)",
+        "prod-modal (container_registry)",
+        "prod-modal-image-builder (image_builder)",
+    ]
     assert payload["service_connectors_created"] == ["prod-modal-aws"]
 
 

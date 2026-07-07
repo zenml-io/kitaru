@@ -18,7 +18,7 @@ Before creating the stack, make sure these already exist:
 - a Modal account with authentication configured (see the [Modal token docs](https://modal.com/docs/reference/cli/token))
 - a remote storage URI for artifacts, such as `s3://my-bucket/kitaru`, `gs://my-bucket/kitaru`, or `az://my-container/kitaru`
 - a remote container registry that Modal can pull from, such as an ECR, Artifact Registry, or ACR repository
-- a Docker / image-build environment on the machine where you submit flows (see the image-builder note below)
+- Docker CLI available on the machine where you submit flows, with `DOCKER_BUILDKIT=1` set for image builds (see the image-builder note below)
 - cloud permissions for the bucket and registry you point at
 
 Kitaru creates the stack definition and component records. It does not create your bucket, registry repository, Modal account, or IAM permissions for you. If matching server-side ZenML service connectors already exist for the bucket and registry, Kitaru links those connectors to the storage and registry components. If you pass explicit cloud credential flags, Kitaru creates a new cloud service connector instead.
@@ -51,9 +51,17 @@ A good failure story to keep in mind: your laptop builds and pushes `12345678901
 
 ### Why Modal needs an image builder
 
-Modal runs a container image, and something has to build that image first. That builder is ZenML's image builder. For this first Kitaru Modal path, Kitaru does not attach an explicit image-builder component to the stack: ZenML falls back to its default local image builder, which builds the image on the machine where you submit the flow. In practice this means **Docker must be available wherever you run the flow**.
+Modal runs a container image, and something has to build that image before Modal can start the run. For Modal stacks, Kitaru stores an explicit local image-builder component on the stack. That component builds the image on the machine where you submit the flow, so **Docker CLI must be available wherever you run the flow**.
 
-If you would rather build images in the cloud instead of on your submitting machine, read the [ZenML image-builder docs](https://docs.zenml.io/stacks/stack-components/image-builders) and configure a cloud-side builder for advanced setups.
+Kitaru configures this image builder with `use_subprocess_call=True`. In plain terms, Kitaru tells ZenML to call the Docker command-line tool instead of using the Docker Python SDK directly. Set this environment variable before submitting Modal runs:
+
+```bash
+export DOCKER_BUILDKIT=1
+```
+
+The reason is specific and practical. Kitaru builds the image, pushes it to your registry, and then Modal imports that registry image. Docker SDK builds can produce a mixed Docker/OCI media-type image shape that Modal rejects while unpacking. In the ECR + Modal test, Docker CLI with BuildKit produced OCI layers that Modal accepted.
+
+If you would rather build images somewhere other than your submitting machine, read the [ZenML image-builder docs](https://docs.zenml.io/stacks/stack-components/image-builders) and configure a cloud-side builder for advanced setups.
 
 ## Create the stack
 

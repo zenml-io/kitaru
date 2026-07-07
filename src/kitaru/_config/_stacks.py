@@ -26,6 +26,7 @@ from zenml.container_registries.gcp_container_registry import (
 )
 from zenml.enums import ContainerRegistryFlavor, StackComponentType
 from zenml.exceptions import EntityExistsError
+from zenml.image_builders.local_image_builder import LocalImageBuilderFlavor
 from zenml.integrations.aws import (
     AWS_CONNECTOR_TYPE,
     AWS_CONTAINER_REGISTRY_FLAVOR,
@@ -90,6 +91,8 @@ _STACK_MANAGED_LABEL_VALUE = "true"
 _STACK_REUSED_SERVICE_CONNECTORS_LABEL_KEY = "kitaru.reused_service_connectors"
 _STACK_REUSED_SERVICE_CONNECTORS_LABEL_VALUE = "true"
 MODAL_ORCHESTRATOR_FLAVOR = "modal"
+_MODAL_IMAGE_BUILDER_FLAVOR = "local"
+_MODAL_IMAGE_BUILDER_CONFIGURATION = {"use_subprocess_call": True}
 _MODAL_INSTALL_HINT = (
     "Modal stack support requires the Modal Python dependencies. "
     'Install them with `uv add "kitaru[modal]"` or '
@@ -286,6 +289,7 @@ _StackComponentKind = Literal[
     "orchestrator",
     "artifact_store",
     "container_registry",
+    "image_builder",
     "sandbox",
 ]
 
@@ -358,6 +362,7 @@ def _build_component_validation_registry() -> dict[
         AWSContainerRegistryFlavor(),
         GCPContainerRegistryFlavor(),
         AzureContainerRegistryFlavor(),
+        LocalImageBuilderFlavor(),
     )
     return {
         (flavor.type, flavor.name): _ComponentValidationMetadata(
@@ -704,6 +709,7 @@ _StackComponentRole = Literal[
     "runner",
     "storage",
     "image_registry",
+    "image_builder",
     "sandbox",
     "additional_component",
 ]
@@ -1835,6 +1841,14 @@ def _build_azureml_stack_request(
     return stack_request
 
 
+def _modal_image_builder_component_info() -> ComponentInfo:
+    """Return the fixed local image builder used by Modal stacks."""
+    return ComponentInfo(
+        flavor=_MODAL_IMAGE_BUILDER_FLAVOR,
+        configuration=dict(_MODAL_IMAGE_BUILDER_CONFIGURATION),
+    )
+
+
 def _modal_container_registry_configuration(
     container_registry: str,
     provider: CloudProvider,
@@ -1966,6 +1980,7 @@ def _build_modal_stack_request(
                     ),
                 )
             ],
+            StackComponentType.IMAGE_BUILDER: [_modal_image_builder_component_info()],
         },
         service_connectors=service_connectors,
     )
@@ -2003,12 +2018,16 @@ def _extract_remote_stack_components(
     *,
     require_connector_metadata: bool = True,
     connector_required_component_types: frozenset[StackComponentType] | None = None,
+    additional_required_components: tuple[
+        tuple[StackComponentType, _StackComponentKind], ...
+    ] = (),
 ) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
     """Extract created component and connector names from a hydrated stack."""
     required_components = (
         (StackComponentType.ORCHESTRATOR, "orchestrator"),
         (StackComponentType.ARTIFACT_STORE, "artifact_store"),
         (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
+        *additional_required_components,
     )
     if not require_connector_metadata:
         connector_required_component_types = frozenset()
@@ -2092,6 +2111,9 @@ def _create_remote_stack_operation(
     stack_request: StackRequest,
     resource_summary: dict[str, str],
     connector_required_component_types: frozenset[StackComponentType] | None = None,
+    additional_required_components: tuple[
+        tuple[StackComponentType, _StackComponentKind], ...
+    ] = (),
     activate: bool = True,
     verify: bool = True,
     client_factory: Callable[[], Any] = Client,
@@ -2173,6 +2195,7 @@ def _create_remote_stack_operation(
             created_stack,
             require_connector_metadata=require_connector_metadata,
             connector_required_component_types=connector_required_component_types,
+            additional_required_components=additional_required_components,
         )
     )
     if missing_connector_metadata:
@@ -2186,6 +2209,7 @@ def _create_remote_stack_operation(
                     refreshed_stack,
                     require_connector_metadata=require_connector_metadata,
                     connector_required_component_types=connector_required_component_types,
+                    additional_required_components=additional_required_components,
                 )
             )
 
@@ -2291,6 +2315,7 @@ def _delete_stack_components_best_effort(
         "orchestrator": StackComponentType.ORCHESTRATOR,
         "artifact_store": StackComponentType.ARTIFACT_STORE,
         "container_registry": StackComponentType.CONTAINER_REGISTRY,
+        "image_builder": StackComponentType.IMAGE_BUILDER,
         _sandbox_components.SANDBOX_COMPONENT_KIND: StackComponentType.SANDBOX,
     }
 
@@ -2349,6 +2374,7 @@ _RECURSIVE_DELETE_COMPONENT_TYPES: tuple[
     (StackComponentType.ORCHESTRATOR, "orchestrator"),
     (StackComponentType.ARTIFACT_STORE, "artifact_store"),
     (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
+    (StackComponentType.IMAGE_BUILDER, "image_builder"),
     _sandbox_components.SANDBOX_RECURSIVE_DELETE_ENTRY,
 )
 
@@ -2787,6 +2813,21 @@ def _stack_component_details_from_model(
             details=tuple(details),
         )
 
+    if component_type == StackComponentType.IMAGE_BUILDER:
+        details: list[tuple[str, str]] = []
+        use_subprocess_call = _normalize_stack_detail_value(
+            component_configuration.get("use_subprocess_call")
+        )
+        if use_subprocess_call is not None:
+            details.append(("use_subprocess_call", use_subprocess_call))
+
+        return StackComponentDetails(
+            role="image_builder",
+            name=component_name,
+            backend=backend,
+            details=tuple(details),
+        )
+
     if component_type == StackComponentType.SANDBOX:
         return StackComponentDetails(
             role=_sandbox_components.SANDBOX_COMPONENT_KIND,
@@ -2859,6 +2900,7 @@ def _stack_component_details_from_stack_model(
         StackComponentType.ORCHESTRATOR,
         StackComponentType.ARTIFACT_STORE,
         StackComponentType.CONTAINER_REGISTRY,
+        StackComponentType.IMAGE_BUILDER,
         StackComponentType.SANDBOX,
     ):
         for component_model in normalized_components.pop(core_component_type, []):
@@ -3250,6 +3292,9 @@ def _create_modal_stack_operation(
                 StackComponentType.ARTIFACT_STORE,
                 StackComponentType.CONTAINER_REGISTRY,
             }
+        ),
+        additional_required_components=(
+            (StackComponentType.IMAGE_BUILDER, "image_builder"),
         ),
         activate=activate,
         verify=spec.verify,
