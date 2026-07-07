@@ -61,6 +61,8 @@ export DOCKER_BUILDKIT=1
 
 The reason is specific and practical. Kitaru builds the image, pushes it to your registry, and then Modal imports that registry image. Docker SDK builds can produce a mixed Docker/OCI media-type image shape that Modal rejects while unpacking. In the ECR + Modal test, Docker CLI with BuildKit produced OCI layers that Modal accepted.
 
+Kitaru also defaults Modal flow images to `linux/amd64` unless you explicitly set another image platform. This matters on Apple Silicon machines: without an explicit platform, Docker can build an ARM image tag that pushes successfully, but Modal later rejects it because the tag has no Linux/amd64 image to run.
+
 If you would rather build images somewhere other than your submitting machine, read the [ZenML image-builder docs](https://docs.zenml.io/stacks/stack-components/image-builders) and configure a cloud-side builder for advanced setups.
 
 ## Create the stack

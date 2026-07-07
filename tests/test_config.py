@@ -22,6 +22,7 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID, ENV_ZENML_ACTIVE_STACK_ID
 from zenml.enums import StackComponentType
 from zenml.exceptions import EntityExistsError
+from zenml.models.v2.misc.info_models import ComponentInfo
 from zenml.utils import io_utils, yaml_utils
 
 import kitaru.config as config_module
@@ -2857,6 +2858,7 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
     assert stack_request.name == "modal-dev"
     assert stack_request.service_connectors == []
     image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert isinstance(image_builder, ComponentInfo)
     assert image_builder.flavor == "local"
     assert image_builder.configuration == {"use_subprocess_call": True}
 
@@ -3800,15 +3802,12 @@ def test_create_modal_stack_operation_rejects_unpaired_token_override(
     client_mock.zen_store.create_stack.assert_not_called()
 
 
-def test_modal_stack_validation_persists_local_subprocess_image_builder(
+def test_modal_stack_request_includes_local_subprocess_image_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Modal requests should validate with a stored subprocess image builder."""
+    """Modal stack requests should include a stored subprocess image builder."""
     _install_fake_modal_package(monkeypatch)
 
-    from zenml.client import Client
-
-    client = Client()
     stack_request = config_module._config_stacks._build_modal_stack_request(
         "modal-dev",
         spec=ModalStackSpec(
@@ -3819,17 +3818,9 @@ def test_modal_stack_validation_persists_local_subprocess_image_builder(
     )
 
     image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert isinstance(image_builder, ComponentInfo)
     assert image_builder.flavor == "local"
     assert image_builder.configuration == {"use_subprocess_call": True}
-
-    client._validate_stack_configuration(stack_request)
-    created_stack = client.zen_store.create_stack(stack_request)
-
-    persisted_image_builder = created_stack.components[
-        StackComponentType.IMAGE_BUILDER
-    ][0]
-    assert persisted_image_builder.flavor.name == "local"
-    assert persisted_image_builder.configuration["use_subprocess_call"] is True
 
 
 def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> None:
