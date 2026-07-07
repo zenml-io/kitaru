@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -64,14 +65,17 @@ def _step(
     )
 
 
-def _run(*steps: Any) -> PipelineRunResponse:
-    return cast(
-        PipelineRunResponse,
-        SimpleNamespace(
-            id=uuid4(),
-            steps={step.name: step for step in steps},
-        ),
-    )
+def _run(
+    *steps: Any,
+    parameters: Mapping[str, Any] | None = None,
+) -> PipelineRunResponse:
+    kwargs: dict[str, Any] = {
+        "id": uuid4(),
+        "steps": {step.name: step for step in steps},
+    }
+    if parameters is not None:
+        kwargs["config"] = SimpleNamespace(parameters=parameters)
+    return cast(PipelineRunResponse, SimpleNamespace(**kwargs))
 
 
 def _adapter_metadata(
@@ -154,6 +158,51 @@ def test_build_replay_plan_skips_steps_before_at_selector() -> None:
     assert plan.steps_to_skip == {"fetch"}
     assert plan.input_overrides == {}
     assert plan.step_input_overrides == {}
+
+
+def test_replay_plan_preserves_recorded_flow_parameters_without_overrides() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+
+    plan = build_replay_plan(
+        run=_run(write, parameters={"topic": "recorded topic", "model": None}),
+        at="write",
+    )
+
+    assert plan.input_overrides == {"topic": "recorded topic", "model": None}
+    assert plan.document.flow_overrides == {}
+
+
+def test_replay_plan_layers_flow_overrides_over_recorded_parameters() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+
+    plan = build_replay_plan(
+        run=_run(write, parameters={"topic": "recorded topic", "model": "model-a"}),
+        at="write",
+        flow_overrides={"temperature": 0.2},
+    )
+
+    assert plan.input_overrides == {
+        "topic": "recorded topic",
+        "model": "model-a",
+        "temperature": 0.2,
+    }
+    assert plan.document.flow_overrides == {"temperature": 0.2}
+
+
+def test_replay_plan_flow_overrides_win_on_same_key() -> None:
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    write = _step(name="write", invocation_id="write", started_at=t0)
+
+    plan = build_replay_plan(
+        run=_run(write, parameters={"topic": "recorded topic", "model": "model-a"}),
+        at="write",
+        flow_overrides={"topic": "new topic"},
+    )
+
+    assert plan.input_overrides == {"topic": "new topic", "model": "model-a"}
+    assert plan.document.flow_overrides == {"topic": "new topic"}
 
 
 def test_leaf_output_override_explains_no_downstream_consumer() -> None:
