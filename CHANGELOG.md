@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
+- Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
+- Added Modal stack cloud credential support for private S3/ECR, GCS/GAR/GCR, and Azure Blob/ADLS/ACR resources by linking provider service connectors to the artifact-store and container-registry components.
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
@@ -19,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- Modal stack creation now reuses matching server-side service connectors for artifact stores and container registries when explicit cloud credentials are not provided, avoiding remote-server failures caused by local-only credential inputs such as AWS SSO profiles.
 - Replay now preserves recorded flow parameters when submitting a replay, so overriding one flow argument no longer lets defaulted arguments such as `model=None` silently replace recorded values.
 - `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.

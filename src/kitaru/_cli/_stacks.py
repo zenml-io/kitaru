@@ -70,6 +70,7 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
         StackType.VERTEX.value,
         StackType.SAGEMAKER.value,
         StackType.AZUREML.value,
+        StackType.MODAL.value,
     }:
         return []
 
@@ -111,6 +112,14 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     container_registry = resources.get("container_registry")
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
+
+    image_builder_components = [
+        component_label
+        for component_label in getattr(result, "components_created", ())
+        if str(component_label).endswith(" (image_builder)")
+    ]
+    if image_builder_components:
+        rows.append(("Image builder:", ", ".join(image_builder_components)))
 
     sandbox = resources.get("sandbox")
     if sandbox:
@@ -167,6 +176,7 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
         "runner": "Runner",
         "storage": "Storage",
         "image_registry": "Image registry",
+        "image_builder": "Image builder",
         "sandbox": "Sandbox",
         "additional_component": "Additional component",
     }
@@ -359,15 +369,20 @@ def create(
     ] = None,
     type: Annotated[
         str | None,
-        Parameter(help="Stack type: local, kubernetes, vertex, sagemaker, or azureml."),
+        Parameter(
+            help=(
+                "Stack type: local, kubernetes, vertex, sagemaker, azureml, "
+                "or modal. Modal creation requires `kitaru[modal]`."
+            )
+        ),
     ] = None,
     artifact_store: Annotated[
         str | None,
         Parameter(
             help=(
-                "Artifact store URI for remote stacks "
-                "(Kubernetes: s3:// or gs://; Vertex: gs://; SageMaker: s3://; "
-                "AzureML: az://, abfs://, or abfss://)."
+                "Artifact store URI for remote stacks. Modal accepts s3://, gs://, "
+                "az://, abfs://, or abfss://; other stack types may require one "
+                "provider-specific URI scheme."
             )
         ),
     ] = None,
@@ -385,8 +400,8 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Container registry URI for Kubernetes, Vertex, SageMaker, or "
-                "AzureML stacks."
+                "Container registry URI for Kubernetes, Vertex, SageMaker, "
+                "AzureML, or Modal stacks."
             )
         ),
     ] = None,
@@ -398,14 +413,22 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Cloud region for Kubernetes, Vertex, SageMaker, or AzureML "
-                "stacks. Optional for AzureML."
+                "Cloud provider region for Kubernetes, Vertex, SageMaker, "
+                "AzureML, or credentialed Modal stack components. Optional for "
+                "AzureML. For Modal, this is the cloud artifact/registry region "
+                "where applicable; Modal placement uses "
+                "--extra orchestrator.region=... instead."
             )
         ),
     ] = None,
     subscription_id: Annotated[
         str | None,
-        Parameter(help="Azure subscription ID for AzureML stacks."),
+        Parameter(
+            help=(
+                "Azure subscription ID for AzureML stacks or credentialed "
+                "Azure-backed Modal stack components."
+            )
+        ),
     ] = None,
     resource_group: Annotated[
         str | None,
@@ -427,8 +450,11 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Optional credentials reference for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks."
+                "Optional cloud credentials reference for Kubernetes, Vertex, "
+                "SageMaker, AzureML, or credentialed Modal stack components. "
+                "Modal API credentials are separate: use "
+                "--extra orchestrator.token_id=... and token_secret=... for "
+                "Modal tokens."
             )
         ),
     ] = None,
@@ -459,14 +485,14 @@ def create(
         bool | None,
         Parameter(
             help=(
-                "Skip credential verification for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks."
+                "Skip cloud connector verification for Kubernetes, Vertex, "
+                "SageMaker, AzureML, or credentialed Modal stack components."
             )
         ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local, Kubernetes-backed, Vertex AI, SageMaker, or AzureML stack."""
+    """Create a local, Kubernetes, Vertex AI, SageMaker, AzureML, or Modal stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
 

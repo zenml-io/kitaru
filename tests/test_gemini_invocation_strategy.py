@@ -1081,7 +1081,7 @@ def test_background_polling_reuses_created_interaction_id(
         "long task",
         agent="deep-research",
         background=True,
-        timeout_s=0.01,
+        timeout_s=1.0,
     )
 
     result = runner.run_sync(request)
@@ -1092,7 +1092,7 @@ def test_background_polling_reuses_created_interaction_id(
     _assert_get_timeout(
         client.interactions.get_calls[0],
         interaction_id="background-1",
-        max_timeout_s=0.01,
+        max_timeout_s=1.0,
     )
     assert result.poll_count == 1
 

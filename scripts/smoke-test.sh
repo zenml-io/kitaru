@@ -871,11 +871,15 @@ run_remote_flow_smoke() {
     local label="$1"
     local category="$2"
     local stack_name="$3"
-    local image_arg=()
     local output
     local error_output
     local stderr_file
     local start=$SECONDS
+    local flow_command=(
+        $UV_RUN python scripts/remote_stack_smoke.py run-flow
+        --stack "$stack_name"
+        --category "$category"
+    )
 
     if [[ "$category" == "kubernetes" && -z "$REMOTE_SMOKE_FLOW_IMAGE" ]]; then
         printf "  ${RED}✗${RESET} %s\n" "$label"
@@ -885,19 +889,18 @@ run_remote_flow_smoke() {
     fi
 
     if [[ "$category" == "kubernetes" && -n "$REMOTE_SMOKE_FLOW_IMAGE" ]]; then
-        image_arg=(--image "$REMOTE_SMOKE_FLOW_IMAGE")
+        flow_command+=(--image "$REMOTE_SMOKE_FLOW_IMAGE")
     fi
+    flow_command+=(
+        --timeout "$REMOTE_SMOKE_EXECUTION_TIMEOUT"
+        --log-timeout "$REMOTE_SMOKE_LOG_TIMEOUT"
+        --run-prefix "$REMOTE_SMOKE_RUN_PREFIX"
+    )
 
     stderr_file=$(mktemp)
     output=$(timed "$((REMOTE_SMOKE_EXECUTION_TIMEOUT + REMOTE_SMOKE_LOG_TIMEOUT + 60))" \
-        $UV_RUN python scripts/remote_stack_smoke.py run-flow \
-            --stack "$stack_name" \
-            --category "$category" \
-            "${image_arg[@]}" \
-            --timeout "$REMOTE_SMOKE_EXECUTION_TIMEOUT" \
-            --log-timeout "$REMOTE_SMOKE_LOG_TIMEOUT" \
-            --run-prefix "$REMOTE_SMOKE_RUN_PREFIX" \
-            2>"$stderr_file")
+        "${flow_command[@]}" \
+        2>"$stderr_file")
     local rc=$?
     error_output=$(cat "$stderr_file")
     rm -f "$stderr_file"
@@ -1293,7 +1296,8 @@ run_test "kitaru project current"        $UV_RUN kitaru project current
 run_test "SDK project-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_project_management(); projects = client.projects.list(); current = client.projects.current(); assert isinstance(projects, list); assert current.name'
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
-run_test "kitaru stack create --help"    $UV_RUN kitaru stack create --help
+run_test "kitaru stack create help mentions modal" \
+    bash -c "$UV_RUN kitaru stack create --help | grep -q modal"
 run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
