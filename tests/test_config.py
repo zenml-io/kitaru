@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, call, patch
+from uuid import UUID
 
 import click
 import pytest
@@ -149,6 +150,24 @@ def _stack_component(
         connector=connector,
         service_connector_resource_id=service_connector_resource_id,
         connector_resource_id=connector_resource_id,
+        resource_id=resource_id,
+    )
+
+
+def _service_connector_model(
+    *,
+    connector_id: str,
+    name: str,
+    connector_type: str,
+    resource_type: str,
+    resource_id: str | None,
+) -> SimpleNamespace:
+    """Return a minimal service connector model stub for stack tests."""
+    return SimpleNamespace(
+        id=connector_id,
+        name=name,
+        type=connector_type,
+        resource_types=[resource_type],
         resource_id=resource_id,
     )
 
@@ -2721,6 +2740,7 @@ def test_create_modal_stack_operation_rewrites_late_missing_modal_import(
         total_pages=1,
         max_size=50,
     )
+    client_mock.list_service_connectors.return_value = []
     client_mock._validate_stack_configuration.side_effect = ModuleNotFoundError(
         "No module named 'modal'",
         name="modal",
@@ -2782,6 +2802,7 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
         total_pages=1,
         max_size=50,
     )
+    client_mock.list_service_connectors.return_value = []
     client_mock.zen_store = Mock()
     client_mock.zen_store.create_stack.return_value = created_stack
     overrides = StackComponentConfigOverrides(
@@ -2854,6 +2875,434 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
         "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
         "sandbox": "modal",
     }
+
+
+def test_create_modal_stack_operation_reuses_existing_aws_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal create should reuse matching server-side S3 and ECR connectors."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="s3://zenml-k8s-339712793861-3794f302c1ca/kitaru",
+        container_registry=(
+            "339712793861.dkr.ecr.eu-central-1.amazonaws.com/zenml-k8s-3794f302c1ca"
+        ),
+    )
+    s3_connector_id = "f964c5e4-d060-442c-8f35-af977bb3c3f8"
+    ecr_connector_id = "f058457a-1194-4c4a-bc1c-de5a345e783a"
+    s3_connector = _service_connector_model(
+        connector_id=s3_connector_id,
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://zenml-k8s-339712793861-3794f302c1ca",
+    )
+    ecr_connector = _service_connector_model(
+        connector_id=ecr_connector_id,
+        name="aws-k8s-stack-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id=(
+            "339712793861.dkr.ecr.eu-central-1.amazonaws.com/zenml-k8s-3794f302c1ca"
+        ),
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws-k8s-stack-s3"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    def _list_service_connectors(**kwargs: Any) -> list[SimpleNamespace]:
+        if kwargs["resource_type"] == "s3-bucket":
+            return [s3_connector]
+        if kwargs["resource_type"] == "docker-registry":
+            return [ecr_connector]
+        return []
+
+    client_mock.list_service_connectors.side_effect = _list_service_connectors
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            activate=False,
+        )
+
+    client_mock.create_service_connector.assert_not_called()
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.labels == {
+        "kitaru.managed": "true",
+        "kitaru.reused_service_connectors": "true",
+    }
+    assert stack_request.service_connectors == [
+        UUID(s3_connector_id),
+        UUID(ecr_connector_id),
+    ]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.service_connector_index == 0
+    assert (
+        artifact_store.service_connector_resource_id
+        == "s3://zenml-k8s-339712793861-3794f302c1ca"
+    )
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.service_connector_index == 1
+    assert (
+        container_registry.service_connector_resource_id
+        == "339712793861.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+    assert container_registry.configuration == {
+        "uri": "339712793861.dkr.ecr.eu-central-1.amazonaws.com",
+        "default_repository": "zenml-k8s-3794f302c1ca",
+    }
+    assert result.service_connectors_created == (
+        "aws-k8s-stack-s3",
+        "aws-k8s-stack-ecr",
+    )
+
+
+def test_create_modal_stack_operation_prefers_specific_over_unscoped_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scoped connector matches should win over broad provider connectors."""
+    _install_fake_modal_package(monkeypatch)
+    broad_connector = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000099",
+        name="aws_connector",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    broad_connector.resource_types = ["s3-bucket", "docker-registry"]
+    s3_connector_id = "f964c5e4-d060-442c-8f35-af977bb3c3f8"
+    ecr_connector_id = "f058457a-1194-4c4a-bc1c-de5a345e783a"
+    s3_connector = _service_connector_model(
+        connector_id=s3_connector_id,
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://bucket",
+    )
+    ecr_connector = _service_connector_model(
+        connector_id=ecr_connector_id,
+        name="aws-k8s-stack-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws-k8s-stack-s3"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [broad_connector, s3_connector]
+        if kwargs["resource_type"] == "s3-bucket"
+        else [broad_connector, ecr_connector]
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+            activate=False,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.service_connectors == [
+        UUID(s3_connector_id),
+        UUID(ecr_connector_id),
+    ]
+
+
+def test_create_modal_stack_operation_reuses_shared_unscoped_connector_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One broad provider connector can satisfy both Modal storage and registry."""
+    _install_fake_modal_package(monkeypatch)
+    connector_id = "00000000-0000-0000-0000-000000000123"
+    broad_connector = _service_connector_model(
+        connector_id=connector_id,
+        name="aws_connector",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    broad_connector.resource_types = ["s3-bucket", "docker-registry"]
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws_connector"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws_connector"),
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.return_value = [broad_connector]
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+            activate=False,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.service_connectors == [UUID(connector_id)]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    registry = stack_request.components[StackComponentType.CONTAINER_REGISTRY][0]
+    assert artifact_store.service_connector_index == 0
+    assert registry.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+    assert (
+        registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+    assert result.service_connectors_created == ("aws_connector",)
+
+
+def test_create_modal_stack_operation_rejects_multiple_unscoped_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multiple broad connectors for a resource type should be ambiguous."""
+    _install_fake_modal_package(monkeypatch)
+    first = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000001",
+        name="aws_connector_a",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    second = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000002",
+        name="aws_connector_b",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="   ",
+    )
+    registry = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000003",
+        name="aws-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [first, second] if kwargs["resource_type"] == "s3-bucket" else [registry]
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "ambiguous existing service connectors" in message
+    assert "aws_connector_a" in message
+    assert "aws_connector_b" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_partial_existing_connector_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal discovery should fail when only one required connector exists."""
+    _install_fake_modal_package(monkeypatch)
+    s3_connector = _service_connector_model(
+        connector_id="f964c5e4-d060-442c-8f35-af977bb3c3f8",
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="zenml-k8s-339712793861-3794f302c1ca",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [s3_connector] if kwargs["resource_type"] == "s3-bucket" else []
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://zenml-k8s-339712793861-3794f302c1ca/kitaru",
+                container_registry=(
+                    "339712793861.dkr.ecr.eu-central-1.amazonaws.com/"
+                    "zenml-k8s-3794f302c1ca"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "only part" in message
+    assert "container registry" in message
+    assert "docker-registry" in message
+    assert "339712793861.dkr.ecr.eu-central-1.amazonaws.com" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_ambiguous_existing_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal discovery should fail when a resource has multiple connector matches."""
+    _install_fake_modal_package(monkeypatch)
+    first = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000001",
+        name="aws-s3-a",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://bucket",
+    )
+    second = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000002",
+        name="aws-s3-b",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="bucket",
+    )
+    registry = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000003",
+        name="aws-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [first, second] if kwargs["resource_type"] == "s3-bucket" else [registry]
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "ambiguous existing service connectors" in message
+    assert "aws-s3-a" in message
+    assert "aws-s3-b" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
 
 
 def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_registry(
@@ -2944,6 +3393,7 @@ def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_regi
         list_resources=False,
         register=False,
     )
+    client_mock.list_service_connectors.assert_not_called()
     stack_request = client_mock._validate_stack_configuration.call_args.args[0]
     assert len(stack_request.service_connectors) == 1
     connector_info = stack_request.service_connectors[0]
@@ -3276,6 +3726,7 @@ def test_create_modal_stack_operation_rejects_unpaired_token_override(
         total_pages=1,
         max_size=50,
     )
+    client_mock.list_service_connectors.return_value = []
     overrides = StackComponentConfigOverrides(orchestrator={"token_id": "ak-test"})
 
     with (
@@ -4212,7 +4663,10 @@ def test_delete_stack_recursive_kubernetes_deletes_unshared_connector() -> None:
         _FakeStackPage(items=[default], total_pages=1, max_size=50),
     ]
     client_mock.list_service_connectors.return_value = [
-        SimpleNamespace(name="dev-connector")
+        SimpleNamespace(
+            name="dev-connector",
+            labels={"kitaru.managed": "true"},
+        )
     ]
 
     with patch("kitaru.config.Client", return_value=client_mock):
@@ -4231,6 +4685,34 @@ def test_delete_stack_recursive_kubernetes_deletes_unshared_connector() -> None:
         "dev-artifacts (artifact_store)",
         "dev-registry (container_registry)",
     )
+
+
+def test_delete_stack_recursive_skips_connector_cleanup_for_reused_connectors() -> None:
+    """Recursive delete should preserve reused connectors even if Kitaru made them."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    dev.labels["kitaru.reused_service_connectors"] = "true"
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(
+            name="dev-connector",
+            labels={"kitaru.managed": "true"},
+        )
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.list_service_connectors.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
 
 
 def test_delete_stack_recursive_kubernetes_keeps_shared_connector() -> None:

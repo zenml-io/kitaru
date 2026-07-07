@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -16,6 +17,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from zenml.artifact_stores.local_artifact_store import LocalArtifactStoreFlavor
 from zenml.client import Client
+from zenml.constants import DOCKER_REGISTRY_RESOURCE_TYPE
 from zenml.container_registries.azure_container_registry import (
     AzureContainerRegistryFlavor,
 )
@@ -29,6 +31,7 @@ from zenml.integrations.aws import (
     AWS_CONTAINER_REGISTRY_FLAVOR,
     AWS_RESOURCE_TYPE,
     AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR,
+    S3_RESOURCE_TYPE,
 )
 from zenml.integrations.aws.flavors.aws_container_registry_flavor import (
     AWSContainerRegistryFlavor,
@@ -41,6 +44,7 @@ from zenml.integrations.azure import (
     AZURE_CONNECTOR_TYPE,
     AZURE_RESOURCE_TYPE,
     AZUREML_ORCHESTRATOR_FLAVOR,
+    BLOB_RESOURCE_TYPE,
 )
 from zenml.integrations.azure.flavors.azure_artifact_store_flavor import (
     AzureArtifactStoreFlavor,
@@ -53,6 +57,7 @@ from zenml.integrations.gcp import (
     GCP_CONNECTOR_TYPE,
     GCP_RESOURCE_TYPE,
     GCP_VERTEX_ORCHESTRATOR_FLAVOR,
+    GCS_RESOURCE_TYPE,
 )
 from zenml.integrations.gcp.flavors.gcp_artifact_store_flavor import (
     GCPArtifactStoreFlavor,
@@ -82,6 +87,8 @@ from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
 
 _STACK_MANAGED_LABEL_KEY = "kitaru.managed"
 _STACK_MANAGED_LABEL_VALUE = "true"
+_STACK_REUSED_SERVICE_CONNECTORS_LABEL_KEY = "kitaru.reused_service_connectors"
+_STACK_REUSED_SERVICE_CONNECTORS_LABEL_VALUE = "true"
 MODAL_ORCHESTRATOR_FLAVOR = "modal"
 _MODAL_INSTALL_HINT = (
     "Modal stack support requires the Modal Python dependencies. "
@@ -229,6 +236,42 @@ class _ResolvedConnectorSpec:
 
     connector_info: ServiceConnectorInfo
     verify_resource_type: str
+
+
+@dataclass(frozen=True)
+class _ModalConnectorReference:
+    """Existing service connector selected for one Modal component."""
+
+    connector_id: UUID
+    resource_id: str
+
+
+@dataclass(frozen=True)
+class _ResolvedModalExistingConnectors:
+    """Existing Modal storage and registry service connectors."""
+
+    artifact_store: _ModalConnectorReference
+    container_registry: _ModalConnectorReference
+
+
+@dataclass(frozen=True)
+class _ModalConnectorLookup:
+    """Connector discovery inputs for one Modal component."""
+
+    component_label: str
+    connector_type: str
+    resource_type: str
+    target_resource_id: str
+    acceptable_resource_ids: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _ModalConnectorDiscoveryResult:
+    """Connector discovery result for one Modal component."""
+
+    lookup: _ModalConnectorLookup
+    scoped_matches: tuple[Any, ...]
+    unscoped_matches: tuple[Any, ...]
 
 
 @dataclass(frozen=True)
@@ -790,6 +833,324 @@ def _container_registry_resource_id(
         return host
     normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
     return normalized_registry.rstrip("/")
+
+
+def _normalize_modal_connector_resource_id(resource_id: str | None) -> str | None:
+    """Normalize a service connector resource ID for tolerant comparisons."""
+    if resource_id is None:
+        return None
+    normalized = resource_id.strip()
+    if not normalized:
+        return None
+    normalized = re.sub(r"^[a-z]+://", "", normalized)
+    return normalized.rstrip("/")
+
+
+def _modal_artifact_store_resource_id_variants(
+    resource_id: str,
+    provider: CloudProvider,
+) -> frozenset[str]:
+    """Return acceptable connector resource IDs for a Modal artifact store."""
+    parsed = urlparse(resource_id)
+    variants = {resource_id.rstrip("/")}
+    if parsed.netloc:
+        variants.add(parsed.netloc)
+    return frozenset(
+        normalized
+        for value in variants
+        if (normalized := _normalize_modal_connector_resource_id(value)) is not None
+    )
+
+
+def _modal_container_registry_resource_id_variants(
+    container_registry: str,
+    resource_id: str,
+) -> frozenset[str]:
+    """Return acceptable connector resource IDs for a Modal registry."""
+    variants = {resource_id.rstrip("/")}
+    normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
+    normalized_registry = normalized_registry.rstrip("/")
+    if normalized_registry:
+        variants.add(normalized_registry)
+    with suppress(ValueError):
+        variants.add(container_registry_host(container_registry))
+    return frozenset(
+        normalized
+        for value in variants
+        if (normalized := _normalize_modal_connector_resource_id(value)) is not None
+    )
+
+
+def _modal_connector_type(provider: CloudProvider) -> str:
+    """Return the provider-specific service connector type."""
+    return {
+        CloudProvider.AWS: AWS_CONNECTOR_TYPE,
+        CloudProvider.GCP: GCP_CONNECTOR_TYPE,
+        CloudProvider.AZURE: AZURE_CONNECTOR_TYPE,
+    }[provider]
+
+
+def _modal_artifact_store_connector_resource_type(provider: CloudProvider) -> str:
+    """Return the provider-specific artifact-store connector resource type."""
+    return {
+        CloudProvider.AWS: S3_RESOURCE_TYPE,
+        CloudProvider.GCP: GCS_RESOURCE_TYPE,
+        CloudProvider.AZURE: BLOB_RESOURCE_TYPE,
+    }[provider]
+
+
+def _modal_connector_type_matches(connector: Any, connector_type: str) -> bool:
+    """Return whether a connector model reports the expected connector type."""
+    raw_type = getattr(connector, "type", None)
+    if raw_type is None:
+        raw_type = getattr(connector, "connector_type", None)
+    if raw_type is None:
+        return True
+    if not isinstance(raw_type, str) and hasattr(raw_type, "connector_type"):
+        raw_type = raw_type.connector_type
+    return str(raw_type) == connector_type
+
+
+def _modal_connector_resource_type_matches(connector: Any, resource_type: str) -> bool:
+    """Return whether a connector model supports the expected resource type."""
+    raw_resource_types = getattr(connector, "resource_types", None)
+    if raw_resource_types is None:
+        raw_resource_type = getattr(connector, "resource_type", None)
+        if raw_resource_type is None:
+            return True
+        raw_resource_types = [raw_resource_type]
+    if isinstance(raw_resource_types, str):
+        connector_resource_types = {raw_resource_types}
+    else:
+        connector_resource_types = {str(item) for item in raw_resource_types}
+    return resource_type in connector_resource_types
+
+
+def _modal_connector_resource_id(connector: Any) -> str | None:
+    """Return a connector resource ID normalized for discovery matching."""
+    return _normalize_modal_connector_resource_id(
+        getattr(connector, "resource_id", None)
+    )
+
+
+def _modal_connector_label(connector: Any) -> str:
+    """Render a connector for user-facing discovery errors."""
+    name = _normalize_stack_detail_value(getattr(connector, "name", None))
+    connector_id = _normalize_stack_detail_value(getattr(connector, "id", None))
+    resource_id = _normalize_stack_detail_value(getattr(connector, "resource_id", None))
+    label = name or connector_id or "<unnamed connector>"
+    if connector_id is not None and connector_id != label:
+        label = f"{label} ({connector_id})"
+    if resource_id is not None:
+        label = f"{label} for {resource_id}"
+    return label
+
+
+def _modal_existing_connector_reference(
+    connector: Any,
+    resource_id: str,
+) -> _ModalConnectorReference:
+    """Build a stack-request connector reference from a ZenML connector model."""
+    connector_id_raw = getattr(connector, "id", None)
+    try:
+        connector_id = UUID(str(connector_id_raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise KitaruBackendError(
+            "ZenML returned a matching service connector without a UUID id: "
+            f"{_modal_connector_label(connector)}"
+        ) from exc
+    return _ModalConnectorReference(
+        connector_id=connector_id,
+        resource_id=resource_id,
+    )
+
+
+def _collect_modal_connector_candidates(
+    client: Client,
+    lookup: _ModalConnectorLookup,
+) -> _ModalConnectorDiscoveryResult:
+    """Collect scoped and unscoped Modal connector candidates."""
+    scoped_matches: list[Any] = []
+    unscoped_matches: list[Any] = []
+    page = 1
+    page_size = 100
+    while True:
+        connector_page = client.list_service_connectors(
+            connector_type=lookup.connector_type,
+            resource_type=lookup.resource_type,
+            page=page,
+            size=page_size,
+            hydrate=True,
+        )
+        if not isinstance(connector_page, Iterable) or isinstance(
+            connector_page,
+            (str, bytes),
+        ):
+            raise KitaruStateError(
+                "Unexpected service connector list response from the configured "
+                "runtime."
+            )
+        for connector in connector_page:
+            if not _modal_connector_type_matches(connector, lookup.connector_type):
+                continue
+            if not _modal_connector_resource_type_matches(
+                connector, lookup.resource_type
+            ):
+                continue
+
+            connector_resource_id = _modal_connector_resource_id(connector)
+            if connector_resource_id is None:
+                unscoped_matches.append(connector)
+            elif connector_resource_id in lookup.acceptable_resource_ids:
+                scoped_matches.append(connector)
+
+        total_pages_raw = getattr(connector_page, "total_pages", 1)
+        try:
+            total_pages = int(total_pages_raw)
+        except (TypeError, ValueError):
+            total_pages = 1
+        if page >= total_pages:
+            break
+        page += 1
+    return _ModalConnectorDiscoveryResult(
+        lookup=lookup,
+        scoped_matches=tuple(scoped_matches),
+        unscoped_matches=tuple(unscoped_matches),
+    )
+
+
+def _selected_modal_connector_matches(
+    discovery: _ModalConnectorDiscoveryResult,
+) -> tuple[Any, ...]:
+    """Return the connector candidates used after scoped/unscoped precedence."""
+    if discovery.scoped_matches:
+        return discovery.scoped_matches
+    return discovery.unscoped_matches
+
+
+def _modal_connector_lookup_message(lookup: _ModalConnectorLookup) -> str:
+    """Render what Kitaru looked for during existing connector discovery."""
+    return (
+        f"{lookup.component_label} connector type '{lookup.connector_type}', "
+        f"resource type '{lookup.resource_type}', resource ID "
+        f"'{lookup.target_resource_id}'"
+    )
+
+
+def _resolve_modal_existing_connectors(
+    spec: ModalStackSpec,
+    *,
+    provider: CloudProvider,
+    client: Client,
+) -> _ResolvedModalExistingConnectors | None:
+    """Find existing server-side service connectors for a Modal stack."""
+    if _modal_cloud_connector_inputs_requested(spec):
+        return None
+
+    artifact_store_uri = (
+        _normalize_azure_artifact_store_uri(spec.artifact_store)
+        if provider == CloudProvider.AZURE
+        else spec.artifact_store
+    )
+    artifact_resource_id = _artifact_store_resource_id(artifact_store_uri, provider)
+    registry_resource_id = _container_registry_resource_id(
+        spec.container_registry,
+        provider,
+    )
+    connector_type = _modal_connector_type(provider)
+    lookups = (
+        _ModalConnectorLookup(
+            component_label="artifact store",
+            connector_type=connector_type,
+            resource_type=_modal_artifact_store_connector_resource_type(provider),
+            target_resource_id=artifact_resource_id,
+            acceptable_resource_ids=_modal_artifact_store_resource_id_variants(
+                artifact_resource_id,
+                provider,
+            ),
+        ),
+        _ModalConnectorLookup(
+            component_label="container registry",
+            connector_type=connector_type,
+            resource_type=DOCKER_REGISTRY_RESOURCE_TYPE,
+            target_resource_id=registry_resource_id,
+            acceptable_resource_ids=_modal_container_registry_resource_id_variants(
+                spec.container_registry,
+                registry_resource_id,
+            ),
+        ),
+    )
+    discoveries = tuple(
+        _collect_modal_connector_candidates(client, lookup) for lookup in lookups
+    )
+    selected_matches = tuple(
+        _selected_modal_connector_matches(discovery) for discovery in discoveries
+    )
+    if all(not matches for matches in selected_matches):
+        return None
+
+    scoped_ambiguous = [
+        discovery for discovery in discoveries if len(discovery.scoped_matches) > 1
+    ]
+    unscoped_ambiguous = [
+        discovery
+        for discovery in discoveries
+        if not discovery.scoped_matches and len(discovery.unscoped_matches) > 1
+    ]
+    ambiguous = [*scoped_ambiguous, *unscoped_ambiguous]
+    if ambiguous:
+        details = "; ".join(
+            f"{_modal_connector_lookup_message(discovery.lookup)} matched "
+            f"{len(_selected_modal_connector_matches(discovery))} connectors: "
+            + ", ".join(
+                _modal_connector_label(match)
+                for match in _selected_modal_connector_matches(discovery)
+            )
+            for discovery in ambiguous
+        )
+        raise KitaruUsageError(
+            "Kitaru found ambiguous existing service connectors for this Modal "
+            f"stack. {details}. Narrow the connectors to one matching resource "
+            "or pass explicit cloud credentials so Kitaru creates a new connector."
+        )
+
+    missing = [
+        discovery
+        for discovery, matches in zip(discoveries, selected_matches, strict=True)
+        if len(matches) == 0
+    ]
+    if missing:
+        found = [
+            (discovery, matches[0])
+            for discovery, matches in zip(discoveries, selected_matches, strict=True)
+            if len(matches) == 1
+        ]
+        found_text = "; ".join(
+            f"found {_modal_connector_label(match)} for "
+            f"{discovery.lookup.component_label}"
+            for discovery, match in found
+        )
+        missing_text = "; ".join(
+            _modal_connector_lookup_message(discovery.lookup) for discovery in missing
+        )
+        raise KitaruUsageError(
+            "Kitaru found only part of the existing service connector pair needed "
+            f"for this Modal stack: {found_text}. Missing: {missing_text}. "
+            "Create the missing server-side ZenML service connector, remove the "
+            "partial match if this should be connectorless, or pass explicit cloud "
+            "credentials so Kitaru creates a new connector."
+        )
+
+    return _ResolvedModalExistingConnectors(
+        artifact_store=_modal_existing_connector_reference(
+            selected_matches[0][0],
+            artifact_resource_id,
+        ),
+        container_registry=_modal_existing_connector_reference(
+            selected_matches[1][0],
+            registry_resource_id,
+        ),
+    )
 
 
 def _modal_cloud_connector_inputs_requested(spec: ModalStackSpec) -> bool:
@@ -1496,18 +1857,29 @@ def _build_modal_stack_request(
     *,
     spec: ModalStackSpec,
     connector_spec: _ResolvedConnectorSpec | None = None,
+    existing_connectors: _ResolvedModalExistingConnectors | None = None,
     labels: dict[str, str] | None,
     component_overrides: StackComponentConfigOverrides | None = None,
     sandbox_flavor: str | None = None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a Modal stack."""
     merged_labels = _merge_managed_labels(labels)
+    if existing_connectors is not None:
+        merged_labels[_STACK_REUSED_SERVICE_CONNECTORS_LABEL_KEY] = (
+            _STACK_REUSED_SERVICE_CONNECTORS_LABEL_VALUE
+        )
     provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
     artifact_store_uri = (
         _normalize_azure_artifact_store_uri(spec.artifact_store)
         if provider == CloudProvider.AZURE
         else spec.artifact_store
     )
+    if connector_spec is not None and existing_connectors is not None:
+        raise KitaruUsageError(
+            "Modal stack creation cannot both create a new cloud connector and "
+            "reuse existing service connectors."
+        )
+
     artifact_store_connector_kwargs: dict[str, Any] = {}
     container_registry_connector_kwargs: dict[str, Any] = {}
     service_connectors: list[UUID | ServiceConnectorInfo] = []
@@ -1526,6 +1898,32 @@ def _build_modal_stack_request(
             "service_connector_resource_id": _container_registry_resource_id(
                 spec.container_registry,
                 provider,
+            ),
+        }
+    elif existing_connectors is not None:
+        connector_indexes: dict[UUID, int] = {}
+        for connector_id in (
+            existing_connectors.artifact_store.connector_id,
+            existing_connectors.container_registry.connector_id,
+        ):
+            if connector_id in connector_indexes:
+                continue
+            connector_indexes[connector_id] = len(service_connectors)
+            service_connectors.append(connector_id)
+        artifact_store_connector_kwargs = {
+            "service_connector_index": connector_indexes[
+                existing_connectors.artifact_store.connector_id
+            ],
+            "service_connector_resource_id": (
+                existing_connectors.artifact_store.resource_id
+            ),
+        }
+        container_registry_connector_kwargs = {
+            "service_connector_index": connector_indexes[
+                existing_connectors.container_registry.connector_id
+            ],
+            "service_connector_resource_id": (
+                existing_connectors.container_registry.resource_id
             ),
         }
 
@@ -1769,7 +2167,7 @@ def _create_remote_stack_operation(
             f"error: {exc}"
         ) from exc
 
-    require_connector_metadata = connector_spec is not None
+    require_connector_metadata = bool(stack_request.service_connectors)
     components_created, service_connectors_created, missing_connector_metadata = (
         _extract_remote_stack_components(
             created_stack,
@@ -1844,17 +2242,35 @@ def _component_collision_message(
     )
 
 
-def _stack_is_managed(stack_model: Any) -> bool:
-    """Return whether a stack carries Kitaru's managed-stack label."""
-    raw_labels = getattr(stack_model, "labels", None)
+def _model_label_matches(model: Any, *, key: str, value: str) -> bool:
+    """Return whether a ZenML model label has the expected value."""
+    raw_labels = getattr(model, "labels", None)
     if not isinstance(raw_labels, Mapping):
         return False
 
-    raw_value = raw_labels.get(_STACK_MANAGED_LABEL_KEY)
+    raw_value = raw_labels.get(key)
     if raw_value is None:
         return False
 
-    return str(raw_value).strip().lower() == _STACK_MANAGED_LABEL_VALUE
+    return str(raw_value).strip().lower() == value
+
+
+def _stack_is_managed(stack_model: Any) -> bool:
+    """Return whether a stack carries Kitaru's managed-stack label."""
+    return _model_label_matches(
+        stack_model,
+        key=_STACK_MANAGED_LABEL_KEY,
+        value=_STACK_MANAGED_LABEL_VALUE,
+    )
+
+
+def _stack_reuses_service_connectors(stack_model: Any) -> bool:
+    """Return whether a stack reused pre-existing service connectors."""
+    return _model_label_matches(
+        stack_model,
+        key=_STACK_REUSED_SERVICE_CONNECTORS_LABEL_KEY,
+        value=_STACK_REUSED_SERVICE_CONNECTORS_LABEL_VALUE,
+    )
 
 
 def _format_stack_component_label(
@@ -2789,10 +3205,25 @@ def _create_modal_stack_operation(
     _require_modal_stack_support()
     provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
     connector_spec = _resolve_modal_connector_spec(spec, provider=provider)
+    existing_connectors: _ResolvedModalExistingConnectors | None = None
+    operation_client_factory: Callable[[], Any] = client_factory
+    if connector_spec is None:
+        discovery_client = client_factory()
+        existing_connectors = _resolve_modal_existing_connectors(
+            spec,
+            provider=provider,
+            client=discovery_client,
+        )
+
+        def _discovered_client_factory() -> Any:
+            return discovery_client
+
+        operation_client_factory = _discovered_client_factory
     stack_request = _build_modal_stack_request(
         selector,
         spec=spec,
         connector_spec=connector_spec,
+        existing_connectors=existing_connectors,
         labels=labels,
         component_overrides=component_overrides,
         sandbox_flavor=sandbox_flavor,
@@ -2822,7 +3253,7 @@ def _create_modal_stack_operation(
         ),
         activate=activate,
         verify=spec.verify,
-        client_factory=client_factory,
+        client_factory=operation_client_factory,
     )
 
 
@@ -3144,13 +3575,17 @@ def _delete_stack_operation(
         )
 
     managed_recursive_delete = recursive and _stack_is_managed(target_stack)
+    cleanup_service_connectors = (
+        managed_recursive_delete and not _stack_reuses_service_connectors(target_stack)
+    )
     components_deleted: tuple[str, ...] = ()
     connector_selectors: tuple[str, ...] = ()
     if managed_recursive_delete:
         components_deleted = _recursive_delete_component_labels(client, target_stack)
-        connector_selectors = (
-            _linked_service_connector_selectors_for_stack(target_stack) or ()
-        )
+        if cleanup_service_connectors:
+            connector_selectors = (
+                _linked_service_connector_selectors_for_stack(target_stack) or ()
+            )
 
     new_active_stack: str | None = None
     if is_active and force:
@@ -3170,7 +3605,7 @@ def _delete_stack_operation(
         client.delete_stack(target_stack.id, recursive=recursive)
     except Exception as exc:
         raise KitaruBackendError(f"Failed to delete stack '{selector}': {exc}") from exc
-    if managed_recursive_delete:
+    if cleanup_service_connectors:
         _delete_unshared_service_connectors_best_effort(client, connector_selectors)
 
     return _StackDeleteResult(

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- Modal stack creation now reuses matching server-side service connectors for artifact stores and container registries when explicit cloud credentials are not provided, avoiding remote-server failures caused by local-only credential inputs such as AWS SSO profiles.
 - `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
