@@ -4,10 +4,18 @@
   </a>
 </p>
 
-<h3 align="center">Every agent run, recorded and replayable.</h3>
+<h3 align="center">Re-run a change against real production history, and see what breaks — before you ship.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru records every step of every run — each model call, tool call, and decision — as a replayable checkpoint, so you can diagnose failures, replay runs with a different model or input, and ship agent updates with confidence. All on your own infrastructure.
+  Observability tools watch your agent. Kitaru turns your production traces into a faithful environment you can re-run — so when you change your agent, you catch what breaks before your users do.
+</p>
+
+<p align="center">
+  Your harness stays yours — LangGraph, PydanticAI, OpenAI Agents SDK, Claude Agent SDK, or raw Python. Kitaru is the same replay-and-regression layer across all of them.
+</p>
+
+<p align="center">
+  Kitaru (来る, "to arrive") is self-hosted — it runs on your own infrastructure.
 </p>
 
 <p align="center">
@@ -39,8 +47,10 @@ Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 |---|---|---|
 | **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
 | **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
-| **Runtime (Kitaru)** | How the agent's runs are *recorded, replayed, and improved over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
+| **Replay & Regression (Kitaru)** | How the agent's runs are *recorded, replayed, and improved over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
+
+Observability tools — Braintrust, LangSmith, Langfuse — only watched your agent, so all they can test against is a dataset you assembled by hand. Only Kitaru executed your agent, so only Kitaru can rebuild your real, multi-step, tool-using production history into an environment you can re-run a change against — and see exactly what regressed.
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
 policy, and Kitaru gives you the execution record — and the replay loop — in

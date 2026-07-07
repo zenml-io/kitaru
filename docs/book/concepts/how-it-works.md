@@ -5,9 +5,12 @@ icon: gears
 
 # How It Works
 
-Kitaru is the runtime for production AI agents: **run** them durably, **replay**
-them faithfully, **improve** them with evidence. This page is the mental model
-that ties those three together, and the architecture that makes them work.
+Observability tools watch your agent. Kitaru turns your production traces into a
+faithful environment you can re-run — so when you change your agent, you catch
+what breaks before your users do. Re-scoring saved outputs against a dataset is
+an eval; faithfully re-running the real run is only possible from the runtime
+that executed it. This page is the mental model behind that claim, and the
+architecture that makes the rebuilt environment faithful enough to trust.
 
 ## The mental model
 
@@ -319,6 +322,19 @@ In production, the three components separate across your infrastructure:
   needs to read files, it fetches temporary credentials brokered by the server.
 
 There is no mandatory SaaS control plane in the path of your agent's data.
+
+## Why an observability tool can't do this
+
+An observability tool that merely watched your agent has the logs — but no way to
+stand them up. Scoring recorded outputs against a dataset you assembled is one
+thing; testing a change against the production history that actually happened
+requires rebuilding the conditions the agent ran in — every checkpoint output,
+every model call, every tool result — as an environment you can re-run. Only the
+runtime that executed the agent holds enough of the run to do that. That is what
+the durable machinery on this page exists for: it is what has to be true for the
+[replay](../guides/replay-and-overrides.md) environment to be faithful enough
+that a change can be tested against what really happened — not a synthetic
+dataset — before your users see it.
 
 ## Related
 

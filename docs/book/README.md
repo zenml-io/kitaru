@@ -1,15 +1,21 @@
 ---
-description: The runtime for production AI agents. Run, replay, improve.
+description: Observability tools watch your agent. Kitaru turns your production traces into a faithful environment you can re-run — so when you change your agent, you catch what breaks before your users do.
 icon: hand-wave
 ---
 
 # Welcome to Kitaru
 
-Kitaru is the runtime for production AI agents: **run, replay, improve**. It
-records every model call and tool call as a durable checkpoint, then lets you
-re-execute a real run faithfully with one thing changed — a different model, a
-different prompt — and diff the result against the original. Because the baseline
-reproduces, the difference you see is your change, not replay noise.
+Observability tools — Braintrust, LangSmith, Langfuse — only watched your agent,
+so all they can test against is a dataset you assembled by hand. Only Kitaru
+executed your agent, so only Kitaru can rebuild your real, multi-step, tool-using
+production history into an environment you can re-run a change against — and see
+exactly what regressed.
+
+That is the loop: Kitaru records every model call and tool call of a real run,
+rebuilds that run as a faithful environment, and lets you re-execute it with one
+thing changed — a different model, a different prompt — so you can diff the
+result against the original and change your agent with confidence. Because the
+baseline reproduces, the difference you see is your change, not noise.
 
 The harness you already picked (PydanticAI, OpenAI Agents SDK, LangGraph, Claude
 Agent SDK, raw Python) keeps owning how the agent thinks. Kitaru owns the run
