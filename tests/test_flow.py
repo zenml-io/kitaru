@@ -226,7 +226,9 @@ class _DummyRun:
         traceback: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        parameters: dict[str, object] | None = None,
     ) -> None:
+        self.config = SimpleNamespace(parameters=parameters)
         self.id = run_id or uuid4()
         self.pipeline_id = pipeline_id
         self.pipeline = pipeline
@@ -3801,6 +3803,69 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         == _empty_registry_payload()
     )
     assert "KITARU_REPLAY_CONTEXT" in docker_settings.environment
+
+
+def test_replay_preserves_unoverridden_recorded_flow_parameters() -> None:
+    """Recorded flow inputs must survive replay unless explicitly overridden.
+
+    ZenML's replay only restores recorded values for parameters without
+    signature defaults, so defaulted flow inputs (e.g. `model=None`) would
+    silently revert to their defaults. Kitaru merges the source run's
+    recorded parameters under the explicit `flow_overrides`.
+    """
+    source_run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        parameters={"topic": "recorded topic", "model": "model-a"},
+    )
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip={"fetch"},
+        input_overrides={"topic": "new topic"},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(lambda topic, model=None: topic)
+        wrapped.replay(
+            str(source_run.id),
+            at="write",
+            flow_overrides={"topic": "new topic"},
+            wait=False,
+        )
+
+    configured_pipeline.replay.assert_called_once_with(
+        pipeline_run=source_run.id,
+        skip={"fetch"},
+        skip_successful_steps=False,
+        input_overrides={"topic": "new topic", "model": "model-a"},
+        step_input_overrides=None,
+    )
 
 
 def test_replay_uses_resolved_project_for_source_lookup_and_replay_write() -> None:

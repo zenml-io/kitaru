@@ -2108,11 +2108,21 @@ class _FlowDefinition:
                 with _scoped_replay_runtime_context(
                     replay_plan.runtime_context.to_json()
                 ):
+                    # ZenML's replay only restores recorded values for
+                    # parameters without signature defaults; defaulted flow
+                    # inputs would silently revert to their defaults. Merge the
+                    # source run's recorded parameters under the explicit
+                    # overrides so unoverridden inputs replay faithfully.
+                    original_parameters = dict(original_run.config.parameters or {})
+                    merged_input_overrides = {
+                        **original_parameters,
+                        **replay_plan.input_overrides,
+                    }
                     replayed_run = configured_pipeline.replay(
                         pipeline_run=original_run.id,
                         skip=replay_plan.steps_to_skip,
                         skip_successful_steps=False,
-                        input_overrides=replay_plan.input_overrides or None,
+                        input_overrides=merged_input_overrides or None,
                         step_input_overrides=replay_plan.step_input_overrides or None,
                     )
             except Exception as exc:
