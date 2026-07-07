@@ -260,7 +260,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89  # v1.47.2
+        uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
       - name: Lint
         run: |
           uv run ruff check .
@@ -579,7 +579,7 @@ jobs:
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b  # v6.2.1
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
