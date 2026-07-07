@@ -927,6 +927,29 @@ def _coerce_flow_overrides(flow_overrides: Mapping[str, Any] | None) -> dict[str
     return {str(key): value for key, value in flow_overrides.items()}
 
 
+def _recorded_flow_parameters(run: PipelineRunResponse) -> dict[str, Any]:
+    """Return flow parameters recorded on the source run.
+
+    Missing ``config`` or ``config.parameters`` means the source run did not
+    expose recorded flow parameters, so replay planning treats that as an empty
+    mapping. A present non-mapping ``parameters`` value is corrupt recorded
+    state and fails loudly. Recorded parameter keys are stringified to match the
+    public ``flow_overrides`` key normalization.
+    """
+    config = getattr(run, "config", None)
+    if config is None:
+        return {}
+
+    parameters = getattr(config, "parameters", None)
+    if parameters is None:
+        return {}
+    if not isinstance(parameters, Mapping):
+        raise KitaruStateError(
+            f"Recorded flow parameters for execution '{run.id}' must be a mapping."
+        )
+    return {str(key): value for key, value in parameters.items()}
+
+
 def build_replay_request_document(
     *,
     flow_overrides: Mapping[str, Any] | None = None,
@@ -1230,6 +1253,8 @@ def build_replay_plan(
     )
 
     normalized_flow_overrides = _coerce_flow_overrides(flow_overrides)
+    input_overrides = _recorded_flow_parameters(run)
+    input_overrides.update(normalized_flow_overrides)
     resolved_document = ReplayPlanDocument(
         flow_overrides=normalized_flow_overrides,
         checkpoint_overrides=document.checkpoint_overrides,
@@ -1241,7 +1266,7 @@ def build_replay_plan(
     return ReplayPlan(
         original_run_id=str(run.id),
         steps_to_skip=steps_to_skip,
-        input_overrides=normalized_flow_overrides,
+        input_overrides=input_overrides,
         step_input_overrides=step_input_overrides,
         runtime_context=runtime_context,
         document=resolved_document,
