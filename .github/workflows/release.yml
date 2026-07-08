@@ -491,9 +491,12 @@ jobs:
 
       # --- GitHub Release (skip on dry-run) ---
       # If the release already exists, verify it's attached to v$VERSION, then
-      # check each expected dist/* asset. Present assets are SHA256-compared
-      # against the local build; matching assets are skipped, mismatched assets
-      # fail loudly (never silently overwrite), and missing assets get uploaded.
+      # check each expected dist/* asset. Reproducible assets (wheel, sdist) are
+      # SHA256-compared against the local build; matching assets are skipped,
+      # mismatched assets fail loudly (never silently overwrite), and missing
+      # assets get uploaded. Signature/attestation assets are regenerated on
+      # every publish run and are never byte-identical, so they are uploaded when
+      # missing and left as-is otherwise rather than SHA256-compared.
       - name: Create GitHub Release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         env:
@@ -516,6 +519,22 @@ jobs:
           existing_assets=$(echo "$release_json" | jq -r '.assets[].name')
           for f in dist/*; do
             name=$(basename "$f")
+            case "$name" in
+              *.attestation|*.sigstore|*.sig|*.asc)
+                # Signatures/attestations are regenerated on every publish run and
+                # are never byte-identical, so they cannot be SHA256-reconciled.
+                # Upload if the release is missing one; otherwise keep the existing
+                # signature. A signature is verified by validating it against the
+                # artifact, never by expecting two signatures to match byte-for-byte.
+                if echo "$existing_assets" | grep -Fxq "$name"; then
+                  echo "  keeping existing signature asset (not reproducible): $name"
+                else
+                  echo "  uploading missing signature asset: $name"
+                  gh release upload "v$VERSION" "$f"
+                fi
+                continue
+                ;;
+            esac
             if echo "$existing_assets" | grep -Fxq "$name"; then
               gh release download "v$VERSION" --pattern "$name" --dir existing-assets --clobber
               local_hash=$(sha256sum "$f" | awk '{print $1}')
