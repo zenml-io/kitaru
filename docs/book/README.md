@@ -5,11 +5,12 @@ icon: hand-wave
 
 # Welcome to Kitaru
 
-Observability tools — Braintrust, LangSmith, Langfuse — only watched your agent,
-so all they can test against is a dataset you assembled by hand. Only Kitaru
-executed your agent, so only Kitaru can rebuild your real, multi-step, tool-using
-production history into an environment you can re-run a change against — and see
-exactly what regressed.
+Braintrust, LangSmith, and Langfuse watched your agent from the outside — the
+closest any of them can get to testing a change is scoring it against a dataset
+you assembled by hand. Kitaru is the runtime your agent ran on, underneath your
+harness, so it can rebuild a real production run — every step, every tool call —
+into an environment you can re-run a change against, and see exactly what
+regressed.
 
 That is the loop: Kitaru records every model call and tool call of a real run,
 rebuilds that run as a faithful environment, and lets you re-execute it with one
