@@ -1506,7 +1506,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.19.0"
+version = "0.20.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -3555,7 +3555,7 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 dependencies = [
-    { name = "anyio" },
+    { name = "anyio", marker = "extra == 'extra-6-kitaru-local' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-google-adk'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ff/fb/2984a686808b89a6781526129a4b51266f678b2d2b97ab2d325e56116df8/starlette-0.45.3.tar.gz", hash = "sha256:2cbcba2a75806f8a41c722141486f37c28e30a0921c5f6fe4346cb0dcee1302f", size = 2574076, upload-time = "2025-01-24T11:17:36.535Z" }
 wheels = [

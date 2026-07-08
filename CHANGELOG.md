@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-08
+
 ### Added
 - Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
 - Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
