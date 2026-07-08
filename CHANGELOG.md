@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-07-08
+
 ### Fixed
 - Project create/use/delete operations now stop before changing server state unless Kitaru can verify a ZenML Pro/Cloud server. Read-only project inspection (`list`, `current`, and `show`) remains available on local/OSS servers for diagnostics. (#512)
 
