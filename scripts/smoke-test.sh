@@ -35,6 +35,14 @@
 #                        Timeout for remote log readback (default: 60)
 #   --remote-run-prefix PREFIX
 #                        Non-secret prefix for generated remote smoke markers
+#   --pro-project-smoke
+#                        Opt into ZenML Pro/Cloud project mutation smoke
+#   --pro-project-server-url URL
+#                        ZenML Pro/Cloud server URL for project smoke
+#   --pro-project-login-timeout SECONDS
+#                        Timeout for Pro/Cloud project smoke login (default: 60)
+#   --pro-project-run-prefix PREFIX
+#                        Non-secret prefix for generated Pro/Cloud project names
 #   -h, --help           Show this help message
 
 # No -e: we deliberately continue past failures to collect all results.
@@ -94,6 +102,20 @@ Options:
   --remote-run-prefix PREFIX
                        Non-secret prefix for generated remote smoke markers.
                        Also settable with KITARU_REMOTE_SMOKE_RUN_PREFIX.
+  --pro-project-smoke
+                       Opt into ZenML Pro/Cloud project mutation smoke. Also
+                       settable with KITARU_PRO_PROJECT_SMOKE=1. This is off by
+                       default; local smoke still proves mutations are blocked.
+  --pro-project-server-url URL
+                       ZenML Pro/Cloud server URL for project smoke. Also
+                       settable with KITARU_PRO_PROJECT_SMOKE_SERVER_URL. Falls
+                       back to KITARU_REMOTE_SMOKE_SERVER_URL when set.
+  --pro-project-login-timeout SECONDS
+                       Timeout for Pro/Cloud project smoke login. Also settable
+                       with KITARU_PRO_PROJECT_SMOKE_LOGIN_TIMEOUT. Default: 60.
+  --pro-project-run-prefix PREFIX
+                       Non-secret prefix for generated Pro/Cloud project names.
+                       Also settable with KITARU_PRO_PROJECT_SMOKE_RUN_PREFIX.
   -h, --help           Show this help message
 EOF
 }
@@ -117,6 +139,10 @@ REMOTE_SMOKE_LOGIN_TIMEOUT="${KITARU_REMOTE_SMOKE_LOGIN_TIMEOUT:-60}"
 REMOTE_SMOKE_EXECUTION_TIMEOUT="${KITARU_REMOTE_SMOKE_EXECUTION_TIMEOUT:-900}"
 REMOTE_SMOKE_LOG_TIMEOUT="${KITARU_REMOTE_SMOKE_LOG_TIMEOUT:-60}"
 REMOTE_SMOKE_RUN_PREFIX="${KITARU_REMOTE_SMOKE_RUN_PREFIX:-kitaru-remote-smoke}"
+PRO_PROJECT_SMOKE=false
+PRO_PROJECT_SMOKE_SERVER_URL="${KITARU_PRO_PROJECT_SMOKE_SERVER_URL:-${KITARU_REMOTE_SMOKE_SERVER_URL:-}}"
+PRO_PROJECT_SMOKE_LOGIN_TIMEOUT="${KITARU_PRO_PROJECT_SMOKE_LOGIN_TIMEOUT:-60}"
+PRO_PROJECT_SMOKE_RUN_PREFIX="${KITARU_PRO_PROJECT_SMOKE_RUN_PREFIX:-kitaru-pro-project-smoke}"
 
 is_truthy_env_value() {
     local value
@@ -129,6 +155,9 @@ is_truthy_env_value() {
 
 if is_truthy_env_value "${KITARU_REMOTE_SMOKE:-}"; then
     REMOTE_STACK_SMOKE=true
+fi
+if is_truthy_env_value "${KITARU_PRO_PROJECT_SMOKE:-}"; then
+    PRO_PROJECT_SMOKE=true
 fi
 
 find_json_out_arg() {
@@ -304,6 +333,37 @@ while [[ $# -gt 0 ]]; do
             REMOTE_SMOKE_RUN_PREFIX="$2"
             shift 2
             ;;
+        --pro-project-smoke)
+            PRO_PROJECT_SMOKE=true
+            shift
+            ;;
+        --pro-project-server-url)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --pro-project-server-url requires a URL" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--pro-project-server-url requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            PRO_PROJECT_SMOKE_SERVER_URL="$2"
+            shift 2
+            ;;
+        --pro-project-login-timeout)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --pro-project-login-timeout requires seconds" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--pro-project-login-timeout requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            PRO_PROJECT_SMOKE_LOGIN_TIMEOUT="$2"
+            shift 2
+            ;;
+        --pro-project-run-prefix)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --pro-project-run-prefix requires a prefix" >&2
+                write_early_json_result "${JSON_OUT:-$DISCOVERED_JSON_OUT}" "smoke option parsing" "--pro-project-run-prefix requires a value" "$RELEASE_MODE" || true
+                exit 1
+            fi
+            PRO_PROJECT_SMOKE_RUN_PREFIX="$2"
+            shift 2
+            ;;
         --required-provider-area)
             if [[ $# -lt 2 ]]; then
                 echo "Error: --required-provider-area requires one of: openai, anthropic, gemini-model, gemini-sandbox-function, gemini-antigravity, google-adk, research-bot" >&2
@@ -356,6 +416,8 @@ RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
 GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
 GOOGLE_ADK_SMOKE_ENV=""
+PRO_PROJECT_SMOKE_CREATED_PROJECT=""
+PRO_PROJECT_SMOKE_LOGGED_IN=false
 # Track whether this script started the server (vs. attaching to an existing one).
 SCRIPT_OWNS_SERVER=false
 
@@ -759,8 +821,57 @@ run_expected_failure() {
     return 0
 }
 
+run_sdk_project_guard_checks() {
+    local project_name="$1"
+    run_test "SDK: local/OSS blocks project create/use/delete" env \
+        KITARU_SMOKE_PROJECT_NAME="$project_name" \
+        $UV_RUN python -c '
+from collections.abc import Callable
+import os
+
+from kitaru import KitaruClient
+from kitaru.errors import KitaruFeatureNotAvailableError
+
+project_name = os.environ["KITARU_SMOKE_PROJECT_NAME"]
+client = KitaruClient.for_project_management()
+operations: dict[str, Callable[[], object]] = {
+    "create": lambda: client.projects.create(project_name, activate=False),
+    "use": lambda: client.projects.use(project_name),
+    "delete": lambda: client.projects.delete(project_name),
+}
+
+for operation, call in operations.items():
+    try:
+        call()
+    except KitaruFeatureNotAvailableError as exc:
+        message = str(exc)
+        if "requires a ZenML Pro/Cloud server" not in message:
+            raise AssertionError(f"unexpected guard message: {message}") from exc
+    else:
+        raise AssertionError(f"project {operation} unexpectedly succeeded")
+'
+}
+
 remote_required_env_names() {
     printf '%s' "KITARU_REMOTE_SMOKE_SERVER_URL,KITARU_REMOTE_SMOKE_KUBERNETES_STACK,KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK"
+}
+
+pro_project_required_env_names() {
+    printf '%s' "KITARU_PRO_PROJECT_SMOKE_SERVER_URL,KITARU_REMOTE_SMOKE_SERVER_URL"
+}
+
+project_current_name_from_json() {
+    python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+item = payload.get("item") if isinstance(payload, dict) else None
+name = item.get("name") if isinstance(item, dict) else None
+if not name:
+    raise SystemExit("current project response did not include item.name")
+print(name)
+'
 }
 
 redact_remote_output() {
@@ -776,7 +887,8 @@ sys.stdout.write(text)
         "$REMOTE_SMOKE_SERVER_URL" \
         "$REMOTE_SMOKE_KUBERNETES_STACK" \
         "$REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK" \
-        "$REMOTE_SMOKE_FLOW_IMAGE"
+        "$REMOTE_SMOKE_FLOW_IMAGE" \
+        "$PRO_PROJECT_SMOKE_SERVER_URL"
 }
 
 remote_evidence_field() {
@@ -935,6 +1047,146 @@ run_remote_flow_smoke() {
     return 1
 }
 
+run_pro_project_smoke_section() {
+    section_header "Pro/Cloud project smoke"
+
+    if [[ "$PRO_PROJECT_SMOKE" != true ]]; then
+        skip_test "Pro/Cloud project smoke" "not opted in; set KITARU_PRO_PROJECT_SMOKE=1 or pass --pro-project-smoke for Pro/Cloud project release evidence"
+        return 0
+    fi
+
+    if [[ -z "$PRO_PROJECT_SMOKE_SERVER_URL" ]]; then
+        local reason="missing required Pro/Cloud project smoke config: KITARU_PRO_PROJECT_SMOKE_SERVER_URL or KITARU_REMOTE_SMOKE_SERVER_URL"
+        printf "  ${RED}✗${RESET} Pro/Cloud project smoke configuration\n"
+        printf "    %s\n" "$reason"
+        record_failure "Pro/Cloud project smoke configuration" "$reason" "none" "$(pro_project_required_env_names)" 0
+        return 0
+    fi
+
+    if ! is_positive_integer "$PRO_PROJECT_SMOKE_LOGIN_TIMEOUT"; then
+        local reason="Pro/Cloud project smoke login timeout must be a positive integer: KITARU_PRO_PROJECT_SMOKE_LOGIN_TIMEOUT"
+        printf "  ${RED}✗${RESET} Pro/Cloud project smoke timeout configuration\n"
+        printf "    %s\n" "$reason"
+        record_failure "Pro/Cloud project smoke timeout configuration" "$reason" "none" "KITARU_PRO_PROJECT_SMOKE_LOGIN_TIMEOUT" 0
+        return 0
+    fi
+
+    local login_output
+    local login_start=$SECONDS
+    login_output=$(timed "$PRO_PROJECT_SMOKE_LOGIN_TIMEOUT" \
+        $UV_RUN kitaru login "$PRO_PROJECT_SMOKE_SERVER_URL" --timeout "$PRO_PROJECT_SMOKE_LOGIN_TIMEOUT" 2>&1)
+    local login_rc=$?
+    local login_duration=$((SECONDS - login_start))
+    if [[ $login_rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} Pro/Cloud project smoke login\n"
+        record_pass_evidence "Pro/Cloud project smoke login" \
+            '{"pro_project_server_configured":true}' "$login_duration"
+        PRO_PROJECT_SMOKE_LOGGED_IN=true
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$login_output" | redact_remote_output | sed 's/^/    /'
+        fi
+    else
+        printf "  ${RED}✗${RESET} Pro/Cloud project smoke login\n"
+        echo "$login_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        record_failure "Pro/Cloud project smoke login" "exit status $login_rc" "none" "KITARU_PRO_PROJECT_SMOKE_SERVER_URL" "$login_duration"
+        return 0
+    fi
+
+    local current_output
+    local current_name
+    local current_start=$SECONDS
+    current_output=$(timed 60 $UV_RUN kitaru project current -o json 2>&1)
+    local current_rc=$?
+    local current_duration=$((SECONDS - current_start))
+    if [[ $current_rc -ne 0 ]]; then
+        printf "  ${RED}✗${RESET} Pro/Cloud project current inspection\n"
+        echo "$current_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        record_failure "Pro/Cloud project current inspection" "exit status $current_rc" "none" "" "$current_duration"
+        return 0
+    fi
+    current_name=$(printf '%s' "$current_output" | project_current_name_from_json 2>/dev/null) || current_name=""
+    if [[ -z "$current_name" ]]; then
+        printf "  ${RED}✗${RESET} Pro/Cloud project current inspection\n"
+        echo "$current_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+        record_failure "Pro/Cloud project current inspection" "current project response did not include item.name" "none" "" "$current_duration"
+        return 0
+    fi
+    printf "  ${GREEN}✓${RESET} Pro/Cloud project current inspection\n"
+    record_pass_evidence "Pro/Cloud project current inspection" \
+        '{"active_project_detected":true}' "$current_duration"
+    if [[ "$VERBOSE" == true ]]; then
+        echo "$current_output" | redact_remote_output | sed 's/^/    /'
+    fi
+    run_test "Pro/Cloud project use current project" \
+        timed 60 $UV_RUN kitaru project use "$current_name"
+
+    local project_name
+    project_name="${PRO_PROJECT_SMOKE_RUN_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
+    local created=false
+    local active_project_changed=false
+
+    PRO_PROJECT_SMOKE_CREATED_PROJECT="$project_name"
+    if run_test "Pro/Cloud project create --no-activate" \
+        timed 60 $UV_RUN kitaru project create "$project_name" --no-activate; then
+        created=true
+    fi
+
+    if [[ "$created" == true ]]; then
+        local after_create_output
+        local after_create_name
+        local after_create_start=$SECONDS
+        after_create_output=$(timed 60 $UV_RUN kitaru project current -o json 2>&1)
+        local after_create_rc=$?
+        local after_create_duration=$((SECONDS - after_create_start))
+        if [[ $after_create_rc -eq 0 ]]; then
+            after_create_name=$(printf '%s' "$after_create_output" | project_current_name_from_json 2>/dev/null) || after_create_name=""
+        else
+            after_create_name=""
+        fi
+
+        if [[ $after_create_rc -eq 0 && -n "$after_create_name" ]]; then
+            if [[ "$after_create_name" == "$current_name" ]]; then
+                printf "  ${GREEN}✓${RESET} Pro/Cloud project create kept active project\n"
+                record_pass_evidence "Pro/Cloud project create kept active project" \
+                    '{"create_no_activate_preserved_active_project":true}' "$after_create_duration"
+            else
+                printf "  ${RED}✗${RESET} Pro/Cloud project create kept active project\n"
+                record_failure "Pro/Cloud project create kept active project" \
+                    "active project changed after create --no-activate" "none" "" "$after_create_duration"
+                active_project_changed=true
+            fi
+        else
+            printf "  ${RED}✗${RESET} Pro/Cloud project active project recheck\n"
+            echo "$after_create_output" | redact_remote_output | tail -30 | sed 's/^/    /'
+            record_failure "Pro/Cloud project active project recheck" \
+                "current project response did not include item.name" "none" "" "$after_create_duration"
+            active_project_changed=true
+        fi
+
+        if [[ "$active_project_changed" == true ]]; then
+            run_test "Pro/Cloud project restore previous active project" \
+                timed 60 $UV_RUN kitaru project use "$current_name" || true
+        else
+            printf "  ${GREEN}✓${RESET} Pro/Cloud project restore not needed\n"
+            record_pass_evidence "Pro/Cloud project restore not needed" \
+                '{"active_project_already_restored":true}' 0
+        fi
+
+        run_test "Pro/Cloud project show created project" \
+            timed 60 $UV_RUN kitaru project show "$project_name" || true
+        if run_test "Pro/Cloud project delete created project" \
+            timed 60 $UV_RUN kitaru project delete "$project_name" --yes; then
+            PRO_PROJECT_SMOKE_CREATED_PROJECT=""
+        fi
+    else
+        if timed 60 $UV_RUN kitaru project delete "$project_name" --yes &>/dev/null; then
+            PRO_PROJECT_SMOKE_CREATED_PROJECT=""
+        fi
+        skip_test "Pro/Cloud project show created project" "project create did not pass"
+        skip_test "Pro/Cloud project delete created project" "project create did not pass"
+    fi
+}
+
 run_remote_stack_smoke_section() {
     section_header "Remote stack smoke"
 
@@ -1040,6 +1292,16 @@ cleanup() {
     # before its own restore ran, then drop the backup file.
     restore_repo_active_stack
 
+    if [[ -n "${PRO_PROJECT_SMOKE_CREATED_PROJECT:-}" ]] && [[ "${PRO_PROJECT_SMOKE_LOGGED_IN:-false}" == true ]]; then
+        timed 60 $UV_RUN kitaru project delete \
+            "$PRO_PROJECT_SMOKE_CREATED_PROJECT" --yes &>/dev/null || true
+        PRO_PROJECT_SMOKE_CREATED_PROJECT=""
+    fi
+    if [[ "${PRO_PROJECT_SMOKE_LOGGED_IN:-false}" == true ]]; then
+        timed 10 $UV_RUN kitaru logout &>/dev/null || true
+        PRO_PROJECT_SMOKE_LOGGED_IN=false
+    fi
+
     if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
         timed 10 $UV_RUN kitaru auth api-keys delete \
             "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
@@ -1133,6 +1395,9 @@ fi
 
 if [[ "$REMOTE_STACK_SMOKE" == true ]]; then
     printf "  Remote stack smoke: enabled (operator-provided config)\n"
+fi
+if [[ "$PRO_PROJECT_SMOKE" == true ]]; then
+    printf "  Pro/Cloud project smoke: enabled (operator-provided config)\n"
 fi
 
 # Internal test hook: exercise the remote section without running local install/server smoke.
@@ -1229,8 +1494,19 @@ run_remote_stack_smoke_section
 section_header "Clear state"
 
 # Logout may exit non-zero if no session is active — that's fine.
-$UV_RUN kitaru logout &>/dev/null || true
-printf "  ${GREEN}✓${RESET} kitaru logout (clear state)\n"
+if [[ -n "${PRO_PROJECT_SMOKE_CREATED_PROJECT:-}" ]] && [[ "${PRO_PROJECT_SMOKE_LOGGED_IN:-false}" == true ]]; then
+    if timed 60 $UV_RUN kitaru project delete \
+        "$PRO_PROJECT_SMOKE_CREATED_PROJECT" --yes &>/dev/null; then
+        PRO_PROJECT_SMOKE_CREATED_PROJECT=""
+    fi
+fi
+if [[ -z "${PRO_PROJECT_SMOKE_CREATED_PROJECT:-}" ]]; then
+    $UV_RUN kitaru logout &>/dev/null || true
+    PRO_PROJECT_SMOKE_LOGGED_IN=false
+    printf "  ${GREEN}✓${RESET} kitaru logout (clear state)\n"
+else
+    printf "  ${YELLOW}!${RESET} skipped kitaru logout so exit cleanup can retry project deletion\n"
+fi
 
 # ---------------------------------------------------------------------------
 # Start local server
@@ -1294,6 +1570,18 @@ run_test "kitaru project list"           $UV_RUN kitaru project list
 run_test "kitaru project list -o json"   $UV_RUN kitaru project list -o json
 run_test "kitaru project current"        $UV_RUN kitaru project current
 run_test "SDK project-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_project_management(); projects = client.projects.list(); current = client.projects.current(); assert isinstance(projects, list); assert current.name'
+PROJECT_GUARD_MESSAGE="requires a ZenML Pro/Cloud server"
+SMOKE_LOCAL_PROJECT="kitaru-smoke-local-project-$$"
+run_expected_failure "local/OSS blocks kitaru project create" \
+    "$PROJECT_GUARD_MESSAGE" \
+    $UV_RUN kitaru project create "$SMOKE_LOCAL_PROJECT" --no-activate
+run_expected_failure "local/OSS blocks kitaru project use" \
+    "$PROJECT_GUARD_MESSAGE" \
+    $UV_RUN kitaru project use "$SMOKE_LOCAL_PROJECT"
+run_expected_failure "local/OSS blocks kitaru project delete" \
+    "$PROJECT_GUARD_MESSAGE" \
+    $UV_RUN kitaru project delete "$SMOKE_LOCAL_PROJECT" --yes
+run_sdk_project_guard_checks "$SMOKE_LOCAL_PROJECT"
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru stack create help mentions modal" \
@@ -1728,6 +2016,11 @@ run_test "MCP: kitaru_projects_list" \
 run_test "MCP: kitaru_projects_current" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_current --json
 
+run_expected_failure "MCP: local/OSS blocks kitaru_projects_use" \
+    "$PROJECT_GUARD_MESSAGE" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_use \
+        --input-json "{\"name_or_id\":\"$SMOKE_LOCAL_PROJECT\"}" --json
+
 run_test "MCP: kitaru_executions_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_executions_list \
         --input-json '{"limit": 3}' --json
@@ -1740,6 +2033,20 @@ run_test "MCP query snapshot (example)" \
     timed 30 $UV_RUN examples/features/mcp/mcp_query_tools.py
 
 fi  # LOGIN_RC == 0
+
+# ---------------------------------------------------------------------------
+# Pro/Cloud project smoke
+# ---------------------------------------------------------------------------
+if [[ "$SCRIPT_OWNS_SERVER" == true ]] && [[ "$KEEP_SERVER" != true ]]; then
+    printf "\n${CYAN}Stopping local server before Pro/Cloud project smoke...${RESET}\n"
+    if timed 10 $UV_RUN kitaru logout &>/dev/null; then
+        printf "${GREEN}Server stopped.${RESET}\n"
+    else
+        printf "${RED}Warning: server stop may have failed. Check port 8383.${RESET}\n"
+    fi
+    SCRIPT_OWNS_SERVER=false
+fi
+run_pro_project_smoke_section
 
 # ---------------------------------------------------------------------------
 # Summary

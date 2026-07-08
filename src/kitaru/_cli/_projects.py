@@ -165,7 +165,7 @@ def create(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a Kitaru project, activating it by default."""
+    """Create a Kitaru project on ZenML Pro/Cloud, activating it by default."""
     command = "project.create"
     output_format = _resolve_output_format(output)
     result = run_with_cli_error_boundary(
@@ -209,7 +209,7 @@ def use(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Use a Kitaru project as the active default by name or ID."""
+    """Use a Kitaru project on ZenML Pro/Cloud as the active default."""
     command = "project.use"
     output_format = _resolve_output_format(output)
     project = run_with_cli_error_boundary(
@@ -242,13 +242,14 @@ def delete(
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Delete a Kitaru project by name or ID."""
+    """Delete a Kitaru project on ZenML Pro/Cloud by name or ID."""
     command = "project.delete"
     output_format = _resolve_output_format(output)
     if not yes:
         _exit_with_error(
             command,
-            "Refusing to delete project without --yes.",
+            f"Kitaru will not delete project '{name_or_id}' without explicit "
+            "confirmation. Re-run with --yes if you want to delete it.",
             output=output_format,
         )
 

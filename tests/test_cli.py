@@ -57,6 +57,7 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     KitaruDeploymentInputValuesError,
+    KitaruFeatureNotAvailableError,
     KitaruStackNotRemoteExecutableUsageError,
     KitaruStateError,
     KitaruUsageError,
@@ -5817,6 +5818,80 @@ def test_project_show_renders_snapshot(
     assert "Active: yes" in output
 
 
+def test_project_help_mentions_pro_cloud_for_mutations(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Project mutation help should explain the ZenML Pro/Cloud requirement."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["project", "--help"])
+    assert exc_info.value.code == 0
+    assert "pro/cloud" in capsys.readouterr().out.lower()
+
+    for command in ("create", "use", "delete"):
+        with pytest.raises(SystemExit) as command_exc_info:
+            app(["project", command, "--help"])
+        assert command_exc_info.value.code == 0
+        assert "pro/cloud" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    ("command", "patch_target", "args"),
+    [
+        (
+            "project.create",
+            "kitaru.cli.create_project",
+            ["project", "create", "staging"],
+        ),
+        ("project.use", "kitaru.cli.use_project", ["project", "use", "staging"]),
+        (
+            "project.delete",
+            "kitaru.cli.delete_project",
+            ["project", "delete", "staging", "--yes"],
+        ),
+    ],
+)
+def test_project_mutation_text_errors_preserve_feature_error(
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    patch_target: str,
+    args: list[str],
+) -> None:
+    message = f"Kitaru {command} requires a ZenML Pro/Cloud server."
+    with (
+        patch(patch_target, side_effect=KitaruFeatureNotAvailableError(message)),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    assert message in capsys.readouterr().err
+
+
+def test_project_create_json_error_preserves_feature_error_type(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    message = "Kitaru project create requires a ZenML Pro/Cloud server."
+    with (
+        patch(
+            "kitaru.cli.create_project",
+            side_effect=KitaruFeatureNotAvailableError(message),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["project", "create", "staging", "--output", "json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "command": "project.create",
+        "error": {
+            "message": message,
+            "type": "KitaruFeatureNotAvailableError",
+        },
+    }
+
+
 def test_project_use_delegates_to_config(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -5908,7 +5983,9 @@ def test_project_delete_requires_yes(
 
     assert exc_info.value.code == 1
     mock_delete_project.assert_not_called()
-    assert "Refusing to delete project without --yes." in capsys.readouterr().err
+    error_output = capsys.readouterr().err
+    assert "Kitaru will not delete project 'staging'" in error_output
+    assert "Re-run with --yes if you want to delete it." in error_output
 
 
 def test_project_delete_reports_success(
