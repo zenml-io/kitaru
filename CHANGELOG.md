@@ -28,7 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
 - Plain user checkpoint input overrides can again mix recorded artifact input names with literal parameter overrides, while adapter-declared replay input slots still reject unknown keys.
 - `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
-- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
+- Flow result extraction now resolves a single eligible terminal checkpoint instead of raising ambiguity when replay or adapter runs record several terminal checkpoints, and honors the `flow_result_candidate` marker and saved flow-return artifacts before terminal-step heuristics.
+- Execution deep links and compare links now resolve to the correct Kitaru UI route when connected to a Pro workspace, instead of landing on the workspace projects page via a stale `/flows/...` URL.
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#490)
 - Fixed `kitaru stack use` and `kitaru status` when `ZENML_ACTIVE_STACK_ID` points to an unresolvable stack: stack activation no longer fails while re-reading the active stack after activation, and diagnostics now tell users to unset, update, or remove the environment variable.
 - Fixed flow submissions with an explicit stack so a successful run is not reported as failed only because Kitaru could not restore a stale previous active stack ID afterward.
 
