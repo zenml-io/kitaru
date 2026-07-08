@@ -24,6 +24,9 @@ just test    # Run tests
 * **Default branch:** `develop` — all PRs target this branch
 * **Checks:** `just check` runs formatting, linting, type checking, typos, and YAML validation
 * **Docs:** Run `just generate-docs` then `just docs` to preview locally
+* **Outside contributors:** If you cannot open a PR directly, open an issue and
+  link to any branch you already prepared. Maintainers may invite issue authors
+  as repository collaborators when direct PR access would help review.
 
 ## Links
 

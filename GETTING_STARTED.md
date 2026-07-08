@@ -366,7 +366,7 @@ For the full internal runbook, see `FRONTEND-TESTING.md`.
 | `uv run kitaru executions list` | List recent flow executions |
 | `uv run kitaru executions get <ID>` | Detailed view of one execution |
 | `uv run kitaru executions logs <ID>` | View runtime logs |
-| `uv run kitaru executions replay <ID> --from <checkpoint>` | Replay from a checkpoint |
+| `uv run kitaru executions replay <ID> --at <checkpoint>` | Replay from a checkpoint |
 | `uv run kitaru stack list` | List available stacks |
 | `uv run kitaru stack create <name>` | Create and auto-activate a local stack |
 | `uv run kitaru stack delete <name> --recursive --force` | Remove a disposable stack and switch back to default if needed |
