@@ -3089,7 +3089,7 @@ class _ProjectsAPI:
         display_name: str | None = None,
         activate: bool = True,
     ) -> ProjectCreateResult:
-        """Create a Kitaru project and optionally activate it."""
+        """Create a Kitaru project on ZenML Pro/Cloud and optionally activate it."""
         return _create_project(
             name,
             description=description,
@@ -3099,11 +3099,11 @@ class _ProjectsAPI:
         )
 
     def use(self, name_or_id: str) -> ProjectInfo:
-        """Set the active Kitaru project."""
+        """Set the active Kitaru project on ZenML Pro/Cloud."""
         return _use_project(name_or_id, client_factory=self._client_ref._client)
 
     def delete(self, name_or_id: str) -> ProjectDeleteResult:
-        """Delete a Kitaru project."""
+        """Delete a Kitaru project on ZenML Pro/Cloud."""
         return _delete_project(name_or_id, client_factory=self._client_ref._client)
 
 
@@ -3179,9 +3179,10 @@ class KitaruClient:
     def for_project_management(cls) -> KitaruClient:
         """Create a client for project-management operations.
 
-        Listing, creating, or choosing projects happens before a project-scoped
-        operation can run, so this constructor validates server/auth pairing
-        while intentionally skipping the active-project requirement.
+        Reading projects happens before a project-scoped operation can run.
+        Project create/use/delete additionally require ZenML Pro/Cloud through
+        the shared project helpers. This constructor validates server/auth
+        pairing while intentionally skipping the active-project requirement.
         """
         return cls(_require_project=False)
 

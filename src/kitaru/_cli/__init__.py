@@ -30,7 +30,7 @@ stack_app = cyclopts.App(
 )
 project_app = cyclopts.App(
     name="project",
-    help="Inspect, create, delete, and switch Kitaru projects.",
+    help="Inspect projects; create, delete, and switch them on ZenML Pro/Cloud.",
 )
 secrets_app = cyclopts.App(
     name="secrets",

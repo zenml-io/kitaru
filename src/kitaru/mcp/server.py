@@ -673,7 +673,7 @@ def kitaru_projects_show(name_or_id: str) -> dict[str, Any]:
 
 @tracked_mcp_tool
 def kitaru_projects_use(name_or_id: str) -> dict[str, Any]:
-    """Use a Kitaru project as the active default by name or ID."""
+    """Use a Kitaru project on ZenML Pro/Cloud as the active default."""
     return run_with_mcp_error_boundary(
         lambda: inspection.serialize_project(project_ops.use_project(name_or_id))
     )

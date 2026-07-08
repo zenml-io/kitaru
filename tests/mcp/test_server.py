@@ -29,7 +29,12 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
@@ -1685,6 +1690,20 @@ def test_projects_use_delegates_to_shared_helpers() -> None:
     mock_use.assert_called_once_with("production")
     assert payload["name"] == "production"
     assert payload["is_active"] is True
+
+
+def test_projects_use_preserves_pro_cloud_feature_error() -> None:
+    """MCP project use should preserve the shared Pro/Cloud guard error."""
+    with (
+        patch(
+            "kitaru._config._projects.use_project",
+            side_effect=KitaruFeatureNotAvailableError(
+                "Kitaru project use requires a ZenML Pro/Cloud server."
+            ),
+        ),
+        pytest.raises(KitaruFeatureNotAvailableError, match="Pro/Cloud"),
+    ):
+        kitaru_projects_use("staging")
 
 
 def test_manage_stack_create_returns_structured_result() -> None:

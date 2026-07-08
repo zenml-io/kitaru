@@ -68,6 +68,14 @@ def test_help_documents_remote_stack_smoke_contract() -> None:
     assert "KITARU_REMOTE_SMOKE_LOCAL_REMOTE_ARTIFACT_STACK" in help_text
     assert "KITARU_REMOTE_SMOKE_FLOW_IMAGE" in help_text
     assert "just dev-image REPO=<operator-image-repo>" in help_text
+    assert "--pro-project-smoke" in help_text
+    assert "--pro-project-server-url URL" in help_text
+    assert "--pro-project-login-timeout SECONDS" in help_text
+    assert "--pro-project-run-prefix PREFIX" in help_text
+    assert "KITARU_PRO_PROJECT_SMOKE" in help_text
+    assert "KITARU_PRO_PROJECT_SMOKE_SERVER_URL" in help_text
+    assert "KITARU_PRO_PROJECT_SMOKE_LOGIN_TIMEOUT" in help_text
+    assert "KITARU_PRO_PROJECT_SMOKE_RUN_PREFIX" in help_text
 
 
 def test_default_remote_smoke_is_opt_in_and_records_no_remote_checks(

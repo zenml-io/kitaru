@@ -843,6 +843,36 @@ def test_projects_api_delegates_to_shared_helpers() -> None:
     delete.assert_called_once_with("staging", client_factory=client._client)
 
 
+@pytest.mark.parametrize(
+    ("method", "patch_target", "expected_args"),
+    [
+        ("create", "kitaru.client._create_project", ("staging",)),
+        ("use", "kitaru.client._use_project", ("staging",)),
+        ("delete", "kitaru.client._delete_project", ("staging",)),
+    ],
+)
+def test_projects_api_propagates_project_management_feature_error(
+    method: str,
+    patch_target: str,
+    expected_args: tuple[str, ...],
+) -> None:
+    error = KitaruFeatureNotAvailableError(
+        "Kitaru project management requires a ZenML Pro/Cloud server."
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch(patch_target, side_effect=error) as helper,
+    ):
+        client = KitaruClient()
+        with pytest.raises(KitaruFeatureNotAvailableError, match="Pro/Cloud"):
+            getattr(client.projects, method)(*expected_args)
+
+    helper.assert_called_once()
+
+
 def test_auth_service_accounts_delegate_to_zenml_client() -> None:
     service_account = _service_account_response()
 
