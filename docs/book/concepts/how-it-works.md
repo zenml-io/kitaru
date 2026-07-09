@@ -5,12 +5,14 @@ icon: gears
 
 # How It Works
 
-Observability tools watch your agent. Kitaru turns your production traces into a
-faithful environment you can re-run — so when you change your agent, you catch
-what breaks before your users do. Re-scoring saved outputs against a dataset is
-an eval; faithfully re-running the real run is only possible from the runtime
-that executed it. This page is the mental model behind that claim, and the
-architecture that makes the rebuilt environment faithful enough to trust.
+As the agent runtime, Kitaru doesn't only execute the full trajectory — it also
+durably persists the state of your agent at every intermediate point. That's
+what makes it possible to go back in time: reconstitute the run from any
+recorded state and replay the trajectory, fully or partially — LLM calls, tool
+calls, and all — with one thing changed. A tool that only ingests your run data
+after the fact can't do this; the state that makes a run re-runnable exists
+only in the runtime that held it. This page is the mental model behind that,
+and the architecture that keeps a replayed run faithful to the original.
 
 ## The mental model
 
