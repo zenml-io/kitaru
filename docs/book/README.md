@@ -5,18 +5,15 @@ icon: hand-wave
 
 # Welcome to Kitaru
 
-Braintrust, LangSmith, and Langfuse only ever ingest the run data your agent
-emits — the closest any of them can get to testing a change is scoring it
-against a dataset you assembled by hand. Kitaru is the runtime your agent ran
-on, underneath your harness, so it can rebuild a real production run — every
-step, every tool call — into an environment you can re-run a change against,
-and see exactly what regressed.
-
-That is the loop: Kitaru records every model call and tool call of a real run,
-rebuilds that run as a faithful environment, and lets you re-execute it with one
-thing changed — a different model, a different prompt — so you can diff the
-result against the original and change your agent with confidence. Because the
-baseline reproduces, the difference you see is your change, not noise.
+Kitaru is the replay-and-regression layer for agents. It's the runtime your
+agent runs on, underneath your harness, and it durably persists your agent's
+state at every intermediate point — every model call, every tool call, every
+decision. That turns your production history into something you can go back
+to: rebuild a real run as a faithful environment, re-execute it with one thing
+changed — a different model, a different prompt — and diff the result against
+the original. Because the baseline reproduces, the difference you see is your
+change, not noise — you catch what breaks before your users do, and change
+your agent with confidence.
 
 The harness you already picked (PydanticAI, OpenAI Agents SDK, LangGraph, Claude
 Agent SDK, raw Python) keeps owning how the agent thinks. Kitaru owns the run
