@@ -58,6 +58,7 @@
 
 * [Overview](stacks/README.md)
 * [Kubernetes Stacks](stacks/kubernetes-stacks.md)
+* [Modal Stacks](stacks/modal-stacks.md)
 * [Vertex Stacks](stacks/vertex-stacks.md)
 * [SageMaker Stacks](stacks/sagemaker-stacks.md)
 * [AzureML Stacks](stacks/azureml-stacks.md)

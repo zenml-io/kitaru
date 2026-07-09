@@ -104,10 +104,11 @@ kitaru stack create dev --no-activate
 
 ## Create a remote stack
 
-Today, the CLI and MCP server can provision five shipped stack types:
+Today, the CLI and MCP server can provision six shipped stack types:
 
 - `local`
 - `kubernetes`
+- `modal`
 - `vertex`
 - `sagemaker`
 - `azureml`
@@ -116,8 +117,12 @@ These remote stack commands assume you are already connected to the Kitaru
 server that should own the stack. If you already have a deployed server,
 connect first with `kitaru login ...` and verify with `kitaru status`.
 
-Kitaru assembles the stack definition and cloud connector for you, but it expects
-the bucket, registry, and any cluster you point at to already exist.
+Kitaru assembles the stack definition for you. For Kubernetes, Vertex,
+SageMaker, and AzureML stacks it also creates the cloud service connector. Modal
+stacks split that responsibility: the Modal runner itself is connectorless, but
+Kitaru can link existing server-side service connectors to the storage and
+registry components. If you pass explicit cloud credential flags, Kitaru creates
+a new connector instead.
 
 ### Kubernetes example
 
@@ -173,6 +178,25 @@ kitaru stack create prod-azureml \
 
 AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
+### Modal example
+
+Install the Modal extra before creating Modal stacks:
+
+```bash
+uv add "kitaru[modal]"
+# or: pip install "kitaru[modal]"
+```
+
+```bash
+kitaru stack create prod-modal \
+  --type modal \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru \
+  --sandbox modal
+```
+
+Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. Without explicit cloud credential flags, Kitaru first tries to reuse matching server-side service connectors for the bucket and registry; if none exist, it creates a connectorless stack for public or manually configured resources. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants, connector reuse, explicit credential caveats, and the Docker CLI/BuildKit image-builder requirement, see [Modal](modal-stacks.md).
+
 You can also keep the same inputs in a YAML file and create the stack with:
 
 ```bash
@@ -192,6 +216,8 @@ Pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 - `orchestrator`
 - `artifact_store`
 - `container_registry`
+- `sandbox` — only used when the stack includes a sandbox component, for
+  example when you pass `--sandbox modal`
 
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
@@ -291,7 +317,7 @@ The SDK keeps `StackInfo` intentionally small: `id`, `name`, and `is_active`.
 
 That means `is_managed` is part of structured list output, not part of `StackInfo` itself.
 
-One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes, Vertex, SageMaker, and AzureML stack creation are exposed through the CLI and MCP surfaces.
+One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes, Modal, Vertex, SageMaker, and AzureML stack creation are exposed through the CLI and MCP surfaces.
 
 ## Precedence with flow-level stack overrides
 
@@ -316,6 +342,7 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 ## Related pages
 
 - [Kubernetes](kubernetes-stacks.md)
+- [Modal](modal-stacks.md)
 - [Containerization](../guides/containerization.md)
 - [Flows](../concepts/flows.md)
 - [CLI stack commands](https://sdkdocs.kitaru.ai)

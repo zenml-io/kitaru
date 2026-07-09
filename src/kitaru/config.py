@@ -120,6 +120,7 @@ KubernetesStackSpec = _config_stacks.KubernetesStackSpec
 VertexStackSpec = _config_stacks.VertexStackSpec
 SagemakerStackSpec = _config_stacks.SagemakerStackSpec
 AzureMLStackSpec = _config_stacks.AzureMLStackSpec
+ModalStackSpec = _config_stacks.ModalStackSpec
 RemoteStackSpec = _config_stacks.RemoteStackSpec
 StackComponentConfigOverrides = _config_stacks.StackComponentConfigOverrides
 _ResolvedConnectorSpec = _config_stacks._ResolvedConnectorSpec
@@ -690,6 +691,27 @@ def _create_azureml_stack_operation(
     )
 
 
+def _create_modal_stack_operation(
+    name: str,
+    *,
+    spec: ModalStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
+) -> _StackCreateResult:
+    """Create a Modal stack via ZenML's one-shot stack API."""
+    return _config_stacks._create_modal_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
+        client_factory=Client,
+    )
+
+
 def _create_stack_operation(
     name: str,
     *,
@@ -717,6 +739,7 @@ def _create_stack_operation(
                 StackType.VERTEX: _create_vertex_stack_operation,
                 StackType.SAGEMAKER: _create_sagemaker_stack_operation,
                 StackType.AZUREML: _create_azureml_stack_operation,
+                StackType.MODAL: _create_modal_stack_operation,
             },
         ),
     )

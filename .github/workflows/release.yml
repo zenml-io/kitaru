@@ -260,7 +260,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89  # v1.47.2
+        uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
       - name: Lint
         run: |
           uv run ruff check .
@@ -491,9 +491,12 @@ jobs:
 
       # --- GitHub Release (skip on dry-run) ---
       # If the release already exists, verify it's attached to v$VERSION, then
-      # check each expected dist/* asset. Present assets are SHA256-compared
-      # against the local build; matching assets are skipped, mismatched assets
-      # fail loudly (never silently overwrite), and missing assets get uploaded.
+      # check each expected dist/* asset. Reproducible assets (wheel, sdist) are
+      # SHA256-compared against the local build; matching assets are skipped,
+      # mismatched assets fail loudly (never silently overwrite), and missing
+      # assets get uploaded. Signature/attestation assets are regenerated on
+      # every publish run and are never byte-identical, so they are uploaded when
+      # missing and left as-is otherwise rather than SHA256-compared.
       - name: Create GitHub Release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         env:
@@ -516,6 +519,22 @@ jobs:
           existing_assets=$(echo "$release_json" | jq -r '.assets[].name')
           for f in dist/*; do
             name=$(basename "$f")
+            case "$name" in
+              *.attestation|*.sigstore|*.sig|*.asc)
+                # Signatures/attestations are regenerated on every publish run and
+                # are never byte-identical, so they cannot be SHA256-reconciled.
+                # Upload if the release is missing one; otherwise keep the existing
+                # signature. A signature is verified by validating it against the
+                # artifact, never by expecting two signatures to match byte-for-byte.
+                if echo "$existing_assets" | grep -Fxq "$name"; then
+                  echo "  keeping existing signature asset (not reproducible): $name"
+                else
+                  echo "  uploading missing signature asset: $name"
+                  gh release upload "v$VERSION" "$f"
+                fi
+                continue
+                ;;
+            esac
             if echo "$existing_assets" | grep -Fxq "$name"; then
               gh release download "v$VERSION" --pattern "$name" --dir existing-assets --clobber
               local_hash=$(sha256sum "$f" | awk '{print $1}')
@@ -579,7 +598,7 @@ jobs:
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b  # v6.2.1
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1

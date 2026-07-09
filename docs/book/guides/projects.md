@@ -1,5 +1,5 @@
 ---
-description: List, inspect, create, switch, and delete Kitaru projects from the CLI, SDK, and MCP server
+description: List and inspect Kitaru projects, and manage them on ZenML Pro/Cloud from the CLI, SDK, and MCP server
 icon: folder-tree
 ---
 
@@ -14,7 +14,20 @@ A concrete example helps: imagine one server used by the same team for
 production deployments. If you switch to `staging`, the same commands look at
 staging instead. The server did not change; the selected project changed.
 
-There are two normal ways to choose a project:
+## Availability
+
+Read-only project inspection works everywhere Kitaru can connect. You can run
+`kitaru project list`, `kitaru project current`, and `kitaru project show ...`
+against local/OSS servers as diagnostics. That lets you answer questions such as
+"what project does this process think it is using?" without changing server
+state.
+
+Creating, switching, and deleting projects require a verified ZenML Pro/Cloud
+server. On a local/OSS server, Kitaru stops before it sends the create, switch,
+or delete request and tells you that project management needs ZenML Pro/Cloud.
+Local/OSS users should stay on the default project.
+
+On ZenML Pro/Cloud, there are two normal ways to choose a project:
 
 1. **Persist it for your local shell:** run `kitaru project use production`.
    Kitaru remembers that choice for later CLI and SDK calls.
@@ -53,7 +66,13 @@ The serialized project shape is the same across CLI and MCP:
 
 `display_name` and `description` may be `null` when they are not set.
 
-## Create and switch projects
+## Create and switch projects on ZenML Pro/Cloud
+
+{% hint style="info" %}
+`kitaru project create` and `kitaru project use` require ZenML Pro/Cloud. On
+local/OSS servers, inspect projects with `list`, `current`, and `show`, and keep
+using the default project.
+{% endhint %}
 
 Create a project:
 
@@ -82,9 +101,9 @@ persists the choice in the same place the backend already uses for active
 project state. In practice, that means you do not get two competing answers to
 "which project am I using?" — Kitaru reads the same active project that it writes.
 
-## Delete projects
+## Delete projects on ZenML Pro/Cloud
 
-Project deletion is deliberately explicit:
+Project deletion also requires ZenML Pro/Cloud and is deliberately explicit:
 
 ```bash
 kitaru project delete staging --yes
@@ -113,9 +132,14 @@ kitaru project list
 kitaru project use production
 ```
 
+The `project use` command requires ZenML Pro/Cloud. On local/OSS servers, use
+`project list` and `project current` for diagnostics and leave the active project
+as the default.
+
 ## Headless, Docker, and CI
 
-For non-interactive processes, set the connection and project explicitly:
+For non-interactive processes on ZenML Pro/Cloud, set the connection and project
+explicitly:
 
 ```bash
 export KITARU_SERVER_URL=https://kitaru.example.com
@@ -125,7 +149,8 @@ export KITARU_PROJECT=production
 
 This is safer than relying on persisted local state. The job starts, reads the
 three variables, and there is no ambiguity about which server and project it
-will use.
+will use. `KITARU_PROJECT` is for explicit project selection; local/OSS users
+should keep using the default project instead of setting a non-default project.
 
 If `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` come from environment variables,
 Kitaru requires `KITARU_PROJECT` before project-scoped operations such as
@@ -145,17 +170,25 @@ current = client.projects.current()
 print(current.name)
 ```
 
-Project operations live under `client.projects`:
+Read-only project operations live under `client.projects` and work on local/OSS
+and ZenML Pro/Cloud connections:
 
 ```python
 projects = client.projects.list()
 staging = client.projects.get("staging")
-created = client.projects.create("experiment", activate=False)
-active = client.projects.use("production")
 ```
 
-Use `KitaruClient.for_project_management()` when the process needs to list,
-create, or select projects before a project-scoped client can exist:
+Project mutations through the SDK require ZenML Pro/Cloud:
+
+```python
+created = client.projects.create("experiment", activate=False)
+active = client.projects.use("production")
+client.projects.delete("experiment")
+```
+
+Use `KitaruClient.for_project_management()` when the process needs to inspect
+projects before a project-scoped client can exist, or when a ZenML Pro/Cloud
+process needs to create or select a project first:
 
 ```python
 from kitaru import KitaruClient
@@ -164,20 +197,21 @@ client = KitaruClient.for_project_management()
 for project in client.projects.list():
     print(project.name)
 
-client.projects.use("production")
+client.projects.use("production")  # ZenML Pro/Cloud only
 ```
 
 The distinction is simple:
 
 - `KitaruClient()` is for project-scoped work: executions, artifacts,
   deployments, and normal runtime operations.
-- `KitaruClient.for_project_management()` is for choosing the project itself.
-  It still validates the server/auth pairing, but it does not require a project
-  to already be selected.
+- `KitaruClient.for_project_management()` is for project inspection everywhere
+  and project creation/selection on ZenML Pro/Cloud. It still validates the
+  server/auth pairing, but it does not require a project to already be selected.
 
 ## MCP tools
 
-The MCP server exposes read/switch project tools for automation agents:
+The MCP server exposes read project tools everywhere, plus a switch tool for
+ZenML Pro/Cloud automation agents:
 
 - `kitaru_projects_list`
 - `kitaru_projects_current`
@@ -185,10 +219,11 @@ The MCP server exposes read/switch project tools for automation agents:
 - `kitaru_projects_use`
 
 It does **not** expose project create/delete tools in this first pass. Agents can
-inspect the current project and switch to a named project, but durable project
+inspect the current project on any Kitaru connection. Switching to a named
+project with `kitaru_projects_use` requires ZenML Pro/Cloud; durable project
 creation and deletion stay in the CLI and SDK.
 
-A useful agent instruction is:
+On ZenML Pro/Cloud, a useful agent instruction is:
 
 ```text
 Check the current Kitaru project. If it is not production, switch to production before listing deployments.
@@ -205,9 +240,10 @@ priority like this:
 3. Public `KITARU_PROJECT` environment variable
 4. Process-local `kitaru.configure(project=...)`
 
-For normal usage, prefer the first and third entries: `kitaru project use` for
-interactive local work, and `KITARU_PROJECT` for CI, Docker, and other headless
-execution.
+For normal ZenML Pro/Cloud usage, prefer the first and third entries: `kitaru
+project use` for interactive work, and `KITARU_PROJECT` for CI, Docker, and
+other headless execution. On local/OSS servers, keep the default project and use
+the read-only commands when you need diagnostics.
 
 ## Related pages
 

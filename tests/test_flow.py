@@ -60,6 +60,7 @@ from kitaru.flow import (
     _FLOW_RESULT_TUPLE_METADATA_MARKER,
     _FLOW_RESULT_TUPLE_METADATA_ROLE,
     FlowHandle,
+    _apply_active_stack_image_defaults,
     _build_kitaru_execution_url,
     _build_pipeline_options,
     _checkpoint_count_from_run,
@@ -1431,6 +1432,72 @@ def test_build_pipeline_options_keeps_secret_refs_out_of_docker_environment() ->
     docker_settings = options["settings"]["docker"]
     assert docker_settings.environment == {"PLAIN": "value"}
     assert options["secrets"] == ["openai-creds"]
+
+
+def test_apply_active_stack_image_defaults_sets_modal_platform() -> None:
+    """Modal runs need amd64 images when Docker defaults to local ARM."""
+    client = SimpleNamespace(
+        active_stack=SimpleNamespace(
+            orchestrator=SimpleNamespace(flavor="modal"),
+        )
+    )
+
+    image = _apply_active_stack_image_defaults(
+        ImageSettings(environment={"PLAIN": "value"}),
+        client_factory=lambda: client,
+    )
+
+    assert isinstance(image, ImageSettings)
+    assert image.platform == "linux/amd64"
+    assert image.environment == {"PLAIN": "value"}
+
+
+def test_apply_active_stack_image_defaults_creates_modal_image_when_missing() -> None:
+    """Modal defaults must apply even when no image settings exist yet."""
+    client = SimpleNamespace(
+        active_stack=SimpleNamespace(
+            orchestrator=SimpleNamespace(flavor="modal"),
+        )
+    )
+
+    image = _apply_active_stack_image_defaults(None, client_factory=lambda: client)
+
+    assert isinstance(image, ImageSettings)
+    assert image.platform == "linux/amd64"
+
+
+def test_apply_active_stack_image_defaults_keeps_explicit_platform() -> None:
+    """A user-specified image platform must win over Modal's default."""
+    client = SimpleNamespace(
+        active_stack=SimpleNamespace(
+            orchestrator=SimpleNamespace(flavor="modal"),
+        )
+    )
+
+    image = _apply_active_stack_image_defaults(
+        ImageSettings(platform="linux/arm64"),
+        client_factory=lambda: client,
+    )
+
+    assert isinstance(image, ImageSettings)
+    assert image.platform == "linux/arm64"
+
+
+def test_apply_active_stack_image_defaults_ignores_non_modal_stack() -> None:
+    """Only Modal stacks need Kitaru to force the default platform."""
+    client = SimpleNamespace(
+        active_stack=SimpleNamespace(
+            orchestrator=SimpleNamespace(flavor="kubernetes"),
+        )
+    )
+
+    image = _apply_active_stack_image_defaults(
+        ImageSettings(),
+        client_factory=lambda: client,
+    )
+
+    assert isinstance(image, ImageSettings)
+    assert image.platform is None
 
 
 def test_flow_run_forwards_secrets_and_preserves_model_registry_env() -> None:

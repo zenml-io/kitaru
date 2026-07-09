@@ -20,7 +20,12 @@ from kitaru._config._projects import (
 )
 from kitaru._env import KITARU_PROJECT_ENV, ZENML_ACTIVE_PROJECT_ID_ENV
 from kitaru.analytics import AnalyticsEvent
-from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruFeatureNotAvailableError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.inspection import serialize_project
 
 
@@ -57,6 +62,25 @@ def _project_model(
         display_name=display_name,
         description=description,
     )
+
+
+class _ServerInfo:
+    def __init__(self, *, is_pro: bool) -> None:
+        self._is_pro = is_pro
+
+    def is_pro_server(self) -> bool:
+        return self._is_pro
+
+
+def _with_project_management_server(
+    client: Any,
+    *,
+    is_pro: bool = True,
+) -> Any:
+    zen_store_mock = Mock()
+    zen_store_mock.get_store_info.return_value = _ServerInfo(is_pro=is_pro)
+    client.zen_store = zen_store_mock
+    return client
 
 
 class _EnvSelectedProjectClient:
@@ -99,6 +123,7 @@ class _DeleteProjectClient:
         self.persisted_active_project_name = persisted_active_project_name
         self.get_project_calls: list[tuple[str, bool, bool]] = []
         self.zen_store = Mock()
+        self.zen_store.get_store_info.return_value = _ServerInfo(is_pro=True)
         self.delete_project = Mock(
             side_effect=AssertionError("Kitaru should bypass Client.delete_project")
         )
@@ -265,8 +290,75 @@ def test_get_project_rejects_empty_selector() -> None:
         get_project("  ", client_factory=Mock)
 
 
-def test_use_project_resolves_exact_selector_and_activates_by_id() -> None:
+@pytest.mark.parametrize("operation", ["create", "use", "delete"])
+def test_project_mutations_require_pro_cloud_before_backend_calls(
+    operation: str,
+) -> None:
+    fake_client = _with_project_management_server(Mock(), is_pro=False)
+
+    with (
+        patch("kitaru._config._projects.track", return_value=True) as track_mock,
+        pytest.raises(
+            KitaruFeatureNotAvailableError,
+            match=f"project {operation} requires a ZenML Pro/Cloud server",
+        ),
+    ):
+        if operation == "create":
+            create_project("staging", client_factory=lambda: fake_client)
+        elif operation == "use":
+            use_project("staging", client_factory=lambda: fake_client)
+        else:
+            delete_project("staging", client_factory=lambda: fake_client)
+
+    fake_client.create_project.assert_not_called()
+    fake_client.get_project.assert_not_called()
+    fake_client.set_active_project.assert_not_called()
+    fake_client.zen_store.delete_project.assert_not_called()
+    track_mock.assert_not_called()
+
+
+def test_create_project_allows_cloudinfra_url_when_metadata_says_not_pro() -> None:
+    created = _project_model("new-id", "hamster")
+    fake_client = _with_project_management_server(Mock(), is_pro=False)
+    fake_client.zen_store.url = "https://161e5333-zenml.staging.cloudinfra.zenml.io"
+    fake_client.create_project.return_value = created
+    fake_client.set_active_project.return_value = created
+
+    with patch("kitaru._config._projects.track", return_value=True) as track_mock:
+        result = create_project("hamster", client_factory=lambda: fake_client)
+
+    assert result.project.name == "hamster"
+    assert result.activated is True
+    fake_client.create_project.assert_called_once_with(
+        name="hamster",
+        description="",
+        display_name=None,
+    )
+    fake_client.set_active_project.assert_called_once_with("new-id")
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.PROJECT_CREATED,
+        {"activated": True},
+    )
+
+
+def test_project_mutation_blocks_when_server_type_cannot_be_verified() -> None:
     fake_client = Mock()
+    fake_client.zen_store.get_store_info.return_value = SimpleNamespace(
+        is_pro_server=lambda: "yes"
+    )
+
+    with (
+        patch("kitaru._config._projects.track", return_value=True) as track_mock,
+        pytest.raises(KitaruBackendError, match="could not verify"),
+    ):
+        create_project("staging", client_factory=lambda: fake_client)
+
+    fake_client.create_project.assert_not_called()
+    track_mock.assert_not_called()
+
+
+def test_use_project_resolves_exact_selector_and_activates_by_id() -> None:
+    fake_client = _with_project_management_server(Mock())
     fake_client.get_project.return_value = _project_model("prod-id", "production")
     fake_client.set_active_project.return_value = _project_model(
         "prod-id", "production"
@@ -289,7 +381,7 @@ def test_use_project_resolves_exact_selector_and_activates_by_id() -> None:
 def test_create_project_activates_by_default_and_tracks_safe_metadata() -> None:
     previous = _project_model("old-id", "default")
     created = _project_model("new-id", "production")
-    fake_client = Mock()
+    fake_client = _with_project_management_server(Mock())
     fake_client.active_project = previous
     fake_client.create_project.return_value = created
     fake_client.set_active_project.return_value = created
@@ -315,7 +407,7 @@ def test_create_project_activates_by_default_and_tracks_safe_metadata() -> None:
 def test_create_project_without_activation_leaves_active_project_unchanged() -> None:
     previous = _project_model("old-id", "default")
     created = _project_model("new-id", "staging")
-    fake_client = Mock()
+    fake_client = _with_project_management_server(Mock())
     fake_client.active_project = previous
     fake_client.create_project.return_value = created
 
@@ -342,6 +434,9 @@ def test_create_project_handles_no_previous_active_project() -> None:
     created = _project_model("new-id", "first-project")
 
     class _FakeClient:
+        def __init__(self) -> None:
+            _with_project_management_server(self)
+
         @property
         def active_project(self) -> Any:
             raise RuntimeError("no active project")
@@ -369,6 +464,7 @@ def test_create_project_creates_missing_kitaru_project_env_selection(
 
     class _CreateEnvSelectedProjectClient:
         def __init__(self) -> None:
+            _with_project_management_server(self)
             self.get_project_calls: list[str] = []
             self.create_project = Mock(return_value=created)
             self.set_active_project = Mock(return_value=created)
@@ -414,6 +510,7 @@ def test_create_project_without_activation_handles_missing_kitaru_project_env(
 
     class _CreateEnvSelectedProjectClient:
         def __init__(self) -> None:
+            _with_project_management_server(self)
             self.create_project = Mock(return_value=created)
             self.set_active_project = Mock()
 
@@ -466,6 +563,7 @@ def test_create_project_ignores_stale_unrelated_kitaru_project_env(
 
     class _CreateWithStaleEnvClient:
         def __init__(self) -> None:
+            _with_project_management_server(self)
             self.get_project_calls: list[str] = []
             self.create_project = Mock(return_value=created)
             self.set_active_project = Mock(return_value=created)
@@ -507,6 +605,7 @@ def test_create_project_without_activation_ignores_stale_unrelated_env(
 
     class _CreateWithoutActivationWithStaleEnvClient:
         def __init__(self) -> None:
+            _with_project_management_server(self)
             self.get_project_calls: list[str] = []
             self.create_project = Mock(return_value=created)
             self.set_active_project = Mock()
@@ -546,7 +645,7 @@ def test_create_project_without_activation_ignores_stale_unrelated_env(
 
 def test_delete_project_returns_deleted_project_and_tracks() -> None:
     target = _project_model("stage-id", "staging")
-    fake_client = Mock()
+    fake_client = _with_project_management_server(Mock())
     fake_client.active_project = _project_model("prod-id", "production")
     fake_client.get_project.return_value = target
 
@@ -637,7 +736,7 @@ def test_current_project_preserves_backend_failure_diagnosis() -> None:
 
 
 def test_project_backend_errors_are_kitaru_worded() -> None:
-    fake_client = Mock()
+    fake_client = _with_project_management_server(Mock())
     fake_client.set_active_project.side_effect = RuntimeError("backend exploded")
 
     with pytest.raises(KitaruBackendError, match="Failed to activate project"):

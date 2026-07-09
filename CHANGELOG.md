@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-07-08
+
+### Fixed
+- Project create/use/delete operations now stop before changing server state unless Kitaru can verify a ZenML Pro/Cloud server. Read-only project inspection (`list`, `current`, and `show`) remains available on local/OSS servers for diagnostics. (#512)
+
+## [0.20.0] - 2026-07-08
+
 ### Added
 - Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
+- Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
+- Added Modal stack cloud credential support for private S3/ECR, GCS/GAR/GCR, and Azure Blob/ADLS/ACR resources by linking provider service connectors to the artifact-store and container-registry components.
 - Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
 - Added Python 3.14 as a supported and tested runtime.
 - Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
@@ -19,13 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
 
 ### Fixed
+- Modal stack creation now reuses matching server-side service connectors for artifact stores and container registries when explicit cloud credentials are not provided, avoiding remote-server failures caused by local-only credential inputs such as AWS SSO profiles.
 - Replay now preserves recorded flow parameters when submitting a replay, so overriding one flow argument no longer lets defaulted arguments such as `model=None` silently replace recorded values.
 - `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
 - PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
 - Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
 - Plain user checkpoint input overrides can again mix recorded artifact input names with literal parameter overrides, while adapter-declared replay input slots still reject unknown keys.
 - `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
-- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#445)
+- Flow result extraction now resolves a single eligible terminal checkpoint instead of raising ambiguity when replay or adapter runs record several terminal checkpoints, and honors the `flow_result_candidate` marker and saved flow-return artifacts before terminal-step heuristics.
+- Execution deep links and compare links now resolve to the correct Kitaru UI route when connected to a Pro workspace, instead of landing on the workspace projects page via a stale `/flows/...` URL.
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#490)
 - Fixed `kitaru stack use` and `kitaru status` when `ZENML_ACTIVE_STACK_ID` points to an unresolvable stack: stack activation no longer fails while re-reading the active stack after activation, and diagnostics now tell users to unset, update, or remove the environment variable.
 - Fixed flow submissions with an explicit stack so a successful run is not reported as failed only because Kitaru could not restore a stale previous active stack ID afterward.
 

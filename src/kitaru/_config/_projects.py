@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 from zenml.client import Client
@@ -16,7 +17,12 @@ from kitaru._env import (
     _normalized_kitaru_env,
 )
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruFeatureNotAvailableError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 
 
 class ProjectInfo(BaseModel):
@@ -49,12 +55,85 @@ class ProjectDeleteResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+_ProjectManagementOperation = Literal["create", "use", "delete"]
+
+
 def _normalize_project_selector(value: str, *, field_name: str = "name_or_id") -> str:
     """Return a non-empty project selector."""
     normalized = value.strip()
     if not normalized:
         raise KitaruUsageError(f"Project {field_name} cannot be empty.")
     return normalized
+
+
+def _is_known_pro_cloud_backend_url(value: Any) -> bool:
+    """Return whether a store URL points at a known ZenML Pro/Cloud backend."""
+    if not isinstance(value, str):
+        return False
+
+    candidate = value.strip()
+    if not candidate:
+        return False
+
+    parsed = urlsplit(candidate if "://" in candidate else f"//{candidate}")
+    hostname = parsed.hostname
+    if hostname is None:
+        return False
+
+    normalized = hostname.lower()
+    return normalized == "cloudinfra.zenml.io" or normalized.endswith(
+        ".cloudinfra.zenml.io"
+    )
+
+
+def _connected_store_url_is_known_pro_cloud(client: Any) -> bool:
+    """Return whether the connected store URL is a known Pro/Cloud backend."""
+    try:
+        store_url = client.zen_store.url
+    except Exception:
+        return False
+    return _is_known_pro_cloud_backend_url(store_url)
+
+
+def _require_pro_cloud_project_management(
+    client: Any,
+    *,
+    operation: _ProjectManagementOperation,
+) -> None:
+    """Require ZenML Pro/Cloud before project-changing operations."""
+
+    def unknown_server_type_error() -> KitaruBackendError:
+        return KitaruBackendError(
+            "Kitaru could not verify whether the connected ZenML server is "
+            f"Pro/Cloud before project {operation}. Project {operation} was "
+            "not attempted. Check your server connection and authentication, "
+            "then retry."
+        )
+
+    try:
+        server_info = client.zen_store.get_store_info()
+        is_pro_server = server_info.is_pro_server
+    except Exception as exc:
+        raise unknown_server_type_error() from exc
+
+    if not callable(is_pro_server):
+        raise unknown_server_type_error()
+
+    try:
+        is_pro = is_pro_server()
+    except Exception as exc:
+        raise unknown_server_type_error() from exc
+
+    if not isinstance(is_pro, bool):
+        raise unknown_server_type_error()
+
+    if not is_pro and not _connected_store_url_is_known_pro_cloud(client):
+        raise KitaruFeatureNotAvailableError(
+            f"Kitaru project {operation} requires a ZenML Pro/Cloud server. "
+            "You are connected to a non-Pro ZenML server. Use the default "
+            "project on local/OSS ZenML, or connect to a ZenML Pro/Cloud "
+            "workspace to manage Kitaru projects."
+        )
 
 
 def _safe_optional_project_string(
@@ -341,6 +420,7 @@ def create_project(
     project_description = _normalize_optional_project_string(description) or ""
     project_display_name = _normalize_optional_project_string(display_name)
     client = client_factory()
+    _require_pro_cloud_project_management(client, operation="create")
     env_selector = _active_project_selector_from_env()
     active_project_read_failed = False
     try:
@@ -405,6 +485,7 @@ def use_project(
     """Set the active Kitaru project and return the resulting project info."""
     selector = _normalize_project_selector(name_or_id)
     client = client_factory()
+    _require_pro_cloud_project_management(client, operation="use")
     try:
         project = client.get_project(
             selector,
@@ -432,6 +513,7 @@ def delete_project(
     """Delete a Kitaru project and return structured operation details."""
     selector = _normalize_project_selector(name_or_id)
     client = client_factory()
+    _require_pro_cloud_project_management(client, operation="delete")
     try:
         project = client.get_project(
             selector,

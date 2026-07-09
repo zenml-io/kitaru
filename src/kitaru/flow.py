@@ -48,6 +48,7 @@ from kitaru._config._active_context import (
     stringify_config_id,
     with_resolved_selection,
 )
+from kitaru._config._stacks import MODAL_ORCHESTRATOR_FLAVOR
 from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV, _temporary_env
 from kitaru._interface_deployments import (
     Deployment,
@@ -275,6 +276,37 @@ def _preflight_active_stack_implementation_hydration(
         if zenml_guidance:
             message = f"{message}\n\nZenML guidance:\n\n{zenml_guidance}"
         raise KitaruStackIntegrationDependencyError(message) from None
+
+
+_MODAL_DEFAULT_IMAGE_PLATFORM = "linux/amd64"
+
+
+def _apply_active_stack_image_defaults(
+    image: ImageSettings | None,
+    *,
+    client_factory: Callable[[], Any] | None = None,
+) -> ImageSettings | None:
+    """Apply image defaults required by the currently active stack.
+
+    Modal currently runs Kitaru pipeline containers on Linux/amd64. On Apple
+    Silicon machines, Docker CLI/BuildKit otherwise builds an ARM image by
+    default. Modal then receives a registry tag that exists but has no amd64
+    image to run. Only fill this value when the user has not chosen a platform.
+    """
+    if image is not None and image.platform is not None:
+        return image
+
+    client = (client_factory or Client)()
+    active_stack = getattr(client, "active_stack", None)
+    orchestrator = getattr(active_stack, "orchestrator", None)
+    flavor = getattr(orchestrator, "flavor", None)
+    if flavor != MODAL_ORCHESTRATOR_FLAVOR:
+        return image
+
+    if image is None:
+        return ImageSettings(platform=_MODAL_DEFAULT_IMAGE_PLATFORM)
+
+    return image.model_copy(update={"platform": _MODAL_DEFAULT_IMAGE_PLATFORM})
 
 
 def _capture_active_stack_provenance_for_guard() -> (
@@ -1904,12 +1936,6 @@ class _FlowDefinition:
         resolved_connection = resolve_connection_config(validate_for_use=True)
         resolved_project = _connection_project(resolved_connection)
         transport_image, _ = _prepare_model_registry_transport(resolved_execution.image)
-        configured_pipeline = self._pipeline.with_options(
-            **_build_pipeline_options(
-                resolved_execution=resolved_execution,
-                transport_image=transport_image,
-            )
-        )
         deployments_api, flow_name = self._deployments_api_and_flow_name()
         source_name = f"kitaru-source::{flow_name}::{uuid4().hex}"
 
@@ -1925,6 +1951,13 @@ class _FlowDefinition:
                 flow=flow_name,
             )
             _preflight_active_stack_implementation_hydration()
+            transport_image = _apply_active_stack_image_defaults(transport_image)
+            configured_pipeline = self._pipeline.with_options(
+                **_build_pipeline_options(
+                    resolved_execution=resolved_execution,
+                    transport_image=transport_image,
+                )
+            )
             try:
                 with _suspend_flow_return_coercion():
                     configured_pipeline.prepare(*args, **kwargs)
@@ -2071,28 +2104,29 @@ class _FlowDefinition:
             transport_image,
             replay_context_json=replay_plan.runtime_context.to_json(),
         )
-        resolved_execution = resolved_execution.model_copy(
-            update={"image": transport_image}
-        )
-        frozen_execution_spec = build_frozen_execution_spec(
-            resolved_execution=resolved_execution,
-            flow_defaults=self._decorator_config,
-            connection=resolved_connection,
-            model_registry=effective_model_registry,
-        )
-        configured_pipeline = self._pipeline.with_options(
-            **_build_pipeline_options(
-                resolved_execution=resolved_execution,
-                transport_image=transport_image,
-            )
-        )
-
         resolved_project = _connection_project(resolved_connection)
+
         with (
             _temporary_active_project(resolved_project),
             _temporary_active_stack(resolved_execution.stack),
         ):
             _preflight_active_stack_implementation_hydration()
+            transport_image = _apply_active_stack_image_defaults(transport_image)
+            resolved_execution = resolved_execution.model_copy(
+                update={"image": transport_image}
+            )
+            frozen_execution_spec = build_frozen_execution_spec(
+                resolved_execution=resolved_execution,
+                flow_defaults=self._decorator_config,
+                connection=resolved_connection,
+                model_registry=effective_model_registry,
+            )
+            configured_pipeline = self._pipeline.with_options(
+                **_build_pipeline_options(
+                    resolved_execution=resolved_execution,
+                    transport_image=transport_image,
+                )
+            )
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
             )
@@ -2354,18 +2388,6 @@ class _FlowDefinition:
             transport_image, effective_model_registry = (
                 _prepare_model_registry_transport(resolved_execution.image)
             )
-            frozen_execution_spec = build_frozen_execution_spec(
-                resolved_execution=resolved_execution,
-                flow_defaults=self._decorator_config,
-                connection=resolved_connection,
-                model_registry=effective_model_registry,
-            )
-            configured_pipeline = self._pipeline.with_options(
-                **_build_pipeline_options(
-                    resolved_execution=resolved_execution,
-                    transport_image=transport_image,
-                )
-            )
 
             # The resolved project stays active across both the run submission and
             # the post-submit spec persistence so ZenML writes them into the same
@@ -2374,6 +2396,21 @@ class _FlowDefinition:
             with _temporary_active_project(resolved_project):
                 with _temporary_active_stack(resolved_execution.stack):
                     _preflight_active_stack_implementation_hydration()
+                    transport_image = _apply_active_stack_image_defaults(
+                        transport_image
+                    )
+                    frozen_execution_spec = build_frozen_execution_spec(
+                        resolved_execution=resolved_execution,
+                        flow_defaults=self._decorator_config,
+                        connection=resolved_connection,
+                        model_registry=effective_model_registry,
+                    )
+                    configured_pipeline = self._pipeline.with_options(
+                        **_build_pipeline_options(
+                            resolved_execution=resolved_execution,
+                            transport_image=transport_image,
+                        )
+                    )
                     deployment_metadata = _deployment_metadata_for_stack(
                         resolved_execution.stack
                     )
