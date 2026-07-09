@@ -82,18 +82,14 @@ The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do n
 
 ## Docs guidance
 
-- Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
-- `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. Describe `kitaru model list` as listing aliases available in the current environment, not just aliases stored locally.
-- Hand-written docs are **GitBook Markdown under `docs/book/`** (not MDX). Edit those `.md` files directly and add new pages to `docs/book/toc.md`. GitBook conventions live in `docs/book/AGENTS.md`.
-- Links **within the GitBook space** use relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the **SDK/CLI reference** with `https://sdkdocs.kitaru.ai` (the separate reference site, not in the GitBook space). Link to **other ZenML docs** with absolute `https://docs.zenml.io/...`. Diagrams are static PNG images hosted on Cloudflare R2 and referenced as `https://assets.kitaru.ai/docs/diagrams/<slug>.png` (regenerate via the diagram pipeline, not committed to the repo).
-- Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. Treat them as coordination scratchpads, not product docs.
-- Generated reference output should still come from the existing generation scripts rather than manual edits.
-- Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
-- Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
-- Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
+Detailed authoring conventions, link rules, and accuracy requirements for all
+three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under
+`docs/`). Rules for example READMEs live in **`examples/CLAUDE.md`**.
+
+Two rules worth keeping in front of you everywhere:
+
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
-- Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
-- `examples/**/README.md` files are **public-facing, educational content** for users learning Kitaru — not internal documentation. Their audience is a developer encountering the example for the first time and trying to understand what Kitaru does, what the example demonstrates, and how to run it themselves. Keep them focused on concepts, primitives in use, and the flow of the example. Do **not** add sections like "Testing" (how maintainers run the example's test suite), internal CI setup notes, contributor-only credential instructions for stubbed/mocked test runs, or any content that only makes sense to someone working on Kitaru itself. Those details belong in `tests/` docstrings, internal contributor docs, or PR descriptions. A good rule of thumb: if the section wouldn't help a brand-new user understand Kitaru, it doesn't belong in an example README.
+- Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document.
 
 ## Branching strategy
 
@@ -104,14 +100,11 @@ The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do n
 
 ### Releasing a new version
 
-1. Ensure `develop` has all changes for the release.
-2. Ensure `CHANGELOG.md` `[Unreleased]` section is complete — cross-check against `git log v<prev>..develop` for any missing user-facing changes.
-3. Run release-grade smoke: `./scripts/smoke-test.sh --release --json-out smoke-results.json` plus any `--required-provider-area <area>` flags for changed provider-backed behavior. For normal runtime releases, also opt into remote-stack smoke with operator-provided private config (`--remote-stack-smoke` / `KITARU_REMOTE_SMOKE=1`) to prove one Kubernetes-backed stack and one local-runner stack with remote artifact storage; docs-only/no-runtime releases may record an explicit waiver instead. Inspect failed checks, skipped checks with reasons, release-relevant skips, remote-stack evidence/waivers, and provider attestation. Bare `./scripts/smoke-test.sh` is still useful during development, but it is not enough to prove a provider- or remote-stack-relevant release because optional provider skips and remote smoke opt-in do not fail outside the release policy.
-4. Check `.github/workflows/llm-integration.yml` before release dispatch. Weekly-green `develop` is a canary. If OpenAI or Anthropic adapter/example behavior changed, run the workflow manually for the exact release ref/SHA and require it to pass, or record an explicit waiver. Gemini remains local release-smoke evidence or waiver for v1. The workflow's secret-bearing jobs use the GitHub Environment `live-provider-tests`; configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as Environment secrets there, with `kitaru-admins` approval/restrictions. Do not add provider calls to `.github/workflows/release.yml`.
-5. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
-6. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-7. The workflow bundles the highest stable/full `kitaru-ui-v*` release from `zenml-io/zenml-frontend-monorepo` into the Python package, bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes. Docker copies the UI from the installed Kitaru package; it does not download UI assets itself. It does not run live provider checks.
-8. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
+Use the **`kitaru-release`** skill. It walks the full procedure: diffing
+`develop` against the last tag, classifying commits, updating `CHANGELOG.md`,
+running release-grade smoke (`./scripts/smoke-test.sh --release`), checking the
+live-provider workflow, dispatching the release, and rewriting the GitHub
+Release notes into structured sections.
 
 ## Development commands
 
@@ -127,84 +120,18 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 
 **Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
 
-**Worktree setup gotcha:** In a fresh `git worktree`, the `test_phase*_example::*_runs_end_to_end` tests (~14 of them) fail with `RuntimeError: Unable to resolve dynamic pipeline source. Make sure your pipeline is defined at the top level of your module.` This is because ZenML's dynamic pipeline resolver uses `get_source_root()` to locate the project root before re-importing the pipeline module by dotted path, and that root comes from the `.kitaru/` marker. Worktrees don't inherit `.kitaru/` from the main checkout, so the resolver can't find `examples.features.basic_flow....` on `sys.path`. **Fix:** run `uv run kitaru init` once in the new worktree after `uv sync`. The unit test suite passes without this — only the end-to-end example tests need it.
+**Worktree setup gotcha:** in a fresh `git worktree`, run `uv run kitaru init` once after `uv sync`, or ~14 end-to-end example tests fail with `Unable to resolve dynamic pipeline source`.
 
 ```bash
-# Setup
-uv sync                              # Install dependencies
-uv sync --extra local                # Include local ZenML runtime components
-uv run kitaru init                   # Required in a fresh git worktree — see note below
-
-# Common Python workflows
-just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions lint, links)
-just test                             # Run all tests
-just test tests/test_foo.py           # Run a single test file
-just test tests/test_foo.py::test_bar # Run a single test
-just test -x                          # Stop on first failure
-uv run pytest -m live_openai          # Explicit live OpenAI checks (requires key)
-uv run pytest -m live_anthropic       # Explicit live Anthropic checks (requires key)
-just fix                              # Auto-fix formatting, lint, and yaml
-
-# Default pytest excludes live provider tests with -m 'not live_llm'.
-# Tests under tests/live/ are paid/external checks and must be selected
-# explicitly with provider credentials available.
-
-# Agent tip: the full suite takes ~4 minutes. When running it through a
-# pager/truncated stream that may drop the failure list, pipe through
-# grep so the failure names survive:
-#   just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20
-# That keeps the PASS/FAIL summary and every FAILED line without
-# forcing a rerun just to recover the list.
-
-# Individual checks
-just lint                             # Lint only
-just typecheck                        # Type check only
-just typos                            # Typo check only
-just format-check                     # Check formatting without modifying
-just yaml-check                       # Check YAML formatting
-just actions-lint                     # Lint GitHub Actions workflows (requires actionlint)
-just zizmor                           # Audit GitHub Actions workflow security
-just audit                            # Audit Python dependencies with pip-audit
-just links                            # Check markdown links offline (requires lychee)
-just example-coverage-audit           # Validate example metadata and required waivers; audit-only, no provider calls
-just build                            # Build wheel + sdist locally
-
-# Docs workflows (require Node 22+ and pnpm)
-just generate-docs                    # Generate CLI reference + changelog + SDK reference docs
-just docs                             # Preview docs dev server (localhost:3000)
-just docs-build                       # Build docs static export
-just docs-validate                    # Validate the static export as served under /docs
-
-# Kitaru UI bundle testing
-# Read FRONTEND-TESTING.md before changing UI bundle, frontend smoke, Docker dashboard, or release UI workflows.
-just ui-bundle                                # Download latest stable/full kitaru-ui-v* bundle
-just UI_TAG=kitaru-ui-v0.2.0 ui-bundle        # Download a specific stable UI bundle
-just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease  # Explicit prerelease opt-in
-just ui-login                                 # Start local Kitaru with prepared bundle
-just ui-smoke                                 # Smoke test prepared bundle and keep server running
-
-# Docker
-just server-image                              # Build production server image (bundles latest stable UI first)
-just DOCKER_TAG=v0.2.0 server-image            # Build with specific image tag
-just UI_TAG=kitaru-ui-v0.2.0 server-image      # Build with specific stable Kitaru UI release
-just server-image-push                         # Build + push to Docker Hub
-just server-dev-image                          # Build dev server image (requires docker/kitaru-ui-dist/)
-
-# Public website deploys are owned by the sibling zenml-io-v2 repository.
+uv sync                # Install dependencies
+uv sync --extra local  # Include local ZenML runtime components
+uv run kitaru init     # Required in a fresh git worktree — see note above
 ```
 
-### CI/CD workflows
-
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| `ci.yml` | Push/PR to `develop` | PRs run Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes. Pushes also run Docker server smoke and wheel packaging because those jobs may need trusted UI release credentials. |
-| `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Regenerate the CLI/SDK reference and build the static docs app on every run. Deploy the SDK+CLI reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`) only on `main` push or manual dispatch. PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
-| `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release. No live provider calls. |
-| `llm-integration.yml` | Weekly schedule; manual dispatch | Trusted live OpenAI/Anthropic provider checks outside PR CI. Manual runs can target an exact Kitaru ref/SHA and select `provider-core`, `provider-extended`, OpenAI, Anthropic, and the opt-in research bot. Uploads logs/results only and sends Discord failure alerts. Secret-bearing jobs use the GitHub Environment `live-provider-tests`; put `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` in that Environment with `kitaru-admins` approval/restrictions. |
-| `ui-prerelease-smoke.yml` | Manual dispatch | Tests an explicit prerelease Kitaru UI bundle against a Kitaru ref without publishing PyPI, Docker, Helm, tags, or releases |
-| `spellcheck.yml` | Manual/reusable runs, push to `develop`, non-draft PRs | Separate typo/spell checking |
-| `image-optimiser.yml` | PRs changing JPG/JPEG/PNG/WebP files | Image compression for same-repo non-draft PRs |
-| `zizmor.yml` | Workflow/dependabot changes, weekly schedule, manual runs | GitHub Actions security analysis |
+Everything else — individual check recipes, single-test invocations, docs
+generation, Kitaru UI bundle scripts, Docker image builds, and the CI/CD
+workflow table — is in the **`kitaru-dev-commands`** skill. Run `just --list`
+for the full recipe list.
 
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 
@@ -270,16 +197,11 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 
 ## Analytics instrumentation
 
-Kitaru collects anonymous usage analytics for users who have opted in (via ZenML's global analytics setting). When adding new features, discuss analytics coverage with the core team during planning to decide what (if anything) should be tracked.
-
-- **Event registry:** all event names live in the `AnalyticsEvent` enum in `src/kitaru/analytics.py`. Add new events there — never use raw strings.
-- **Privacy by design:** track only non-sensitive metadata (event names, boolean flags, enum values, counts). Never include user content, file paths, prompts, model outputs, secret values, or positional CLI arguments. The CLI command tracker uses an allowlist of known multi-word commands (`_MULTI_TOKEN_COMMANDS`) to avoid leaking positional args.
-- **Three instrumentation surfaces:**
-  - **CLI** (`src/kitaru/cli.py` + `src/kitaru/_cli/`): entry-point tracking in `cli()`, per-command feature events in subcommand handlers.
-  - **MCP** (`src/kitaru/mcp/server.py`): `@tracked_mcp_tool` decorator wraps each tool with automatic success/failure tracking.
-  - **Core SDK** (`src/kitaru/`): `track(AnalyticsEvent.X, {...})` calls at key lifecycle points (flow submit/terminal, wait, LLM calls, artifact save/load, replay, etc.).
-- **Graceful degradation:** all `track()` calls silently fail if analytics is unavailable. Never let a tracking failure break user-facing functionality.
-- **Source tagging:** each entry point calls `set_source()` (cli, mcp, python) so events can be segmented by surface without leaking specifics.
+Kitaru collects anonymous usage analytics for opted-in users. Event names live in
+the `AnalyticsEvent` enum in `src/kitaru/analytics.py` — never use raw strings,
+and never track user content, file paths, prompts, model outputs, secret values,
+or positional CLI arguments. Full instrumentation guidance is in
+**`src/kitaru/CLAUDE.md`**.
 
 ## Versioning and changelog
 
