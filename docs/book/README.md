@@ -5,12 +5,12 @@ icon: hand-wave
 
 # Welcome to Kitaru
 
-Braintrust, LangSmith, and Langfuse watched your agent from the outside — the
-closest any of them can get to testing a change is scoring it against a dataset
-you assembled by hand. Kitaru is the runtime your agent ran on, underneath your
-harness, so it can rebuild a real production run — every step, every tool call —
-into an environment you can re-run a change against, and see exactly what
-regressed.
+Braintrust, LangSmith, and Langfuse only ever ingest the run data your agent
+emits — the closest any of them can get to testing a change is scoring it
+against a dataset you assembled by hand. Kitaru is the runtime your agent ran
+on, underneath your harness, so it can rebuild a real production run — every
+step, every tool call — into an environment you can re-run a change against,
+and see exactly what regressed.
 
 That is the loop: Kitaru records every model call and tool call of a real run,
 rebuilds that run as a faithful environment, and lets you re-execute it with one

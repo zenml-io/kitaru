@@ -50,7 +50,7 @@ Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 | **Replay & Regression (Kitaru)** | How the agent's runs are *recorded, replayed, and improved over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 
-Braintrust, LangSmith, and Langfuse watched your agent from the outside — the closest any of them can get to testing a change is scoring it against a dataset you assembled by hand. Kitaru is the runtime your agent ran on, underneath your harness, so it can rebuild a real production run — every step, every tool call — into an environment you can re-run a change against, and see exactly what regressed.
+Braintrust, LangSmith, and Langfuse only ever ingest the run data your agent emits — the closest any of them can get to testing a change is scoring it against a dataset you assembled by hand. Kitaru is the runtime your agent ran on, underneath your harness, so it can rebuild a real production run — every step, every tool call — into an environment you can re-run a change against, and see exactly what regressed.
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
 policy, and Kitaru gives you the execution record — and the replay loop — in

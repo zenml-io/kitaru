@@ -325,8 +325,8 @@ There is no mandatory SaaS control plane in the path of your agent's data.
 
 ## Why an observability tool can't do this
 
-An observability tool that merely watched your agent has the logs — but no way to
-stand them up. Scoring recorded outputs against a dataset you assembled is one
+An observability tool that only ever ingested your agent's run data has the logs
+— but no way to stand them up. Scoring recorded outputs against a dataset you assembled is one
 thing; testing a change against the production history that actually happened
 requires rebuilding the conditions the agent ran in — every checkpoint output,
 every model call, every tool result — as an environment you can re-run. Only the
