@@ -15,6 +15,14 @@ the original. Because the baseline reproduces, the difference you see is your
 change, not noise — you catch what breaks before your users do, and change
 your agent with confidence.
 
+Every change to your agent is a hypothesis. Replay is the controlled experiment
+that tests it — against production runs that actually happened. The environment
+holds everything else constant, so the diff against the real baseline is
+attributable evidence, not a hunch. And because completed checkpoints are
+cached, each experiment costs only the part you changed — you can test several
+hypotheses against the same recorded run, or one hypothesis against a whole
+cohort of runs.
+
 The harness you already picked (PydanticAI, OpenAI Agents SDK, LangGraph, Claude
 Agent SDK, raw Python) keeps owning how the agent thinks. Kitaru owns the run
 record and the replay loop. A Kitaru flow is a dynamic ZenML pipeline, so agents
