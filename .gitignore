@@ -258,6 +258,12 @@ src/kitaru/_ui/bundle_manifest.json
 !.codex/skills/
 AGENTS.override.md
 .agents/skills/*
+!.agents/skills/kitaru-dev/
+!.agents/skills/kitaru-dev/**
+!.agents/skills/kitaru-docs/
+!.agents/skills/kitaru-docs/**
+!.agents/skills/kitaru-tests-release/
+!.agents/skills/kitaru-tests-release/**
 
 # Agent Skills
 .pi/

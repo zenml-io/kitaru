@@ -1,59 +1,43 @@
 # Test Suite Guidelines
 
-This file applies to everything under `tests/`. It supplements the repo-root `AGENTS.md` with test-specific guidance. When there is no conflict, follow both documents.
+This file applies to everything under `tests/`. It supplements the repo-root
+`AGENTS.md`; when there is no conflict, follow both documents.
 
 ## What Lives Here
 
-The test suite mixes a few different layers of coverage:
-
-- `tests/test_*.py`: unit, contract, and integration tests for the Python SDK and CLI
-- `tests/test_phase*.py`: example-driven end-to-end tests that exercise the runnable flows in `examples/`
+- `tests/test_*.py`: unit, contract, and integration tests for the SDK and CLI
+- `tests/test_phase*.py`: example-driven end-to-end tests for runnable flows in `examples/`
 - `tests/mcp/test_*.py`: MCP-specific tests for the optional `kitaru[mcp]` surface
-- `tests/live/test_*.py`: paid/external provider checks, always marked `live_llm` plus a provider-specific marker and excluded from default pytest runs
-- `tests/conftest.py`: the shared isolation harness for Kitaru + ZenML state and provider-call guard
+- `tests/live/test_*.py`: paid/external provider checks, always marked
+  `live_llm` plus a provider-specific marker and excluded from default pytest runs
+- `tests/conftest.py`: shared isolation harness and provider-call guard
 - `tests/mcp/conftest.py`: MCP-only fixtures and sample objects
 
-When adding a new test file, mirror the source area it protects where possible. Examples:
-
-- `src/kitaru/runtime.py` -> `tests/test_runtime.py`
-- `src/kitaru/_cli/_stacks.py` -> `tests/test_cli.py` or a focused CLI test file if it grows too large
-- `src/kitaru/mcp/server.py` -> `tests/mcp/test_server.py`
+When adding a new test file, mirror the source area it protects where possible.
+For example, `src/kitaru/runtime.py` maps naturally to `tests/test_runtime.py`.
 
 ## Running Tests
 
-Use the repo-level commands from the project root:
+Run tests from the repo root:
 
-- `just test`: run the whole suite
-- `just test tests/test_runtime.py`: run one file
-- `just test tests/test_runtime.py::test_name`: run one test
-- `just check`: run the required formatting, lint, type, typo, YAML, actionlint, and link checks
+- `just test`: whole default suite
+- `just test tests/test_runtime.py`: one file
+- `just test tests/test_runtime.py::test_name`: one test
+- `just check`: formatting, lint, type, typo, YAML, actionlint, and link checks
 
-Important repo defaults:
+Default pytest uses `-vv -n auto -m 'not live_llm'`, so tests must be safe under
+parallel execution. If a failure looks timing- or isolation-related, rerun it
+serially with `just test -n 0 tests/...`.
 
-- `pytest` is configured with `-vv -n auto -m 'not live_llm'`, so default runs are deterministic and tests should be safe under `xdist`
-- `pythonpath = ["scripts"]`, so tests may import helpers from `scripts/` without ad hoc path hacks
-- live provider tests are selected explicitly, for example `uv run pytest -m live_openai`, `uv run pytest -m live_anthropic`, or `uv run pytest -m "live_llm and not provider_extended"`. In GitHub, those checks belong in `.github/workflows/llm-integration.yml` only; do not wire them into PR CI or `release.yml`.
-
-Useful debugging pattern:
-
-- If a failure looks timing- or isolation-related, rerun it serially with `just test -n 0 tests/...`
-
-Extra installation notes:
-
-- base suite: `uv sync`
-- tests that execute real local Kitaru/ZenML flows often assume `uv sync --extra local`
-- MCP tests assume `uv sync --extra mcp`
+Use `uv sync` for the base suite. Tests that execute real local Kitaru/ZenML
+flows often assume `uv sync --extra local`; MCP tests assume `uv sync --extra mcp`.
 
 ## Shared Isolation Rules
 
-`tests/conftest.py` is the heart of the safety story. It does four important things before tests run:
-
-1. clears Kitaru- and ZenML-related environment variables that could leak in from a developer machine
-2. redirects config and home-directory lookups into `tmp_path`
-3. resets global Kitaru and ZenML client/config singletons between tests
-4. blocks accidental provider calls from unmarked tests while still allowing localhost/Kitaru/ZenML local traffic
-
-That means the suite is designed to avoid touching a real local config directory, real user state, or paid provider APIs during default runs. Keep it that way. When you need exact fixture names, config paths, provider markers, or the environment-variable denylist, read `tests/conftest.py` and `tests/mcp/conftest.py`; this file intentionally keeps the rule at a higher level.
+`tests/conftest.py` protects local state before tests run. It clears Kitaru and
+ZenML environment variables, redirects config/home lookups into `tmp_path`,
+resets global clients/config singletons, and blocks accidental provider calls
+from unmarked deterministic tests.
 
 When writing new tests:
 
@@ -61,105 +45,24 @@ When writing new tests:
 - use `monkeypatch` for env vars and process-global state
 - prefer test-local fixtures or helpers over hidden module-level state
 - do not rely on execution order
+- do not bypass the provider guard in deterministic tests; fake the provider or
+  patch Kitaru's local call point instead
 
-## `primed_zenml` Fixture
+## Live Provider Tests
 
-`primed_zenml` eagerly initializes the ZenML store. Think of it like starting the engine before a road test: useful for tests that genuinely drive the system, but unnecessary overhead for tests that only inspect one component on the workbench.
+Live provider tests live under `tests/live/` and are off by default. They are
+for trusted manual or scheduled runs, not normal PR CI.
 
-Use `primed_zenml` only when the test:
+- Mark every live provider test with `@pytest.mark.live_llm` plus exactly the
+  provider marker it needs, such as `live_openai`, `live_anthropic`, or
+  `live_gemini`.
+- Use `@pytest.mark.provider_extended` for slower or higher-cost checks.
+- Skip cleanly when required credentials are absent.
+- Keep prompts tiny and set max-turns or equivalent limits explicitly.
+- Do not add live provider tests to fork PR workflows.
 
-- actually runs a flow
-- uses `KitaruClient` against real local state
-- spawns threads or code paths that touch the ZenML runtime lazily
+## More Test Guidance
 
-Do not add `primed_zenml` to lightweight unit tests, parser tests, serializer tests, or simple CLI rendering tests. Keeping those tests cheap is what makes `-n auto` practical.
-
-## Patterns To Copy
-
-### Unit and contract tests
-
-These should stay lightweight and explicit:
-
-- build small stubs or `SimpleNamespace` objects rather than booting full runtime state
-- assert on one behavior or contract at a time
-- include regression coverage for bug fixes
-
-This is the pattern used heavily in `tests/test_cli.py`, `tests/test_checkpoint.py`, and similar files.
-
-### CLI tests
-
-CLI tests in this repo follow a few important rules:
-
-- always call the Cyclopts app with an explicit arg list, for example `app(["--help"])`
-- successful invocations raise `SystemExit(0)`; assert on that explicitly
-- use `capsys` and assert on stable plain-text substrings
-- prefer lightweight stubs/mocks for execution objects rather than full backend setup
-
-The story here is simple: keep CLI tests focused on argument parsing, command dispatch, and rendered output, not on unrelated runtime bootstrapping.
-
-### Example-driven `test_phase*.py` tests
-
-These are closer to executable documentation than ordinary unit tests. Their job is to prove that the examples in `examples/` still work end to end.
-
-When adding or updating one:
-
-- import and call the example entrypoint directly
-- use `monkeypatch` to provide fake credentials or mock-response env vars
-- request `primed_zenml` when the flow genuinely executes
-- assert on persisted execution state, metadata, checkpoints, or artifacts, not just a return value
-
-Good example: `tests/test_phase12_llm_example.py` registers a model alias, injects fake API credentials, runs the example flow, and then inspects the recorded metadata in ZenML.
-
-### Live provider tests
-
-Live provider tests live under `tests/live/` and are off by default. They are for trusted manual or scheduled runs, not normal PR CI.
-
-Rules:
-
-- mark every live provider test with `@pytest.mark.live_llm` plus the provider marker: `live_openai`, `live_anthropic`, or `live_gemini`; `live_llm` by itself is invalid because it bypasses the deterministic provider-call guard but is not selected by provider workflows
-- put slower or higher-cost checks under `@pytest.mark.provider_extended` as well
-- skip cleanly when the required key is absent; the shared guard already skips `live_openai` without `OPENAI_API_KEY`, `live_anthropic` without `ANTHROPIC_API_KEY`, and `live_gemini` without `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-- keep prompts tiny and bounded; set max-turns or equivalent limits explicitly
-- do not add live provider tests to fork PR workflows
-- do not bypass the provider guard in deterministic tests; fake the provider or patch Kitaru's local call point instead
-
-### MCP tests
-
-MCP tests live under `tests/mcp/` for a reason:
-
-- keep MCP-only fixtures in `tests/mcp/conftest.py`
-- use mocked `KitaruClient` namespaces unless the test truly needs deeper integration
-- verify both delegation and serialized payload shape
-- cover file/module loading behavior with `tmp_path` and `monkeypatch.syspath_prepend(...)` rather than real project files
-
-## Parallel-Safety Expectations
-
-Because the suite defaults to `-n auto`, tests should behave like good neighbors in a shared apartment:
-
-- no hidden dependence on cwd unless the test sets it up itself
-- no shared mutable module-level state
-- no assumptions about another test having already created config, stores, or env vars
-- no reliance on wall-clock ordering between tests
-
-If a test is flaky under parallelism, fix the isolation problem instead of silently depending on single-process execution.
-
-## Choosing Where Fixtures Live
-
-Use this rule of thumb:
-
-- if many test files across `tests/` need it, put it in `tests/conftest.py`
-- if only MCP tests need it, put it in `tests/mcp/conftest.py`
-- if only one file needs it, keep it local to that file unless duplication becomes painful
-
-Keep shared fixtures small and intention-revealing. A fixture should make setup easier to understand, not hide the whole story.
-
-## When Fixing Bugs
-
-Every bug fix should come with a regression test that would have caught the original problem. The best pattern is:
-
-1. write or update the test so it captures the broken behavior
-2. make the code change
-3. rerun the targeted test
-4. rerun the broader relevant suite
-
-If you change code after running tests, run the tests again. Do not assume the earlier green run still counts.
+For fixture placement, `primed_zenml`, CLI-test patterns, example-driven tests,
+MCP tests, and bug-fix regression-test workflow, load the
+`kitaru-tests-release` skill.
