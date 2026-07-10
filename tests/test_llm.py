@@ -46,6 +46,7 @@ from tests._checkpoint_handle_helpers import (
     assert_checkpoint_handle_error,
     checkpoint_output_handle,
 )
+from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 
 def _flow_checkpoint_scope() -> tuple[str, str]:
@@ -526,6 +527,16 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking(
     assert usage_record["cost"]["source_label"] == "genai-prices"
     assert usage_record["cost"]["pricing_version"].startswith("genai-prices:")
     assert usage_record["warnings"] == []
+    checkpoint_diff = checkpoint_diff_from_usage_records(
+        original_records=[],
+        replay_records=[usage_record],
+    )
+    assert checkpoint_diff.token_delta == {
+        "prompt_tokens": 10,
+        "completion_tokens": 20,
+        "total_tokens": 30,
+    }
+    assert checkpoint_diff.cost_delta_usd == 0.00123
     extract_usage.assert_called_once_with(
         {
             "model": "gpt-4o-mini",

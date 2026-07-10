@@ -1068,7 +1068,8 @@ def _record_cost(record: Mapping[str, Any], key: str) -> float | None:
     return coerce_cost_usd(cost.get(key))
 
 
-def _round_money(value: float) -> float:
+def round_cost_usd(value: float) -> float:
+    """Round USD costs to suppress insignificant floating-point noise."""
     return round(value, 10)
 
 
@@ -1092,6 +1093,7 @@ def empty_usage_summary() -> dict[str, Any]:
         "estimated_cost_usd": 0.0,
         "display_cost_usd": 0.0,
         "records_without_cost_count": 0,
+        "non_reused_records_without_cost_count": 0,
         "adapters": [],
         "models": [],
         "cost_policy": (
@@ -1171,6 +1173,8 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
                 summary["display_cost_usd"] += estimated_cost
         if actual_cost is None and estimated_cost is None:
             summary["records_without_cost_count"] += 1
+            if not is_reused:
+                summary["non_reused_records_without_cost_count"] += 1
 
         adapter = record.get("adapter")
         if isinstance(adapter, str):
@@ -1182,9 +1186,9 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
         if isinstance(record_warnings, list):
             warnings.extend(str(warning) for warning in record_warnings)
 
-    summary["actual_cost_usd"] = _round_money(float(summary["actual_cost_usd"]))
-    summary["estimated_cost_usd"] = _round_money(float(summary["estimated_cost_usd"]))
-    summary["display_cost_usd"] = _round_money(float(summary["display_cost_usd"]))
+    summary["actual_cost_usd"] = round_cost_usd(float(summary["actual_cost_usd"]))
+    summary["estimated_cost_usd"] = round_cost_usd(float(summary["estimated_cost_usd"]))
+    summary["display_cost_usd"] = round_cost_usd(float(summary["display_cost_usd"]))
     summary["adapters"] = sorted(adapters)
     summary["models"] = sorted(models)
     summary["warnings"] = warnings

@@ -453,6 +453,32 @@ kitaru executions diff kr-original kr-replay-a -o json
 kitaru executions diff-matrix kr-a kr-b kr-c -o json
 ```
 
+Checkpoint token and cost deltas in JSON output are always calculated as
+**replay minus original**. For example:
+
+```json
+{
+  "token_delta": {
+    "prompt_tokens": -120,
+    "completion_tokens": 40,
+    "total_tokens": -80
+  },
+  "cost_delta_usd": -0.0017
+}
+```
+
+The token object always uses the keys `prompt_tokens`, `completion_tokens`, and
+`total_tokens`. A negative value means the replay used fewer tokens than the
+original; a positive value means it used more. A recorded model call with zero
+tokens produces a three-key object containing zeroes, while `token_delta: null`
+means neither checkpoint has a model usage record.
+
+The cost follows the same subtraction rule. `cost_delta_usd: null` means at
+least one model call that was not explicitly reused has neither usable actual
+cost nor a usable estimate, so Kitaru cannot calculate a trustworthy
+difference. Reused checkpoint work contributes zero cost because the provider
+call was not made again.
+
 `ExecutionDiff.urls` links to the Kitaru UI compare view — one URL listing the original and every compared replay, whether discovered automatically or passed explicitly:
 
 ```text

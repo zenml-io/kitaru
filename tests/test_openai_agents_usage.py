@@ -11,6 +11,7 @@ from kitaru.adapters.openai_agents._agent import KitaruRunner
 from kitaru.adapters.openai_agents._policy import OpenAICapturePolicy
 from kitaru.adapters.openai_agents._types import OpenAIRunResult
 from kitaru.adapters.openai_agents._usage import normalize_usage
+from tests._diff_helpers import checkpoint_diff_from_usage_records
 from tests._genai_prices_helpers import install_fake_genai_calc_price
 
 
@@ -183,6 +184,16 @@ def test_finalize_run_result_uses_genai_prices_when_no_user_calculator(
     assert logged[0]["cost"]["source"] == "calculator"
     assert logged[0]["cost"]["source_label"] == "genai-prices"
     assert logged[0]["cost"]["pricing_version"].startswith("genai-prices:")
+    checkpoint_diff = checkpoint_diff_from_usage_records(
+        original_records=[],
+        replay_records=logged,
+    )
+    assert checkpoint_diff.token_delta == {
+        "prompt_tokens": 10,
+        "completion_tokens": 6,
+        "total_tokens": 16,
+    }
+    assert checkpoint_diff.cost_delta_usd == 0.99
     assert genai_calls == [
         {
             "usage": {

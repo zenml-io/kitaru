@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kitaru._client._models import CheckpointCall, Execution
+from kitaru._llm_usage import aggregate_usage_records, round_cost_usd
 from kitaru._ui_urls import (
     UiUrlContext,
     build_compare_url_from_context,
@@ -31,6 +32,7 @@ class CheckpointDiff:
     duration_delta_ms: float | None
     token_delta: dict[str, int] | None
     artifact_hashes: dict[str, tuple[str | None, str | None]]
+    cost_delta_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -211,16 +213,10 @@ def _checkpoint_duration_ms(checkpoint: CheckpointCall) -> float | None:
     return (checkpoint.ended_at - checkpoint.started_at).total_seconds() * 1000
 
 
-def _token_totals(checkpoint: CheckpointCall) -> dict[str, int]:
-    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    for record in checkpoint.llm_usage_records:
-        for key in totals:
-            value = record.get(key)
-            if isinstance(value, int):
-                totals[key] += value
-    if not any(totals.values()):
-        return {}
-    return totals
+def _checkpoint_usage_summary(checkpoint: CheckpointCall | None) -> dict[str, Any]:
+    if checkpoint is None:
+        return aggregate_usage_records(())
+    return checkpoint.aggregated_llm_usage_summary
 
 
 def _artifact_content_hash(artifact_id: str, client: KitaruClient) -> str | None:
@@ -295,14 +291,30 @@ def _compare_checkpoints(
     if original_duration is not None and replay_duration is not None:
         duration_delta = replay_duration - original_duration
 
-    original_tokens = _token_totals(original_cp) if original_cp is not None else {}
-    replay_tokens = _token_totals(replay_cp) if replay_cp is not None else {}
+    original_usage = _checkpoint_usage_summary(original_cp)
+    replay_usage = _checkpoint_usage_summary(replay_cp)
     token_delta: dict[str, int] | None = None
-    if original_tokens or replay_tokens:
-        token_delta = {
-            key: replay_tokens.get(key, 0) - original_tokens.get(key, 0)
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+    if original_usage["usage_record_count"] or replay_usage["usage_record_count"]:
+        token_keys = {
+            "prompt_tokens": "input_tokens",
+            "completion_tokens": "output_tokens",
+            "total_tokens": "total_tokens",
         }
+        token_delta = {
+            public_key: replay_usage[summary_key] - original_usage[summary_key]
+            for public_key, summary_key in token_keys.items()
+        }
+
+    cost_delta: float | None = None
+    if not (
+        original_usage["non_reused_records_without_cost_count"]
+        or replay_usage["non_reused_records_without_cost_count"]
+    ):
+        cost_delta = round_cost_usd(
+            replay_usage["display_cost_usd"] - original_usage["display_cost_usd"]
+        )
+        if cost_delta == 0:
+            cost_delta = 0.0
 
     original_hashes = (
         _artifact_hashes(original_cp, client) if original_cp is not None else {}
@@ -327,6 +339,7 @@ def _compare_checkpoints(
         duration_delta_ms=duration_delta,
         token_delta=token_delta,
         artifact_hashes=artifact_hashes,
+        cost_delta_usd=cost_delta,
     )
 
 
@@ -355,6 +368,7 @@ def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
         "status_match": item.status_match,
         "duration_delta_ms": item.duration_delta_ms,
         "token_delta": item.token_delta,
+        "cost_delta_usd": item.cost_delta_usd,
         "artifact_hashes": {
             role: {"original": left, "replay": right}
             for role, (left, right) in item.artifact_hashes.items()
