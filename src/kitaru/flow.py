@@ -270,10 +270,10 @@ def _preflight_active_stack_implementation_hydration(
     except ImportError as exc:
         zenml_guidance = str(exc).strip()
         message = (
-            "Cannot submit this Kitaru flow because the active stack could not "
-            "be loaded in this Python environment.\n\n"
-            "A stack integration dependency appears to be missing. Install the "
-            "missing ZenML integration or stack requirements, then retry."
+            "Cannot submit this Kitaru flow because this Python environment could not "
+            "load the active stack's integration dependencies.\n\n"
+            "ZenML supplies these dependencies. Install the missing integration or the "
+            "active stack requirements, then retry."
         )
         if zenml_guidance:
             message = f"{message}\n\nZenML guidance:\n\n{zenml_guidance}"
