@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import os
 import sys
 import threading
@@ -99,6 +100,7 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStackIntegrationDependencyError,
     KitaruStateError,
+    KitaruTimeoutError,
     KitaruUsageError,
     classify_failure_origin,
     execution_error_from_failure,
@@ -1697,10 +1699,18 @@ class FlowHandle:
         ):
             self._terminal_llm_usage_metadata_persisted = True
 
-    def wait(self) -> Any:
+    def wait(self, timeout: float | None = None) -> Any:
         """Block until execution finishes and return its result.
 
+        Args:
+            timeout: Maximum seconds to wait locally. Must be a positive, finite
+                number. Pass ``None`` or omit the argument to wait indefinitely.
+                Expiration does not change the remote execution.
+
         Raises:
+            KitaruUsageError: If ``timeout`` is not a positive, finite number.
+            KitaruTimeoutError: If the local timeout expires while the execution
+                is still active.
             KitaruStateError: If the execution is waiting for input or paused.
             KitaruExecutionError: If the run finishes unsuccessfully.
             KitaruRuntimeError: If result extraction fails after completion.
@@ -1708,6 +1718,26 @@ class FlowHandle:
         Returns:
             The flow return value.
         """
+        if timeout is not None:
+            invalid_timeout = KitaruUsageError(
+                "FlowHandle.wait() timeout must be a positive, finite number."
+            )
+            if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+                raise invalid_timeout
+            try:
+                timeout = float(timeout)
+            except OverflowError as exc:
+                raise invalid_timeout from exc
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise invalid_timeout
+
+        if timeout is None:
+            started_at = None
+            deadline = None
+        else:
+            started_at = time.monotonic()
+            deadline = started_at + timeout
+
         while True:
             run = self._refresh()
             if run.status.is_finished:
@@ -1755,7 +1785,24 @@ class FlowHandle:
                     f"  kitaru executions resume {run.id}"
                 )
 
-            time.sleep(1)
+            if deadline is None or started_at is None:
+                time.sleep(1)
+                continue
+
+            now = time.monotonic()
+            remaining_seconds = deadline - now
+            if remaining_seconds > 0:
+                time.sleep(min(1.0, remaining_seconds))
+                now = time.monotonic()
+
+            if now >= deadline:
+                assert timeout is not None
+                raise KitaruTimeoutError(
+                    exec_id=str(run.id),
+                    timeout_seconds=timeout,
+                    elapsed_seconds=now - started_at,
+                    last_status=_to_public_status(run.status),
+                )
 
     def get(self) -> Any:
         """Get the flow result without waiting.

@@ -116,6 +116,7 @@ class TestPublicExports:
             "KitaruRuntimeError",
             "KitaruStackIntegrationDependencyError",
             "KitaruStateError",
+            "KitaruTimeoutError",
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",

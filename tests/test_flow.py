@@ -45,6 +45,7 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStackIntegrationDependencyError,
     KitaruStateError,
+    KitaruTimeoutError,
     KitaruUsageError,
     KitaruUserCodeError,
     build_recovery_command,
@@ -4993,12 +4994,200 @@ def test_flow_handle_wait_polls_until_complete() -> None:
     handle = FlowHandle(_as_pipeline_run(initial))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic") as monotonic_mock,
         patch("kitaru.flow.time.sleep") as sleep_mock,
     ):
         result = handle.wait()
 
     assert result == 42
+    monotonic_mock.assert_not_called()
     sleep_mock.assert_called_once_with(1)
+
+
+@pytest.mark.parametrize("timeout", [2, 2.0])
+def test_flow_handle_wait_accepts_and_normalizes_positive_timeout(
+    timeout: float,
+) -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=timeout)
+
+    assert exc_info.value.timeout_seconds == 2.0
+    sleep_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [
+        0,
+        -1,
+        True,
+        False,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        "2",
+        object(),
+    ],
+)
+def test_flow_handle_wait_rejects_invalid_timeout_before_side_effects(
+    timeout: object,
+) -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_constructor = MagicMock()
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", client_constructor),
+        patch("kitaru.flow.time.monotonic") as monotonic_mock,
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(
+            KitaruUsageError,
+            match="timeout must be a positive, finite number",
+        ),
+    ):
+        handle.wait(timeout=cast(Any, timeout))
+
+    client_constructor.assert_not_called()
+    monotonic_mock.assert_not_called()
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_reports_context_without_mutating_execution() -> None:
+    run_id = uuid4()
+    running = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=2)
+
+    error = exc_info.value
+    assert isinstance(error, KitaruStateError)
+    assert isinstance(error, TimeoutError)
+    assert error.exec_id == str(run_id)
+    assert error.timeout_seconds == 2.0
+    assert error.elapsed_seconds == 2.0
+    assert error.last_status == KitaruExecutionStatus.RUNNING
+    assert str(run_id) in str(error)
+    assert "configured timeout: 2.0 seconds" in str(error)
+    assert "after 2.0 seconds" in str(error)
+    assert "last status: running" in str(error)
+    assert "remote execution was not changed" in str(error)
+    assert client_mock.method_calls == [
+        call.get_pipeline_run(
+            run_id,
+            allow_name_prefix_match=False,
+            project=None,
+        )
+    ]
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_raises_without_polling_after_final_sleep() -> None:
+    run_id = uuid4()
+    running = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.time.monotonic",
+            side_effect=[10.0, 10.75, 11.0],
+        ),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=1.0)
+
+    assert exc_info.value.elapsed_seconds == 1.0
+    sleep_mock.assert_called_once_with(pytest.approx(0.25))
+    client_mock.get_pipeline_run.assert_called_once_with(
+        run_id,
+        allow_name_prefix_match=False,
+        project=None,
+    )
+
+
+def test_flow_handle_wait_completed_refresh_wins_at_deadline() -> None:
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]) as monotonic_mock,
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+    ):
+        result = handle.wait(timeout=2)
+
+    assert result == 42
+    monotonic_mock.assert_called_once_with()
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_preserves_unsuccessful_execution_error() -> None:
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        traceback="Traceback\nValueError: bad input",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        patch("kitaru.flow.track"),
+        pytest.raises(KitaruUserCodeError) as exc_info,
+    ):
+        handle.wait(timeout=5)
+
+    assert f"kitaru executions retry {run_id}" in str(exc_info.value)
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_preserves_backend_error() -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.side_effect = RuntimeError("backend unavailable")
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruBackendError, match="backend unavailable"),
+    ):
+        handle.wait(timeout=5)
+
+    sleep_mock.assert_not_called()
 
 
 def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
@@ -5016,10 +5205,11 @@ def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message
@@ -5048,10 +5238,11 @@ def test_flow_handle_wait_paused_without_pending_waits_guides_resume() -> None:
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message
@@ -5073,10 +5264,11 @@ def test_flow_handle_wait_pending_wait_lookup_failure_gives_cautious_guidance() 
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message
