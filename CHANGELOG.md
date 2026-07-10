@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. The execution-level `llm_usage_summary_v1` payload is unchanged, cached and replay-reused checkpoints report zero incurred cost, and metadata writes are best-effort so a failed write never fails the run. (#528)
+
+### Fixed
+- Execution views now show the checkpoint attempt that ZenML surfaces in the run graph. When a checkpoint was retried, `KitaruClient.executions.get()`, `kitaru executions get`, and the MCP execution tools could surface the superseded `retried` attempt instead of the live one; they now select the newest non-retried attempt. (#528)
+
+### Infrastructure
+- The release workflow's GitHub Release asset reconcile step now skips signature and attestation assets, which are regenerated per dispatch and previously caused recovery re-dispatches to hard-fail on a non-reproducible asset mismatch. (#513)
+
 ## [0.20.1] - 2026-07-08
 
 ### Fixed
