@@ -8,7 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -35,6 +35,8 @@ from kitaru.cli import (
     app,
 )
 from kitaru.client import (
+    CheckpointCall,
+    Execution,
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatus,
@@ -62,6 +64,7 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.inspection import serialize_execution
 from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
 
 
@@ -111,7 +114,7 @@ def _execution_stub(
     pending_wait: SimpleNamespace | None = None,
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
-    checkpoints: list[SimpleNamespace] | None = None,
+    checkpoints: list[CheckpointCall] | None = None,
     llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
@@ -133,6 +136,35 @@ def _execution_stub(
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
         llm_usage_records=[],
+    )
+
+
+def _checkpoint_stub(
+    *,
+    call_id: str,
+    name: str,
+    status: ExecutionStatus,
+    original_call_id: str | None = None,
+) -> CheckpointCall:
+    """Build a complete checkpoint-call-shaped object for CLI tests."""
+    return CheckpointCall(
+        call_id=call_id,
+        name=name,
+        checkpoint_type=None,
+        checkpoint_origin="user",
+        adapter=None,
+        adapter_checkpoint_kind=None,
+        replay_input_slots=[],
+        replay_output_slots=[],
+        status=status,
+        started_at=None,
+        ended_at=None,
+        metadata={},
+        original_call_id=original_call_id,
+        parent_call_ids=[],
+        failure=None,
+        attempts=[],
+        artifacts=[],
     )
 
 
@@ -2352,10 +2384,38 @@ def test_flow_tag_and_untag_call_public_apis(
     assert json.loads(capsys.readouterr().out)["command"] == "flow.untag"
 
 
-def test_executions_get_renders_execution_details(
+def test_executions_get_renders_all_checkpoint_call_ids(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions get` should render a detailed execution snapshot."""
+    """Execution details should show every checkpoint call without truncation."""
+    checkpoints = [
+        _checkpoint_stub(
+            call_id="call-research-1",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-1",
+            name="write",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-research-2",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-review-1",
+            name="review",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-2",
+            name="write",
+            status=ExecutionStatus.FAILED,
+            original_call_id="call-write-1",
+        ),
+    ]
     execution = _execution_stub(
         exec_id="kr-123",
         flow_name="content_pipeline",
@@ -2364,10 +2424,7 @@ def test_executions_get_renders_execution_details(
             name="approve_draft",
             question="Ship this draft?",
         ),
-        checkpoints=[
-            SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
-            SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
-        ],
+        checkpoints=checkpoints,
         llm_usage_summary={
             "usage_record_count": 2,
             "incurred_usage_record_count": 1,
@@ -2396,8 +2453,251 @@ def test_executions_get_renders_execution_details(
     assert "Status: waiting" in output
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
-    assert "Checkpoints: research (completed), write (running)" in output
+    assert "Checkpoints" in output
+    for checkpoint in checkpoints:
+        assert f"Call ID {checkpoint.call_id}: {checkpoint.name}" in output
+        assert f"({checkpoint.status.value})" in output
+    assert output.count("research (completed)") == 2
+    assert (
+        "Call ID call-write-2: write (failed); original call ID: call-write-1 "
+        "(may identify a call in the source execution; "
+        "not a --at selector for this execution)"
+    ) in output
+    assert "(+1 more)" not in output
     assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_checkpoint_ids_in_rich_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Interactive output should contain the same checkpoint details."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-research-2",
+                name="research",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-research-1",
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_interactive", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Checkpoints" in output
+    assert "Call ID call-research-1" in output
+    assert "research (completed)" in output
+    assert "Call ID call-research-2" in output
+    assert "research (failed)" in output
+    assert "original call ID:" in output
+    assert "call-research-1 (may identify a call in the source execution;" in output
+    assert "not a --at" in output
+    assert "selector for this execution)" in output
+    assert "Replay into a new execution" in output
+    assert "Command:" in output
+    assert "kitaru executions replay kr-123 --at call-research-2" in output
+
+
+@pytest.mark.parametrize(
+    ("exec_id", "call_id"),
+    [
+        ("kr execution", "call-write-2"),
+        ("kr-123", "call 'write'"),
+        ("kr-123", 'call-"write"'),
+        ("kr-123", "call-write;$HOME"),
+    ],
+)
+def test_executions_get_omits_replay_command_for_unsafe_identifiers(
+    capsys: pytest.CaptureFixture[str],
+    exec_id: str,
+    call_id: str,
+) -> None:
+    """Replay guidance should require cross-shell-safe identifiers."""
+    execution = _execution_stub(
+        exec_id=exec_id,
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id=call_id,
+                name="write",
+                status=ExecutionStatus.FAILED,
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", exec_id])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    assert f"Call ID {call_id}: write (failed)" in output
+
+
+def test_executions_get_suggests_first_failed_checkpoint_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed execution should suggest its first eligible failed call ID."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+            ),
+            _checkpoint_stub(
+                call_id="call-publish-3",
+                name="publish",
+                status=ExecutionStatus.FAILED,
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" in output
+    assert "Command: kitaru executions replay kr-123 --at call-write-2" in output
+    assert "--at call-publish-3" not in output
+
+
+@pytest.mark.parametrize(
+    ("execution_status", "checkpoints"),
+    [
+        (
+            ExecutionStatus.COMPLETED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+        (ExecutionStatus.FAILED, []),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.COMPLETED,
+                )
+            ],
+        ),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="  ",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+    ],
+)
+def test_executions_get_omits_ineligible_replay_command(
+    capsys: pytest.CaptureFixture[str],
+    execution_status: ExecutionStatus,
+    checkpoints: list[CheckpointCall],
+) -> None:
+    """Replay guidance should appear only when its call ID is usable."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=execution_status,
+        checkpoints=checkpoints,
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    if not checkpoints:
+        assert "Calls: none" in output
+    elif not checkpoints[0].call_id.strip():
+        assert "Call ID not available: write (failed)" in output
+
+
+def test_executions_get_json_contract_is_unchanged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text-only checkpoint guidance must not enter the JSON envelope."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-write-1",
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.get",
+        "item": serialize_execution(cast(Execution, execution)),
+    }
 
 
 def test_executions_get_renders_malformed_llm_usage_summary_honestly(
