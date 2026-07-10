@@ -155,6 +155,7 @@ class TestPublicExports:
             "get_secret",
             "is_replay",
             "list_projects",
+            "list_secrets",
             "list_stacks",
             "llm",
             "load",

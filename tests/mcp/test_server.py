@@ -64,6 +64,7 @@ from kitaru.mcp.server import (
     kitaru_projects_show,
     kitaru_projects_use,
     kitaru_secrets_create,
+    kitaru_secrets_list,
     kitaru_stacks_list,
     kitaru_start_local_server,
     kitaru_status,
@@ -94,6 +95,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_executions_replay,
     kitaru_executions_diff_matrix,
     kitaru_secrets_create,
+    kitaru_secrets_list,
     kitaru_artifacts_list,
     kitaru_artifacts_get,
     kitaru_start_local_server,
@@ -220,6 +222,17 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     assert "kitaru_projects_delete" not in tool_schemas
     assert "kitaru_executions_diff_matrix" in tool_schemas
     assert "kitaru_executions_diff_cohort" not in tool_schemas
+
+
+def test_secrets_list_schema_has_optional_pagination_parameters() -> None:
+    schema = _mcp_tool_schemas_by_name()["kitaru_secrets_list"]
+
+    assert set(schema["properties"]) == {"page", "size"}
+    assert schema["properties"]["page"]["type"] == "integer"
+    assert schema["properties"]["page"]["default"] == 1
+    assert schema["properties"]["size"]["type"] == "integer"
+    assert schema["properties"]["size"]["default"] == 20
+    assert schema.get("required", []) == []
 
 
 def test_load_flow_target_supports_module_paths(
@@ -1379,6 +1392,165 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     assert payload["value_type"] == "custom.Type"
 
 
+def test_secrets_list_uses_default_pagination() -> None:
+    summaries = [
+        SecretSummary(
+            name=f"secret-{index:02d}",
+            id=f"secret-id-{index:02d}",
+            private=False,
+            keys=["API_KEY"],
+        )
+        for index in range(25)
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ) as mock_list:
+        payload = kitaru_secrets_list()
+
+    mock_list.assert_called_once_with()
+    assert len(payload) == 20
+    assert [item["id"] for item in payload] == [
+        summary.id for summary in summaries[:20]
+    ]
+
+
+def test_secrets_list_applies_non_default_pagination_without_resorting() -> None:
+    summaries = [
+        SecretSummary(
+            name=name,
+            id=f"secret-id-{index}",
+            private=False,
+            keys=["API_KEY"],
+        )
+        for index, name in enumerate(["zeta", "alpha", "gamma", "beta", "delta"])
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ) as mock_list:
+        payload = kitaru_secrets_list(page=2, size=2)
+
+    mock_list.assert_called_once_with()
+    assert [item["id"] for item in payload] == [
+        summaries[2].id,
+        summaries[3].id,
+    ]
+
+
+def test_secrets_list_returns_empty_for_out_of_range_page() -> None:
+    summaries = [
+        SecretSummary(
+            name="openai-creds",
+            id="secret-id",
+            private=False,
+            keys=["OPENAI_API_KEY"],
+        )
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ):
+        payload = kitaru_secrets_list(page=2, size=20)
+
+    assert payload == []
+
+
+def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> None:
+    summaries = [
+        SecretSummary(
+            name="shared-creds",
+            id="public-id",
+            private=False,
+            keys=["OPENAI_API_KEY"],
+            has_missing_values=True,
+        ),
+        SecretSummary(
+            name="personal-creds",
+            id="private-id",
+            private=True,
+            keys=["ANTHROPIC_API_KEY"],
+        ),
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ):
+        payload = kitaru_secrets_list()
+
+    assert payload == [
+        {
+            "id": "public-id",
+            "name": "shared-creds",
+            "visibility": "public",
+            "keys": ["OPENAI_API_KEY"],
+            "has_missing_values": True,
+        },
+        {
+            "id": "private-id",
+            "name": "personal-creds",
+            "visibility": "private",
+            "keys": ["ANTHROPIC_API_KEY"],
+            "has_missing_values": False,
+        },
+    ]
+
+
+def test_secrets_list_returns_empty_keys_when_backend_omits_value_metadata() -> None:
+    """MCP listing should serialize the metadata available in real list responses."""
+    summary = SecretSummary(
+        name="provider-creds",
+        id="secret-id",
+        private=False,
+        keys=[],
+        has_missing_values=False,
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=[summary],
+    ):
+        payload = kitaru_secrets_list()
+
+    assert payload == [
+        {
+            "id": "secret-id",
+            "name": "provider-creds",
+            "visibility": "public",
+            "keys": [],
+            "has_missing_values": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize("page", [True, 0, -1])
+def test_secrets_list_rejects_invalid_page(page: Any) -> None:
+    with (
+        patch("kitaru.mcp.server.secrets_api.list_secrets") as mock_list,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        kitaru_secrets_list(page=page)
+
+    assert str(exc_info.value) == "`page` must be an integer >= 1."
+    mock_list.assert_not_called()
+
+
+@pytest.mark.parametrize("size", [True, 0, -1])
+def test_secrets_list_rejects_invalid_size(size: Any) -> None:
+    with (
+        patch("kitaru.mcp.server.secrets_api.list_secrets") as mock_list,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        kitaru_secrets_list(size=size)
+
+    assert str(exc_info.value) == "`size` must be an integer >= 1."
+    mock_list.assert_not_called()
+
+
 def test_secrets_create_returns_metadata_without_values() -> None:
     """MCP secret creation should delegate to SDK creation safely."""
     summary = SecretSummary(
@@ -1456,6 +1628,7 @@ def test_mcp_does_not_expose_secret_delete_tool() -> None:
     import kitaru.mcp.server as server
 
     assert not hasattr(server, "kitaru_secrets_delete")
+    assert "kitaru_secrets_delete" not in _mcp_tool_schemas_by_name()
 
 
 def test_start_local_server_returns_structured_payload() -> None:

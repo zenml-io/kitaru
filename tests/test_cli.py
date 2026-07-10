@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
@@ -56,6 +56,7 @@ from kitaru.config import (
     VertexStackSpec,
 )
 from kitaru.errors import (
+    KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruFeatureNotAvailableError,
     KitaruStackNotRemoteExecutableUsageError,
@@ -63,6 +64,7 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
+from kitaru.secrets import SecretSummary
 
 
 class _BrokenGlobalConfig:
@@ -3300,17 +3302,13 @@ def test_secrets_list_past_end_does_not_claim_none_found(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Paging past the end of a non-empty secret list must not say 'none found'."""
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_a, secret_b],
-        total_pages=1,
-        max_size=2,
-    )
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=False, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+    ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "9", "--size", "1"])
@@ -5588,32 +5586,23 @@ def test_secrets_show_displays_values_when_requested(
     assert "Value (OPENAI_API_KEY): sk-123" in output
 
 
-def test_secrets_list_renders_all_pages_sorted(
+def test_secrets_list_renders_shared_order(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should merge all pages and sort by secret name."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = [
-        SimpleNamespace(items=[secret_z], total_pages=2, max_size=1),
-        SimpleNamespace(items=[secret_a], total_pages=2, max_size=1),
+    """`kitaru secrets list` should render the SDK's deterministic order."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
     ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets) as mock_list_secrets,
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])
 
     assert exc_info.value.code == 0
-    calls = fake_client.list_secrets.call_args_list
-    assert len(calls) == 2
-    backend_scan_size = calls[0].kwargs["size"]
-    assert calls == [
-        call(page=1, size=backend_scan_size),
-        call(page=2, size=backend_scan_size),
-    ]
+    mock_list_secrets.assert_called_once_with()
     output = capsys.readouterr().out
     assert "Kitaru secrets" in output
     assert "alpha: secret-a (private)" in output
@@ -5623,61 +5612,53 @@ def test_secrets_list_renders_all_pages_sorted(
     )
 
 
-def test_secrets_list_uses_stable_backend_page_size(
+def test_secrets_list_json_contains_metadata_without_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Backend scan pagination should not switch sizes after the first page."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    observed_sizes: list[int] = []
-
-    def list_secrets(*, page: int, size: int | None = None) -> SimpleNamespace:
-        if size is None:
-            raise AssertionError("backend scan calls must pass an explicit size")
-        observed_sizes.append(size)
-        if page == 1:
-            return SimpleNamespace(
-                items=[secret_z],
-                total_pages=2,
-                max_size=size + 100,
-            )
-        if page == 2 and size == observed_sizes[0]:
-            return SimpleNamespace(items=[secret_a], total_pages=2, max_size=size + 100)
-        return SimpleNamespace(items=[], total_pages=2, max_size=size + 100)
-
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = list_secrets
-
-    with (
-        patch("kitaru.cli.Client", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["secrets", "list"])
-
-    assert exc_info.value.code == 0
-    assert len(observed_sizes) == 2
-    assert observed_sizes[0] == observed_sizes[1]
-    output = capsys.readouterr().out
-    assert "alpha: secret-a (private)" in output
-    assert "zeta: secret-z (public)" in output
-
-
-def test_secrets_list_paginates_after_sorting(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`secrets list` should slice after deterministic name/id ordering."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_z, secret_b, secret_a],
-        total_pages=1,
-        max_size=3,
+    """JSON list output should include key names but never secret values."""
+    secret = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        keys=["OPENAI_API_KEY"],
+        has_missing_values=False,
     )
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=[secret]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "secrets.list",
+        "items": [
+            {
+                "id": "secret-id",
+                "name": "openai-creds",
+                "visibility": "private",
+                "keys": ["OPENAI_API_KEY"],
+                "has_missing_values": False,
+            }
+        ],
+        "count": 1,
+    }
+
+
+def test_secrets_list_paginates_after_shared_ordering(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI should slice the complete list after the SDK has ordered it."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+    ]
+
+    with (
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "1", "--size", "2"])
@@ -5690,12 +5671,15 @@ def test_secrets_list_paginates_after_sorting(
     assert "Page 1 (size 2, showing 2 of 3)" in output
 
 
-def test_secrets_list_surfaces_client_errors(
+def test_secrets_list_surfaces_sdk_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should surface backend errors as CLI errors."""
+    """`kitaru secrets list` should surface SDK errors as CLI errors."""
     with (
-        patch("kitaru.cli.Client", side_effect=RuntimeError("offline")),
+        patch(
+            "kitaru.secrets.list_secrets",
+            side_effect=KitaruBackendError("Failed to list secrets: offline"),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])

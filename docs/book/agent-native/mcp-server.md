@@ -159,10 +159,19 @@ Artifact tools:
 Secret tools:
 
 - `kitaru_secrets_create`
+- `kitaru_secrets_list`
 
-`kitaru_secrets_create` returns metadata only: secret ID, name, visibility, key
-names, and missing-value status. The MCP server intentionally does not expose a
-secret delete tool; use the CLI or Python SDK for deletion.
+`kitaru_secrets_list` accepts `page` and `size` (defaults: `1` and `20`) and
+returns only metadata for each secret: `id`, `name`, `visibility`, `keys`, and
+`has_missing_values`. It never returns secret values. Pages beyond the available
+results return `[]`.
+
+When listing secrets, `keys` and `has_missing_values` may be unpopulated because
+the backend does not include key names in list responses. These fields are
+meaningful in `kitaru_secrets_create` responses and the CLI `secrets show` path.
+
+`kitaru_secrets_create` also returns metadata only. The MCP server intentionally
+does not expose `kitaru_secrets_delete`; use the CLI or Python SDK for deletion.
 
 Project tools:
 
