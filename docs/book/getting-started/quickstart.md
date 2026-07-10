@@ -21,6 +21,23 @@ kitaru init
 
 This creates a `.kitaru/` directory that marks your project root.
 
+The example calls an OpenAI model, so install Kitaru with the OpenAI
+provider package:
+
+{% tabs %}
+{% tab title="uv (recommended)" %}
+```bash
+uv add "kitaru[openai]"
+```
+{% endtab %}
+
+{% tab title="pip" %}
+```bash
+pip install "kitaru[openai]"
+```
+{% endtab %}
+{% endtabs %}
+
 `kitaru.llm()` reads its provider key and default model from the environment:
 
 ```bash
