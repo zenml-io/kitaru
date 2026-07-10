@@ -529,13 +529,22 @@ Then use tool calls like:
 - `kitaru_executions_list(status="waiting")`
 - `kitaru_executions_statistics(group_by=["status"])`
 - `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
+- `kitaru_executions_abort_wait(exec_id=..., wait=...)`
+- `kitaru_executions_resume(exec_id=...)`
 - `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`
 
-If the execution does not continue automatically after wait input is resolved
-(e.g. the original runner already exited), use the CLI or SDK `resume(...)` call.
-MCP does not currently expose a separate resume tool.
+Use the pending-wait name or ID shown by the execution, or already known by the
+workflow. Resolve that wait with `kitaru_executions_input` or explicitly abort
+it with `kitaru_executions_abort_wait`, then inspect the returned execution's
+`status` and singular `pending_wait`. If `pending_wait` is absent but the
+execution does not continue, call `kitaru_executions_resume` (for example,
+because the original runner exited).
+
+Aborting a wait resolves only that selected wait; it does not cancel the whole
+execution. The input and abort-wait tools do not call resume themselves, though
+an existing runner may continue after the wait is resolved.
 
 See the full setup guide at [MCP Server](../agent-native/mcp-server.md).
 

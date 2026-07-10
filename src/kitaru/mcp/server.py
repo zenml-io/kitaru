@@ -408,6 +408,16 @@ def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
 
 
 @tracked_mcp_tool
+def kitaru_executions_abort_wait(exec_id: str, wait: str) -> dict[str, Any]:
+    """Abort one pending wait without cancelling its execution."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.abort_wait(exec_id, wait=wait)
+        )
+    )
+
+
+@tracked_mcp_tool
 def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, Any]:
     """Provide input to a waiting execution and return updated details."""
 
@@ -424,6 +434,16 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
         return inspection.serialize_execution(updated_execution)
 
     return run_with_mcp_error_boundary(_provide_input)
+
+
+@tracked_mcp_tool
+def kitaru_executions_resume(exec_id: str) -> dict[str, Any]:
+    """Resume one execution after its pending waits are resolved."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.resume(exec_id)
+        )
+    )
 
 
 @tracked_mcp_tool

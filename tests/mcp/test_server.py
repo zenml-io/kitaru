@@ -48,6 +48,7 @@ from kitaru.mcp.server import (
     kitaru_deployments_list,
     kitaru_deployments_tag,
     kitaru_deployments_untag,
+    kitaru_executions_abort_wait,
     kitaru_executions_cancel,
     kitaru_executions_diff_matrix,
     kitaru_executions_get,
@@ -55,6 +56,7 @@ from kitaru.mcp.server import (
     kitaru_executions_latest,
     kitaru_executions_list,
     kitaru_executions_replay,
+    kitaru_executions_resume,
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_executions_statistics,
@@ -89,8 +91,10 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_deployments_delete,
     kitaru_deployments_tag,
     kitaru_deployments_untag,
+    kitaru_executions_abort_wait,
     kitaru_executions_cancel,
     kitaru_executions_input,
+    kitaru_executions_resume,
     kitaru_executions_retry,
     kitaru_executions_replay,
     kitaru_executions_diff_matrix,
@@ -148,6 +152,14 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     input_schema = tool_schemas["kitaru_executions_input"]
     assert set(input_schema["properties"]) == {"exec_id", "wait", "value"}
     assert input_schema["required"] == ["exec_id", "wait", "value"]
+
+    resume_schema = tool_schemas["kitaru_executions_resume"]
+    assert set(resume_schema["properties"]) == {"exec_id"}
+    assert resume_schema["required"] == ["exec_id"]
+
+    abort_wait_schema = tool_schemas["kitaru_executions_abort_wait"]
+    assert set(abort_wait_schema["properties"]) == {"exec_id", "wait"}
+    assert abort_wait_schema["required"] == ["exec_id", "wait"]
 
     invoke_schema = tool_schemas["kitaru_deployments_invoke"]
     assert set(invoke_schema["properties"]) == {
@@ -1330,6 +1342,90 @@ def test_execution_mutation_tools_return_serialized_execution(
 
     assert cancel_payload["exec_id"] == sample_execution.exec_id
     assert retry_payload["exec_id"] == sample_execution.exec_id
+
+
+def test_executions_resume_delegates_and_serializes_execution(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Resume should delegate once and return the full normalized payload."""
+    mock_kitaru_client.executions.resume.return_value = sample_execution
+    normalized = {"exec_id": sample_execution.exec_id, "status": "running"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution",
+            return_value=normalized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_resume(sample_execution.exec_id)
+
+    mock_kitaru_client.executions.resume.assert_called_once_with(
+        sample_execution.exec_id
+    )
+    mock_serialize.assert_called_once_with(sample_execution)
+    assert payload == normalized
+
+
+def test_executions_abort_wait_delegates_and_serializes_execution(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Abort-wait should pass the selector by keyword and normalize the result."""
+    mock_kitaru_client.executions.abort_wait.return_value = sample_execution
+    normalized = {"exec_id": sample_execution.exec_id, "status": "waiting"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution",
+            return_value=normalized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_abort_wait(
+            sample_execution.exec_id,
+            wait="approve_draft",
+        )
+
+    mock_kitaru_client.executions.abort_wait.assert_called_once_with(
+        sample_execution.exec_id,
+        wait="approve_draft",
+    )
+    mock_serialize.assert_called_once_with(sample_execution)
+    assert payload == normalized
+
+
+@pytest.mark.parametrize(
+    ("tool", "client_method", "kwargs"),
+    [
+        (kitaru_executions_resume, "resume", {}),
+        (
+            kitaru_executions_abort_wait,
+            "abort_wait",
+            {"wait": "approve_draft"},
+        ),
+    ],
+)
+def test_execution_wait_mutations_preserve_client_state_errors(
+    mock_kitaru_client: MagicMock,
+    tool,
+    client_method: str,
+    kwargs: dict[str, str],
+) -> None:
+    """Wait mutation tools should re-raise SDK state errors without serializing."""
+    error = KitaruStateError("execution cannot make this transition")
+    getattr(mock_kitaru_client.executions, client_method).side_effect = error
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch("kitaru.inspection.serialize_execution") as mock_serialize,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        tool("kr-a8f3c2", **kwargs)
+
+    assert exc_info.value is error
+    mock_serialize.assert_not_called()
 
 
 def test_artifact_tools_call_client_and_serialize(
