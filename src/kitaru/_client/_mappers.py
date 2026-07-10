@@ -207,10 +207,8 @@ def _map_failure_info(
 
 
 def _checkpoint_lineage_key(step: StepRunResponse) -> str:
-    """Return the stable lineage key for checkpoint retry grouping."""
-    if step.original_step_run_id is not None:
-        return str(step.original_step_run_id)
-    return str(step.id)
+    """Return the run-local invocation name used for retry grouping."""
+    return step.name
 
 
 def _list_checkpoint_attempts_for_run_with_zenml_client(
@@ -250,6 +248,8 @@ def _list_checkpoint_attempts_for_run_with_zenml_client(
             f"Failed to fetch checkpoint attempts for execution {run.id}: {exc}"
         ) from exc
 
+    for attempts in grouped_attempts.values():
+        attempts.sort(key=lambda step: step.version)
     return dict(grouped_attempts)
 
 
@@ -651,16 +651,25 @@ def _map_execution(
         except KitaruBackendError:
             attempts_by_lineage = {}
 
+        attempt_ids_by_lineage = {
+            lineage_key: {str(attempt.id) for attempt in attempts}
+            for lineage_key, attempts in attempts_by_lineage.items()
+        }
+        for step in run.steps.values():
+            lineage_key = _checkpoint_lineage_key(step)
+            attempts = attempts_by_lineage.setdefault(lineage_key, [])
+            attempt_ids = attempt_ids_by_lineage.setdefault(lineage_key, set())
+            step_id = str(step.id)
+            if step_id not in attempt_ids:
+                attempts.append(step)
+                attempt_ids.add(step_id)
+
         latest_steps_by_lineage: dict[str, StepRunResponse] = {}
         for lineage_key, attempts in attempts_by_lineage.items():
+            attempts.sort(key=lambda step: step.version)
             visible_step = visible_checkpoint_step_for_lineage(attempts)
             if visible_step is not None:
                 latest_steps_by_lineage[lineage_key] = visible_step
-
-        for step in run.steps.values():
-            lineage_key = _checkpoint_lineage_key(step)
-            latest_steps_by_lineage.setdefault(lineage_key, step)
-            attempts_by_lineage.setdefault(lineage_key, [step])
 
         for step in latest_steps_by_lineage.values():
             checkpoints.append(

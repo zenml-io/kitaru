@@ -191,6 +191,7 @@ class _DummyStep:
         outputs: dict[str, list[_DummyArtifact]],
         inputs: dict[str, list[_DummyArtifact]] | None = None,
         step_id: UUID | None = None,
+        version: int = 1,
         original_step_run_id: UUID | None = None,
         run_metadata: dict[str, Any] | None = None,
         exception_traceback: str | None = None,
@@ -199,6 +200,7 @@ class _DummyStep:
     ) -> None:
         self.id = step_id or uuid4()
         self.name = name
+        self.version = version
         self.status = status
         self.start_time = None
         self.end_time = None
@@ -2523,17 +2525,17 @@ def test_get_prefers_output_artifact_ref_when_input_seen_first() -> None:
 def test_get_surfaces_checkpoint_attempt_history() -> None:
     attempt_one = _DummyStep(
         name="research",
+        version=1,
         status=ZenMLExecutionStatus.RETRIED,
         outputs={},
         exception_traceback="Traceback\nValueError: boom",
     )
     attempt_two = _DummyStep(
         name="research",
+        version=2,
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
-        original_step_run_id=attempt_one.id,
     )
-
     run = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,
         flow_name="flow_a",
@@ -2550,19 +2552,130 @@ def test_get_surfaces_checkpoint_attempt_history() -> None:
         client_mock = client_cls.return_value
         client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
         client_mock.list_run_steps.return_value = SimpleNamespace(
-            items=[_as_step_run(attempt_one), _as_step_run(attempt_two)]
+            items=[_as_step_run(attempt_two), _as_step_run(attempt_one)]
         )
 
         client = KitaruClient()
         execution = client.executions.get(str(run.id))
 
+    assert len(execution.checkpoints) == 1
     checkpoint = execution.checkpoints[0]
+    assert checkpoint.call_id == str(attempt_two.id)
+    assert checkpoint.status == ExecutionStatus.COMPLETED
+    assert checkpoint.original_call_id is None
+    assert [attempt.attempt_id for attempt in checkpoint.attempts] == [
+        str(attempt_one.id),
+        str(attempt_two.id),
+    ]
     assert len(checkpoint.attempts) == 2
     assert checkpoint.attempts[0].status == ExecutionStatus.FAILED
     assert checkpoint.attempts[0].failure is not None
     assert checkpoint.attempts[0].failure.origin == FailureOrigin.USER_CODE
     assert checkpoint.attempts[0].failure.exception_type == "ValueError"
+    assert checkpoint.attempts[1].status == ExecutionStatus.COMPLETED
+    assert checkpoint.attempts[1].failure is None
     assert checkpoint.failure is None
+
+
+def test_get_merges_run_step_into_partial_attempt_history() -> None:
+    attempt_one = _DummyStep(
+        name="research",
+        version=1,
+        status=ZenMLExecutionStatus.RETRIED,
+        outputs={},
+    )
+    attempt_two = _DummyStep(
+        name="research",
+        version=2,
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={attempt_two.name: attempt_two},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(
+            items=[_as_step_run(attempt_one)]
+        )
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert len(execution.checkpoints) == 1
+    checkpoint = execution.checkpoints[0]
+    assert checkpoint.call_id == str(attempt_two.id)
+    assert checkpoint.status == ExecutionStatus.COMPLETED
+    assert [attempt.attempt_id for attempt in checkpoint.attempts] == [
+        str(attempt_one.id),
+        str(attempt_two.id),
+    ]
+
+
+def test_get_keeps_distinct_checkpoint_names_with_shared_original_step_separate() -> (
+    None
+):
+    original_step_run_id = uuid4()
+    first = _DummyStep(
+        name="research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        original_step_run_id=original_step_run_id,
+    )
+    second = _DummyStep(
+        name="research_2",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        original_step_run_id=original_step_run_id,
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={first.name: first, second.name: second},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(
+            items=[_as_step_run(first), _as_step_run(second)]
+        )
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert [checkpoint.name for checkpoint in execution.checkpoints] == [
+        "research",
+        "research_2",
+    ]
+    checkpoints_by_name = {
+        checkpoint.name: checkpoint for checkpoint in execution.checkpoints
+    }
+    assert [
+        attempt.attempt_id for attempt in checkpoints_by_name["research"].attempts
+    ] == [str(first.id)]
+    assert [
+        attempt.attempt_id for attempt in checkpoints_by_name["research_2"].attempts
+    ] == [str(second.id)]
+    assert {checkpoint.original_call_id for checkpoint in execution.checkpoints} == {
+        str(original_step_run_id)
+    }
 
 
 def test_get_surfaces_execution_failure_origin() -> None:

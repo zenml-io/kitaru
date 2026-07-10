@@ -1112,6 +1112,7 @@ def test_mapped_execution_uses_replay_skip_metadata_for_public_records(
     fetch_step = SimpleNamespace(
         id="fetch-attempt",
         name="fetch",
+        version=1,
         status="replay_reused",
         start_time=None,
         end_time=None,
@@ -1127,6 +1128,7 @@ def test_mapped_execution_uses_replay_skip_metadata_for_public_records(
     write_step = SimpleNamespace(
         id="write-attempt",
         name="write",
+        version=1,
         status="replay_reused",
         start_time=None,
         end_time=None,
@@ -1155,8 +1157,8 @@ def test_mapped_execution_uses_replay_skip_metadata_for_public_records(
     monkeypatch.setattr(
         "kitaru._client._mappers._list_checkpoint_attempts_for_run",
         lambda *, run, client: {
-            "fetch-attempt": [fetch_step],
-            "write-attempt": [write_step],
+            "fetch": [fetch_step],
+            "write": [write_step],
         },
     )
 
