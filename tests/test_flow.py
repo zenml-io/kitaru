@@ -2416,6 +2416,8 @@ def test_terminal_llm_usage_metadata_uses_zenml_client_without_kitaru_auth(
         total_tokens=11,
     )
     written: dict[str, Any] = {}
+    terminal_client = SimpleNamespace(name="terminal-client")
+    execution_write_client: object | None = None
 
     monkeypatch.setenv("KITARU_SERVER_URL", "https://kitaru.example.test")
     monkeypatch.delenv("KITARU_AUTH_TOKEN", raising=False)
@@ -2425,13 +2427,25 @@ def test_terminal_llm_usage_metadata_uses_zenml_client_without_kitaru_auth(
             AssertionError("terminal aggregation must not construct KitaruClient")
         ),
     )
+
+    def fake_fetch(*, run: PipelineRunResponse, client: object) -> object:
+        assert client is terminal_client
+        return {}
+
     monkeypatch.setattr(
         terminal_usage_module,
         "_list_checkpoint_attempts_for_run",
-        lambda *, run, client: {},
+        fake_fetch,
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
+        nonlocal execution_write_client
+        execution_write_client = _client
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
@@ -2444,12 +2458,13 @@ def test_terminal_llm_usage_metadata_uses_zenml_client_without_kitaru_auth(
                 run_metadata={LLM_USAGE_METADATA_KEY: {"call": record}},
             ),
         ),
-        zenml_client=SimpleNamespace(),
+        zenml_client=terminal_client,
     )
 
     summary = parse_usage_summary(written[LLM_USAGE_SUMMARY_METADATA_KEY])
     assert persisted is True
     assert summary is not None
+    assert execution_write_client is terminal_client
     assert summary["usage_record_count"] == 1
     assert summary["total_tokens"] == 11
 
@@ -2506,10 +2521,19 @@ def test_terminal_llm_usage_metadata_rewrites_stale_complete_summary(
         lambda *, run, client: attempts_by_lineage,
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
+    )
 
     persisted = _persist_terminal_llm_usage_metadata(
         cast(
@@ -2573,10 +2597,19 @@ def test_terminal_llm_usage_metadata_rewrites_same_count_stale_summary(
         lambda *, run, client: attempts_by_lineage,
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
+    )
 
     persisted = _persist_terminal_llm_usage_metadata(
         cast(
@@ -2622,7 +2655,12 @@ def test_terminal_llm_usage_metadata_does_not_skip_partial_summary(
         fetch_calls += 1
         return {}
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.client.KitaruClient", lambda: SimpleNamespace())
@@ -2747,10 +2785,19 @@ def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
         lambda *, run, client: attempts_by_lineage,
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
+    )
 
     _persist_terminal_llm_usage_metadata(
         cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
@@ -2761,6 +2808,437 @@ def test_terminal_llm_usage_metadata_counts_retry_attempts(monkeypatch) -> None:
     assert summary["usage_record_count"] == 2
     assert written[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 2
     assert written[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 25
+
+
+def test_terminal_llm_usage_metadata_writes_checkpoint_flat_metadata_to_visible_step(
+    monkeypatch,
+) -> None:
+    """Checkpoint flat metadata is written to the non-retried DAG step run."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_DISPLAY_COST_USD_KEY,
+        LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+        parse_usage_summary,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    retried_id = str(uuid4())
+    visible_id = str(uuid4())
+    first = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="summary_call_first",
+        total_tokens=10,
+        actual_cost_usd=0.2,
+    )
+    second = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="summary_call_second",
+        total_tokens=15,
+        estimated_cost_usd=0.3,
+    )
+    attempts_by_lineage = {
+        "summary_call": [
+            SimpleNamespace(
+                id=retried_id,
+                name="summary_call",
+                status="retried",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"call": first}},
+            ),
+            SimpleNamespace(
+                id=visible_id,
+                name="summary_call",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"call": second}},
+            ),
+        ]
+    }
+    execution_metadata: dict[str, Any] = {}
+    terminal_client = SimpleNamespace(name="terminal-client")
+    checkpoint_writes: list[tuple[str, object | None, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, _client=None, **metadata: execution_metadata.update(metadata),
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, _client=None, **metadata: checkpoint_writes.append(
+            (checkpoint_id, _client, dict(metadata))
+        ),
+    )
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={})),
+        zenml_client=terminal_client,
+    )
+
+    summary = parse_usage_summary(execution_metadata[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert persisted is True
+    assert summary is not None
+    assert summary["usage_record_count"] == 2
+    assert len(checkpoint_writes) == 1
+    checkpoint_id, writer_client, checkpoint_metadata = checkpoint_writes[0]
+    assert checkpoint_id == visible_id
+    assert writer_client is terminal_client
+    assert LLM_USAGE_SUMMARY_METADATA_KEY not in checkpoint_metadata
+    assert checkpoint_metadata[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 2
+    assert checkpoint_metadata[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 25
+    assert checkpoint_metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.5
+
+
+def test_terminal_llm_usage_metadata_continues_after_checkpoint_write_failure(
+    monkeypatch,
+) -> None:
+    """One failed checkpoint metadata write should not stop later writes."""
+    from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    failing_id = str(uuid4())
+    later_id = str(uuid4())
+    first = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="first-checkpoint-call",
+        total_tokens=10,
+    )
+    second = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="second-checkpoint-call",
+        total_tokens=20,
+    )
+    attempts_by_lineage = {
+        "first_checkpoint": [
+            SimpleNamespace(
+                id=failing_id,
+                name="first_checkpoint",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"first": first}},
+            )
+        ],
+        "second_checkpoint": [
+            SimpleNamespace(
+                id=later_id,
+                name="second_checkpoint",
+                status="completed",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"second": second}},
+            )
+        ],
+    }
+    terminal_client = SimpleNamespace(name="terminal-client")
+    checkpoint_writes: list[tuple[str, object | None, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda run_id, _client=None, **metadata: None,
+    )
+
+    def fake_log_to_checkpoint(
+        checkpoint_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
+        checkpoint_writes.append((checkpoint_id, _client, dict(metadata)))
+        if checkpoint_id == failing_id:
+            raise RuntimeError("first checkpoint write failed")
+
+    monkeypatch.setattr("kitaru.logging.log_to_checkpoint", fake_log_to_checkpoint)
+
+    persisted = _persist_terminal_llm_usage_metadata(
+        cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={})),
+        zenml_client=terminal_client,
+    )
+
+    assert persisted is False
+    checkpoint_write_ids = [
+        checkpoint_id for checkpoint_id, _client, _metadata in checkpoint_writes
+    ]
+    assert checkpoint_write_ids == [failing_id, later_id]
+    assert all(
+        _client is terminal_client
+        for _checkpoint_id, _client, _metadata in checkpoint_writes
+    )
+
+
+def test_terminal_llm_usage_metadata_writes_reused_checkpoint_zero_display_cost(
+    monkeypatch,
+) -> None:
+    """Replay-reused checkpoint details should show zero new spend."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_ACTUAL_COST_USD_KEY,
+        LLM_FLAT_DISPLAY_COST_USD_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+    from kitaru.replay import REPLAY_SKIPPED_STEPS_METADATA_KEY
+
+    visible_id = str(uuid4())
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="replayed-call",
+        total_tokens=37,
+        actual_cost_usd=1.25,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "fetch": [
+            SimpleNamespace(
+                id=visible_id,
+                name="fetch",
+                spec=SimpleNamespace(invocation_id="fetch"),
+                status="replay_reused",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"replayed-call": record}},
+            )
+        ]
+    }
+    checkpoint_writes: list[tuple[str, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution", lambda run_id, _client=None, **metadata: None
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, _client=None, **metadata: checkpoint_writes.append(
+            (checkpoint_id, dict(metadata))
+        ),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(
+            PipelineRunResponse,
+            SimpleNamespace(
+                id="run-1",
+                run_metadata={REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"]},
+            ),
+        )
+    )
+
+    assert len(checkpoint_writes) == 1
+    checkpoint_id, checkpoint_metadata = checkpoint_writes[0]
+    assert checkpoint_id == visible_id
+    assert LLM_USAGE_SUMMARY_METADATA_KEY not in checkpoint_metadata
+    assert checkpoint_metadata[LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY] == 1
+    assert checkpoint_metadata[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 37
+    assert checkpoint_metadata[LLM_FLAT_ACTUAL_COST_USD_KEY] == 0.0
+    assert checkpoint_metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.0
+
+
+def test_terminal_llm_usage_metadata_writes_cached_checkpoint_zero_display_cost(
+    monkeypatch,
+) -> None:
+    """Cached checkpoint details should show zero new spend."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_ACTUAL_COST_USD_KEY,
+        LLM_FLAT_DISPLAY_COST_USD_KEY,
+        LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
+        LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
+        LLM_USAGE_METADATA_KEY,
+        LLM_USAGE_SUMMARY_METADATA_KEY,
+        build_usage_record,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    visible_id = str(uuid4())
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="cached-call",
+        total_tokens=37,
+        actual_cost_usd=1.25,
+        billing_effect="incurred",
+        cache_status="executed",
+    )
+    attempts_by_lineage = {
+        "fetch": [
+            SimpleNamespace(
+                id=visible_id,
+                name="fetch",
+                status="cached",
+                run_metadata={LLM_USAGE_METADATA_KEY: {"cached-call": record}},
+            )
+        ]
+    }
+    checkpoint_writes: list[tuple[str, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution", lambda run_id, _client=None, **metadata: None
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, _client=None, **metadata: checkpoint_writes.append(
+            (checkpoint_id, dict(metadata))
+        ),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
+    )
+
+    assert len(checkpoint_writes) == 1
+    checkpoint_id, checkpoint_metadata = checkpoint_writes[0]
+    assert checkpoint_id == visible_id
+    assert LLM_USAGE_SUMMARY_METADATA_KEY not in checkpoint_metadata
+    assert checkpoint_metadata[LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY] == 1
+    assert checkpoint_metadata[LLM_FLAT_REUSED_TOTAL_TOKENS_KEY] == 37
+    assert checkpoint_metadata[LLM_FLAT_ACTUAL_COST_USD_KEY] == 0.0
+    assert checkpoint_metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.0
+
+
+def test_terminal_llm_usage_metadata_skips_matching_checkpoint_flat_metadata(
+    monkeypatch,
+) -> None:
+    """Existing complete checkpoint flat metadata should not be rewritten."""
+    from kitaru._llm_usage import (
+        LLM_USAGE_METADATA_KEY,
+        build_usage_record,
+        flat_usage_metadata_from_records,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    visible_id = str(uuid4())
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="checkpoint-call",
+        total_tokens=12,
+        estimated_cost_usd=0.04,
+    )
+    existing_flat_metadata = flat_usage_metadata_from_records([record])
+    attempts_by_lineage = {
+        "checkpoint_call": [
+            SimpleNamespace(
+                id=visible_id,
+                name="checkpoint_call",
+                status="completed",
+                run_metadata={
+                    LLM_USAGE_METADATA_KEY: {"checkpoint-call": record},
+                    **existing_flat_metadata,
+                },
+            )
+        ]
+    }
+    checkpoint_writes: list[tuple[str, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution", lambda run_id, _client=None, **metadata: None
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, _client=None, **metadata: checkpoint_writes.append(
+            (checkpoint_id, dict(metadata))
+        ),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
+    )
+
+    assert checkpoint_writes == []
+
+
+def test_terminal_llm_usage_metadata_rewrites_partial_checkpoint_flat_metadata(
+    monkeypatch,
+) -> None:
+    """Missing checkpoint flat fields should be republished as a full set."""
+    from kitaru._llm_usage import (
+        LLM_FLAT_DISPLAY_COST_USD_KEY,
+        LLM_USAGE_METADATA_KEY,
+        build_usage_record,
+        flat_usage_metadata_from_records,
+    )
+    from kitaru.flow import _persist_terminal_llm_usage_metadata
+
+    visible_id = str(uuid4())
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="checkpoint-call",
+        total_tokens=12,
+        estimated_cost_usd=0.04,
+    )
+    partial_flat_metadata = flat_usage_metadata_from_records([record])
+    partial_flat_metadata.pop(LLM_FLAT_DISPLAY_COST_USD_KEY)
+    attempts_by_lineage = {
+        "checkpoint_call": [
+            SimpleNamespace(
+                id=visible_id,
+                name="checkpoint_call",
+                status="completed",
+                run_metadata={
+                    LLM_USAGE_METADATA_KEY: {"checkpoint-call": record},
+                    **partial_flat_metadata,
+                },
+            )
+        ]
+    }
+    checkpoint_writes: list[tuple[str, dict[str, Any]]] = []
+
+    terminal_usage_module = sys.modules["kitaru._terminal_usage"]
+    monkeypatch.setattr(
+        terminal_usage_module,
+        "_list_checkpoint_attempts_for_run",
+        lambda *, run, client: attempts_by_lineage,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution", lambda run_id, _client=None, **metadata: None
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, _client=None, **metadata: checkpoint_writes.append(
+            (checkpoint_id, dict(metadata))
+        ),
+    )
+
+    _persist_terminal_llm_usage_metadata(
+        cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
+    )
+
+    assert len(checkpoint_writes) == 1
+    checkpoint_id, checkpoint_metadata = checkpoint_writes[0]
+    assert checkpoint_id == visible_id
+    assert checkpoint_metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.04
 
 
 def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) -> None:
@@ -2792,7 +3270,12 @@ def test_terminal_llm_usage_metadata_includes_execution_metadata(monkeypatch) ->
         lambda *, run, client: {},
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
@@ -2843,7 +3326,12 @@ def test_terminal_llm_usage_metadata_is_idempotent(monkeypatch) -> None:
         lambda *, run, client: {},
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.append(dict(metadata))
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
@@ -2909,10 +3397,19 @@ def test_terminal_llm_usage_metadata_marks_cached_attempts_reused(monkeypatch) -
         lambda *, run, client: attempts_by_lineage,
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
+    )
 
     _persist_terminal_llm_usage_metadata(
         cast(PipelineRunResponse, SimpleNamespace(id="run-1", run_metadata={}))
@@ -2972,7 +3469,11 @@ def test_terminal_llm_usage_metadata_preserves_replay_tail_incurred_record(
     )
     monkeypatch.setattr(
         "kitaru.logging.log_to_execution",
-        lambda run_id, **metadata: written.update(metadata),
+        lambda run_id, _client=None, **metadata: written.update(metadata),
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
     )
 
     _persist_terminal_llm_usage_metadata(
@@ -3036,7 +3537,11 @@ def test_terminal_llm_usage_metadata_marks_replay_skipped_attempt_reused(
     )
     monkeypatch.setattr(
         "kitaru.logging.log_to_execution",
-        lambda run_id, **metadata: written.update(metadata),
+        lambda run_id, _client=None, **metadata: written.update(metadata),
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_checkpoint",
+        lambda checkpoint_id, **metadata: None,
     )
 
     _persist_terminal_llm_usage_metadata(
@@ -3082,7 +3587,12 @@ def test_terminal_llm_usage_metadata_skips_when_attempt_fetch_fails(
         terminal_usage_module, "_list_checkpoint_attempts_for_run", fail_fetch
     )
 
-    def fake_log_to_execution(run_id: str, **metadata: Any) -> None:
+    def fake_log_to_execution(
+        run_id: str,
+        *,
+        _client: object | None = None,
+        **metadata: Any,
+    ) -> None:
         written.update(metadata)
 
     monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)

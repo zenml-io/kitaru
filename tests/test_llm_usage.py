@@ -31,11 +31,21 @@ from kitaru._llm_usage import (
     calculated_or_genai_cost_metadata,
     estimate_genai_prices_cost,
     execution_metadata_from_records,
+    flat_usage_metadata_from_records,
     log_usage_record_best_effort,
+    metadata_matches_flat_usage_metadata,
     parse_usage_summary,
     usage_records_from_metadata,
+    usage_reuse_classification,
 )
 from tests._genai_prices_helpers import install_fake_genai_calc_price
+
+
+def test_usage_reuse_classification_marks_non_reused_records_executed() -> None:
+    reused, cache_status = usage_reuse_classification(checkpoint_status="completed")
+
+    assert reused is False
+    assert cache_status == "executed"
 
 
 def test_genai_prices_helper_estimates_gemini_with_normalized_usage(
@@ -956,6 +966,52 @@ def test_execution_metadata_uses_json_summary_and_flat_numeric_keys() -> None:
     assert metadata[LLM_FLAT_ACTUAL_COST_USD_KEY] == 0.0
     assert metadata[LLM_FLAT_ESTIMATED_COST_USD_KEY] == 0.123
     assert metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.123
+
+
+def test_flat_usage_metadata_from_records_omits_summary_key() -> None:
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="checkpoint",
+        total_tokens=42,
+        estimated_cost_usd=0.123,
+    )
+
+    metadata = flat_usage_metadata_from_records([record])
+
+    assert LLM_USAGE_SUMMARY_METADATA_KEY not in metadata
+    assert metadata[LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY] == 1
+    assert metadata[LLM_FLAT_INCURRED_TOTAL_TOKENS_KEY] == 42
+    assert metadata[LLM_FLAT_DISPLAY_COST_USD_KEY] == 0.123
+
+
+def test_flat_usage_metadata_from_records_omits_empty_by_default() -> None:
+    assert flat_usage_metadata_from_records([]) == {}
+    assert (
+        flat_usage_metadata_from_records([], include_empty_metadata=True)[
+            LLM_FLAT_DISPLAY_COST_USD_KEY
+        ]
+        == 0.0
+    )
+
+
+def test_metadata_matches_flat_usage_metadata_requires_complete_matching_keys() -> None:
+    record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="checkpoint",
+        total_tokens=42,
+        estimated_cost_usd=0.123,
+    )
+    metadata = flat_usage_metadata_from_records([record])
+    partial = dict(metadata)
+    partial.pop(LLM_FLAT_DISPLAY_COST_USD_KEY)
+    stale = dict(metadata)
+    stale[LLM_FLAT_DISPLAY_COST_USD_KEY] = 0.0
+
+    assert metadata_matches_flat_usage_metadata(metadata, metadata) is True
+    assert metadata_matches_flat_usage_metadata(partial, metadata) is False
+    assert metadata_matches_flat_usage_metadata(stale, metadata) is False
 
 
 def test_cached_checkpoint_attempt_public_records_are_marked_reused() -> None:

@@ -24,6 +24,7 @@ from kitaru._checkpoint_metadata import (
     checkpoint_metadata_slots,
     checkpoint_metadata_str,
 )
+from kitaru._checkpoint_steps import visible_checkpoint_step_for_lineage
 from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
@@ -652,8 +653,9 @@ def _map_execution(
 
         latest_steps_by_lineage: dict[str, StepRunResponse] = {}
         for lineage_key, attempts in attempts_by_lineage.items():
-            if attempts:
-                latest_steps_by_lineage[lineage_key] = attempts[-1]
+            visible_step = visible_checkpoint_step_for_lineage(attempts)
+            if visible_step is not None:
+                latest_steps_by_lineage[lineage_key] = visible_step
 
         for step in run.steps.values():
             lineage_key = _checkpoint_lineage_key(step)
