@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 from zenml.exceptions import EntityExistsError
 
+import kitaru
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruUsageError
 from kitaru.secrets import (
@@ -19,6 +20,11 @@ from kitaru.secrets import (
     get_secret,
     list_secrets,
 )
+
+
+def test_list_secrets_is_exported_from_package_root() -> None:
+    """The listing helper should follow the existing top-level import pattern."""
+    assert kitaru.list_secrets is list_secrets
 
 
 def test_list_secrets_scans_all_backend_pages_at_fixed_size() -> None:
@@ -98,7 +104,7 @@ def test_list_secrets_returns_metadata_without_raw_values() -> None:
     }
 
 
-def test_list_secrets_returns_empty_keys_when_backend_does_not_populate_values() -> None:
+def test_list_secrets_returns_empty_keys_without_backend_values() -> None:
     """SDK listing should reflect backend responses that omit value metadata."""
     client = Mock()
     client.list_secrets.return_value = SimpleNamespace(

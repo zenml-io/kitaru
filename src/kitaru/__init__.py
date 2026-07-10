@@ -25,7 +25,7 @@ Current status:
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``kitaru.progress()``, ``kitaru.events.publish()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
-  ``create_secret()``, ``delete_secret()``, ``connect()``,
+  ``list_secrets()``, ``create_secret()``, ``delete_secret()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI
@@ -147,6 +147,7 @@ from kitaru.secrets import (
     create_secret,
     delete_secret,
     get_secret,
+    list_secrets,
 )
 from kitaru.wait import wait
 
@@ -225,6 +226,7 @@ __all__ = [
     "get_secret",
     "is_replay",
     "list_projects",
+    "list_secrets",
     "list_stacks",
     "llm",
     "load",
