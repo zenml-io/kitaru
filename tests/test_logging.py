@@ -10,7 +10,7 @@ from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 
 from kitaru.errors import KitaruContextError, KitaruStateError
-from kitaru.logging import _parse_scope_uuid, log
+from kitaru.logging import _parse_scope_uuid, log, log_to_checkpoint, log_to_execution
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -92,6 +92,54 @@ def test_log_attaches_to_checkpoint_inside_checkpoint() -> None:
     assert client.create_run_metadata.call_args.kwargs["publisher_step_id"] == UUID(
         checkpoint_id
     )
+
+
+def test_log_to_checkpoint_attaches_to_explicit_step_run() -> None:
+    checkpoint_id = str(uuid4())
+
+    with patch("kitaru.logging.Client") as client_cls:
+        log_to_checkpoint(checkpoint_id, cost=0.01, tokens=128)
+
+    client = client_cls.return_value
+    client.create_run_metadata.assert_called_once()
+    resource = _get_logged_resource(client)
+    assert resource.type == MetadataResourceTypes.STEP_RUN
+    assert resource.id == UUID(checkpoint_id)
+    assert client.create_run_metadata.call_args.kwargs["metadata"] == {
+        "cost": 0.01,
+        "tokens": 128,
+    }
+    assert client.create_run_metadata.call_args.kwargs["publisher_step_id"] == UUID(
+        checkpoint_id
+    )
+
+
+def test_log_to_checkpoint_reuses_explicit_client() -> None:
+    checkpoint_id = str(uuid4())
+    client = MagicMock()
+
+    with patch("kitaru.logging.Client") as client_cls:
+        log_to_checkpoint(checkpoint_id, _client=client, cost=0.01)
+
+    client_cls.assert_not_called()
+    client.create_run_metadata.assert_called_once()
+    resource = _get_logged_resource(client)
+    assert resource.type == MetadataResourceTypes.STEP_RUN
+    assert resource.id == UUID(checkpoint_id)
+
+
+def test_log_to_execution_reuses_explicit_client() -> None:
+    execution_id = str(uuid4())
+    client = MagicMock()
+
+    with patch("kitaru.logging.Client") as client_cls:
+        log_to_execution(execution_id, _client=client, cost=0.01)
+
+    client_cls.assert_not_called()
+    client.create_run_metadata.assert_called_once()
+    resource = _get_logged_resource(client)
+    assert resource.type == MetadataResourceTypes.PIPELINE_RUN
+    assert resource.id == UUID(execution_id)
 
 
 def test_log_prefers_checkpoint_target_when_both_scopes_are_active() -> None:

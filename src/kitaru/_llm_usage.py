@@ -189,7 +189,7 @@ def usage_reuse_classification(
     cache_status = cache_status_for_checkpoint_status(checkpoint_status)
     if cache_status is not None:
         return True, cache_status
-    return False, "checkpoint_cache_hit"
+    return False, "executed"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -1199,6 +1199,18 @@ def summary_to_flat_metadata(summary: Mapping[str, Any]) -> dict[str, int | floa
     }
 
 
+def flat_usage_metadata_from_records(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    include_empty_metadata: bool = False,
+) -> dict[str, int | float]:
+    """Build promoted flat LLM usage metadata from per-call records."""
+    summary = aggregate_usage_records(records)
+    if not include_empty_metadata and summary["usage_record_count"] == 0:
+        return {}
+    return summary_to_flat_metadata(summary)
+
+
 def serialize_summary_for_metadata(summary: Mapping[str, Any]) -> str:
     """Serialize the rich summary as last-write-wins metadata text."""
     return json.dumps(summary, sort_keys=True, separators=(",", ":"))
@@ -1227,21 +1239,11 @@ def _valid_summary_number(value: Any, *, is_float: bool) -> bool:
     return number is not None and number >= 0
 
 
-def metadata_matches_usage_metadata(
+def _flat_metadata_values_match(
     metadata: Mapping[str, Any],
     expected_metadata: Mapping[str, Any],
 ) -> bool:
-    """Return whether stored usage metadata matches freshly generated metadata."""
-    if not metadata_has_complete_usage_summary(metadata):
-        return False
-
-    summary = parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
-    expected_summary = parse_usage_summary(
-        expected_metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY)
-    )
-    if summary is None or expected_summary is None or summary != expected_summary:
-        return False
-
+    """Return whether all promoted flat usage fields match expected values."""
     for metadata_key, summary_key, _coerce in _FLAT_METADATA_FIELDS:
         is_float = summary_key in _SUMMARY_FLOAT_FIELDS
         current = (
@@ -1258,6 +1260,34 @@ def metadata_matches_usage_metadata(
             return False
 
     return True
+
+
+def metadata_matches_flat_usage_metadata(
+    metadata: Mapping[str, Any],
+    expected_metadata: Mapping[str, Any],
+) -> bool:
+    """Return whether stored flat usage metadata already matches expected values."""
+    if not expected_metadata:
+        return False
+    return _flat_metadata_values_match(metadata, expected_metadata)
+
+
+def metadata_matches_usage_metadata(
+    metadata: Mapping[str, Any],
+    expected_metadata: Mapping[str, Any],
+) -> bool:
+    """Return whether stored usage metadata matches freshly generated metadata."""
+    if not metadata_has_complete_usage_summary(metadata):
+        return False
+
+    summary = parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+    expected_summary = parse_usage_summary(
+        expected_metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY)
+    )
+    if summary is None or expected_summary is None or summary != expected_summary:
+        return False
+
+    return _flat_metadata_values_match(metadata, expected_metadata)
 
 
 def metadata_has_complete_usage_summary(metadata: Mapping[str, Any]) -> bool:
