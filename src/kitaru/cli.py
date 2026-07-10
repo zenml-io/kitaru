@@ -61,6 +61,7 @@ from kitaru._cli._auth import token as auth_token
 from kitaru._cli._clean import all_, global_, project
 from kitaru._cli._executions import (
     _auto_detect_single_pending_wait,
+    _checkpoint_summary,
     _collect_interactive_wait_candidates,
     _emit_control_message,
     _emit_empty_logs_message,
@@ -403,6 +404,7 @@ __all__ = [
     "_auto_detect_single_pending_wait",
     "_build_info_sections",
     "_build_runtime_snapshot",
+    "_checkpoint_summary",
     "_clear_persisted_store_configuration",
     "_collect_interactive_wait_candidates",
     "_combine_warnings",

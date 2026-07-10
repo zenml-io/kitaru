@@ -28,6 +28,7 @@ from kitaru.cli import (
     ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     _build_runtime_snapshot,
+    _checkpoint_summary,
     _describe_local_server,
     _format_table_timestamp,
     _logout_current_connection,
@@ -2382,6 +2383,19 @@ def test_flow_tag_and_untag_call_public_apis(
         tag="prod",
     )
     assert json.loads(capsys.readouterr().out)["command"] == "flow.untag"
+
+
+def test_checkpoint_summary_remains_available_from_compatibility_facade() -> None:
+    """The legacy private import remains available for integrations."""
+    checkpoints = [
+        SimpleNamespace(name=f"step-{index}", status=ExecutionStatus.COMPLETED)
+        for index in range(5)
+    ]
+
+    assert _checkpoint_summary(checkpoints) == (
+        "step-0 (completed), step-1 (completed), step-2 (completed), "
+        "step-3 (completed), ... (+1 more)"
+    )
 
 
 def test_executions_get_renders_all_checkpoint_call_ids(

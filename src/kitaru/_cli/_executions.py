@@ -212,6 +212,22 @@ def _status_label(status: ExecutionStatus | str) -> str:
     return str(status)
 
 
+def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
+    """Render the legacy compact checkpoint summary."""
+    if not checkpoints:
+        return "none"
+
+    entries = [
+        f"{getattr(checkpoint, 'name', 'unknown')} "
+        f"({_status_label(getattr(checkpoint, 'status', 'unknown'))})"
+        for checkpoint in checkpoints[:max_items]
+    ]
+    remaining = len(checkpoints) - len(entries)
+    if remaining > 0:
+        entries.append(f"... (+{remaining} more)")
+    return ", ".join(entries)
+
+
 def _checkpoint_rows(checkpoints: list[CheckpointCall]) -> list[tuple[str, str]]:
     """Build one display row for each checkpoint call."""
     if not checkpoints:
