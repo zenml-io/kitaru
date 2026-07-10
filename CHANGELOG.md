@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-07-10
+
 ### Added
 - LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. Per-checkpoint values sum exactly to the execution-level totals, and the execution-level `llm_usage_summary_v1` payload is unchanged. (#528)
 - Cached, skipped, and replay-reused checkpoints report their token counts under the `reused_*` fields with zero incurred and zero display cost, so a replayed run shows what the work would have cost without billing it again. Retried checkpoints keep a separate record per attempt, so a retry that really called the provider twice is counted twice. (#528)
