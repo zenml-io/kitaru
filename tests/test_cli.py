@@ -5645,8 +5645,6 @@ def test_secrets_list_json_contains_metadata_without_values(
         ],
         "count": 1,
     }
-    assert "values" not in payload["items"][0]
-    assert "secret_values" not in payload["items"][0]
 
 
 def test_secrets_list_paginates_after_shared_ordering(

@@ -244,13 +244,12 @@ def list_secrets() -> list[SecretSummary]:
         ]
 
         for page_number in range(2, first_page.total_pages + 1):
-            page = client.list_secrets(
-                page=page_number,
-                size=_SECRETS_BACKEND_SCAN_SIZE,
-            )
             summaries.extend(
                 _secret_summary_from_response(secret_response)
-                for secret_response in page.items
+                for secret_response in client.list_secrets(
+                    page=page_number,
+                    size=_SECRETS_BACKEND_SCAN_SIZE,
+                ).items
             )
 
         return sorted(summaries, key=lambda summary: (summary.name.lower(), summary.id))

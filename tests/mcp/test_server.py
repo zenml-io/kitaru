@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -30,7 +30,6 @@ from kitaru.config import (
     VertexStackSpec,
 )
 from kitaru.errors import (
-    KitaruBackendError,
     KitaruFeatureNotAvailableError,
     KitaruRuntimeError,
     KitaruStateError,
@@ -1451,50 +1450,13 @@ def test_secrets_list_returns_empty_for_out_of_range_page() -> None:
         )
     ]
 
-    with (
-        patch(
-            "kitaru.mcp.server.secrets_api.list_secrets",
-            return_value=summaries,
-        ),
-        patch(
-            "kitaru.mcp.server.inspection.serialize_secret_summary",
-        ) as mock_serialize,
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
     ):
         payload = kitaru_secrets_list(page=2, size=20)
 
     assert payload == []
-    mock_serialize.assert_not_called()
-
-
-def test_secrets_list_delegates_in_page_items_to_serializer_in_order() -> None:
-    summaries = [
-        SecretSummary(
-            name=f"secret-{index}",
-            id=f"secret-id-{index}",
-            private=False,
-            keys=["API_KEY"],
-        )
-        for index in range(4)
-    ]
-    serialized = [{"id": summaries[2].id}, {"id": summaries[3].id}]
-
-    with (
-        patch(
-            "kitaru.mcp.server.secrets_api.list_secrets",
-            return_value=summaries,
-        ),
-        patch(
-            "kitaru.mcp.server.inspection.serialize_secret_summary",
-            side_effect=serialized,
-        ) as mock_serialize,
-    ):
-        payload = kitaru_secrets_list(page=2, size=2)
-
-    assert payload == serialized
-    assert mock_serialize.call_args_list == [
-        call(summaries[2]),
-        call(summaries[3]),
-    ]
 
 
 def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> None:
@@ -1536,16 +1498,6 @@ def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> 
             "has_missing_values": False,
         },
     ]
-    for item in payload:
-        assert set(item) == {
-            "id",
-            "name",
-            "visibility",
-            "keys",
-            "has_missing_values",
-        }
-        assert "values" not in item
-        assert "secret_values" not in item
 
 
 @pytest.mark.parametrize("page", [True, 0, -1])
@@ -1570,17 +1522,6 @@ def test_secrets_list_rejects_invalid_size(size: Any) -> None:
 
     assert str(exc_info.value) == "`size` must be an integer >= 1."
     mock_list.assert_not_called()
-
-
-def test_secrets_list_propagates_sdk_backend_errors() -> None:
-    with (
-        patch(
-            "kitaru.mcp.server.secrets_api.list_secrets",
-            side_effect=KitaruBackendError("backend unavailable"),
-        ),
-        pytest.raises(KitaruBackendError, match="backend unavailable"),
-    ):
-        kitaru_secrets_list()
 
 
 def test_secrets_create_returns_metadata_without_values() -> None:

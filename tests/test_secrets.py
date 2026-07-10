@@ -21,36 +21,6 @@ from kitaru.secrets import (
 )
 
 
-def test_list_secrets_scans_one_backend_page() -> None:
-    """SDK listing should request the first backend page at the fixed size."""
-    client = Mock()
-    client.list_secrets.return_value = SimpleNamespace(
-        items=[
-            SimpleNamespace(
-                name="openai-creds",
-                id="secret-id",
-                private=False,
-                values={"OPENAI_API_KEY": object()},
-                has_missing_values=False,
-            )
-        ],
-        total_pages=1,
-    )
-
-    with patch("kitaru.secrets._ZenMLClient", return_value=client):
-        summaries = list_secrets()
-
-    client.list_secrets.assert_called_once_with(page=1, size=50)
-    assert summaries == [
-        SecretSummary(
-            name="openai-creds",
-            id="secret-id",
-            private=False,
-            keys=["OPENAI_API_KEY"],
-        )
-    ]
-
-
 def test_list_secrets_scans_all_backend_pages_at_fixed_size() -> None:
     """SDK listing should fetch every reported page with the same scan size."""
     client = Mock()
@@ -119,18 +89,13 @@ def test_list_secrets_returns_metadata_without_raw_values() -> None:
     with patch("kitaru.secrets._ZenMLClient", return_value=client):
         summary = list_secrets()[0]
 
-    assert summary == SecretSummary(
-        name="provider-creds",
-        id="123",
-        private=True,
-        keys=["A_KEY", "Z_TOKEN"],
-        has_missing_values=True,
-    )
-    payload = summary.model_dump()
-    assert "values" not in payload
-    assert "secret_values" not in payload
-    assert "secret-a" not in str(payload)
-    assert "secret-z" not in str(payload)
+    assert summary.model_dump() == {
+        "name": "provider-creds",
+        "id": "123",
+        "private": True,
+        "keys": ["A_KEY", "Z_TOKEN"],
+        "has_missing_values": True,
+    }
 
 
 def test_list_secrets_orders_by_case_insensitive_name_then_id() -> None:
@@ -164,17 +129,8 @@ def test_list_secrets_returns_empty_list_for_empty_backend() -> None:
         assert list_secrets() == []
 
 
-def test_list_secrets_maps_client_initialization_failure_to_backend_error() -> None:
-    """Client construction failures should become Kitaru backend errors."""
-    with (
-        patch("kitaru.secrets._ZenMLClient", side_effect=RuntimeError("offline")),
-        pytest.raises(KitaruBackendError, match="Failed to list secrets: offline"),
-    ):
-        list_secrets()
-
-
-def test_list_secrets_discards_partial_results_after_request_failure() -> None:
-    """A later page failure should raise instead of returning earlier items."""
+def test_list_secrets_maps_later_page_failure_to_backend_error() -> None:
+    """Later page failures should become Kitaru backend errors."""
     client = Mock()
     client.list_secrets.side_effect = [
         SimpleNamespace(

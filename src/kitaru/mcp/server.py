@@ -577,11 +577,10 @@ def kitaru_secrets_list(
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             raise KitaruUsageError("`size` must be an integer >= 1.")
 
-        all_summaries = secrets_api.list_secrets()
-        start = (page - 1) * size
-        end = start + size
-        page_items = all_summaries[start:end]
-        return [inspection.serialize_secret_summary(summary) for summary in page_items]
+        return [
+            inspection.serialize_secret_summary(summary)
+            for summary in secrets_api.list_secrets()[(page - 1) * size : page * size]
+        ]
 
     return run_with_mcp_error_boundary(_list_secrets)
 
