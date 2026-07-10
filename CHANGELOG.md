@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Cohort diff replay discovery now uses one server-filtered query per flow and reuses artifact hashes across rows, avoiding repeated broad scans and duplicate artifact loads; truncation warnings now appear only when more than 10,000 matching replays exist. (#525)
 - Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
 
 ## [0.20.2] - 2026-07-10

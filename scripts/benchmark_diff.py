@@ -88,21 +88,28 @@ class _FakeExecutionsAPI:
         self._counters.execution_get_calls += 1
         return self._executions[exec_id]
 
-    def list(
-        self, *, flow: str | None = None, limit: int | None = None, **_: Any
-    ) -> list[Execution]:
+    def _list_replays_for_originals(
+        self,
+        *,
+        original_exec_ids: Sequence[str],
+        flow: str | None,
+        limit: int,
+    ) -> tuple[list[Execution], bool]:
         self._counters.execution_list_calls += 1
-        selected = [
-            item for item in self._candidates if flow is None or item.flow_name == flow
+        original_ids = set(original_exec_ids)
+        matching = [
+            item
+            for item in self._candidates
+            if item.original_exec_id in original_ids
+            and (flow is None or item.flow_name == flow)
         ]
-        if limit is not None:
-            selected = selected[:limit]
-        page_size = max(50, limit or 50)
+        selected = matching[:limit]
+        page_size = min(100, limit)
         self._counters.backend_pages_read += (
             ceil(len(selected) / page_size) if selected else 1
         )
         self._counters.candidate_rows_read += len(selected)
-        return selected
+        return selected, len(matching) > limit
 
 
 class _FakeClient:
@@ -437,11 +444,21 @@ class _CountingExecutions:
         self._counters.execution_get_calls += 1
         return self._api.get(exec_id)
 
-    def list(self, **kwargs: Any) -> list[Execution]:
+    def _list_replays_for_originals(
+        self,
+        *,
+        original_exec_ids: Sequence[str],
+        flow: str | None,
+        limit: int,
+    ) -> tuple[list[Execution], bool]:
         self._counters.execution_list_calls += 1
-        result = self._api.list(**kwargs)
+        result, truncated = self._api._list_replays_for_originals(
+            original_exec_ids=original_exec_ids,
+            flow=flow,
+            limit=limit,
+        )
         self._counters.candidate_rows_read += len(result)
-        return result
+        return result, truncated
 
 
 @contextmanager

@@ -1079,12 +1079,12 @@ def _restart_run_from_snapshot(
         ) from restoration_error
 
 
-def _validate_event_filter_values(
+def _validate_non_empty_string_list(
     values: Sequence[str] | None,
     *,
     name: str,
 ) -> builtins.list[str]:
-    """Validate repeated string filters for execution event watching."""
+    """Normalize a sequence containing only non-empty strings."""
     if values is None:
         return []
     if isinstance(values, (str, bytes)):
@@ -1107,7 +1107,7 @@ def _validate_event_kind_filter_values(
     values: Sequence[str] | None,
 ) -> builtins.list[str]:
     """Validate event-kind filters for execution event watching."""
-    normalized = _validate_event_filter_values(values, name="kinds")
+    normalized = _validate_non_empty_string_list(values, name="kinds")
     for kind in normalized:
         if "\n" in kind or "\r" in kind:
             raise KitaruUsageError("`kinds` values cannot contain newline characters.")
@@ -1351,7 +1351,7 @@ class _ExecutionsAPI:
         as network resume positions.
         """
         normalized_kinds = _validate_event_kind_filter_values(kinds)
-        normalized_correlation_ids = _validate_event_filter_values(
+        normalized_correlation_ids = _validate_non_empty_string_list(
             correlation_ids,
             name="correlation_ids",
         )
@@ -1901,6 +1901,76 @@ class _ExecutionsAPI:
         """Get and map one execution by ID."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         return _map_execution(run=run, client=self._client_ref, include_details=True)
+
+    def _list_replays_for_originals(
+        self,
+        *,
+        original_exec_ids: Sequence[str],
+        flow: str | None,
+        limit: int,
+    ) -> tuple[builtins.list[Execution], bool]:
+        """List replay executions linked to any requested original.
+
+        Returns up to ``limit`` lightweight executions in backend order and
+        whether one additional execution passed the exact client-side checks.
+        """
+        normalized_ids = _validate_non_empty_string_list(
+            original_exec_ids,
+            name="original_exec_ids",
+        )
+        if not normalized_ids:
+            raise KitaruUsageError("`original_exec_ids` must contain at least one ID.")
+        if isinstance(limit, bool) or limit < 1:
+            raise KitaruUsageError("`limit` must be >= 1.")
+        if flow is not None and _normalize_flow_name(flow) is None:
+            return [], False
+
+        server_filters: dict[str, Any] = {
+            "run_metadata": (
+                "original_exec_id:" + _backend_filter_value(normalized_ids)
+            )
+        }
+        if flow is not None:
+            server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
+
+        original_ids = set(normalized_ids)
+        results: builtins.list[Execution] = []
+        backend_page = 1
+        page_size = min(100, limit + 1)
+
+        while True:
+            run_page = self._client_ref._client().list_pipeline_runs(
+                sort_by="desc:created",
+                page=backend_page,
+                size=page_size,
+                project=self._client_ref._project,
+                hydrate=False,
+                **server_filters,
+            )
+            page_runs = list(run_page.items)
+            total = int(run_page.total)
+            if not page_runs:
+                break
+
+            for run in page_runs:
+                execution = _map_execution(
+                    run=run,
+                    client=self._client_ref,
+                    include_details=False,
+                )
+                if flow is not None and execution.flow_name != flow:
+                    continue
+                if execution.original_exec_id not in original_ids:
+                    continue
+                results.append(execution)
+                if len(results) > limit:
+                    return results[:limit], True
+
+            if backend_page * page_size >= total or len(page_runs) < page_size:
+                break
+            backend_page += 1
+
+        return results, False
 
     def list(
         self,

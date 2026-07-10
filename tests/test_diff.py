@@ -5,11 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from kitaru._client._models import CheckpointCall, Execution, ExecutionStatus
+from kitaru._client._models import (
+    ArtifactRef,
+    CheckpointCall,
+    Execution,
+    ExecutionStatus,
+)
 from kitaru._ui_urls import UiUrlContext
 from kitaru.diff import diff, serialize_execution_diff
 
@@ -30,6 +35,7 @@ def _checkpoint(
     call_id: str,
     name: str,
     original_call_id: str | None = None,
+    artifact_ids: list[str] | None = None,
 ) -> CheckpointCall:
     started = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     ended = datetime(2026, 3, 9, 10, 1, tzinfo=UTC)
@@ -44,7 +50,18 @@ def _checkpoint(
         parent_call_ids=[],
         failure=None,
         attempts=[],
-        artifacts=[],
+        artifacts=[
+            ArtifactRef(
+                artifact_id=artifact_id,
+                name="output",
+                kind="dict",
+                save_type="dict",
+                producing_call=call_id,
+                metadata={},
+                _client=MagicMock(),
+            )
+            for artifact_id in artifact_ids or []
+        ],
         checkpoint_type="tool_call",
     )
 
@@ -57,11 +74,13 @@ def _execution(
     project_id: str | None = "project-123",
     project_name: str | None = "default",
     metadata: dict[str, object] | None = None,
+    flow_id: str = "flow-1",
+    flow_name: str | None = "support_copilot_flow",
 ) -> Execution:
     return Execution(
         exec_id=exec_id,
-        flow_id="flow-1",
-        flow_name="support_copilot_flow",
+        flow_id=flow_id,
+        flow_name=flow_name,
         status=ExecutionStatus.COMPLETED,
         started_at=None,
         ended_at=None,
@@ -155,14 +174,14 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [
         original_a,
-        replay_a,
         original_b,
+        replay_a,
         replay_b,
     ]
-    fake_client.executions.list.side_effect = [
-        [replay_a],
-        [replay_b],
-    ]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         from kitaru.diff import diff_cohort
@@ -174,6 +193,404 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     assert matrix.rows[1].original_exec_id == "kr-original-b"
     assert matrix.rows[0].compared[0][0] == "kr-replay-a"
     assert matrix.rows[1].compared[0][0] == "kr-replay-b"
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original-a", "kr-original-b"],
+        flow="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+
+
+def test_diff_uses_loaded_original_id_and_resolves_ui_context_once() -> None:
+    original = _execution("kr-canonical", checkpoints=[])
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-canonical",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.diff._client_ui_url_context",
+            return_value=None,
+        ) as ui_context_mock,
+    ):
+        result = diff("kr-requested-alias", "kr-replay")
+
+    assert result.original_exec_id == "kr-canonical"
+    ui_context_mock.assert_called_once_with(fake_client)
+    fake_client.executions._list_replays_for_originals.assert_not_called()
+
+
+def test_diff_cohort_uses_canonical_ids_for_aliases_and_duplicates() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_a = _execution("kr-original-a", checkpoints=[])
+    original_b = _execution("kr-original-b", checkpoints=[])
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original-a",
+        checkpoints=[],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original-b",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original_a,
+        original_b,
+        original_a,
+        replay_a,
+        replay_b,
+    ]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.diff._client_ui_url_context",
+            return_value=None,
+        ) as ui_context_mock,
+    ):
+        matrix = diff_cohort(["latest-a", "kr-original-b", "kr-original-a", "latest-a"])
+
+    assert [row.original_exec_id for row in matrix.rows] == [
+        "kr-original-a",
+        "kr-original-b",
+        "kr-original-a",
+        "kr-original-a",
+    ]
+    assert matrix.rows[0] is matrix.rows[2] is matrix.rows[3]
+    assert fake_client.executions.get.call_args_list == [
+        call("latest-a"),
+        call("kr-original-b"),
+        call("kr-original-a"),
+        call("kr-replay-a"),
+        call("kr-replay-b"),
+    ]
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original-a", "kr-original-b"],
+        flow="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+    ui_context_mock.assert_called_once_with(fake_client)
+
+
+def test_diff_cohort_discovers_once_and_excludes_unrelated_rows() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_ids = [f"kr-original-{index}" for index in range(50)]
+    originals = [_execution(exec_id, checkpoints=[]) for exec_id in original_ids]
+    replays = [
+        _execution(
+            f"kr-replay-{index}",
+            original_exec_id=original_id,
+            checkpoints=[],
+        )
+        for index, original_id in enumerate(original_ids)
+    ]
+    unrelated = [
+        _execution(
+            f"kr-unrelated-{index}",
+            original_exec_id="outside-cohort",
+            checkpoints=[],
+        )
+        for index in range(1_000)
+    ]
+    candidates = [*replays, *unrelated]
+    returned_rows = 0
+
+    def list_filtered_replays(
+        *,
+        original_exec_ids: list[str],
+        flow: str | None,
+        limit: int,
+    ) -> tuple[list[Execution], bool]:
+        nonlocal returned_rows
+        requested_original_ids = set(original_exec_ids)
+        matching = [
+            candidate
+            for candidate in candidates
+            if candidate.original_exec_id in requested_original_ids
+            and candidate.flow_name == flow
+        ][:limit]
+        returned_rows += len(matching)
+        return matching, False
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [*originals, *replays]
+    fake_client.executions._list_replays_for_originals.side_effect = (
+        list_filtered_replays
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert [row.original_exec_id for row in matrix.rows] == original_ids
+    assert [row.compared[0][0] for row in matrix.rows] == [
+        replay.exec_id for replay in replays
+    ]
+    assert returned_rows == 50
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=original_ids,
+        flow="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+
+
+def test_diff_cohort_discovers_once_per_flow_and_preserves_input_order() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_ids = ["flow-b-1", "flow-a-1", "flow-b-2"]
+    originals = [
+        _execution("flow-b-1", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+        _execution("flow-a-1", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+        _execution("flow-b-2", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = originals
+    fake_client.executions._list_replays_for_originals.side_effect = [
+        ([], False),
+        ([], False),
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert [row.original_exec_id for row in matrix.rows] == original_ids
+    assert fake_client.executions._list_replays_for_originals.call_args_list == [
+        call(
+            original_exec_ids=["flow-b-1", "flow-b-2"],
+            flow="flow_b",
+            limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+        ),
+        call(
+            original_exec_ids=["flow-a-1"],
+            flow="flow_a",
+            limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+        ),
+    ]
+
+
+def test_diff_cohort_attaches_truncation_warning_to_every_row_in_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original_ids = ["flow-a-1", "flow-b-1", "flow-a-2"]
+    originals = [
+        _execution("flow-a-1", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+        _execution("flow-b-1", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+        _execution("flow-a-2", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = originals
+    fake_client.executions._list_replays_for_originals.side_effect = [
+        ([], True),
+        ([], False),
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert len(matrix.rows[0].warnings) == 1
+    assert matrix.rows[1].warnings == []
+    assert matrix.rows[2].warnings == matrix.rows[0].warnings
+    warning = matrix.rows[0].warnings[0]
+    assert "flow flow_a" in warning
+    assert "combined replay discovery query" in warning
+    assert "exceeded the 3 matching-replay limit" in warning
+    assert "This row may omit older replays" in warning
+    assert serialize_execution_diff(matrix.rows[0])["warnings"] == [warning]
+
+
+def test_diff_cohort_warning_describes_missing_flow_name_plainly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original = _execution("kr-original", checkpoints=[], flow_name=None)
+    fake_client = MagicMock()
+    fake_client.executions.get.return_value = original
+    fake_client.executions._list_replays_for_originals.return_value = ([], True)
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(["kr-original"])
+
+    warning = matrix.rows[0].warnings[0]
+    assert "executions without an available flow name" in warning
+    assert "This row may omit older replays" in warning
+
+
+def test_diff_cohort_reuses_artifact_hashes_across_original_rows() -> None:
+    from kitaru.diff import diff_cohort
+
+    originals = [
+        _execution(
+            f"kr-original-{suffix}",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-original-{suffix}",
+                    name="checkpoint",
+                    artifact_ids=["artifact-shared"],
+                )
+            ],
+        )
+        for suffix in ("a", "b")
+    ]
+    replays = [
+        _execution(
+            f"kr-replay-{suffix}",
+            original_exec_id=f"kr-original-{suffix}",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-replay-{suffix}",
+                    name="checkpoint",
+                    original_call_id=f"cp-original-{suffix}",
+                    artifact_ids=["artifact-shared"],
+                )
+            ],
+        )
+        for suffix in ("a", "b")
+    ]
+    shared_artifact = SimpleNamespace(load=MagicMock(return_value={"value": "shared"}))
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [*originals, *replays]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        replays,
+        False,
+    )
+    fake_client._get_artifact_version.return_value = shared_artifact
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(["kr-original-a", "kr-original-b"])
+
+    fake_client._get_artifact_version.assert_called_once_with(
+        "artifact-shared", hydrate=True
+    )
+    shared_artifact.load.assert_called_once_with()
+    assert [row.compared[0][1][0].artifact_hashes["output"] for row in matrix.rows] == [
+        (matrix.rows[0].compared[0][1][0].artifact_hashes["output"])
+    ] * 2
+
+
+def test_diff_caches_artifact_hashes_for_one_request() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-original",
+                name="checkpoint",
+                artifact_ids=["artifact-original"],
+            )
+        ],
+    )
+    replays = [
+        _execution(
+            replay_id,
+            original_exec_id="kr-original",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-{replay_id}",
+                    name="checkpoint",
+                    original_call_id="cp-original",
+                    artifact_ids=["artifact-replay"],
+                )
+            ],
+        )
+        for replay_id in ("kr-replay-a", "kr-replay-b")
+    ]
+    loaded_artifacts = {
+        "artifact-original": SimpleNamespace(
+            load=MagicMock(return_value={"value": "original"})
+        ),
+        "artifact-replay": SimpleNamespace(
+            load=MagicMock(return_value={"value": "replay"})
+        ),
+    }
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, *replays]
+    fake_client._get_artifact_version.side_effect = lambda artifact_id, *, hydrate: (
+        loaded_artifacts[artifact_id]
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original", "kr-replay-a", "kr-replay-b")
+
+    assert fake_client._get_artifact_version.call_count == 2
+    assert loaded_artifacts["artifact-original"].load.call_count == 1
+    assert loaded_artifacts["artifact-replay"].load.call_count == 1
+    first_hashes = result.compared[0][1][0].artifact_hashes["output"]
+    second_hashes = result.compared[1][1][0].artifact_hashes["output"]
+    assert first_hashes == second_hashes
+    assert all(value is not None for value in first_hashes)
+
+
+def test_diff_caches_failed_artifact_hashes_as_none() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-original",
+                name="checkpoint",
+                artifact_ids=["missing-artifact"],
+            )
+        ],
+    )
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-replay",
+                name="checkpoint",
+                original_call_id="cp-original",
+                artifact_ids=["missing-artifact"],
+            )
+        ],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+    fake_client._get_artifact_version.side_effect = RuntimeError("missing")
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original", "kr-replay")
+
+    fake_client._get_artifact_version.assert_called_once_with(
+        "missing-artifact",
+        hydrate=True,
+    )
+    assert result.compared[0][1][0].artifact_hashes == {"output": (None, None)}
 
 
 def test_build_compare_url_for_executions_supports_three_way_compare() -> None:
@@ -310,7 +727,10 @@ def test_diff_auto_discovers_replays_and_returns_one_multi_exec_url() -> None:
 
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [original, replay_a, replay_b]
-    fake_client.executions.list.return_value = [replay_a, replay_b]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
     fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io"
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
@@ -489,7 +909,7 @@ def test_diff_omits_compare_url_when_cloud_url_metadata_is_incomplete() -> None:
     assert result.urls == []
 
 
-def test_diff_discovers_replay_beyond_first_200_candidates() -> None:
+def test_diff_auto_discovery_uses_filtered_client_operation() -> None:
     original = _execution(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
@@ -505,23 +925,18 @@ def test_diff_discovers_replay_beyond_first_200_candidates() -> None:
             )
         ],
     )
-    candidates = [
-        _execution(
-            f"kr-candidate-{index}",
-            original_exec_id="kr-other",
-            checkpoints=[],
-        )
-        for index in range(200)
-    ] + [replay]
-
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [original, replay]
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay],
+        False,
+    )
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
         flow="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
@@ -537,23 +952,51 @@ def test_diff_auto_discovery_does_not_warn_below_scan_limit(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
     )
-    candidates = [
-        _execution("kr-candidate-1", original_exec_id="kr-other", checkpoints=[]),
-        _execution("kr-candidate-2", original_exec_id="kr-other", checkpoints=[]),
-    ]
-
     fake_client = MagicMock()
     fake_client.executions.get.return_value = original
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = ([], False)
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
         flow="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
+    assert result.warnings == []
+
+
+def test_diff_auto_discovery_returns_exact_scan_limit_without_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original = _execution("kr-original", checkpoints=[])
+    replays = [
+        _execution(
+            f"kr-replay-{index}",
+            original_exec_id="kr-original",
+            checkpoints=[],
+        )
+        for index in range(3)
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, *replays]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        replays,
+        False,
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original")
+
+    assert [replay_exec_id for replay_exec_id, _ in result.compared] == [
+        replay.exec_id for replay in replays
+    ]
     assert result.warnings == []
 
 
@@ -565,31 +1008,24 @@ def test_diff_warns_when_auto_discovery_hits_scan_limit(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
     )
-    candidates = [
-        _execution(
-            f"kr-candidate-{index}",
-            original_exec_id="kr-other",
-            checkpoints=[],
-        )
-        for index in range(3)
-    ]
-
     fake_client = MagicMock()
     fake_client.executions.get.return_value = original
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = ([], True)
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
         flow="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
     assert len(result.warnings) == 1
     warning = result.warnings[0]
-    assert "auto-discovery" in warning
-    assert "stopped after scanning 3 executions" in warning
+    assert "combined replay discovery query" in warning
+    assert "exceeded the 3 matching-replay limit" in warning
+    assert "This row may omit older replays" in warning
     assert "support_copilot_flow" in warning
     assert "execution IDs explicitly" in warning
     assert serialize_execution_diff(result)["warnings"] == result.warnings
@@ -618,6 +1054,6 @@ def test_diff_does_not_warn_for_explicit_replay_ids_at_candidate_limit() -> None
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original", "kr-replay")
 
-    fake_client.executions.list.assert_not_called()
+    fake_client.executions._list_replays_for_originals.assert_not_called()
     assert result.warnings == []
     assert serialize_execution_diff(result)["warnings"] == []
