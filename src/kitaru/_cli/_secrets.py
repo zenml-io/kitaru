@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from cyclopts import Parameter
 from zenml.exceptions import EntityExistsError
 from zenml.models import SecretResponse
 
+import kitaru.secrets as secrets_api
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
-from kitaru.secrets import _SECRET_KEY_PATTERN
+from kitaru.secrets import _SECRET_KEY_PATTERN, SecretSummary
 
 from . import secrets_app
 from ._dependencies import cli_dependencies
@@ -31,8 +32,6 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
-
-_SECRETS_BACKEND_SCAN_SIZE = 50
 
 
 def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
@@ -101,21 +100,6 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
     return parsed
 
 
-def _list_accessible_secrets(client: Any) -> list[SecretResponse]:
-    """List all accessible secrets across all backend pages."""
-    first_page = client.list_secrets(page=1, size=_SECRETS_BACKEND_SCAN_SIZE)
-    secrets = list(first_page.items)
-
-    for page_number in range(2, first_page.total_pages + 1):
-        page = client.list_secrets(
-            page=page_number,
-            size=_SECRETS_BACKEND_SCAN_SIZE,
-        )
-        secrets.extend(page.items)
-
-    return secrets
-
-
 def _secret_show_rows(
     secret: SecretResponse,
     *,
@@ -139,12 +123,7 @@ def _secret_show_rows(
     return rows
 
 
-def _order_secrets(secrets: list[SecretResponse]) -> list[SecretResponse]:
-    """Return secrets in deterministic CLI display order."""
-    return sorted(secrets, key=lambda secret: (secret.name.lower(), str(secret.id)))
-
-
-def _secret_list_rows(secrets: list[SecretResponse]) -> list[tuple[str, str]]:
+def _secret_list_rows(secrets: list[SecretSummary]) -> list[tuple[str, str]]:
     """Build label/value rows for `kitaru secrets list`."""
     if not secrets:
         return [("Secrets", "none found")]
@@ -285,14 +264,13 @@ def list__(
         output=output_format,
     )
     secrets = run_with_cli_error_boundary(
-        lambda: _list_accessible_secrets(cli_dependencies().zenml_client()),
+        secrets_api.list_secrets,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
     )
 
-    ordered = _order_secrets(secrets)
-    visible_secrets = _paginate_items(ordered, page=page, size=size)
+    visible_secrets = _paginate_items(secrets, page=page, size=size)
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
@@ -302,7 +280,7 @@ def list__(
         )
         return
 
-    if ordered and not visible_secrets:
+    if secrets and not visible_secrets:
         rows: list[tuple[str, str]] = [("Secrets", f"no items on page {page}")]
     else:
         rows = _secret_list_rows(visible_secrets)
@@ -311,7 +289,7 @@ def list__(
         page=page,
         size=size,
         returned_count=len(visible_secrets),
-        total_count=len(ordered),
+        total_count=len(secrets),
         output=output_format,
     )
 
