@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
+
 ## [0.20.2] - 2026-07-10
 
 ### Added
