@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- Cohort diff replay discovery now uses one server-filtered query per flow and reuses artifact hashes across rows, avoiding repeated broad scans and duplicate artifact loads; truncation warnings now appear only when more than 10,000 matching replays exist. (#525)
+- Cohort diff replay discovery now scans each flow once using ZenML's native replay linkage and reuses successful artifact hashes across rows, avoiding repeated flow scans and duplicate successful artifact loads; unrelated executions consume the 10,000-execution scan bound, and a warning appears only when older executions remain. (#525)
 - Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
 
 ## [0.20.2] - 2026-07-10

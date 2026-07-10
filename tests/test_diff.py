@@ -195,7 +195,7 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     assert matrix.rows[1].compared[0][0] == "kr-replay-b"
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=["kr-original-a", "kr-original-b"],
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
 
@@ -277,7 +277,7 @@ def test_diff_cohort_uses_canonical_ids_for_aliases_and_duplicates() -> None:
     ]
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=["kr-original-a", "kr-original-b"],
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
     ui_context_mock.assert_called_once_with(fake_client)
@@ -310,7 +310,7 @@ def test_diff_cohort_discovers_once_and_excludes_unrelated_rows() -> None:
     def list_filtered_replays(
         *,
         original_exec_ids: list[str],
-        flow: str | None,
+        expected_flow_name: str | None,
         limit: int,
     ) -> tuple[list[Execution], bool]:
         nonlocal returned_rows
@@ -319,7 +319,7 @@ def test_diff_cohort_discovers_once_and_excludes_unrelated_rows() -> None:
             candidate
             for candidate in candidates
             if candidate.original_exec_id in requested_original_ids
-            and candidate.flow_name == flow
+            and candidate.flow_name == expected_flow_name
         ][:limit]
         returned_rows += len(matching)
         return matching, False
@@ -343,7 +343,7 @@ def test_diff_cohort_discovers_once_and_excludes_unrelated_rows() -> None:
     assert returned_rows == 50
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=original_ids,
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
 
@@ -374,12 +374,12 @@ def test_diff_cohort_discovers_once_per_flow_and_preserves_input_order() -> None
     assert fake_client.executions._list_replays_for_originals.call_args_list == [
         call(
             original_exec_ids=["flow-b-1", "flow-b-2"],
-            flow="flow_b",
+            expected_flow_name="flow_b",
             limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
         ),
         call(
             original_exec_ids=["flow-a-1"],
-            flow="flow_a",
+            expected_flow_name="flow_a",
             limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
         ),
     ]
@@ -415,8 +415,9 @@ def test_diff_cohort_attaches_truncation_warning_to_every_row_in_flow(
     assert matrix.rows[2].warnings == matrix.rows[0].warnings
     warning = matrix.rows[0].warnings[0]
     assert "flow flow_a" in warning
-    assert "combined replay discovery query" in warning
-    assert "exceeded the 3 matching-replay limit" in warning
+    assert "Replay discovery" in warning
+    assert "scanned 3 executions" in warning
+    assert "older executions remain" in warning
     assert "This row may omit older replays" in warning
     assert serialize_execution_diff(matrix.rows[0])["warnings"] == [warning]
 
@@ -553,14 +554,14 @@ def test_diff_caches_artifact_hashes_for_one_request() -> None:
     assert all(value is not None for value in first_hashes)
 
 
-def test_diff_caches_failed_artifact_hashes_as_none() -> None:
+def test_diff_retries_artifact_hash_after_transient_failure() -> None:
     original = _execution(
         "kr-original",
         checkpoints=[
             _checkpoint(
                 call_id="cp-original",
                 name="checkpoint",
-                artifact_ids=["missing-artifact"],
+                artifact_ids=["shared-artifact"],
             )
         ],
     )
@@ -572,13 +573,19 @@ def test_diff_caches_failed_artifact_hashes_as_none() -> None:
                 call_id="cp-replay",
                 name="checkpoint",
                 original_call_id="cp-original",
-                artifact_ids=["missing-artifact"],
+                artifact_ids=["shared-artifact"],
             )
         ],
     )
+    loaded_artifact = SimpleNamespace(
+        load=MagicMock(return_value={"value": "available"})
+    )
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [original, replay]
-    fake_client._get_artifact_version.side_effect = RuntimeError("missing")
+    fake_client._get_artifact_version.side_effect = [
+        RuntimeError("transient"),
+        loaded_artifact,
+    ]
 
     with (
         patch("kitaru.diff.KitaruClient", return_value=fake_client),
@@ -586,11 +593,14 @@ def test_diff_caches_failed_artifact_hashes_as_none() -> None:
     ):
         result = diff("kr-original", "kr-replay")
 
-    fake_client._get_artifact_version.assert_called_once_with(
-        "missing-artifact",
-        hydrate=True,
-    )
-    assert result.compared[0][1][0].artifact_hashes == {"output": (None, None)}
+    assert fake_client._get_artifact_version.call_args_list == [
+        call("shared-artifact", hydrate=True),
+        call("shared-artifact", hydrate=True),
+    ]
+    loaded_artifact.load.assert_called_once_with()
+    original_hash, replay_hash = result.compared[0][1][0].artifact_hashes["output"]
+    assert original_hash is None
+    assert replay_hash is not None
 
 
 def test_build_compare_url_for_executions_supports_three_way_compare() -> None:
@@ -909,7 +919,7 @@ def test_diff_omits_compare_url_when_cloud_url_metadata_is_incomplete() -> None:
     assert result.urls == []
 
 
-def test_diff_auto_discovery_uses_filtered_client_operation() -> None:
+def test_diff_auto_discovery_uses_bounded_flow_scan() -> None:
     original = _execution(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
@@ -937,7 +947,7 @@ def test_diff_auto_discovery_uses_filtered_client_operation() -> None:
 
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=["kr-original"],
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
     assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
@@ -961,7 +971,7 @@ def test_diff_auto_discovery_does_not_warn_below_scan_limit(
 
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=["kr-original"],
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
@@ -1017,14 +1027,15 @@ def test_diff_warns_when_auto_discovery_hits_scan_limit(
 
     fake_client.executions._list_replays_for_originals.assert_called_once_with(
         original_exec_ids=["kr-original"],
-        flow="support_copilot_flow",
+        expected_flow_name="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
     assert len(result.warnings) == 1
     warning = result.warnings[0]
-    assert "combined replay discovery query" in warning
-    assert "exceeded the 3 matching-replay limit" in warning
+    assert "Replay discovery" in warning
+    assert "scanned 3 executions" in warning
+    assert "older executions remain" in warning
     assert "This row may omit older replays" in warning
     assert "support_copilot_flow" in warning
     assert "execution IDs explicitly" in warning

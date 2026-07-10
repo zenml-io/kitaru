@@ -92,24 +92,24 @@ class _FakeExecutionsAPI:
         self,
         *,
         original_exec_ids: Sequence[str],
-        flow: str | None,
+        expected_flow_name: str | None,
         limit: int,
     ) -> tuple[list[Execution], bool]:
         self._counters.execution_list_calls += 1
         original_ids = set(original_exec_ids)
+        scanned = self._candidates[: limit + 1]
         matching = [
             item
-            for item in self._candidates
+            for item in scanned[:limit]
             if item.original_exec_id in original_ids
-            and (flow is None or item.flow_name == flow)
+            and item.flow_name == expected_flow_name
         ]
-        selected = matching[:limit]
         page_size = min(100, limit)
         self._counters.backend_pages_read += (
-            ceil(len(selected) / page_size) if selected else 1
+            ceil(len(scanned) / page_size) if scanned else 1
         )
-        self._counters.candidate_rows_read += len(selected)
-        return selected, len(matching) > limit
+        self._counters.candidate_rows_read += len(scanned)
+        return matching, len(scanned) > limit
 
 
 class _FakeClient:
@@ -350,10 +350,16 @@ def deterministic_benchmarks() -> list[Measurement]:
             artifact_bytes=1_000_000,
         ),
         _run_fake_scenario(
-            "10,000 execution scan cap",
+            "exactly 10,000 scanned executions",
             originals=50,
             replays_per_original=1,
             unrelated=9_950,
+        ),
+        _run_fake_scenario(
+            "10,000 execution scan cap plus older row",
+            originals=50,
+            replays_per_original=1,
+            unrelated=9_951,
         ),
     ]
 
@@ -448,17 +454,15 @@ class _CountingExecutions:
         self,
         *,
         original_exec_ids: Sequence[str],
-        flow: str | None,
+        expected_flow_name: str | None,
         limit: int,
     ) -> tuple[list[Execution], bool]:
         self._counters.execution_list_calls += 1
-        result, truncated = self._api._list_replays_for_originals(
+        return self._api._list_replays_for_originals(
             original_exec_ids=original_exec_ids,
-            flow=flow,
+            expected_flow_name=expected_flow_name,
             limit=limit,
         )
-        self._counters.candidate_rows_read += len(result)
-        return result, truncated
 
 
 @contextmanager
@@ -468,7 +472,9 @@ def _count_backend_pages(client: KitaruClient, counters: Counters) -> Any:
 
     def counted(*args: Any, **kwargs: Any) -> Any:
         counters.backend_pages_read += 1
-        return original(*args, **kwargs)
+        result = original(*args, **kwargs)
+        counters.candidate_rows_read += len(result.items)
+        return result
 
     with patch.object(zenml_client, "list_pipeline_runs", side_effect=counted):
         yield

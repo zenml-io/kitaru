@@ -223,7 +223,7 @@ class _DummyRun:
         self,
         *,
         status: Any,
-        flow_name: str,
+        flow_name: str | None,
         flow_id: str | None = None,
         run_metadata: dict[str, Any] | None = None,
         steps: dict[str, _DummyStep] | None = None,
@@ -2803,7 +2803,7 @@ def test_list_filters_flow_status_and_limit() -> None:
     assert executions[0].exec_id == str(run_1.id)
 
 
-def test_filtered_replay_list_encodes_multiple_originals_and_flow() -> None:
+def test_replay_scan_discovers_native_replays_without_metadata() -> None:
     replay_a = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,
         flow_name="flow_a",
@@ -2825,13 +2825,14 @@ def test_filtered_replay_list_encodes_multiple_originals_and_flow() -> None:
         client_mock = client_cls.return_value
         client_mock.list_pipeline_runs.return_value = SimpleNamespace(
             items=[_as_pipeline_run(replay_a), _as_pipeline_run(replay_b)],
-            total=2,
+            index=1,
+            total_pages=1,
         )
 
         client = KitaruClient()
         executions, truncated = client.executions._list_replays_for_originals(
             original_exec_ids=[" original-a ", 'original-"b"'],
-            flow="flow_a",
+            expected_flow_name="flow_a",
             limit=2,
         )
 
@@ -2841,9 +2842,7 @@ def test_filtered_replay_list_encodes_multiple_originals_and_flow() -> None:
     ]
     assert truncated is False
     kwargs = client_mock.list_pipeline_runs.call_args.kwargs
-    assert kwargs["run_metadata"] == (
-        'original_exec_id:oneof:["original-a","original-\\"b\\""]'
-    )
+    assert "run_metadata" not in kwargs
     assert set(_backend_filter_values(kwargs["pipeline_name"])) == {
         "flow_a",
         f"{_PIPELINE_SOURCE_ALIAS_PREFIX}flow_a",
@@ -2852,43 +2851,67 @@ def test_filtered_replay_list_encodes_multiple_originals_and_flow() -> None:
     assert kwargs["hydrate"] is False
 
 
-def test_filtered_replay_list_uses_equality_filter_for_one_original() -> None:
+def test_replay_scan_skips_unrelated_waiting_and_running_runs() -> None:
+    native_match = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "stale-original"},
+    )
+    native_match.original_run = SimpleNamespace(id="original-a")
+    metadata_only_match = _DummyRun(
+        status=ZenMLExecutionStatus.PAUSED,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "original-a"},
+    )
+    metadata_only_match.original_run = SimpleNamespace(id="different-original")
+    unrelated_running = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "original-a"},
+    )
+    unrelated_running.original_run = SimpleNamespace(id="another-original")
+
     with (
         patch(
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
         patch("kitaru.client.Client") as client_cls,
+        patch("kitaru._client._mappers._first_pending_wait") as first_pending_wait,
     ):
         client_mock = client_cls.return_value
         client_mock.list_pipeline_runs.return_value = SimpleNamespace(
-            items=[],
-            total=0,
+            items=[
+                _as_pipeline_run(native_match),
+                _as_pipeline_run(metadata_only_match),
+                _as_pipeline_run(unrelated_running),
+            ],
+            index=1,
+            total_pages=1,
         )
 
         client = KitaruClient()
         executions, truncated = client.executions._list_replays_for_originals(
-            original_exec_ids=[" original-a "],
-            flow="flow_a",
-            limit=10_000,
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=10,
         )
 
-    assert executions == []
+    assert [execution.exec_id for execution in executions] == [str(native_match.id)]
     assert truncated is False
-    assert client_mock.list_pipeline_runs.call_args.kwargs["run_metadata"] == (
-        "original_exec_id:original-a"
-    )
+    assert "run_metadata" not in client_mock.list_pipeline_runs.call_args.kwargs
+    first_pending_wait.assert_not_called()
 
 
-def test_filtered_replay_list_paginates_and_reports_backend_truncation() -> None:
-    originals = ["original-a", "original-b"]
+def test_replay_scan_paginates_and_unrelated_rows_consume_limit() -> None:
     runs = []
     for index in range(151):
         run = _DummyRun(
             status=ZenMLExecutionStatus.COMPLETED,
             flow_name="flow_a",
         )
-        run.original_run = SimpleNamespace(id=originals[index % 2])
+        original_id = "outside-cohort" if index < 100 else "original-a"
+        run.original_run = SimpleNamespace(id=original_id)
         runs.append(run)
 
     with (
@@ -2902,22 +2925,26 @@ def test_filtered_replay_list_paginates_and_reports_backend_truncation() -> None
         client_mock.list_pipeline_runs.side_effect = [
             SimpleNamespace(
                 items=[_as_pipeline_run(run) for run in runs[:100]],
-                total=151,
+                index=1,
+                total_pages=2,
             ),
             SimpleNamespace(
                 items=[_as_pipeline_run(run) for run in runs[100:]],
-                total=151,
+                index=2,
+                total_pages=2,
             ),
         ]
 
         client = KitaruClient()
         executions, truncated = client.executions._list_replays_for_originals(
-            original_exec_ids=originals,
-            flow="flow_a",
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
             limit=150,
         )
 
-    assert len(executions) == 150
+    assert [execution.exec_id for execution in executions] == [
+        str(run.id) for run in runs[100:150]
+    ]
     assert truncated is True
     assert [
         item.kwargs["page"] for item in client_mock.list_pipeline_runs.call_args_list
@@ -2928,38 +2955,23 @@ def test_filtered_replay_list_paginates_and_reports_backend_truncation() -> None
 
 
 @pytest.mark.parametrize(
-    ("valid_count", "expected_truncated"),
-    [(2, False), (3, True)],
+    ("total", "expected_truncated"),
+    [(3, False), (4, True)],
 )
-def test_filtered_replay_list_counts_only_exact_client_matches(
-    valid_count: int,
+def test_replay_scan_distinguishes_exact_cap_from_older_rows(
+    total: int,
     expected_truncated: bool,
 ) -> None:
-    rejected_originals = [
+    runs = [
         _DummyRun(
             status=ZenMLExecutionStatus.COMPLETED,
             flow_name="flow_a",
         )
-        for _ in range(2)
+        for _ in range(total)
     ]
-    for run in rejected_originals:
+    for run in runs:
         run.original_run = SimpleNamespace(id="outside-cohort")
-    rejected_flow = _DummyRun(
-        status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="flow_b",
-    )
-    rejected_flow.original_run = SimpleNamespace(id="original-a")
-    valid_runs = [
-        _DummyRun(
-            status=ZenMLExecutionStatus.COMPLETED,
-            flow_name="flow_a",
-        )
-        for _ in range(valid_count)
-    ]
-    for run in valid_runs:
-        run.original_run = SimpleNamespace(id="original-a")
 
-    total = 3 + valid_count
     with (
         patch(
             "kitaru.client.resolve_connection_config",
@@ -2968,37 +2980,59 @@ def test_filtered_replay_list_counts_only_exact_client_matches(
         patch("kitaru.client.Client") as client_cls,
     ):
         client_mock = client_cls.return_value
-        client_mock.list_pipeline_runs.side_effect = [
-            SimpleNamespace(
-                items=[
-                    *[_as_pipeline_run(run) for run in rejected_originals],
-                    _as_pipeline_run(rejected_flow),
-                ],
-                total=total,
-            ),
-            SimpleNamespace(
-                items=[_as_pipeline_run(run) for run in valid_runs],
-                total=total,
-            ),
-        ]
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(run) for run in runs],
+            index=1,
+            total_pages=1,
+        )
 
         client = KitaruClient()
         executions, truncated = client.executions._list_replays_for_originals(
             original_exec_ids=["original-a"],
-            flow="flow_a",
-            limit=2,
+            expected_flow_name="flow_a",
+            limit=3,
         )
 
-    assert [execution.exec_id for execution in executions] == [
-        str(run.id) for run in valid_runs[:2]
-    ]
+    assert executions == []
     assert truncated is expected_truncated
-    assert [
-        item.kwargs["page"] for item in client_mock.list_pipeline_runs.call_args_list
-    ] == [1, 2]
-    assert [
-        item.kwargs["size"] for item in client_mock.list_pipeline_runs.call_args_list
-    ] == [3, 3]
+
+
+def test_replay_scan_handles_missing_flow_name() -> None:
+    named_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    named_run.original_run = SimpleNamespace(id="original-a")
+    unnamed_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name=None,
+    )
+    unnamed_run.original_run = SimpleNamespace(id="original-a")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(named_run), _as_pipeline_run(unnamed_run)],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name=None,
+            limit=10,
+        )
+
+    assert [execution.exec_id for execution in executions] == [str(unnamed_run.id)]
+    assert truncated is False
+    assert "pipeline_name" not in client_mock.list_pipeline_runs.call_args.kwargs
 
 
 @pytest.mark.parametrize(
@@ -3019,7 +3053,7 @@ def test_filtered_replay_list_rejects_invalid_original_ids(
         with pytest.raises(KitaruUsageError, match="original_exec_ids"):
             client.executions._list_replays_for_originals(
                 original_exec_ids=original_ids,
-                flow="flow_a",
+                expected_flow_name="flow_a",
                 limit=10_000,
             )
 

@@ -226,7 +226,7 @@ def _token_totals(checkpoint: CheckpointCall) -> dict[str, int]:
 def _artifact_content_hash(
     artifact_id: str,
     client: KitaruClient,
-    cache: dict[str, str | None],
+    cache: dict[str, str],
 ) -> str | None:
     if artifact_id in cache:
         return cache[artifact_id]
@@ -236,7 +236,7 @@ def _artifact_content_hash(
         payload = json.dumps(value, sort_keys=True, default=str)
         result = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     except Exception:
-        result = None
+        return None
     cache[artifact_id] = result
     return result
 
@@ -244,7 +244,7 @@ def _artifact_content_hash(
 def _artifact_hashes(
     checkpoint: CheckpointCall,
     client: KitaruClient,
-    cache: dict[str, str | None],
+    cache: dict[str, str],
 ) -> dict[str, str | None]:
     hashes: dict[str, str | None] = {}
     for artifact in checkpoint.artifacts:
@@ -291,7 +291,7 @@ def _compare_checkpoints(
     original_cp: CheckpointCall | None,
     replay_cp: CheckpointCall | None,
     client: KitaruClient,
-    artifact_hash_cache: dict[str, str | None],
+    artifact_hash_cache: dict[str, str],
 ) -> CheckpointDiff:
     checkpoint = original_cp or replay_cp
     name = checkpoint.name if checkpoint is not None else "unknown"
@@ -412,9 +412,10 @@ def _replay_discovery_warning(flow_name: str | None) -> str:
     else:
         query_scope = f"flow {flow_name}"
     return (
-        f"The combined replay discovery query for {query_scope} exceeded the "
-        f"{_AUTO_DISCOVERY_SCAN_LIMIT} matching-replay limit. This row may omit "
-        "older replays; pass replay execution IDs explicitly to compare them."
+        f"Replay discovery for {query_scope} scanned "
+        f"{_AUTO_DISCOVERY_SCAN_LIMIT} executions before confirming that older "
+        "executions remain. This row may omit older replays; pass replay execution "
+        "IDs explicitly to compare them."
     )
 
 
@@ -424,10 +425,10 @@ def _discover_replays(
     flow_name: str | None,
     original_exec_ids: Sequence[str],
 ) -> tuple[dict[str, list[str]], list[str]]:
-    """Find matching replays for one flow with one filtered backend query."""
+    """Find matching native replays with one bounded scan for one flow."""
     candidates, truncated = client.executions._list_replays_for_originals(
         original_exec_ids=original_exec_ids,
-        flow=flow_name,
+        expected_flow_name=flow_name,
         limit=_AUTO_DISCOVERY_SCAN_LIMIT,
     )
     replay_ids_by_original = {exec_id: [] for exec_id in original_exec_ids}
@@ -446,7 +447,7 @@ def _compare_execution(
     original_execution: Execution,
     replay_exec_ids: Sequence[str],
     warnings: Sequence[str],
-    artifact_hash_cache: dict[str, str | None],
+    artifact_hash_cache: dict[str, str],
     ui_context: UiUrlContext | None,
 ) -> ExecutionDiff:
     """Compare one loaded original against explicit replay execution IDs."""
@@ -506,7 +507,7 @@ def diff(
         },
     )
     client = KitaruClient()
-    artifact_hash_cache: dict[str, str | None] = {}
+    artifact_hash_cache: dict[str, str] = {}
     ui_context = _client_ui_url_context(client)
     original_execution = client.executions.get(original)
     if executions:
@@ -544,7 +545,7 @@ def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
         },
     )
     client = KitaruClient()
-    artifact_hash_cache: dict[str, str | None] = {}
+    artifact_hash_cache: dict[str, str] = {}
     ui_context = _client_ui_url_context(client)
     executions_by_selector: dict[str, Execution] = {}
     originals_by_id: dict[str, Execution] = {}

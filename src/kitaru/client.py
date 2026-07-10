@@ -24,6 +24,7 @@ import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
 from typing import Any, Literal, NoReturn, Protocol, cast
 from uuid import UUID
@@ -36,6 +37,7 @@ from zenml.exceptions import EntityExistsError
 from zenml.login.credentials_store import get_credentials_store
 from zenml.models import PipelineRunResponse, PipelineRunUpdate
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
+from zenml.utils.pagination_utils import depaginate_stream
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
@@ -1906,13 +1908,15 @@ class _ExecutionsAPI:
         self,
         *,
         original_exec_ids: Sequence[str],
-        flow: str | None,
+        expected_flow_name: str | None,
         limit: int,
     ) -> tuple[builtins.list[Execution], bool]:
         """List replay executions linked to any requested original.
 
-        Returns up to ``limit`` lightweight executions in backend order and
-        whether one additional execution passed the exact client-side checks.
+        Scans up to ``limit`` lightweight executions for one flow in backend
+        order. ``expected_flow_name=None`` selects only executions whose flow
+        name is unavailable; it does not disable flow filtering. Returns
+        matching native replays and whether older executions in the scan remain.
         """
         normalized_ids = _validate_non_empty_string_list(
             original_exec_ids,
@@ -1922,53 +1926,52 @@ class _ExecutionsAPI:
             raise KitaruUsageError("`original_exec_ids` must contain at least one ID.")
         if isinstance(limit, bool) or limit < 1:
             raise KitaruUsageError("`limit` must be >= 1.")
-        if flow is not None and _normalize_flow_name(flow) is None:
+        if (
+            expected_flow_name is not None
+            and _normalize_flow_name(expected_flow_name) is None
+        ):
             return [], False
 
-        server_filters: dict[str, Any] = {
-            "run_metadata": (
-                "original_exec_id:" + _backend_filter_value(normalized_ids)
+        server_filters: dict[str, Any] = {}
+        if expected_flow_name is not None:
+            server_filters["pipeline_name"] = _pipeline_name_filter_value(
+                expected_flow_name
             )
-        }
-        if flow is not None:
-            server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
 
         original_ids = set(normalized_ids)
         results: builtins.list[Execution] = []
-        backend_page = 1
-        page_size = min(100, limit + 1)
+        runs = depaginate_stream(
+            self._client_ref._client().list_pipeline_runs,
+            sort_by="desc:created",
+            page=1,
+            size=100,
+            project=self._client_ref._project,
+            hydrate=False,
+            **server_filters,
+        )
+        for scanned_count, run in enumerate(islice(runs, limit + 1), start=1):
+            if scanned_count > limit:
+                return results, True
 
-        while True:
-            run_page = self._client_ref._client().list_pipeline_runs(
-                sort_by="desc:created",
-                page=backend_page,
-                size=page_size,
-                project=self._client_ref._project,
-                hydrate=False,
-                **server_filters,
+            pipeline = getattr(run, "pipeline", None)
+            raw_flow_name = (
+                _normalize_flow_name(pipeline.name) if pipeline is not None else None
             )
-            page_runs = list(run_page.items)
-            total = int(run_page.total)
-            if not page_runs:
-                break
+            if raw_flow_name != expected_flow_name:
+                continue
 
-            for run in page_runs:
-                execution = _map_execution(
+            original_run = getattr(run, "original_run", None)
+            raw_original_id = str(original_run.id) if original_run is not None else None
+            if raw_original_id not in original_ids:
+                continue
+
+            results.append(
+                _map_execution(
                     run=run,
                     client=self._client_ref,
                     include_details=False,
                 )
-                if flow is not None and execution.flow_name != flow:
-                    continue
-                if execution.original_exec_id not in original_ids:
-                    continue
-                results.append(execution)
-                if len(results) > limit:
-                    return results[:limit], True
-
-            if backend_page * page_size >= total or len(page_runs) < page_size:
-                break
-            backend_page += 1
+            )
 
         return results, False
 
