@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. The execution-level `llm_usage_summary_v1` payload is unchanged, cached and replay-reused checkpoints report zero incurred cost, and metadata writes are best-effort so a failed write never fails the run. (#528)
+- LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. Per-checkpoint values sum exactly to the execution-level totals, and the execution-level `llm_usage_summary_v1` payload is unchanged. (#528)
+- Cached, skipped, and replay-reused checkpoints report their token counts under the `reused_*` fields with zero incurred and zero display cost, so a replayed run shows what the work would have cost without billing it again. Retried checkpoints keep a separate record per attempt, so a retry that really called the provider twice is counted twice. (#528)
 
-### Fixed
-- Execution views now show the checkpoint attempt that ZenML surfaces in the run graph. When a checkpoint was retried, `KitaruClient.executions.get()`, `kitaru executions get`, and the MCP execution tools could surface the superseded `retried` attempt instead of the live one; they now select the newest non-retried attempt. (#528)
+### Changed
+- Terminal cost metadata writes are best-effort: a failed write is debug-logged, the remaining checkpoint writes are still attempted, and incomplete persistence is reported so aggregation can be retried. A metadata write failure never fails the flow run. (#528)
 
 ### Infrastructure
 - The release workflow's GitHub Release asset reconcile step now skips signature and attestation assets, which are regenerated per dispatch and previously caused recovery re-dispatches to hard-fail on a non-reproducible asset mismatch. (#513)
