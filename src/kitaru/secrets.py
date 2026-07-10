@@ -15,6 +15,7 @@ from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruUsageError
 
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SECRETS_BACKEND_SCAN_SIZE = 50
 
 
 class Secret(BaseModel):
@@ -223,6 +224,40 @@ def _read_secret_values(secret_name: str) -> dict[str, str]:
     return values
 
 
+def list_secrets() -> list[SecretSummary]:
+    """List all accessible secrets as metadata-only summaries.
+
+    Returns:
+        All accessible secrets, ordered case-insensitively by name and then by
+        ID.
+
+    Raises:
+        KitaruBackendError: If client creation, a backend request, or response
+            conversion fails.
+    """
+    try:
+        client = _ZenMLClient()
+        first_page = client.list_secrets(page=1, size=_SECRETS_BACKEND_SCAN_SIZE)
+        summaries = [
+            _secret_summary_from_response(secret_response)
+            for secret_response in first_page.items
+        ]
+
+        for page_number in range(2, first_page.total_pages + 1):
+            page = client.list_secrets(
+                page=page_number,
+                size=_SECRETS_BACKEND_SCAN_SIZE,
+            )
+            summaries.extend(
+                _secret_summary_from_response(secret_response)
+                for secret_response in page.items
+            )
+
+        return sorted(summaries, key=lambda summary: (summary.name.lower(), summary.id))
+    except Exception as exc:
+        raise KitaruBackendError(f"Failed to list secrets: {exc}") from exc
+
+
 def get_secret(name_or_id: str) -> Secret:
     """Read a stored secret by exact name or ID.
 
@@ -303,4 +338,11 @@ def delete_secret(name_or_id: str) -> SecretSummary:
     return summary
 
 
-__all__ = ["Secret", "SecretSummary", "create_secret", "delete_secret", "get_secret"]
+__all__ = [
+    "Secret",
+    "SecretSummary",
+    "create_secret",
+    "delete_secret",
+    "get_secret",
+    "list_secrets",
+]
