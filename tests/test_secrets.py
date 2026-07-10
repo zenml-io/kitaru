@@ -98,6 +98,35 @@ def test_list_secrets_returns_metadata_without_raw_values() -> None:
     }
 
 
+def test_list_secrets_returns_empty_keys_when_backend_does_not_populate_values() -> None:
+    """SDK listing should reflect backend responses that omit value metadata."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                name="provider-creds",
+                id="secret-id",
+                private=False,
+                values={},
+            )
+        ],
+        total_pages=1,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summaries = list_secrets()
+
+    assert summaries == [
+        SecretSummary(
+            name="provider-creds",
+            id="secret-id",
+            private=False,
+            keys=[],
+            has_missing_values=False,
+        )
+    ]
+
+
 def test_list_secrets_orders_by_case_insensitive_name_then_id() -> None:
     """SDK listing should return deterministic global ordering."""
     client = Mock()

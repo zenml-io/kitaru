@@ -1500,6 +1500,33 @@ def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> 
     ]
 
 
+def test_secrets_list_returns_empty_keys_when_backend_omits_value_metadata() -> None:
+    """MCP listing should serialize the metadata available in real list responses."""
+    summary = SecretSummary(
+        name="provider-creds",
+        id="secret-id",
+        private=False,
+        keys=[],
+        has_missing_values=False,
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=[summary],
+    ):
+        payload = kitaru_secrets_list()
+
+    assert payload == [
+        {
+            "id": "secret-id",
+            "name": "provider-creds",
+            "visibility": "public",
+            "keys": [],
+            "has_missing_values": False,
+        }
+    ]
+
+
 @pytest.mark.parametrize("page", [True, 0, -1])
 def test_secrets_list_rejects_invalid_page(page: Any) -> None:
     with (

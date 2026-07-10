@@ -166,6 +166,10 @@ returns only metadata for each secret: `id`, `name`, `visibility`, `keys`, and
 `has_missing_values`. It never returns secret values. Pages beyond the available
 results return `[]`.
 
+When listing secrets, `keys` and `has_missing_values` may be unpopulated because
+the backend does not include key names in list responses. These fields are
+meaningful in `kitaru_secrets_create` responses and the CLI `secrets show` path.
+
 `kitaru_secrets_create` also returns metadata only. The MCP server intentionally
 does not expose `kitaru_secrets_delete`; use the CLI or Python SDK for deletion.
 
