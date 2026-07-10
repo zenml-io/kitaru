@@ -37,6 +37,7 @@ from kitaru._local_server import (
     stop_registered_local_server,
 )
 from kitaru.analytics import AnalyticsEvent, set_source, track
+from kitaru.errors import KitaruUsageError
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -561,6 +562,28 @@ def kitaru_secrets_create(
             secrets_api.create_secret(name, values, private=private)
         )
     )
+
+
+@tracked_mcp_tool
+def kitaru_secrets_list(
+    page: int = 1,
+    size: int = 20,
+) -> list[dict[str, Any]]:
+    """List paginated secret metadata without raw values."""
+
+    def _list_secrets() -> list[dict[str, Any]]:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise KitaruUsageError("`page` must be an integer >= 1.")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+            raise KitaruUsageError("`size` must be an integer >= 1.")
+
+        all_summaries = secrets_api.list_secrets()
+        start = (page - 1) * size
+        end = start + size
+        page_items = all_summaries[start:end]
+        return [inspection.serialize_secret_summary(summary) for summary in page_items]
+
+    return run_with_mcp_error_boundary(_list_secrets)
 
 
 @tracked_mcp_tool
