@@ -39,6 +39,9 @@ This gives you the full SDK, CLI, and everything you need to run flows locally.
 | `mcp` | MCP server for querying executions from AI assistants |
 | `modal` | Python dependencies needed to create and validate Modal-backed stacks |
 | `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
+| `openai` | OpenAI SDK for `kitaru.llm()` calls to OpenAI models |
+| `anthropic` | Anthropic SDK for `kitaru.llm()` calls to Claude models |
+| `llm` | Both `openai` and `anthropic` provider packages in one install |
 
 ```bash
 uv add "kitaru[mcp,pydantic-ai,local]"
@@ -46,6 +49,9 @@ uv add "kitaru[mcp,pydantic-ai,local]"
 
 # Modal stacks: uv add "kitaru[modal]"
 # or: pip install "kitaru[modal]"
+
+# Provider extras: uv add "kitaru[openai]"
+# or: pip install "kitaru[openai]"
 ```
 
 The `modal` extra does not create Modal tokens, Docker registry logins, cloud

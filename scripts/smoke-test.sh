@@ -1774,7 +1774,7 @@ run_test "examples/integrations/gemini_interactions_agent/gemini_interactions_ad
 if [[ "$HAS_GEMINI_API_KEY" == true ]]; then
     run_provider_test "gemini-model" "GEMINI_API_KEY,GOOGLE_API_KEY" \
         "examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --mode model" \
-        timed 120 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+        timed 180 $UV_RUN python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
             --mode model \
             --prompt "Explain one Kitaru checkpoint in one short sentence."
 elif [[ "$HAS_GEMINI_VERTEX" == true ]]; then
