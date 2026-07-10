@@ -1841,6 +1841,8 @@ run_expected_failure "kitaru build rejects local stack deployments" \
 # ---------------------------------------------------------------------------
 section_header "Secret API"
 
+run_test "kitaru secrets list --help" $UV_RUN kitaru secrets list --help
+
 SMOKE_SECRET_NAME="kitaru-smoke-creds"
 run_test "kitaru secrets set smoke secret" \
     $UV_RUN kitaru secrets set "$SMOKE_SECRET_NAME" --SMOKE_TOKEN=smoke-value
@@ -2015,6 +2017,9 @@ run_test "MCP: kitaru_projects_list" \
 
 run_test "MCP: kitaru_projects_current" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_current --json
+
+run_test "MCP: kitaru_secrets_list" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_secrets_list --json
 
 run_expected_failure "MCP: local/OSS blocks kitaru_projects_use" \
     "$PROJECT_GUARD_MESSAGE" \
