@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Missing stack integration dependencies now fail before deploy, run, or replay with a concise Kitaru explanation followed by ZenML's exact integration and whole-stack installation guidance. (#506)
+
 ## [0.20.2] - 2026-07-10
 
 ### Added
