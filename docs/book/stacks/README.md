@@ -5,8 +5,10 @@ icon: layer-group
 
 # Stacks
 
-A **stack** is where the runner places work and where artifacts live. It
-bundles three concerns:
+A **stack** is where your flows run and where their checkpoints persist. It is the
+durable substrate replay depends on: checkpoints written to a stack's artifact
+store are what a later `flow.replay(...)` reads back to reproduce a run faithfully.
+A stack bundles three concerns:
 
 - **Execution placement** — the compute backend the runner uses for the run
   itself and for any `runtime="isolated"` checkpoints (local, Kubernetes, AWS,
@@ -16,10 +18,10 @@ bundles three concerns:
 - **Container registry** — where Kitaru pushes the image it builds for remote
   execution
 
-The active stack is the default; per-flow and per-run overrides can bind a
+The active stack is the default. Per-flow and per-run overrides can bind a
 different stack for a single execution. See
-[How It Works](../concepts/how-it-works.md) for how execution
-placement interacts with the runner.
+[How It Works](../concepts/how-it-works.md) for how execution placement interacts
+with the runner.
 
 ## The default stack
 
@@ -102,10 +104,11 @@ kitaru stack create dev --no-activate
 
 ## Create a remote stack
 
-Today, the CLI and MCP server can provision five shipped stack types:
+Today, the CLI and MCP server can provision six shipped stack types:
 
 - `local`
 - `kubernetes`
+- `modal`
 - `vertex`
 - `sagemaker`
 - `azureml`
@@ -114,7 +117,12 @@ These remote stack commands assume you are already connected to the Kitaru
 server that should own the stack. If you already have a deployed server,
 connect first with `kitaru login ...` and verify with `kitaru status`.
 
-In story form: Kitaru can assemble the stack definition and cloud connector for you, but it still expects the bucket, registry, and any cluster you point at to already exist.
+Kitaru assembles the stack definition for you. For Kubernetes, Vertex,
+SageMaker, and AzureML stacks it also creates the cloud service connector. Modal
+stacks split that responsibility: the Modal runner itself is connectorless, but
+Kitaru can link existing server-side service connectors to the storage and
+registry components. If you pass explicit cloud credential flags, Kitaru creates
+a new connector instead.
 
 ### Kubernetes example
 
@@ -170,6 +178,25 @@ kitaru stack create prod-azureml \
 
 AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
+### Modal example
+
+Install the Modal extra before creating Modal stacks:
+
+```bash
+uv add "kitaru[modal]"
+# or: pip install "kitaru[modal]"
+```
+
+```bash
+kitaru stack create prod-modal \
+  --type modal \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru \
+  --sandbox modal
+```
+
+Modal is a managed-runner path that is not tied to one cloud provider: Kitaru infers the provider from your artifact-store URI, so `s3://`, `gs://`, and `az://` each pick the matching storage and registry flavors. Without explicit cloud credential flags, Kitaru first tries to reuse matching server-side service connectors for the bucket and registry; if none exist, it creates a connectorless stack for public or manually configured resources. `--sandbox modal` is optional and attaches a Modal sandbox for agent flows. For the end-to-end Modal setup, including AWS/GCP/Azure variants, connector reuse, explicit credential caveats, and the Docker CLI/BuildKit image-builder requirement, see [Modal](modal-stacks.md).
+
 You can also keep the same inputs in a YAML file and create the stack with:
 
 ```bash
@@ -180,20 +207,17 @@ CLI flags still override YAML values when both are provided.
 
 ## Advanced stack defaults with `--extra` and `--async`
 
-The named stack flags cover the common story: where artifacts live, which registry to use, which cluster or cloud region to target.
+The named stack flags cover the common case: where artifacts live, which registry
+to use, which cluster or cloud region to target. When you need to set a field on
+an underlying stack component directly, use `--extra`.
 
-Sometimes you need one layer deeper. That is what `--extra` is for.
-
-Think of it like this:
-
-- the named flags are the front desk
-- `--extra` is the side door into the underlying stack component defaults
-
-You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
+Pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
 
 - `orchestrator`
 - `artifact_store`
 - `container_registry`
+- `sandbox` — only used when the stack includes a sandbox component, for
+  example when you pass `--sandbox modal`
 
 For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
 
@@ -237,7 +261,7 @@ extra:
     default_repository: agents
 ```
 
-CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.
+CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object.
 
 Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, see the ZenML component reference for your orchestrator type: [Kubernetes](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes), [Vertex](https://docs.zenml.io/stacks/stack-components/orchestrators/vertex), [SageMaker](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker), [AzureML](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
@@ -261,6 +285,21 @@ If the stack you are deleting is currently active, Kitaru protects you by defaul
 kitaru stack delete dev --recursive --force
 ```
 
+## Use the active stack sandbox from Python
+
+`kitaru.run_sandbox_command(...)` runs a command in the sandbox attached to your active stack, rather than choosing one by type. It finds the stack's one sandbox component, runs the command in a temporary session, and returns the output.
+
+```python
+import kitaru
+
+result = kitaru.run_sandbox_command("python --version")
+print(result.stdout)
+```
+
+If the active stack's sandbox is `local`, the command runs as a local subprocess, so treat it like running on your own machine, not a locked-down container. When a model chooses the command, use an isolated sandbox and minimal credentials. Kitaru raises an error instead of guessing if the active stack has no sandbox, or more than one.
+
+For a runnable version inside a tracked flow, see `features/sandbox/active_stack_sandbox_command.py` in the [examples guide](../getting-started/examples.md).
+
 ## Use the Python SDK
 
 ```python
@@ -278,11 +317,11 @@ The SDK keeps `StackInfo` intentionally small: `id`, `name`, and `is_active`.
 
 That means `is_managed` is part of structured list output, not part of `StackInfo` itself.
 
-One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes, Vertex, SageMaker, and AzureML stack creation are exposed through the CLI and MCP surfaces.
+One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes, Modal, Vertex, SageMaker, and AzureML stack creation are exposed through the CLI and MCP surfaces.
 
 ## Precedence with flow-level stack overrides
 
-The active stack is only one layer in the execution precedence chain. Higher layers can override it:
+The active stack is only one layer in the execution precedence chain. Higher layers override it (highest first):
 
 1. `my_flow.run(..., stack="gpu-cluster")`
 2. `@flow(stack="gpu-cluster")`
@@ -291,7 +330,7 @@ The active stack is only one layer in the execution precedence chain. Higher lay
 5. `pyproject.toml` (`[tool.kitaru].stack`)
 6. currently active stack
 
-In story form:
+What each layer does:
 
 - `kitaru stack use prod` changes your persisted default stack
 - `kitaru.configure(stack="gpu-cluster")` changes the default only for the current Python process
@@ -303,6 +342,7 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 ## Related pages
 
 - [Kubernetes](kubernetes-stacks.md)
+- [Modal](modal-stacks.md)
 - [Containerization](../guides/containerization.md)
 - [Flows](../concepts/flows.md)
 - [CLI stack commands](https://sdkdocs.kitaru.ai)

@@ -10,12 +10,20 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic_core import to_jsonable_python
 
 from kitaru._env import _temporary_env
+from kitaru._llm_usage import (
+    build_usage_record,
+    estimate_genai_prices_cost_from_response,
+    usage_record_metadata,
+)
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import (
@@ -31,7 +39,14 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.logging import log
-from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
+from kitaru.replay_context import resolve_model_override
+from kitaru.runtime import (
+    _get_current_checkpoint_id,
+    _get_current_checkpoint_name,
+    _is_inside_checkpoint,
+    _is_inside_flow,
+    _next_llm_call_name,
+)
 from kitaru.secrets import _read_secret_values
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
@@ -41,8 +56,19 @@ _OLLAMA_HOST_ENV = "OLLAMA_HOST"
 _OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 _OLLAMA_DUMMY_API_KEY = "ollama"  # Ollama needs no auth; prevents OpenAI SDK env lookup
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_MIN_REDACTABLE_SECRET_LENGTH = 8
+_CREDENTIAL_KEY_PARTS = {
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "KEY",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+}
+_LLM_FAILURE_ANALYTICS_MARKER = "_kitaru_llm_failure_analytics_tracked"
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
+_OpenAITokenLimitParam = Literal["max_tokens", "max_completion_tokens"]
 
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
@@ -58,6 +84,11 @@ class _LLMUsage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    raw_usage: dict[str, Any] | None = None
 
 
 class _LLMRequest(BaseModel):
@@ -110,6 +141,15 @@ class _ProviderCallResult:
     usage: _LLMUsage
 
 
+@dataclass(frozen=True)
+class _DirectCostEstimate:
+    """Estimated cost result for one direct LLM call."""
+
+    estimated_cost_usd: float | None = None
+    cost_source_label: str | None = None
+    pricing_version: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Name normalization
 # ---------------------------------------------------------------------------
@@ -149,6 +189,16 @@ def _provider_credential_keys(model: str) -> tuple[str, ...] | None:
     if provider is None:
         return None
     return _MODEL_PROVIDER_HINTS.get(provider)
+
+
+def _openai_token_limit_param(model: str) -> _OpenAITokenLimitParam:
+    """Return the Chat Completions output-limit field for an OpenAI model."""
+    normalized_model = model.strip().lower()
+    if normalized_model.startswith("gpt-5"):
+        return "max_completion_tokens"
+    if re.match(r"o[134](?:$|[-_.])", normalized_model):
+        return "max_completion_tokens"
+    return "max_tokens"
 
 
 def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
@@ -284,6 +334,60 @@ def _normalize_messages(
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_credential_name(name: str) -> bool:
+    """Return whether an environment-style name usually carries credentials."""
+    normalized = name.upper()
+    parts = set(re.split(r"[^A-Z0-9]+", normalized))
+    return bool(parts & _CREDENTIAL_KEY_PARTS) or "APIKEY" in normalized
+
+
+def _redactable_secret(value: str | None) -> str | None:
+    """Return a value only when redacting it is unlikely to erase harmless text."""
+    if value is None or value == _OLLAMA_DUMMY_API_KEY:
+        return None
+    if len(value) < _MIN_REDACTABLE_SECRET_LENGTH:
+        return None
+    return value
+
+
+def _redact_provider_error_text(
+    text: str,
+    *,
+    env_overlay: Mapping[str, str],
+    env_names: Sequence[str] = (),
+    extra_secrets: Sequence[str | None] = (),
+) -> str:
+    """Strip known credential values from provider SDK error text.
+
+    Provider SDK exceptions can echo request credentials. Kitaru only redacts
+    values from credential-like overlay keys, explicit provider credential names,
+    or explicit SDK credential arguments so ordinary secret fields do not hide
+    useful provider diagnostics.
+    """
+    credential_names = {
+        name
+        for name in set(env_overlay) | set(env_names)
+        if _looks_like_credential_name(name)
+    }
+    secrets: list[str] = []
+    for name in credential_names:
+        if secret := _redactable_secret(env_overlay.get(name)):
+            secrets.append(secret)
+        if secret := _redactable_secret(os.environ.get(name)):
+            secrets.append(secret)
+    for candidate in extra_secrets:
+        if secret := _redactable_secret(candidate):
+            secrets.append(secret)
+
+    unique_secrets: list[str] = sorted(
+        set(secrets), key=lambda secret: len(secret), reverse=True
+    )
+    redacted = text
+    for secret in unique_secrets:
+        redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
 def _call_openai(
     *,
     model: str,
@@ -294,6 +398,7 @@ def _call_openai(
     base_url: str | None = None,
     api_key: str | None = None,
     provider_label: str = "openai",
+    token_limit_param: _OpenAITokenLimitParam = "max_tokens",
 ) -> _ProviderCallResult:
     """Execute one OpenAI-compatible Chat Completions call.
 
@@ -312,7 +417,7 @@ def _call_openai(
     if temperature is not None:
         kwargs["temperature"] = temperature
     if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+        kwargs[token_limit_param] = max_tokens
 
     client_kwargs: dict[str, Any] = {}
     if base_url is not None:
@@ -321,13 +426,19 @@ def _call_openai(
         client_kwargs["api_key"] = api_key
 
     with _temporary_env(env_overlay):
-        client = OpenAI(**client_kwargs)
         try:
+            client = OpenAI(**client_kwargs)
             response = client.chat.completions.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS.get(provider_label, ()),
+                extra_secrets=(api_key,),
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling {provider_label} for "
-                f"model `{provider_label}/{model}`: {exc}"
+                f"model `{provider_label}/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(
@@ -383,13 +494,18 @@ def _call_anthropic(
         kwargs["temperature"] = temperature
 
     with _temporary_env(env_overlay):
-        client = Anthropic()
         try:
+            client = Anthropic()
             response = client.messages.create(**kwargs)
         except Exception as exc:
+            safe_text = _redact_provider_error_text(
+                str(exc),
+                env_overlay=env_overlay,
+                env_names=_MODEL_PROVIDER_HINTS["anthropic"],
+            )
             raise KitaruBackendError(
                 f"kitaru.llm() failed while calling Anthropic for model "
-                f"`anthropic/{model}`: {exc}"
+                f"`anthropic/{model}`: {safe_text}"
             ) from exc
 
     return _ProviderCallResult(
@@ -488,15 +604,21 @@ def _extract_response_text_anthropic(raw_response: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_usage_int(usage_payload: Any, key: str) -> int | None:
-    """Read an integer field from a usage payload (Mapping or object)."""
+def _read_usage_value(usage_payload: Any, key: str) -> Any:
+    """Read one field from a usage payload (Mapping or object)."""
     if usage_payload is None:
         return None
-    raw_value: Any
-    if isinstance(usage_payload, Mapping):
-        raw_value = usage_payload.get(key)
-    else:
-        raw_value = getattr(usage_payload, key, None)
+    try:
+        if isinstance(usage_payload, Mapping):
+            return usage_payload.get(key)
+        return getattr(usage_payload, key, None)
+    except Exception:
+        return None
+
+
+def _read_usage_int(usage_payload: Any, key: str) -> int | None:
+    """Read an integer field from a usage payload (Mapping or object)."""
+    raw_value = _read_usage_value(usage_payload, key)
     if raw_value is None:
         return None
     try:
@@ -505,19 +627,71 @@ def _read_usage_int(usage_payload: Any, key: str) -> int | None:
         return None
 
 
+def _jsonable_usage_payload(
+    usage_payload: Any,
+    *,
+    keys: Sequence[str],
+    detail_keys: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any] | None:
+    """Convert known provider usage fields into a JSON-safe mapping."""
+    if usage_payload is None:
+        return None
+    try:
+        if isinstance(usage_payload, Mapping):
+            jsonable = to_jsonable_python(dict(usage_payload), serialize_unknown=True)
+            if isinstance(jsonable, Mapping):
+                return {str(key): value for key, value in jsonable.items()}
+            return {"value": jsonable}
+        model_dump = getattr(usage_payload, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump(mode="python")
+            if isinstance(dumped, Mapping):
+                jsonable = to_jsonable_python(dumped, serialize_unknown=True)
+                if isinstance(jsonable, Mapping):
+                    return {str(key): value for key, value in jsonable.items()}
+    except Exception:
+        pass
+
+    raw: dict[str, Any] = {}
+    for key in keys:
+        value = _read_usage_value(usage_payload, key)
+        if value is not None:
+            try:
+                raw[key] = to_jsonable_python(value, serialize_unknown=True)
+            except Exception:
+                continue
+    for key, nested_keys in (detail_keys or {}).items():
+        nested = _read_usage_value(usage_payload, key)
+        if nested_mapping := _jsonable_usage_payload(nested, keys=nested_keys):
+            raw[key] = nested_mapping
+    return raw or None
+
+
 def _extract_usage_openai(raw_response: Any) -> _LLMUsage:
     """Extract usage from an OpenAI Chat Completions response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_usage_value(raw_response, "usage")
+    prompt_details = _read_usage_value(usage, "prompt_tokens_details")
+    completion_details = _read_usage_value(usage, "completion_tokens_details")
     return _LLMUsage(
         prompt_tokens=_read_usage_int(usage, "prompt_tokens"),
         completion_tokens=_read_usage_int(usage, "completion_tokens"),
         total_tokens=_read_usage_int(usage, "total_tokens"),
+        cached_input_tokens=_read_usage_int(prompt_details, "cached_tokens"),
+        reasoning_tokens=_read_usage_int(completion_details, "reasoning_tokens"),
+        raw_usage=_jsonable_usage_payload(
+            usage,
+            keys=("prompt_tokens", "completion_tokens", "total_tokens"),
+            detail_keys={
+                "prompt_tokens_details": ("cached_tokens",),
+                "completion_tokens_details": ("reasoning_tokens",),
+            },
+        ),
     )
 
 
 def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
     """Extract usage from an Anthropic Messages response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_usage_value(raw_response, "usage")
     input_tokens = _read_usage_int(usage, "input_tokens")
     output_tokens = _read_usage_int(usage, "output_tokens")
     total = None
@@ -527,6 +701,97 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=total,
+        cache_creation_input_tokens=_read_usage_int(
+            usage, "cache_creation_input_tokens"
+        ),
+        cache_read_input_tokens=_read_usage_int(usage, "cache_read_input_tokens"),
+        raw_usage=_jsonable_usage_payload(
+            usage,
+            keys=(
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct estimated cost calculation
+# ---------------------------------------------------------------------------
+
+
+def _direct_pricing_usage_payload(provider: str, usage: _LLMUsage) -> dict[str, Any]:
+    """Build the provider usage mapping expected by genai-prices."""
+    if provider == "openai":
+        payload: dict[str, Any] = {}
+        if usage.prompt_tokens is not None:
+            payload["prompt_tokens"] = usage.prompt_tokens
+        if usage.completion_tokens is not None:
+            payload["completion_tokens"] = usage.completion_tokens
+        if usage.total_tokens is not None:
+            payload["total_tokens"] = usage.total_tokens
+        if usage.cached_input_tokens is not None:
+            payload["prompt_tokens_details"] = {
+                "cached_tokens": usage.cached_input_tokens
+            }
+        if usage.reasoning_tokens is not None:
+            payload["completion_tokens_details"] = {
+                "reasoning_tokens": usage.reasoning_tokens
+            }
+        return payload
+
+    payload = {}
+    if usage.prompt_tokens is not None:
+        payload["input_tokens"] = usage.prompt_tokens
+    if usage.completion_tokens is not None:
+        payload["output_tokens"] = usage.completion_tokens
+    if usage.cache_creation_input_tokens is not None:
+        payload["cache_creation_input_tokens"] = usage.cache_creation_input_tokens
+    if usage.cache_read_input_tokens is not None:
+        payload["cache_read_input_tokens"] = usage.cache_read_input_tokens
+    return payload
+
+
+def _estimate_direct_llm_cost(
+    *,
+    resolved_model: str,
+    usage: _LLMUsage,
+    warnings: list[str],
+) -> _DirectCostEstimate:
+    """Estimate direct OpenAI/Anthropic call cost with genai-prices."""
+    provider = _provider_name(resolved_model)
+    _, _, provider_model = resolved_model.partition("/")
+    response_data = {
+        "model": provider_model,
+        "usage": _direct_pricing_usage_payload(provider or "", usage),
+    }
+    metadata = estimate_genai_prices_cost_from_response(
+        provider=provider,
+        model=resolved_model,
+        response_data=response_data,
+        warnings=warnings,
+        adapter_name="direct LLM",
+        api_flavor="chat" if provider == "openai" else None,
+        missing_package_warning=(
+            "genai-prices is not installed; direct LLM tokens were recorded "
+            "without an estimated cost."
+        ),
+        failure_warning_prefix=(
+            "genai-prices could not estimate direct LLM cost for "
+            f"{resolved_model!r}; tokens were recorded without an estimated cost"
+        ),
+        invalid_warning=(
+            "genai-prices returned an invalid direct LLM estimated cost for "
+            f"{resolved_model!r}; tokens were recorded without an estimated cost."
+        ),
+        failure_cost_source="none",
+    )
+    return _DirectCostEstimate(
+        estimated_cost_usd=metadata.estimated_cost_usd,
+        cost_source_label=metadata.cost_source_label,
+        pricing_version=metadata.pricing_version,
     )
 
 
@@ -559,6 +824,7 @@ def _dispatch_provider_call(
             temperature=temperature,
             max_tokens=max_tokens,
             env_overlay=env_overlay,
+            token_limit_param=_openai_token_limit_param(target.provider_model),
         )
     if target.provider == "anthropic":
         return _call_anthropic(
@@ -586,8 +852,78 @@ def _dispatch_provider_call(
             base_url=compat_base_url,
             api_key=compat_api_key,
             provider_label=target.provider,
+            token_limit_param="max_tokens",
         )
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
+
+
+def _track_llm_attempt_analytics(*, inside_checkpoint: bool) -> None:
+    """Emit privacy-safe analytics for a direct LLM call attempt."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LLM_ATTEMPTED,
+        {
+            "llm_path": "direct_llm",
+            "inside_checkpoint": inside_checkpoint,
+        },
+    )
+
+
+def _mark_llm_failure_tracked(exc: Exception) -> None:
+    """Mark an exception after emitting LLM failure analytics."""
+    with suppress(Exception):
+        setattr(exc, _LLM_FAILURE_ANALYTICS_MARKER, True)
+
+
+def _llm_failure_already_tracked(exc: Exception) -> bool:
+    """Return whether LLM failure analytics were already emitted."""
+    return bool(getattr(exc, _LLM_FAILURE_ANALYTICS_MARKER, False))
+
+
+def _llm_analytics_metadata(
+    *,
+    model_selection: ResolvedModelSelection | None = None,
+    credential_source: str | None = None,
+    mocked: bool | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build shared privacy-safe metadata for direct LLM analytics."""
+    metadata: dict[str, Any] = {}
+    if model_selection is not None:
+        metadata["resolved_model"] = model_selection.resolved_model
+        metadata["model"] = model_selection.resolved_model  # dashboard compat alias
+    if credential_source is not None:
+        metadata["credential_source"] = credential_source
+    if mocked is not None:
+        metadata["mocked"] = mocked
+    if extra_metadata is not None:
+        metadata.update(
+            {key: value for key, value in extra_metadata.items() if value is not None}
+        )
+    return metadata
+
+
+def _track_llm_failure_analytics(
+    *,
+    exc: Exception,
+    model_selection: ResolvedModelSelection | None = None,
+    credential_source: str | None = None,
+    mocked: bool | None = None,
+) -> None:
+    """Emit privacy-safe analytics for direct LLM call failures."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    metadata = {
+        "llm_path": "direct_llm",
+        "error_type": type(exc).__name__,
+        **_llm_analytics_metadata(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=mocked,
+        ),
+    }
+    track(AnalyticsEvent.LLM_FAILED, metadata)
 
 
 def _track_llm_call_analytics(
@@ -600,82 +936,135 @@ def _track_llm_call_analytics(
     """Emit the canonical `LLM_CALLED` analytics event."""
     from kitaru.analytics import AnalyticsEvent, track
 
-    metadata: dict[str, Any] = {
-        "resolved_model": model_selection.resolved_model,
-        "model": model_selection.resolved_model,  # dashboard compat alias
-        "credential_source": credential_source,
-        "mocked": mocked,
-    }
-    if extra_metadata is not None:
-        metadata.update(
-            {key: value for key, value in extra_metadata.items() if value is not None}
-        )
-    track(AnalyticsEvent.LLM_CALLED, metadata)
+    track(
+        AnalyticsEvent.LLM_CALLED,
+        _llm_analytics_metadata(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=mocked,
+            extra_metadata=extra_metadata,
+        ),
+    )
 
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
-    model_selection = resolve_model_selection(request.model)
-    messages = _normalize_messages(request.prompt, system=request.system)
-
-    # Mock short-circuit: skip credential resolution and provider SDK entirely
-    if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
-        result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
-        env_overlay: dict[str, str] = {}
-        credential_source = "environment"
-        latency_ms = 0.0
-        is_mocked = True
-    else:
-        env_overlay, credential_source = _resolve_credential_overlay(model_selection)
-        started_at = time.perf_counter()
-        result = _dispatch_provider_call(
-            model_selection=model_selection,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            env_overlay=env_overlay,
+    model_selection: ResolvedModelSelection | None = None
+    credential_source: str | None = None
+    is_mocked: bool | None = None
+    try:
+        model_override = resolve_model_override(
+            request.call_name,
+            _get_current_checkpoint_name(),
+            _get_current_checkpoint_id(),
         )
-        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
-        is_mocked = False
+        if model_override:
+            request = request.model_copy(update={"model": model_override})
 
-    response_text = result.response_text
-    usage = result.usage
+        model_selection = resolve_model_selection(request.model)
+        messages = _normalize_messages(request.prompt, system=request.system)
 
-    _safe_save(
-        f"{request.call_name}_prompt",
-        messages,
-        artifact_type="prompt",
-        save_func=save,
-    )
-    _safe_save(
-        f"{request.call_name}_response",
-        response_text,
-        artifact_type="response",
-        save_func=save,
-    )
+        # Mock short-circuit: skip credential resolution and provider SDK entirely
+        if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
+            is_mocked = True
+            result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
+            credential_source = "environment"
+            latency_ms = 0.0
+        else:
+            env_overlay, credential_source = _resolve_credential_overlay(
+                model_selection
+            )
+            is_mocked = False
+            started_at = time.perf_counter()
+            result = _dispatch_provider_call(
+                model_selection=model_selection,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+            )
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-    llm_metadata: dict[str, Any] = {
-        "requested_model": model_selection.requested_model,
-        "alias": model_selection.alias,
-        "resolved_model": model_selection.resolved_model,
-        "credential_source": credential_source,
-        "latency_ms": latency_ms,
-        "tokens_input": usage.prompt_tokens,
-        "tokens_output": usage.completion_tokens,
-        "total_tokens": usage.total_tokens,
-    }
-    filtered_metadata = {
-        key: value for key, value in llm_metadata.items() if value is not None
-    }
-    log(llm_calls={request.call_name: filtered_metadata})
+        response_text = result.response_text
+        usage = result.usage
+        usage_warnings: list[str] = []
+        cost_estimate = _estimate_direct_llm_cost(
+            resolved_model=model_selection.resolved_model,
+            usage=usage,
+            warnings=usage_warnings,
+        )
 
-    _track_llm_call_analytics(
-        model_selection=model_selection,
-        credential_source=credential_source,
-        mocked=is_mocked,
-    )
+        _safe_save(
+            f"{request.call_name}_prompt",
+            messages,
+            artifact_type="prompt",
+            save_func=save,
+        )
+        _safe_save(
+            f"{request.call_name}_response",
+            response_text,
+            artifact_type="response",
+            save_func=save,
+        )
 
-    return response_text
+        llm_metadata: dict[str, Any] = {
+            "requested_model": model_selection.requested_model,
+            "alias": model_selection.alias,
+            "resolved_model": model_selection.resolved_model,
+            "credential_source": credential_source,
+            "latency_ms": latency_ms,
+            "tokens_input": usage.prompt_tokens,
+            "tokens_output": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "estimated_cost_usd": cost_estimate.estimated_cost_usd,
+        }
+        filtered_metadata = {
+            key: value for key, value in llm_metadata.items() if value is not None
+        }
+        usage_record = build_usage_record(
+            adapter="kitaru.llm",
+            surface="direct_llm",
+            call_name=request.call_name,
+            record_id=f"{request.call_name}:{uuid4().hex}",
+            requested_model=model_selection.requested_model,
+            resolved_model=model_selection.resolved_model,
+            model=model_selection.resolved_model,
+            provider=_provider_name(model_selection.resolved_model),
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
+            raw_usage=usage.raw_usage,
+            estimated_cost_usd=cost_estimate.estimated_cost_usd,
+            cost_source_label=cost_estimate.cost_source_label,
+            pricing_version=cost_estimate.pricing_version,
+            latency_ms=latency_ms,
+            billing_effect="unknown" if is_mocked else "incurred",
+            cache_status="unknown" if is_mocked else "executed",
+            warnings=usage_warnings,
+        )
+        log(
+            llm_calls={request.call_name: filtered_metadata},
+            **usage_record_metadata(usage_record),
+        )
+
+        _track_llm_call_analytics(
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=is_mocked,
+        )
+
+        return response_text
+    except Exception as exc:
+        _track_llm_failure_analytics(
+            exc=exc,
+            model_selection=model_selection,
+            credential_source=credential_source,
+            mocked=is_mocked,
+        )
+        _mark_llm_failure_tracked(exc)
+        raise
 
 
 @checkpoint(type="llm_call")
@@ -716,16 +1105,25 @@ def llm(
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)
-    request = _LLMRequest(
-        prompt=prompt,
-        model=model,
-        system=system,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        call_name=_normalize_call_name(name),
-    )
 
-    if _is_inside_checkpoint():
-        return _execute_llm_call(request)
+    inside_checkpoint = _is_inside_checkpoint()
+    _track_llm_attempt_analytics(inside_checkpoint=inside_checkpoint)
+    try:
+        request = _LLMRequest(
+            prompt=prompt,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            call_name=_normalize_call_name(name),
+        )
 
-    return _llm_checkpoint_call(request, id=request.call_name)
+        if inside_checkpoint:
+            return _execute_llm_call(request)
+
+        return _llm_checkpoint_call(request, id=request.call_name)
+    except Exception as exc:
+        if not _llm_failure_already_tracked(exc):
+            _track_llm_failure_analytics(exc=exc)
+            _mark_llm_failure_tracked(exc)
+        raise

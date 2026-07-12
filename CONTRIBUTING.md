@@ -63,6 +63,17 @@ just fix    # Auto-fix formatting and lint issues
 - Write clear PR titles (no `feat:`/`fix:` prefixes) and describe what the
   changes do and why
 
+## Outside Contributor Flow
+
+If you are not able to open a pull request directly, please open an issue first
+and include the change you want to make. If you already have a branch ready,
+link to it in the issue so maintainers can review it.
+
+Maintainers may invite issue authors as repository collaborators when the change
+looks appropriate for the project and direct PR access would make review easier.
+Opening an issue or branch does not guarantee collaborator access; it gives the
+team the context needed to decide.
+
 ## Reporting Issues
 
 - **Bugs:** use the [bug report template](https://github.com/zenml-io/kitaru/issues/new?template=bug_report.md)

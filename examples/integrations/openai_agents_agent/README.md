@@ -9,11 +9,16 @@ checkpoints.
 ## Setup
 
 ```bash
-cd examples/integrations/openai_agents_agent
+# From the repository root:
 uv sync --extra local --extra openai-agents
 uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='sk-...'
+cd examples/integrations/openai_agents_agent
 ```
+
+`uv run kitaru init` creates the Kitaru project marker. `uv run kitaru stack
+create dev` creates and activates a local stack with a local sandbox.
 
 Default model is `gpt-5-nano`.
 
@@ -30,6 +35,43 @@ uv run python openai_agents_adapter.py
 ```
 
 If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
+
+## Active-stack sandbox tool example
+
+To let an OpenAI agent run a command through Kitaru's active stack sandbox, run:
+
+```bash
+uv run python openai_agents_sandbox_tool.py
+```
+
+The example gives the agent one local OpenAI Agents SDK `FunctionTool` created by
+`kitaru.adapters.openai_agents.sandbox_command_tool(...)`. When the model calls
+that tool, Kitaru runs the command through the sandbox attached to the active
+stack and returns compact JSON to the model. The prompt tells the model to check
+`exit_code` before trusting `stdout`.
+
+For this local setup, the active `dev` stack has one local sandbox. If you switch
+to another stack, that active stack must have exactly one sandbox component.
+Remote stacks need an explicit sandbox component. If the active stack has no
+sandbox, or has more than one sandbox, Kitaru raises an error instead of guessing
+where to run the command.
+
+Security note: the tool schema prevents the model from choosing extra environment
+variables for a tool call, but the model still chooses the command. Do not attach
+this tool to a sandbox that contains secrets, broad cloud credentials, or network
+access the agent does not need. If prompts or users are not fully trusted, put a
+small allowlist or validator in front of the tool so only approved commands run.
+
+The sandbox tool example also supports the same strategy comparison mode:
+
+```bash
+OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_sandbox_tool.py
+```
+
+The default `runner_call` run saves one outer OpenAI runner checkpoint. In the
+optional `calls` run, the sandbox command becomes its own `tool_call` checkpoint,
+so you can inspect the command input and compact JSON result separately in the
+Kitaru UI.
 
 ## Streaming example
 
@@ -62,24 +104,23 @@ adapter's `OpenAIRunResult` becomes the flow's terminal artifact and
 ## `calls` vs `runner_call` (plain-language version)
 
 - `runner_call`: Kitaru places one bigger checkpoint around the entire
-  `Runner.run(...)` call. Single terminal artifact, clean `.wait()` return.
+  `Runner.run(...)` call. This is useful when you want one coarse replay unit.
 - `calls`: Kitaru places smaller checkpoints around each supported model/tool
-  call. Finer replay units, but each call becomes a peer checkpoint with no
-  single sink — `.wait()` raises `KitaruAmbiguousFlowResultError` because
-  there is no "the" return value. The per-checkpoint artifacts are still
-  visible in the Kitaru UI.
+  call. You get finer replay units, and `.wait()` still returns the flow's
+  persisted final output when the flow has an explicit `return` value. The
+  per-checkpoint artifacts are still visible in the Kitaru UI.
 
 To see both side-by-side (the default `runner_call` run, then the `calls`
-run with the expected ambiguity error printed), use:
+run with the same final output plus finer checkpoint detail), use:
 
 ```bash
 OPENAI_AGENTS_COMPARE_CALLS=1 uv run python openai_agents_adapter.py
 ```
 
 In that mode you'll see the `runner_call` model output first, then a
-`=== calls strategy output ===` section showing the new actionable error
-that names the terminal checkpoints, gives the execution ID, and points at
-the Kitaru UI / `KitaruClient` for per-checkpoint artifact retrieval.
+`=== calls strategy output ===` section that prints the final answer from the
+persisted flow output. The `calls` run also produces finer-grained model/tool
+checkpoints that are visible in the Kitaru UI.
 
 ## Passing OpenAI Agents context
 

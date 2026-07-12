@@ -13,13 +13,20 @@ from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
+from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
 
+from kitaru._checkpoint_metadata import (
+    KITARU_METADATA_NAMESPACE,
+    adapter_checkpoint_metadata,
+)
 from kitaru._client._mappers import _map_checkpoint_call
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
     CheckpointCall,
     Execution,
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -52,6 +59,8 @@ from kitaru.inspection import (
     serialize_checkpoint_attempt,
     serialize_checkpoint_call,
     serialize_execution,
+    serialize_execution_statistics,
+    serialize_execution_statistics_group,
     serialize_execution_summary,
     serialize_failure,
     serialize_log_entry,
@@ -363,6 +372,72 @@ def test_checkpoint_mapping_includes_structural_input_artifacts() -> None:
     assert checkpoint.artifacts[1].kind == "response"
 
 
+def test_checkpoint_mapping_surfaces_adapter_checkpoint_metadata() -> None:
+    step = SimpleNamespace(
+        id="step-id",
+        name="lookup_policy_tool",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={
+            KITARU_METADATA_NAMESPACE: adapter_checkpoint_metadata(
+                adapter="pydantic_ai",
+                kind="tool_call",
+                input_slots=["tool_args"],
+                output_slots=["output"],
+            )
+        },
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={},
+        outputs={},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert checkpoint.checkpoint_origin == "adapter"
+    assert checkpoint.adapter == "pydantic_ai"
+    assert checkpoint.adapter_checkpoint_kind == "tool_call"
+    assert checkpoint.replay_input_slots == ["tool_args"]
+    assert checkpoint.replay_output_slots == ["output"]
+
+
+def test_checkpoint_mapping_keeps_user_tool_call_origin_without_adapter_metadata() -> (
+    None
+):
+    step = SimpleNamespace(
+        id="step-id",
+        name="user_tool_checkpoint",
+        status="completed",
+        start_time=None,
+        end_time=None,
+        run_metadata={},
+        original_step_run_id=None,
+        parent_step_ids=[],
+        type=SimpleNamespace(value="tool_call"),
+        inputs={},
+        outputs={},
+    )
+
+    checkpoint = _map_checkpoint_call(
+        step=cast(Any, step),
+        client=cast(Any, SimpleNamespace()),
+        attempts_by_lineage={},
+    )
+
+    assert checkpoint.checkpoint_type == "tool_call"
+    assert checkpoint.checkpoint_origin == "user"
+    assert checkpoint.adapter is None
+    assert checkpoint.adapter_checkpoint_kind is None
+    assert checkpoint.replay_input_slots == []
+    assert checkpoint.replay_output_slots == []
+
+
 def test_checkpoint_mapping_includes_tool_call_structural_input_artifacts() -> None:
     input_artifact = SimpleNamespace(
         id="input-artifact-id",
@@ -481,6 +556,7 @@ def test_serialize_checkpoint_attempt_contract() -> None:
             "traceback": "Traceback...\nValueError: boom",
             "origin": "user_code",
         },
+        "llm_usage_records": [],
     }
 
 
@@ -491,6 +567,11 @@ def test_serialize_checkpoint_call_contract() -> None:
         "call_id": "call-1",
         "name": "research",
         "checkpoint_type": "tool_call",
+        "checkpoint_origin": "user",
+        "adapter": None,
+        "adapter_checkpoint_kind": None,
+        "replay_input_slots": [],
+        "replay_output_slots": [],
         "status": "failed",
         "started_at": "2026-03-14T10:00:00+00:00",
         "ended_at": "2026-03-14T10:10:00+00:00",
@@ -516,6 +597,7 @@ def test_serialize_checkpoint_call_contract() -> None:
                     "traceback": "Traceback...\nValueError: boom",
                     "origin": "user_code",
                 },
+                "llm_usage_records": [],
             }
         ],
         "artifacts": [
@@ -528,6 +610,43 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "metadata": {"source": "notes"},
             }
         ],
+        "llm_usage_records": [],
+    }
+
+
+def test_serialize_execution_statistics_contract() -> None:
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed", "day": "2026-03-14"},
+                execution_count=12,
+                metrics={"duration_avg": 15.5},
+            ),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+        ],
+        truncated=True,
+    )
+
+    assert serialize_execution_statistics_group(statistics.groups[0]) == {
+        "keys": {"status": "completed", "day": "2026-03-14"},
+        "execution_count": 12,
+        "metrics": {"duration_avg": 15.5},
+    }
+    assert serialize_execution_statistics(statistics) == {
+        "groups": [
+            {
+                "keys": {"status": "completed", "day": "2026-03-14"},
+                "execution_count": 12,
+                "metrics": {"duration_avg": 15.5},
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {},
+            },
+        ],
+        "truncated": True,
+        "group_count": 2,
     }
 
 
@@ -555,6 +674,7 @@ def test_serialize_execution_summary_contract() -> None:
         "metadata": {"owner": "alice"},
         "checkpoint_count": 1,
         "artifact_count": 1,
+        "llm_usage_summary": None,
     }
 
 
@@ -575,7 +695,9 @@ def test_serialize_execution_contract() -> None:
         "metadata",
         "checkpoint_count",
         "artifact_count",
+        "llm_usage_summary",
         "frozen_execution_spec",
+        "llm_usage_records",
         "original_exec_id",
         "checkpoints",
         "artifacts",
@@ -586,6 +708,7 @@ def test_serialize_execution_contract() -> None:
         "image": None,
         "cache": False,
         "retries": 0,
+        "llm_estimated_costs": "auto",
     }
     assert spec["flow_defaults"] == {
         "stack": None,
@@ -605,6 +728,7 @@ def test_serialize_execution_contract() -> None:
         },
         "cache": None,
         "retries": None,
+        "llm_estimated_costs": None,
         "server_url": None,
         "auth_token": None,
         "project": None,
@@ -714,6 +838,11 @@ def test_serialize_stack_details_contract() -> None:
                 name="prod-storage",
                 purpose="stores artifacts",
             ),
+            StackComponentDetails(
+                role="sandbox",
+                name="prod-sandbox",
+                backend="local",
+            ),
         ),
     )
 
@@ -735,6 +864,7 @@ def test_serialize_stack_details_contract() -> None:
                 "name": "prod-storage",
                 "purpose": "stores artifacts",
             },
+            {"role": "sandbox", "name": "prod-sandbox", "backend": "local"},
         ],
     }
 
@@ -948,7 +1078,7 @@ def test_build_runtime_snapshot_collects_active_context_source_precedence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ZENML_ACTIVE_STACK_ID", "env-stack-id")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "env-stack-id")
     monkeypatch.setenv("KITARU_PROJECT", "kitaru-project-id")
     monkeypatch.setenv("ZENML_ACTIVE_PROJECT_ID", "zenml-project-id")
     monkeypatch.setenv("KITARU_STACK", "execution-default-stack")
@@ -998,7 +1128,7 @@ def test_build_runtime_snapshot_collects_active_context_source_precedence(
     assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
 
     assert stack_provenance.effective_source == "environment"
-    assert stack_provenance.effective_source_detail == "ZENML_ACTIVE_STACK_ID"
+    assert stack_provenance.effective_source_detail == ENV_ZENML_ACTIVE_STACK_ID
     assert stack_provenance.effective_id == "env-stack-id"
     assert stack_provenance.environment_id == "env-stack-id"
     assert stack_provenance.repository_id == "repo-stack-id"
@@ -1034,7 +1164,7 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
     tmp_path: Path,
 ) -> None:
     for name in (
-        "ZENML_ACTIVE_STACK_ID",
+        ENV_ZENML_ACTIVE_STACK_ID,
         "ZENML_ACTIVE_PROJECT_ID",
         "KITARU_PROJECT",
         "KITARU_STACK",
@@ -1105,6 +1235,79 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
         call.find_repository(enable_warnings=False),
         call(),
     ]
+
+
+def test_build_runtime_snapshot_warns_for_unresolvable_zenml_active_stack_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Snapshot warnings should explain stale ZENML_ACTIVE_STACK_ID recovery."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+    fake_gc = _fake_global_config(tmp_path)
+
+    class FakeClient:
+        root = None
+        active_user = SimpleNamespace(name="alice")
+        zen_store = SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="postgres",
+                deployment_type="kubernetes",
+            )
+        )
+
+        @staticmethod
+        def find_repository(*, enable_warnings: bool = False) -> None:
+            return None
+
+        @property
+        def active_stack_model(self) -> SimpleNamespace:
+            raise KeyError(
+                "Unable to get stack with ID 'stale-stack-id': "
+                "No stack with this ID found"
+            )
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, FakeClient):
+            stack.enter_context(context_manager)
+        stack.enter_context(
+            patch(
+                "kitaru._inspection_runtime.resolve_log_store",
+                return_value=ResolvedLogStore(
+                    backend="datadog",
+                    endpoint="https://logs.example.com",
+                    api_key=None,
+                    source="environment",
+                ),
+            )
+        )
+        mismatch_mock = stack.enter_context(
+            patch("kitaru._inspection_runtime.log_store_mismatch_details")
+        )
+        snapshot = build_runtime_snapshot()
+
+    mismatch_mock.assert_not_called()
+    assert snapshot.active_stack is None
+    assert snapshot.warning is not None
+    assert "Unable to query the configured store (KeyError)" in snapshot.warning
+    assert ENV_ZENML_ACTIVE_STACK_ID in snapshot.warning
+    assert "stale-stack-id" in snapshot.warning
+    assert "Unset it" in snapshot.warning
+    assert "remove it from .envrc" in snapshot.warning
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert any(
+        "Active-stack lookup failed (KeyError)" in note
+        for note in stack_provenance.notes
+    )
+    assert all("Client() failed" not in note for note in stack_provenance.notes)
+    assert any(
+        "Active-stack lookup failed (KeyError)" in note
+        for note in project_provenance.notes
+    )
+    assert all("Client() failed" not in note for note in project_provenance.notes)
 
 
 def test_build_runtime_snapshot_appends_legacy_warning_when_local_store_missing(
@@ -1517,7 +1720,7 @@ def test_describe_local_server_handles_non_import_error() -> None:
 
 def _clear_active_context_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "ZENML_ACTIVE_STACK_ID",
+        ENV_ZENML_ACTIVE_STACK_ID,
         "ZENML_ACTIVE_PROJECT_ID",
         "KITARU_PROJECT",
         "KITARU_STACK",

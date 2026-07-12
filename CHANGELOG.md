@@ -7,6 +7,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Missing stack integration dependencies now fail before deploy, run, or replay with a concise Kitaru explanation followed by ZenML's exact integration and whole-stack installation guidance. (#506)
+- Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
+
+## [0.20.2] - 2026-07-10
+
+### Added
+- `FlowHandle.wait(timeout=...)` can now stop waiting after a positive, finite number of seconds without changing the remote execution. It raises the new typed `KitaruTimeoutError` with the execution ID, configured and elapsed timeout, and last observed status. (#523)
+- LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. Per-checkpoint values sum exactly to the execution-level totals, and the execution-level `llm_usage_summary_v1` payload is unchanged. (#528)
+- Cached, skipped, and replay-reused checkpoints report their token counts under the `reused_*` fields with zero incurred and zero display cost, so a replayed run shows what the work would have cost without billing it again. Retried checkpoints keep a separate record per attempt, so a retry that really called the provider twice is counted twice. (#528)
+
+### Changed
+- Terminal cost metadata writes are best-effort: a failed write is debug-logged, the remaining checkpoint writes are still attempted, and incomplete persistence is reported so aggregation can be retried. A metadata write failure never fails the flow run. (#528)
+
+### Fixed
+- Retried checkpoint invocations are now exposed as one checkpoint call with attempt history ordered by retry version. (#530)
+
+### Infrastructure
+- The release workflow's GitHub Release asset reconcile step now skips signature and attestation assets, which are regenerated per dispatch and previously caused recovery re-dispatches to hard-fail on a non-reproducible asset mismatch. (#513)
+
+## [0.20.1] - 2026-07-08
+
+### Fixed
+- Project create/use/delete operations now stop before changing server state unless Kitaru can verify a ZenML Pro/Cloud server. Read-only project inspection (`list`, `current`, and `show`) remains available on local/OSS servers for diagnostics. (#512)
+
+## [0.20.0] - 2026-07-08
+
+### Added
+- Added explicit adapter checkpoint metadata to SDK/API inspection output: checkpoint calls now expose `checkpoint_origin`, `adapter`, `adapter_checkpoint_kind`, `replay_input_slots`, and `replay_output_slots`, so clients can distinguish adapter-generated checkpoints from hand-written checkpoints with the same display type.
+- Added `kitaru stack create --type modal` and MCP `manage_stack(..., stack_type="modal")` support for Modal-backed stacks with remote artifact storage, remote image registry, optional `sandbox="modal"`, and Modal-specific component overrides.
+- Added Modal stack cloud credential support for private S3/ECR, GCS/GAR/GCR, and Azure Blob/ADLS/ACR resources by linking provider service connectors to the artifact-store and container-registry components.
+- Added Kitaru projects across SDK, CLI, and MCP: `KitaruClient.projects`, `KitaruClient.for_project_management()`, `kitaru project list/current/show/create/use/delete`, and MCP read/switch tools `kitaru_projects_list`, `kitaru_projects_current`, `kitaru_projects_show`, and `kitaru_projects_use`. `kitaru login --project ...` now reports `Project: ...` in text output without returning to the older `Active project` wording.
+- Added Python 3.14 as a supported and tested runtime.
+- Added opt-in remote-stack release smoke covering an operator-provided Kubernetes stack and a local-runner stack with remote artifact storage, with sanitized structured evidence and deterministic contract tests.
+
+### Changed
+- PydanticAI tool-checkpoint replay input overrides now rerun the tool body with edited `tool_args`. Users still pass the public `input` override field; shorthand tool arguments and explicit `{"tool_args": ...}` input-slot overrides are both supported.
+- **Breaking:** Replay planning now uses recorded replay input slots and real step inputs before falling back to older type-based guesses, so a hand-written `type="tool_call"` checkpoint is no longer treated as a PydanticAI tool checkpoint unless it actually exposes replayable tool arguments. Input overrides against older recordings without replay input-slot metadata now fail loudly instead of silently doing nothing.
+- Bumped the minimum ZenML dependency, server image tag, and Helm subchart version to `0.96.1`.
+
+### Fixed
+- Modal stack creation now reuses matching server-side service connectors for artifact stores and container registries when explicit cloud credentials are not provided, avoiding remote-server failures caused by local-only credential inputs such as AWS SSO profiles.
+- Replay now preserves recorded flow parameters when submitting a replay, so overriding one flow argument no longer lets defaulted arguments such as `model=None` silently replace recorded values.
+- `FlowHandle.wait()` now distinguishes paused executions with pending wait input from paused executions that need `kitaru executions resume`, and `kitaru executions resume` accepts `--exec-id` while preserving clearer wait-condition resume diagnostics.
+- PydanticAI edited tool-argument replay now reruns the tool's own argument validator, so JSON override values are coerced back into richer Python types such as `date` before the tool body runs.
+- Checkpoint metadata now keeps Kitaru's reserved `boundary`, `type`, and `flow_result_candidate` keys authoritative when user metadata contains the same names.
+- Plain user checkpoint input overrides can again mix recorded artifact input names with literal parameter overrides, while adapter-declared replay input slots still reject unknown keys.
+- `FlowHandle.wait()` / `.get()` now preserve explicit `None` flow returns instead of falling back to discarded terminal checkpoint outputs.
+- Flow result extraction now resolves a single eligible terminal checkpoint instead of raising ambiguity when replay or adapter runs record several terminal checkpoints, and honors the `flow_result_candidate` marker and saved flow-return artifacts before terminal-step heuristics.
+- Execution deep links and compare links now resolve to the correct Kitaru UI route when connected to a Pro workspace, instead of landing on the workspace projects page via a stale `/flows/...` URL.
+- Fixed replay LLM usage accounting so replay executions write terminal usage rollups, preserve incurred/executed records for live replay-tail calls, and classify explicitly skipped replay checkpoints as reused. (#490)
+- Fixed `kitaru stack use` and `kitaru status` when `ZENML_ACTIVE_STACK_ID` points to an unresolvable stack: stack activation no longer fails while re-reading the active stack after activation, and diagnostics now tell users to unset, update, or remove the environment variable.
+- Fixed flow submissions with an explicit stack so a successful run is not reported as failed only because Kitaru could not restore a stale previous active stack ID afterward.
+
+## [0.19.0] - 2026-06-30
+
+### Added
+- Added experimental Google ADK adapter support with `KitaruADKRunner`, `KitaruADKModel`, and `KitaruADKTool`, plus docs, direct and persisted-workflow integration examples, isolated no-dev contract/live smoke paths, explicit-wrapper `calls` mode, and tool-confirmation resume helpers.
+- Added public replay-mode detection helpers: `kitaru.is_replay()`, `kitaru.get_replay_runtime_context()`, and `kitaru.ReplayRuntimeContext`, so side-effectful checkpoints can guard behavior during replay.
+- Added named LLM cost/token metric shortcuts for execution statistics across SDK, CLI, and MCP.
+- Added `kitaru.diff(original, *executions)` for per-checkpoint structural comparison between an original execution and its replays (auto-discovers replays via `original_exec_id` when omitted).
+- Added unified multi-execution replay through `flow.replay([...], *, at=..., ...)`, `KitaruClient().executions.replay([...], ...)`, and multi-ID `kitaru executions replay`. Parents missing the `at` checkpoint are skipped in collect mode and recorded in `ReplaySubmission.skipped`.
+- Added `kitaru.diff_matrix(exec_ids)` to diff many originals against their auto-discovered replays.
+- Added CLI commands `kitaru executions diff` and `kitaru executions diff-matrix`, plus MCP tools `kitaru_executions_diff`, `kitaru_executions_diff_matrix`, and unified `kitaru_executions_replay` with explicit execution IDs.
+- Added client-side cohort selection via `kitaru.cohort(...).resolve()`, `KitaruClient().executions.cohort(...)`, CLI `kitaru executions cohort` (dry-run selection), and MCP `kitaru_executions_cohort`; replay now takes explicit execution IDs rather than selecting cohorts inside the replay command.
+- Added a LangGraph replay and fork adapter (`kitaru.adapters.langgraph.replay`) that reconstructs a recorded LangGraph run as a directed graph from a captured trace and forks it for replay. Public surface includes `KitaruReplayAgent`, `KitaruAdapter`, `import_langgraph_trace` / `import_trace`, and graph `edit` helpers, with Langfuse and JSONL trace import sources.
+- `kitaru executions replay` now prints UI compare URLs (and includes `compare_url` in JSON output) for the original execution vs the new replay.
+- Reshaped the replay overrides demo as a prod walkthrough: slim `demo.py` dispatcher, `replay_scenarios/` modules, `publish-input` re-publish override, and narrative `README.md` (removed synthetic `record_replay_observation` tail and `inject-output`).
+- `kitaru.diff()` now sets `ExecutionDiff.urls` to a single UI compare link listing the original and all compared replays (auto-discovered or explicitly passed). Compare URLs prefer deployment version metadata when present.
+- Added `KITARU_UI_URL` to override the dashboard base URL used for compare and execution deep links when the Kitaru frontend is hosted separately from the API server.
+
+### Changed
+- **Breaking:** Redesigned the replay API. `flow.replay(...)`, `KitaruClient().executions.replay(...)`, CLI `kitaru executions replay`, and MCP `kitaru_executions_replay` now take the checkpoint selector as `at=` (previously `from_=`) with separate override groups `flow_overrides`, `checkpoint_overrides`, and `invocation_overrides` (previously a single `overrides` map), and return a shared `ReplaySubmission` result model (previously a `FlowHandle`). Code written against the earlier replay signature needs updating.
+- Clarified Google ADK MCP docs around the safe subset: Kitaru can checkpoint a replay-safe ADK `BaseTool`-like object wrapped with `KitaruADKTool`, but it does not restore ADK MCP processes, sessions, or hidden server state.
+- Refreshed the Google ADK dependency note: `google-adk` still stays out of the normal local/dev project environment, even though a 2026-06-29 direct resolver probe with `zenml[server]` now succeeds, until the full local server path is certified with the newer FastAPI/Starlette stack.
+
+### Fixed
+- Kitaru terminal logs now rewrite ZenML's named pipeline completion message to ``Flow `...` completed successfully.``, so ``Pipeline `...` completed successfully.`` no longer leaks into flow output.
+- Replay checkpoint overrides now fan out across repeated adapter-generated model and tool calls, while suffixed selectors still target exactly one recorded call.
+- Replay output overrides on terminal checkpoints now fail with a clearer error explaining that output replacement requires a downstream consumer.
+- MCP replay now lets omitted `on_error` use the shared SDK default (`fail` for one parent, `collect` for batches), and `kitaru.diff()` now scans up to 10,000 same-flow executions when auto-discovering replays before warning that older replays may require explicit IDs.
+- Unknown checkpoint override targets now give repeated-call guidance when a likely model/tool family exists, pointing users to family-level `checkpoint_overrides` or one-call `invocation_overrides`.
+- LangGraph replay import now raises a catchable Kitaru error instead of `SystemExit` when Langfuse rows never arrive, and live forks support node callables that accept `(state, config)`.
+- `KitaruClient.executions.replay()` and the pipeline fallback replay path now wait for completion and run terminal LLM usage aggregation before returning, so replay executions expose `llm_usage_summary` for compare/outcomes views.
+- Cohort selection now hydrates list summaries when checking replay anchors, so `executions cohort` matches originals that only expose checkpoints on `executions get`.
+- `kitaru.diff()` and `kitaru executions diff` now emit one multi-execution compare URL when auto-discovering replays, not one pairwise URL per replay.
+- Replay planning now re-executes the full live tail after `at` for linear adapter call sequences that lack explicit DAG upstream edges (for example PydanticAI `calls` checkpoints after `lookup_policy_tool`).
+- `FlowHandle.wait()` / `.get()` now return a flow's persisted output instead of raising an ambiguous-result error when an adapter produced several non-result model/tool checkpoints (the common `checkpoint_strategy="calls"` shape) or the flow has an explicit return value. Previously such flows raised an ambiguous-terminal error even though they completed successfully; the returned value is now linked via execution metadata and read back.
+- Updated LLM usage summaries so Kitaru normally writes them when executions finish, while `FlowHandle.wait()` and `.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written.
+
+### Security
+- Raised the `pydantic-ai-slim` lower bound and lockfile version to clear CVE-2026-48782.
+
+## [0.18.0] - 2026-06-25
+
+### Added
+- Added adapter-owned cost calculator inputs for Claude Agent SDK, Gemini Interactions, and Pydantic AI, so adapter users can record estimated LLM costs with their own calculator hooks.
+- Added default `genai-prices` estimated-cost support for OpenAI Agents, LangGraph, Claude Agent SDK, Gemini Interactions, and Pydantic AI adapter usage records when Kitaru has reliable provider/model/token data.
+- Added estimated-cost recording for direct `kitaru.llm()` calls when provider usage includes token counts and `genai-prices` has pricing for the model, with config and environment controls to leave estimation on automatic or opt out. Cost estimation is best effort: a pricing-lookup miss never turns a successful LLM call into a failure.
+- Added `--page` and `--size` pagination options to `kitaru executions statistics`.
+
+### Changed
+- Recorded Claude Agent SDK `total_cost_usd` as estimated cost metadata instead of provider-reported actual cost, with user calculators and then `genai-prices` as fallbacks when the SDK does not report a cost.
+
+### Fixed
+- Fixed direct `kitaru.llm()` OpenAI calls so public `max_tokens` is sent as OpenAI's `max_completion_tokens` for newer reasoning/GPT-5-style models, while older OpenAI, OpenRouter, and Ollama calls keep using `max_tokens`.
+
+## [0.17.1] - 2026-06-22
+
+### Added
+- Added a LangGraph runner convenience API so fresh `invoke`, `ainvoke`, `stream`, and `astream` calls can pass raw graph input with `thread_id=...` instead of manually building `LangGraphRunRequest.start(...)`, while keeping request objects as the resume and advanced path. (#455)
+
+### Changed
+- Repositioned user-facing messaging (README, PyPI description, CLI `--help`, docs welcome page) around recording, replaying, and improving agents in production; durable execution is now described as the underlying mechanism rather than the headline.
+
+### Fixed
+- Fixed LangGraph calls-mode checkpoints so tool calls survive model-call materialization and LangGraph routes to tools correctly. (#458)
+
+### Security
+- Bumped audited dependency locks (`langsmith`, `msgpack`, `pydantic-settings`) to clear advisories flagged against the earlier pinned versions. (#455)
+
+## [0.17.0] - 2026-06-19
+
+### Added
+- Added sandbox stack component support and the public `kitaru.run_sandbox_command(...)` SDK helper. Local stacks now get a default local sandbox, stack creation accepts explicit sandbox flavors through CLI/YAML/MCP paths, and `examples/features/sandbox/active_stack_sandbox_command.py` shows a tracked flow checkpoint running a command through the sandbox on the current stack. (#423)
+- Added a PydanticAI sandbox command toolset via `sandbox_command_toolset(...)`, plus docs, example coverage, and `examples/integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py`, so PydanticAI agents can call `run_sandbox_command` through Kitaru's shared sandbox helper. (#429)
+- Added an OpenAI Agents SDK sandbox command tool via `sandbox_command_tool(...)`, plus docs and `examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py`, so OpenAI agents can call a local `FunctionTool` that runs commands through the sandbox on the current stack. (#430)
+- Added caller-owned Gemini custom function execution through Kitaru's sandbox helper, with explicit registered sandbox commands, a dry-run example showcase, and docs that keep Antigravity / Google-owned tool internals outside Kitaru's replay promise. This requires the Gemini extra's current Google GenAI SDK 2.x range (`google-genai>=2.8.0,<3`) for the Interactions step and function-result schema. (#433)
+- Added a LangGraph/LangChain sandbox command tool via `create_sandbox_command_tool(...)`, plus a sandbox strategy in the LangGraph example, so agents can run shell commands through the sandbox on the current stack. (#434)
+- Added a Claude Agent SDK sandbox MCP helper (`create_kitaru_sandbox_mcp_server`) and runnable example at `examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`, letting Claude call the sandbox on the current stack through a Kitaru-owned MCP tool while Claude-owned `Bash` stays disabled. (#432)
+
+### Changed
+- Bumped the ZenML dependency floor and aligned runtime surfaces to `zenml>=0.95.1`, which provides the sandbox stack component and sandbox session APIs used by this release.
+- Reworked the prospect scout example (`examples/end_to_end/prospect_scout/`) into a genuinely agentic sweep: the qualifier is now a real PydanticAI agent that calls a `search_web` tool and decides its own searches (instead of being handed pre-fetched snippets), classifies prospects against a `LineOfBusiness` enum, and is built lazily inside its checkpoint so remote runs can inject keys via a secret. The README is reorganized around the durability, agent-observability, type-safety, and human-in-the-loop "aha moments", and a regression test asserts the agent actually invokes its search tool. (#446, #451)
+
+### Fixed
+- Rejected sandbox config overrides when stack creation did not also select a sandbox flavor, avoiding the confusing case where remote stack creation accepted sandbox-looking settings and then created no sandbox.
+- Fixed the LangGraph sandbox demo so its real-model run deterministically executes the documented demo command, and redacted static sandbox tool env values from wrapped provider error messages. (#434)
+- Kept the Claude Agent SDK sandbox MCP helper's default output limits and serialized JSON tool results within Claude Code's MCP result-size ceiling, so Kitaru's stdout/stderr truncation flags match what Claude actually receives. (#432)
+- Fixed the news scout example (`examples/end_to_end/news_scout/`) to build its agent lazily inside the flow body instead of at module import, so remote-stack runs no longer crash at import when the provider key is only applied to the environment at run time. (#446)
+
+## [0.16.0] - 2026-06-15
+
+### Added
+- Added count-based execution statistics through `KitaruClient().executions.statistics(...)`, `kitaru executions statistics`, and the `kitaru_executions_statistics` MCP tool, with grouping by status, flow, stack, tag, time bucket, and execution metadata. (#378)
+- Added LLM token tracking: tracked LLM calls (`kitaru.llm()` and the framework adapters) record input/output/total token counts as execution metadata, split into freshly-incurred vs. replay-reused, feeding the new execution statistics metrics. (#378)
+- Added LLM cost tracking where a trustworthy cost source exists: the Claude Agent SDK adapter records provider-reported USD cost automatically, and the LangGraph and OpenAI Agents adapters accept a cost calculator. Calls with no cost source (such as plain `kitaru.llm()`) are tallied under a records-without-cost count rather than reported as free. (#378)
+- Added a local chatbot driver for `examples/chatbot/`, giving the durable chatbot example a direct command-line path for trying the conversation loop without the browser UI. (#408)
+- Added the prospect scout example (`examples/end_to_end/prospect_scout/`): a durable prospect-research sweep with one checkpoint per company, enum-typed PydanticAI qualification, a `kitaru.wait()` shortlist approval gate, per-prospect outreach drafts, and optional Exa-backed web search.
+
+### Fixed
+- Fixed chatbot history persistence so resumed or continued local chatbot sessions keep their conversation history available to the driver and UI artifacts. (#410)
+- Fixed `kitaru executions retry` and `kitaru executions resume` so failed or paused executions are reopened correctly before continuation is submitted, preventing local no-ops and server-token failures. (#442)
+- `KitaruClient.executions.list()` now pushes flow and status filters to the server instead of scanning all project runs client-side. (#440)
+- Redact credential values from LLM provider error messages raised by `kitaru.llm()`. (#439)
+- Fixed a LangGraph adapter crash when running graphs without a LangGraph checkpointer under Kitaru's default durability policy. (#409)
+- Fixed duplicate PydanticAI stream events so watched `KitaruAgent` runs no longer emit repeated stream updates. (#428)
+- Fixed streaming wait tools so human-in-the-loop tool calls behave correctly during streamed adapter runs. (#431)
+- Fixed agent instruction drift so adapter-managed agents keep their configured instructions across turns. (#435)
+- Fixed the chatbot example image build so its PydanticAI dependencies resolve correctly. (#427)
+
 ## [0.15.0] - 2026-06-04
 
 ### Added

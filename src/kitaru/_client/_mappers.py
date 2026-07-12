@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import ValidationError
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
+from kitaru._checkpoint_metadata import (
+    ADAPTER_CHECKPOINT_KIND_KEY,
+    ADAPTER_KEY,
+    CHECKPOINT_ORIGIN_ADAPTER,
+    CHECKPOINT_ORIGIN_KEY,
+    CHECKPOINT_ORIGIN_USER,
+    REPLAY_INPUT_SLOTS_KEY,
+    REPLAY_OUTPUT_SLOTS_KEY,
+    CheckpointOrigin,
+    checkpoint_metadata_from_step,
+    checkpoint_metadata_slots,
+    checkpoint_metadata_str,
+)
+from kitaru._checkpoint_steps import visible_checkpoint_step_for_lineage
 from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
@@ -19,6 +34,7 @@ from kitaru._client._models import (
     FailureInfo,
     PendingWait,
 )
+from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
     CHECKPOINT_SOURCE_ALIAS_PREFIX as _CHECKPOINT_SOURCE_ALIAS_PREFIX,
 )
@@ -43,11 +59,58 @@ from kitaru.errors import (
     traceback_exception_type,
     traceback_last_line,
 )
+from kitaru.replay import (
+    parse_replay_skipped_steps_metadata,
+    replay_step_invocation_id,
+)
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
 
 _WAIT_CONDITION_STATUS_PENDING = "pending"
+
+_RAW_STATUSES_BY_PUBLIC_STATUS: dict[ExecutionStatus, tuple[str, ...]] = {
+    ExecutionStatus.RUNNING: (
+        "cancelling",
+        "initializing",
+        "provisioning",
+        "queued",
+        "running",
+        "retrying",
+        "resuming",
+        "stopping",
+    ),
+    ExecutionStatus.WAITING: ("paused",),
+    ExecutionStatus.COMPLETED: (
+        "completed",
+        "cached",
+        "skipped",
+        "replay_reused",
+        "reused",
+        "reused_not_incurred",
+    ),
+    ExecutionStatus.FAILED: ("failed", "retried"),
+    ExecutionStatus.CANCELLED: ("cancelled", "stopped"),
+}
+_RAW_STATUS_TO_PUBLIC_STATUS: dict[str, ExecutionStatus] = {
+    raw_status: public_status
+    for public_status, raw_statuses in _RAW_STATUSES_BY_PUBLIC_STATUS.items()
+    for raw_status in raw_statuses
+}
+
+
+def _backend_filter_value(values: Sequence[str]) -> str:
+    """Format values for ZenML backend string-filter fields."""
+    if len(values) == 1:
+        return values[0]
+    return f"oneof:{json.dumps(list(values), separators=(',', ':'))}"
+
+
+def _status_filter_value(public_status: ExecutionStatus | None) -> str | None:
+    """Map a public status filter to the backend string-filter syntax."""
+    if public_status is None:
+        return None
+    return _backend_filter_value(_RAW_STATUSES_BY_PUBLIC_STATUS[public_status])
 
 
 def _to_plain_dict(values: Mapping[str, Any]) -> dict[str, Any]:
@@ -59,35 +122,14 @@ def _to_public_status(status: Any) -> ExecutionStatus:
     """Map ZenML execution states to Kitaru public states."""
     status_value = str(getattr(status, "value", status))
 
-    if status_value in {
-        "initializing",
-        "provisioning",
-        "running",
-        "retrying",
-    }:
-        return ExecutionStatus.RUNNING
-    if status_value == "paused":
-        return ExecutionStatus.WAITING
-    if status_value in {
-        "completed",
-        "cached",
-        "skipped",
-    }:
-        return ExecutionStatus.COMPLETED
-    if status_value in {
-        "failed",
-        "retried",
-    }:
-        return ExecutionStatus.FAILED
-    if status_value in {
-        "stopped",
-        "stopping",
-    }:
-        return ExecutionStatus.CANCELLED
-
-    raise KitaruRuntimeError(
-        f"Unsupported execution status mapping: {status!r} (value={status_value!r})."
-    )
+    try:
+        return _RAW_STATUS_TO_PUBLIC_STATUS[status_value]
+    except KeyError as exc:
+        message = (
+            f"Unsupported execution status mapping: {status!r} "
+            f"(value={status_value!r})."
+        )
+        raise KitaruRuntimeError(message) from exc
 
 
 def _coerce_status_filter(
@@ -165,30 +207,29 @@ def _map_failure_info(
 
 
 def _checkpoint_lineage_key(step: StepRunResponse) -> str:
-    """Return the stable lineage key for checkpoint retry grouping."""
-    if step.original_step_run_id is not None:
-        return str(step.original_step_run_id)
-    return str(step.id)
+    """Return the run-local invocation name used for retry grouping."""
+    return step.name
 
 
-def _list_checkpoint_attempts_for_run(
+def _list_checkpoint_attempts_for_run_with_zenml_client(
     *,
     run: PipelineRunResponse,
-    client: KitaruClient,
+    zenml_client: Any,
+    project: Any | None = None,
 ) -> dict[str, list[StepRunResponse]]:
-    """Fetch all step attempts for one execution, including retried runs."""
+    """Fetch all step attempts for one execution with a ZenML client."""
     grouped_attempts: defaultdict[str, list[StepRunResponse]] = defaultdict(list)
     page = 1
     page_size = 200
 
     try:
         while True:
-            step_page = client._client().list_run_steps(
+            step_page = zenml_client.list_run_steps(
                 sort_by="asc:created",
                 page=page,
                 size=page_size,
                 pipeline_run_id=run.id,
-                project=client._project,
+                project=project,
                 exclude_retried=False,
                 hydrate=True,
             )
@@ -207,10 +248,29 @@ def _list_checkpoint_attempts_for_run(
             f"Failed to fetch checkpoint attempts for execution {run.id}: {exc}"
         ) from exc
 
+    for attempts in grouped_attempts.values():
+        attempts.sort(key=lambda step: step.version)
     return dict(grouped_attempts)
 
 
-def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
+def _list_checkpoint_attempts_for_run(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+) -> dict[str, list[StepRunResponse]]:
+    """Fetch all step attempts for one execution, including retried runs."""
+    return _list_checkpoint_attempts_for_run_with_zenml_client(
+        run=run,
+        zenml_client=client._client(),
+        project=client._project,
+    )
+
+
+def _map_checkpoint_attempt(
+    step: StepRunResponse,
+    *,
+    replay_skipped_steps: set[str] | None = None,
+) -> CheckpointAttempt:
     """Map one step run model into a checkpoint-attempt entry."""
     public_status = _to_public_status(step.status)
     checkpoint_name = _normalize_checkpoint_name(step.name)
@@ -233,6 +293,11 @@ def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
         ended_at=step.end_time,
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
+        _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
+        _replay_reused=(
+            replay_skipped_steps is not None
+            and replay_step_invocation_id(step) in replay_skipped_steps
+        ),
     )
 
 
@@ -265,6 +330,13 @@ def _map_artifact_ref(
     )
 
 
+def _checkpoint_origin(metadata: Mapping[str, Any]) -> CheckpointOrigin:
+    origin = checkpoint_metadata_str(metadata, CHECKPOINT_ORIGIN_KEY)
+    if origin == CHECKPOINT_ORIGIN_ADAPTER:
+        return CHECKPOINT_ORIGIN_ADAPTER
+    return CHECKPOINT_ORIGIN_USER
+
+
 def _adapter_structural_input_kind(
     *,
     checkpoint_type: str | None,
@@ -283,10 +355,13 @@ def _map_checkpoint_call(
     step: StepRunResponse,
     client: KitaruClient,
     attempts_by_lineage: Mapping[str, list[StepRunResponse]],
+    replay_skipped_steps: set[str] | None = None,
 ) -> CheckpointCall:
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
     checkpoint_type = step.type.value if step.type else None
+    metadata = _to_plain_dict(step.run_metadata)
+    contract_metadata = checkpoint_metadata_from_step(step)
     seen_artifact_ids: set[str] = set()
     artifacts: list[ArtifactRef] = []
 
@@ -338,7 +413,13 @@ def _map_checkpoint_call(
 
     lineage_key = _checkpoint_lineage_key(step)
     attempt_steps = attempts_by_lineage.get(lineage_key, [step])
-    attempts = [_map_checkpoint_attempt(attempt) for attempt in attempt_steps]
+    attempts = [
+        _map_checkpoint_attempt(
+            attempt,
+            replay_skipped_steps=replay_skipped_steps,
+        )
+        for attempt in attempt_steps
+    ]
 
     failure = None
     if attempts:
@@ -354,13 +435,24 @@ def _map_checkpoint_call(
         status=_to_public_status(step.status),
         started_at=step.start_time,
         ended_at=step.end_time,
-        metadata=_to_plain_dict(step.run_metadata),
+        metadata=metadata,
         original_call_id=original_call_id,
         parent_call_ids=[str(parent_id) for parent_id in step.parent_step_ids],
         failure=failure,
         attempts=attempts,
         artifacts=artifacts,
         checkpoint_type=checkpoint_type,
+        checkpoint_origin=_checkpoint_origin(contract_metadata),
+        adapter=checkpoint_metadata_str(contract_metadata, ADAPTER_KEY),
+        adapter_checkpoint_kind=checkpoint_metadata_str(
+            contract_metadata, ADAPTER_CHECKPOINT_KIND_KEY
+        ),
+        replay_input_slots=checkpoint_metadata_slots(
+            contract_metadata, REPLAY_INPUT_SLOTS_KEY
+        ),
+        replay_output_slots=checkpoint_metadata_slots(
+            contract_metadata, REPLAY_OUTPUT_SLOTS_KEY
+        ),
     )
 
 
@@ -508,6 +600,7 @@ def _map_execution(
     run: PipelineRunResponse,
     client: KitaruClient,
     include_details: bool,
+    resolve_wait_status: bool = False,
 ) -> Execution:
     """Map a ZenML pipeline run into a Kitaru execution model."""
     status = _to_public_status(run.status)
@@ -519,7 +612,9 @@ def _map_execution(
         active_wait = _get_active_wait_condition(run)
         if active_wait is not None:
             pending_wait = _map_pending_wait(active_wait)
-        elif include_details:
+        elif include_details or resolve_wait_status:
+            # Some ZenML responses only expose pending waits through
+            # list_run_wait_conditions(...), not through active_wait_condition.
             pending_wait = _first_pending_wait(run=run, client=client)
 
     if pending_wait is not None:
@@ -541,6 +636,9 @@ def _map_execution(
             fallback_message=f"Execution {run.id} failed.",
         )
 
+    metadata = _to_plain_dict(run.run_metadata)
+    replay_skipped_steps = parse_replay_skipped_steps_metadata(metadata)
+
     checkpoints: list[CheckpointCall] = []
     artifacts: list[ArtifactRef] = []
     if include_details:
@@ -553,15 +651,25 @@ def _map_execution(
         except KitaruBackendError:
             attempts_by_lineage = {}
 
-        latest_steps_by_lineage: dict[str, StepRunResponse] = {}
-        for lineage_key, attempts in attempts_by_lineage.items():
-            if attempts:
-                latest_steps_by_lineage[lineage_key] = attempts[-1]
-
+        attempt_ids_by_lineage = {
+            lineage_key: {str(attempt.id) for attempt in attempts}
+            for lineage_key, attempts in attempts_by_lineage.items()
+        }
         for step in run.steps.values():
             lineage_key = _checkpoint_lineage_key(step)
-            latest_steps_by_lineage.setdefault(lineage_key, step)
-            attempts_by_lineage.setdefault(lineage_key, [step])
+            attempts = attempts_by_lineage.setdefault(lineage_key, [])
+            attempt_ids = attempt_ids_by_lineage.setdefault(lineage_key, set())
+            step_id = str(step.id)
+            if step_id not in attempt_ids:
+                attempts.append(step)
+                attempt_ids.add(step_id)
+
+        latest_steps_by_lineage: dict[str, StepRunResponse] = {}
+        for lineage_key, attempts in attempts_by_lineage.items():
+            attempts.sort(key=lambda step: step.version)
+            visible_step = visible_checkpoint_step_for_lineage(attempts)
+            if visible_step is not None:
+                latest_steps_by_lineage[lineage_key] = visible_step
 
         for step in latest_steps_by_lineage.values():
             checkpoints.append(
@@ -569,6 +677,7 @@ def _map_execution(
                     step=step,
                     client=client,
                     attempts_by_lineage=attempts_by_lineage,
+                    replay_skipped_steps=replay_skipped_steps,
                 )
             )
 
@@ -585,8 +694,6 @@ def _map_execution(
                 if existing.direction == "input" and artifact.direction == "output":
                     artifacts[existing_index] = artifact
 
-    metadata = _to_plain_dict(run.run_metadata)
-
     flow_id: str | None = None
     flow_name: str | None = None
     if run.pipeline is not None:
@@ -601,6 +708,8 @@ def _map_execution(
     stack_name: str | None = None
     if run.stack is not None:
         stack_name = run.stack.name
+
+    project_identity = extract_run_project_identity(run)
 
     return Execution(
         exec_id=str(run.id),
@@ -621,12 +730,16 @@ def _map_execution(
         checkpoints=checkpoints,
         artifacts=artifacts,
         _client=client,
+        project_id=project_identity.project_id,
+        project_name=project_identity.project_name,
     )
 
 
 __all__ = [
     "_CHECKPOINT_SOURCE_ALIAS_PREFIX",
     "_PIPELINE_SOURCE_ALIAS_PREFIX",
+    "_RAW_STATUSES_BY_PUBLIC_STATUS",
+    "_RAW_STATUS_TO_PUBLIC_STATUS",
     "_WAIT_CONDITION_STATUS_PENDING",
     "_adapter_structural_input_kind",
     "_checkpoint_lineage_key",

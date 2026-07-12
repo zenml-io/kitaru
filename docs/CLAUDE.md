@@ -41,14 +41,15 @@ Python tooling except for the generated reference content. The static export in
 
 **Automatic (the normal path):** the `SDK Reference Docs` workflow
 (`.github/workflows/docs.yml`) regenerates the CLI + SDK reference, builds the
-static export, and `wrangler deploy`s it to `kitaru-sdkdocs`, then deploys the
-`kitaru-site` redirect worker. It runs on:
+static export, and tests the redirect worker on every run. It `wrangler deploy`s
+the reference site to `kitaru-sdkdocs`, then deploys the `kitaru-site` redirect
+worker, only on:
 
 - **push to `main`** (i.e. at release time), and
 - **manual `workflow_dispatch`** (Actions → "SDK Reference Docs" → Run workflow)
   — deploys whichever branch it runs against, so you can ship from `develop`.
 
-PRs get an ephemeral preview Worker (`kitaru-sdkdocs-preview-<PR#>`).
+PRs build and test only; they do not deploy or create preview Workers. The workflow does not run `scripts/generate_changelog_docs.py`; public changelog traffic is handled by the redirect worker.
 
 **Manual (from a clone, needs Cloudflare creds via `wrangler login`):**
 
@@ -70,12 +71,15 @@ changes when redirect rules in `docs/worker/redirect.mjs` change.
   no root `node_modules`, no workspace config.
 - **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`),
   `content/docs/changelog.mdx`, and `content/docs/reference/` are created by
-  generation scripts and gitignored. SDK reference uses a two-step pipeline:
+  generation scripts and gitignored. The public changelog is hosted at
+  `docs.zenml.io/changelog`; the local `changelog.mdx` is only generated for
+  local/reference builds. SDK reference uses a two-step pipeline:
   `scripts/generate_sdk_docs.py` (Python extraction) + `docs/scripts/convert-sdk-docs.mjs`
   (Node MDX conversion via fumadocs-python).
 - **CLI reference fixes belong in the generator/source:** if command syntax is
-  wrong in generated CLI docs, fix `scripts/generate_cli_docs.py` and/or
-  `src/kitaru/cli.py`, then regenerate. Never hand-edit generated CLI pages.
+  wrong in generated CLI docs, fix `scripts/generate_cli_docs.py` and/or the
+  relevant `src/kitaru/_cli/_*.py` module. Use `src/kitaru/cli.py` only for
+  facade/bootstrap issues. Then regenerate. Never hand-edit generated CLI pages.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -94,12 +98,10 @@ changes when redirect rules in `docs/worker/redirect.mjs` change.
 ```
 content/docs/
   meta.json              # Top-level sidebar ordering
-  index.mdx              # "What is Kitaru?" overview
-  getting-started/       # Installation + quickstart
-  cli.mdx                # AUTO-GENERATED (flat; becomes cli/ when subcommands exist)
-  contributing.mdx       # Links to repo CONTRIBUTING.md
-  changelog.mdx          # AUTO-GENERATED from CHANGELOG.md
-  reference/             # AUTO-GENERATED (gitignored, SDK reference via fumadocs-python)
+  index.mdx              # Reference-site landing page
+  cli/                   # AUTO-GENERATED, gitignored CLI reference
+  changelog.mdx          # AUTO-GENERATED, gitignored local/reference changelog page
+  reference/python/      # AUTO-GENERATED, gitignored SDK reference via fumadocs-python
 ```
 
 ## Available MDX Components
@@ -131,18 +133,41 @@ pnpm run lint       # Biome lint
 pnpm run format     # Biome format
 ```
 
-**Important:** Generated content (CLI reference, changelog, SDK reference) is gitignored.
+**Important:** Generated content (CLI reference, the local/reference changelog page, and SDK reference) is gitignored.
 On a fresh clone, run `just generate-docs` before `just docs` or `just docs-build`,
-otherwise those pages will be missing from the sidebar. SDK reference generation
-requires `fumapy` — `just generate-docs` auto-installs it from
+otherwise generated pages will be missing from the sidebar. The deployed public
+changelog still lives at `docs.zenml.io/changelog`; the generated
+`changelog.mdx` here is not the public changelog source. SDK reference
+generation requires `fumapy` — `just generate-docs` auto-installs it from
 `docs/node_modules/fumadocs-python` (requires `pnpm install` in `docs/` first).
 
 ## File Responsibilities
 
 | File | Owner |
 |---|---|
-| `content/docs/**/*.mdx` | Python developers (content) |
-| `content/docs/**/meta.json` | Python developers (navigation) |
+| `content/docs/index.mdx`, `content/docs/meta.json` | Python/docs developers (reference-site landing + top-level navigation) |
+| `content/docs/cli/**`, `content/docs/changelog.mdx`, `content/docs/reference/**` | Generation scripts — do not hand-edit or commit generated output |
 | `app/`, `components/`, `lib/` | Designer / frontend (layout, theme, routes, metadata) |
 | `global.css` | Designer (branding) |
 | `mdx-components.tsx` | Shared (component registration) |
+
+## Cross-surface docs guidance
+
+These rules apply to Kitaru documentation on any surface (GitBook `docs/book/`,
+this FumaDocs reference app, and generated output).
+
+### Authoring conventions
+
+- Hand-written docs are **GitBook Markdown under `docs/book/`** (not MDX). Edit those `.md` files directly and add new pages to `docs/book/toc.md`. GitBook conventions live in `docs/book/AGENTS.md`.
+- Links **within the GitBook space** use relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the **SDK/CLI reference** with `https://sdkdocs.kitaru.ai` (the separate reference site, not in the GitBook space). Link to **other ZenML docs** with absolute `https://docs.zenml.io/...`. Diagrams are static PNG images hosted on Cloudflare R2 and referenced as `https://assets.kitaru.ai/docs/diagrams/<slug>.png` (regenerate via the diagram pipeline, not committed to the repo).
+- Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. Treat them as coordination scratchpads, not product docs.
+- Generated reference output should still come from the existing generation scripts rather than manual edits.
+
+### Accuracy rules for what we describe
+
+- Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
+- `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. Describe `kitaru model list` as listing aliases available in the current environment, not just aliases stored locally.
+- Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
+- Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
+- Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
+- Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.

@@ -25,7 +25,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast, runtime_checkable
+from typing import Any, Literal, NoReturn, Protocol, cast
+from uuid import UUID
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -33,7 +34,7 @@ from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.login.credentials_store import get_credentials_store
-from zenml.models import PipelineRunResponse
+from zenml.models import PipelineRunResponse, PipelineRunUpdate
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
@@ -73,7 +74,9 @@ from kitaru._client._logs import (
 from kitaru._client._mappers import (
     _CHECKPOINT_SOURCE_ALIAS_PREFIX,
     _PIPELINE_SOURCE_ALIAS_PREFIX,
+    _RAW_STATUSES_BY_PUBLIC_STATUS,
     _WAIT_CONDITION_STATUS_PENDING,
+    _backend_filter_value,
     _checkpoint_lineage_key,
     _coerce_status_filter,
     _first_pending_wait,
@@ -89,6 +92,7 @@ from kitaru._client._mappers import (
     _map_pending_wait,
     _parse_frozen_execution_spec,
     _select_pending_wait_condition,
+    _status_filter_value,
     _to_plain_dict,
     _to_public_status,
 )
@@ -101,6 +105,14 @@ from kitaru._client._models import (
     CheckpointCall,
     Execution,
     ExecutionEvent,
+    ExecutionStatistics,
+    ExecutionStatisticsDimension,
+    ExecutionStatisticsGroup,
+    ExecutionStatisticsGrouping,
+    ExecutionStatisticsMetric,
+    ExecutionStatisticsMetricAggregation,
+    ExecutionStatisticsMetricSource,
+    ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
@@ -108,6 +120,11 @@ from kitaru._client._models import (
 )
 from kitaru._client._models import (
     Deployment as DeploymentRecord,
+)
+from kitaru._client._statistics import (
+    get_execution_statistics,
+    normalize_execution_statistics_groupings,
+    normalize_execution_statistics_metrics,
 )
 from kitaru._interface_deployments import (
     Deployment,
@@ -125,11 +142,33 @@ from kitaru._source_aliases import (
 )
 from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
 from kitaru._telemetry import deployment_metadata_for_stack_model
+from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
+    ProjectCreateResult,
+    ProjectDeleteResult,
+    ProjectInfo,
     active_stack_log_store,
     resolve_connection_config,
     resolve_log_store,
+)
+from kitaru.config import (
+    create_project as _create_project,
+)
+from kitaru.config import (
+    current_project as _current_project,
+)
+from kitaru.config import (
+    delete_project as _delete_project,
+)
+from kitaru.config import (
+    get_project as _get_project,
+)
+from kitaru.config import (
+    list_projects as _list_projects,
+)
+from kitaru.config import (
+    use_project as _use_project,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -143,12 +182,41 @@ from kitaru.errors import (
     classify_failure_origin,
     execution_error_from_failure,
 )
-from kitaru.replay import build_replay_plan
+from kitaru.replay import (
+    ReplayFailureRow,
+    ReplayResultRow,
+    ReplaySkippedRow,
+    ReplaySubmission,
+    build_replay_plan,
+    build_replay_request_document,
+    new_replay_submission_id,
+    plan_requires_runtime_transport,
+    replay_at_skip_reason,
+    replay_at_status,
+    safe_compare_url_for_executions,
+    safe_persist_replay_submission_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
+_RETRY_RESUMING_REASON = "Manual retry requested by user."
+_RETRY_ROLLBACK_REASON = "Retry submission failed."
+_RESUME_RESUMING_REASON = "Manual resume requested by user."
+_RESUME_ROLLBACK_REASON = "Manual resume failed."
+_DUPLICATE_WAIT_CONDITION_CONFIGURATION_ERROR = (
+    "A run wait condition with this name already exists for the run, "
+    "but with different configuration."
+)
+_OPERATIONAL_RESUME_FAILURE_MARKERS = (
+    "Additionally failed to roll back execution status",
+    "Could not verify whether the execution is still RESUMING",
+    "The execution may remain RESUMING",
+    "Additionally failed to restore the previous active Kitaru stack",
+    "restoring the previous active Kitaru stack failed",
+    "The execution may continue",
+)
 _REPLAY_IMPORT_LOCK = threading.RLock()
 
 
@@ -445,34 +513,37 @@ def _attempt_local_key_activation(
     return _with_local_key_activation_status(result, succeeded=True)
 
 
-@runtime_checkable
 class _ReplayFlowLike(Protocol):
     """Flow wrapper protocol used by client-side replay resolution."""
 
     def replay(
         self,
-        exec_id: str,
+        execution: str | Sequence[str],
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
-        **flow_inputs: Any,
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
     ) -> Any: ...
 
 
-@contextmanager
-def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a stack while running an operation."""
-    if not stack_name_or_id:
-        yield
-        return
+_KITARU_REPLAY_FLOW_WRAPPER_MARKER = "_kitaru_replay_flow_wrapper"
 
-    client = Client()
-    old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
-    try:
-        yield
-    finally:
-        client.activate_stack(old_stack_id)
+
+def _is_replay_flow_wrapper(candidate: Any) -> bool:
+    """Return whether ``candidate`` is a real Kitaru flow wrapper.
+
+    A plain ZenML ``Pipeline`` also has a ``replay`` method, but it does not
+    accept Kitaru's unified replay arguments such as ``at`` and
+    ``flow_overrides``.  Runtime-checkable protocols only verify attribute
+    presence, not signatures, so replay resolution uses an explicit marker set
+    by Kitaru's ``@flow`` wrapper before delegating to the wrapper path.
+    """
+    return bool(getattr(candidate, _KITARU_REPLAY_FLOW_WRAPPER_MARKER, False))
 
 
 def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
@@ -692,8 +763,8 @@ def _resolve_flow_for_replay(run: PipelineRunResponse) -> _ReplayFlowLike:
     )
     for selector in deduped_selectors:
         candidate = getattr(module, selector, None)
-        if isinstance(candidate, _ReplayFlowLike):
-            return candidate
+        if _is_replay_flow_wrapper(candidate):
+            return cast(_ReplayFlowLike, candidate)
 
     tried_selectors = ", ".join(deduped_selectors) or "none"
     raise KitaruRuntimeError(
@@ -723,11 +794,169 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
     return pipeline_obj
 
 
+def _raise_if_running_source(run: PipelineRunResponse, execution: str) -> None:
+    run_status_value = _run_status_value(run)
+    if run_status_value in _RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING]:
+        raise KitaruStateError(
+            "Replay requires a non-running source execution. "
+            f"Execution '{execution}' is currently '{run_status_value}'."
+        )
+
+
+def _run_status_value(run: PipelineRunResponse) -> str:
+    """Return a pipeline run status as a plain string."""
+    return str(getattr(run.status, "value", run.status))
+
+
+def _exception_chain_contains(exc: BaseException, markers: tuple[str, ...]) -> bool:
+    """Return whether an exception, cause, or context contains any marker."""
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+
+        if any(marker in str(current) for marker in markers):
+            return True
+
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return False
+
+
+def _is_duplicate_wait_condition_configuration_error(exc: BaseException) -> bool:
+    """Return whether an exception chain contains ZenML's duplicate wait error."""
+    return _exception_chain_contains(
+        exc,
+        (_DUPLICATE_WAIT_CONDITION_CONFIGURATION_ERROR,),
+    )
+
+
+def _has_operational_resume_failure_context(exc: BaseException) -> bool:
+    """Return whether resume failure text includes operational recovery warnings."""
+    return _exception_chain_contains(exc, _OPERATIONAL_RESUME_FAILURE_MARKERS)
+
+
+def _duplicate_wait_condition_resume_message(exec_id: str) -> str:
+    """Build the duplicate wait-condition resume failure message."""
+    return (
+        f"Unable to resume execution '{exec_id}' because the resumed run "
+        "re-entered an existing wait condition, but the execution backend "
+        "reported that the wait condition now has different configuration. "
+        "Keep wait `name`, "
+        "`question`, `type`, and `schema`/`data_schema` stable across resume. "
+        "If the execution is still waiting for unresolved input, resolve that "
+        "input first with:\n\n"
+        f"  kitaru executions input {exec_id} --value '<json>'"
+    )
+
+
+def _rollback_reopened_run(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    operation_name: str,
+    original_error: Exception,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
+) -> NoReturn:
+    """Try to restore a run status after reopening it failed."""
+    try:
+        client._client().zen_store.update_run(
+            run_id=run.id,
+            run_update=PipelineRunUpdate(
+                status=rollback_status,
+                status_reason=rollback_reason,
+            ),
+        )
+    except Exception as rollback_error:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}. "
+            "Additionally failed to roll back execution status to "
+            f"'{rollback_status.value}': {rollback_error}. "
+            "The execution may remain RESUMING."
+        ) from original_error
+
+    raise KitaruBackendError(
+        f"Failed to {operation_name} execution '{run.id}': {original_error}"
+    ) from original_error
+
+
+def _repair_reopened_run_after_resume_failure(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    operation_name: str,
+    original_error: Exception,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
+) -> NoReturn:
+    """Repair a reopened run if ZenML did not move it out of RESUMING."""
+    try:
+        latest_run = client._get_pipeline_run(str(run.id), hydrate=False)
+    except Exception as refresh_error:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}. "
+            "Could not verify whether the execution is still RESUMING: "
+            f"{refresh_error}. The execution may remain RESUMING."
+        ) from original_error
+
+    if _run_status_value(latest_run) != ZenMLExecutionStatus.RESUMING.value:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {original_error}"
+        ) from original_error
+
+    _rollback_reopened_run(
+        run=run,
+        client=client,
+        operation_name=operation_name,
+        original_error=original_error,
+        rollback_status=rollback_status,
+        rollback_reason=rollback_reason,
+    )
+
+
+def _restore_previous_active_stack(
+    *,
+    client: Client,
+    old_stack_id: str | UUID,
+) -> Exception | None:
+    """Restore the active Kitaru stack and return the error if it fails."""
+    try:
+        client.activate_stack(old_stack_id)
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _raise_with_restore_failure_context(
+    *,
+    error: KitaruBackendError,
+    original_error: Exception,
+    restoration_error: Exception | None,
+) -> NoReturn:
+    """Raise an operation failure, adding Kitaru stack restore context if needed."""
+    if restoration_error is None:
+        raise error
+    raise KitaruBackendError(
+        f"{error}. Additionally failed to restore the previous active Kitaru "
+        f"stack: {restoration_error}."
+    ) from original_error
+
+
 def _restart_run_from_snapshot(
     *,
     run: PipelineRunResponse,
     client: KitaruClient,
     operation_name: str,
+    resuming_reason: str,
+    rollback_status: ZenMLExecutionStatus,
+    rollback_reason: str,
 ) -> None:
     """Restart an execution from its stored snapshot metadata."""
     snapshot = run.snapshot
@@ -741,20 +970,113 @@ def _restart_run_from_snapshot(
             f"Unable to {operation_name} execution because snapshot stack "
             "metadata is missing."
         )
+    snapshot_stack_id = getattr(snapshot.stack, "id", None)
+    if not snapshot_stack_id:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot stack "
+            "id is missing."
+        )
 
     try:
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = client._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.resume_run(
-                snapshot=snapshot,
-                run=run,
-                stack=active_stack,
-            )
+        reopened_run = client._client().zen_store.update_run(
+            run_id=run.id,
+            run_update=PipelineRunUpdate(
+                status=ZenMLExecutionStatus.RESUMING,
+                status_reason=resuming_reason,
+            ),
+        )
     except Exception as exc:
         raise KitaruBackendError(
-            f"Failed to {operation_name} execution '{run.id}': {exc}"
+            f"Failed to reopen execution '{run.id}' for {operation_name}: {exc}"
         ) from exc
+
+    try:
+        stack_client = Client()
+        old_stack_id = cast(str | UUID, stack_client.active_stack_model.id)
+    except Exception as exc:
+        _rollback_reopened_run(
+            run=reopened_run,
+            client=client,
+            operation_name=operation_name,
+            original_error=exc,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+        )
+
+    try:
+        stack_client.activate_stack(str(snapshot_stack_id))
+    except Exception as exc:
+        _rollback_reopened_run(
+            run=reopened_run,
+            client=client,
+            operation_name=operation_name,
+            original_error=exc,
+            rollback_status=rollback_status,
+            rollback_reason=rollback_reason,
+        )
+
+    try:
+        active_stack = stack_client.active_stack
+        orchestrator = cast(Any, active_stack.orchestrator)
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _rollback_reopened_run(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    try:
+        orchestrator.resume_run(
+            snapshot=snapshot,
+            run=reopened_run,
+            stack=active_stack,
+        )
+    except Exception as exc:
+        restoration_error = _restore_previous_active_stack(
+            client=stack_client,
+            old_stack_id=old_stack_id,
+        )
+        try:
+            _repair_reopened_run_after_resume_failure(
+                run=reopened_run,
+                client=client,
+                operation_name=operation_name,
+                original_error=exc,
+                rollback_status=rollback_status,
+                rollback_reason=rollback_reason,
+            )
+        except KitaruBackendError as operation_error:
+            _raise_with_restore_failure_context(
+                error=operation_error,
+                original_error=exc,
+                restoration_error=restoration_error,
+            )
+
+    restoration_error = _restore_previous_active_stack(
+        client=stack_client,
+        old_stack_id=old_stack_id,
+    )
+    if restoration_error is not None:
+        raise KitaruBackendError(
+            f"The {operation_name} request for execution '{run.id}' was submitted, "
+            "but restoring the previous active Kitaru stack failed: "
+            f"{restoration_error}. The execution may continue; inspect its latest "
+            "status before retrying."
+        ) from restoration_error
 
 
 def _validate_event_filter_values(
@@ -811,6 +1133,25 @@ def _validate_optional_event_filter_value(
 def _run_has_complete_step_list(run: Any) -> bool:
     """Return whether run steps are stable enough for server-side filters."""
     return _to_public_status(run.status).is_finished
+
+
+def _pipeline_name_filter_value(flow: str) -> str:
+    """Return the backend filter value for both stored names of a Kitaru flow."""
+    candidates = [flow, f"{_PIPELINE_SOURCE_ALIAS_PREFIX}{flow}"]
+    return _backend_filter_value(candidates)
+
+
+def _list_status_filter_value(public_status: ExecutionStatus) -> str:
+    """Return the safest backend status filter for execution listing."""
+    if public_status in {ExecutionStatus.RUNNING, ExecutionStatus.WAITING}:
+        raw_statuses = (
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.RUNNING],
+            *_RAW_STATUSES_BY_PUBLIC_STATUS[ExecutionStatus.WAITING],
+        )
+        return _backend_filter_value(raw_statuses)
+    status_value = _status_filter_value(public_status)
+    assert status_value is not None
+    return status_value
 
 
 class _ExecutionsAPI:
@@ -1138,7 +1479,7 @@ class _ExecutionsAPI:
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
-        run_status_value = str(getattr(run.status, "value", run.status))
+        run_status_value = _run_status_value(run)
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
                 "Only failed executions can be retried. "
@@ -1149,6 +1490,9 @@ class _ExecutionsAPI:
             run=run,
             client=self._client_ref,
             operation_name="retry",
+            resuming_reason=_RETRY_RESUMING_REASON,
+            rollback_status=ZenMLExecutionStatus.FAILED,
+            rollback_reason=_RETRY_ROLLBACK_REASON,
         )
         track(AnalyticsEvent.EXECUTION_RETRIED, {})
         return self.get(exec_id)
@@ -1165,128 +1509,393 @@ class _ExecutionsAPI:
                 f"Resolve pending wait input before resuming execution '{exec_id}'."
             )
 
-        run_status_value = str(getattr(run.status, "value", run.status))
-        if run_status_value != "paused":
+        run_status_value = _run_status_value(run)
+        if run_status_value != ZenMLExecutionStatus.PAUSED.value:
             raise KitaruStateError(
                 "Only paused executions can be resumed. "
                 f"Execution '{exec_id}' is currently '{run_status_value}'."
             )
 
-        _restart_run_from_snapshot(
-            run=run,
-            client=self._client_ref,
-            operation_name="resume",
-        )
+        try:
+            _restart_run_from_snapshot(
+                run=run,
+                client=self._client_ref,
+                operation_name="resume",
+                resuming_reason=_RESUME_RESUMING_REASON,
+                rollback_status=ZenMLExecutionStatus.PAUSED,
+                rollback_reason=_RESUME_ROLLBACK_REASON,
+            )
+        except KitaruBackendError as exc:
+            if _has_operational_resume_failure_context(exc):
+                raise
+            if _is_duplicate_wait_condition_configuration_error(exc):
+                raise KitaruStateError(
+                    _duplicate_wait_condition_resume_message(exec_id)
+                ) from exc
+            raise
         track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
 
+    def _await_replay_completion(self, handle_or_run: Any) -> str:
+        """Block until a replay finishes and roll up terminal LLM usage metadata."""
+        from kitaru.flow import FlowHandle
+
+        if isinstance(handle_or_run, FlowHandle) or callable(
+            getattr(handle_or_run, "wait", None)
+        ):
+            handle = handle_or_run
+        else:
+            handle = FlowHandle(handle_or_run, project=self._client_ref._project)
+        handle.wait()
+        return str(handle.exec_id)
+
+    def _persist_replay_terminal_llm_usage_if_terminal(self, exec_id: str) -> None:
+        """Best-effort terminal LLM rollup after replay metadata exists."""
+        try:
+            run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        except Exception:
+            logger.debug(
+                "Failed to refresh replay execution before terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        if not getattr(getattr(run, "status", None), "is_finished", False):
+            return
+        try:
+            zenml_client = self._client_ref._client()
+        except Exception:
+            logger.debug(
+                "Failed to create ZenML client for replay terminal LLM usage "
+                "aggregation.",
+                exc_info=True,
+            )
+            return
+        _safe_persist_terminal_llm_usage_metadata(
+            run,
+            zenml_client=zenml_client,
+        )
+
     def replay(
         self,
-        exec_id: str,
+        execution: str | Sequence[str],
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
-        **flow_inputs: Any,
-    ) -> Execution:
-        """Replay an execution from a checkpoint boundary."""
-        source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+    ) -> ReplaySubmission:
+        """Replay one or more explicit executions from a checkpoint cut point."""
+        from kitaru.cohort import coerce_exec_ids
 
-        run_status_value = str(getattr(source_run.status, "value", source_run.status))
-        if run_status_value in {
-            "initializing",
-            "provisioning",
-            "running",
-            "retrying",
-            "stopping",
-        }:
-            raise KitaruStateError(
-                "Replay requires a non-running source execution. "
-                f"Execution '{exec_id}' is currently '{run_status_value}'."
-            )
+        exec_ids = (
+            [execution] if isinstance(execution, str) else coerce_exec_ids(execution)
+        )
+        if not exec_ids:
+            raise KitaruUsageError("Pass at least one execution ID to replay.")
+        resolved_wait = (len(exec_ids) == 1) if wait is None else wait
+        resolved_on_error = on_error or ("fail" if len(exec_ids) == 1 else "collect")
+        if resolved_on_error not in {"collect", "fail"}:
+            raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
+
+        first_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
+        _raise_if_running_source(first_run, exec_ids[0])
 
         replay_flow: _ReplayFlowLike | None = None
         try:
-            replay_flow = _resolve_flow_for_replay(source_run)
+            replay_flow = _resolve_flow_for_replay(first_run)
         except _ReplayImportDependencyError:
             raise
         except KitaruRuntimeError:
             replay_flow = None
 
         if replay_flow is not None:
-            handle = replay_flow.replay(
-                exec_id,
-                from_=from_,
-                overrides=overrides,
-                **flow_inputs,
+            result = replay_flow.replay(
+                exec_ids[0] if len(exec_ids) == 1 else exec_ids,
+                at=at,
+                flow_overrides=flow_overrides,
+                checkpoint_overrides=checkpoint_overrides,
+                invocation_overrides=invocation_overrides,
+                skip=skip,
+                tag=tag,
+                wait=resolved_wait,
+                on_error=resolved_on_error,
             )
-            replay_exec_id = getattr(handle, "exec_id", None)
-            if not replay_exec_id:
-                raise KitaruRuntimeError(
-                    "Resolved flow replay call did not return a valid execution handle."
-                )
-            return self.get(str(replay_exec_id))
+            if isinstance(result, ReplaySubmission):
+                return result
+            # Compatibility with any locally imported old flow wrapper.
+            replay_exec_id = (
+                self._await_replay_completion(result)
+                if resolved_wait
+                else str(result.exec_id)
+            )
+            execution_obj = self.get(replay_exec_id) if resolved_wait else None
+            return ReplaySubmission.create(
+                tag=tag,
+                at=at,
+                wait=resolved_wait,
+                plan=build_replay_request_document(flow_overrides=flow_overrides),
+                results=[
+                    ReplayResultRow(
+                        original_exec_ref=exec_ids[0],
+                        original_exec_id=str(first_run.id),
+                        replay_exec_id=replay_exec_id,
+                        status=(
+                            "completed" if execution_obj is not None else "submitted"
+                        ),
+                        compare_url=safe_compare_url_for_executions(
+                            [str(first_run.id), replay_exec_id]
+                        ),
+                        handle=None if resolved_wait else result,
+                    )
+                ],
+            )
 
-        replay_pipeline = _resolve_pipeline_for_replay(source_run)
-        replay_plan = build_replay_plan(
-            run=source_run,
-            from_=from_,
-            overrides=overrides,
-            flow_inputs=flow_inputs,
+        return self._replay_via_pipeline_fallback(
+            exec_ids,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag=tag,
+            wait=resolved_wait,
+            on_error=resolved_on_error,
+            prefetched_runs={exec_ids[0]: first_run},
         )
 
-        replay_metadata: dict[str, Any] = {
-            "from_checkpoint": from_,
-            "replay_path": "pipeline_fallback",
-        }
-        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+    def _replay_via_pipeline_fallback(
+        self,
+        executions: Sequence[str],
+        *,
+        at: str,
+        flow_overrides: Mapping[str, Any] | None,
+        checkpoint_overrides: Mapping[str, Any] | None,
+        invocation_overrides: Mapping[str, Any] | None,
+        skip: Sequence[str] | None,
+        tag: str | None,
+        wait: bool,
+        on_error: Literal["collect", "fail"],
+        prefetched_runs: Mapping[str, PipelineRunResponse] | None = None,
+    ) -> ReplaySubmission:
+        """Replay through ZenML pipeline fallback when no Kitaru flow wrapper exists."""
+        from kitaru.flow import FlowHandle, _temporary_active_project
 
-        try:
-            replayed_run = replay_pipeline.replay(
-                pipeline_run=source_run.id,
-                skip=replay_plan.steps_to_skip,
-                skip_successful_steps=False,
-                input_overrides=replay_plan.input_overrides or None,
-                step_input_overrides=replay_plan.step_input_overrides or None,
-            )
-        except Exception as exc:
-            failure_origin = classify_failure_origin(
-                status_reason=str(exc),
-                traceback=None,
-                default=FailureOrigin.BACKEND,
-            )
-            track(
-                AnalyticsEvent.REPLAY_FAILED,
-                {
-                    **replay_metadata,
-                    "error_type": type(exc).__name__,
-                    "failure_origin": failure_origin.value,
-                },
-            )
-            if failure_origin == FailureOrigin.DIVERGENCE:
-                raise execution_error_from_failure(
-                    f"Replay divergence detected for execution '{exec_id}': {exc}",
-                    exec_id=str(source_run.id),
-                    status="failed",
-                    origin=failure_origin,
-                ) from exc
-            raise KitaruBackendError(
-                f"Failed to replay execution '{exec_id}': {exc}"
-            ) from exc
+        submission_id = new_replay_submission_id()
+        request_document = build_replay_request_document(
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+        )
+        plan_document = request_document
+        results: list[ReplayResultRow] = []
+        failures: list[ReplayFailureRow] = []
+        skipped_rows: list[ReplaySkippedRow] = []
+        compare_ids: list[str] = []
 
-        replayed_exec_id = str(getattr(replayed_run, "id", ""))
-        if not replayed_exec_id:
-            track(
-                AnalyticsEvent.REPLAY_FAILED,
-                {
-                    **replay_metadata,
-                    "error_type": "KitaruRuntimeError",
-                    "failure_origin": FailureOrigin.RUNTIME.value,
-                },
-            )
-            raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
+        for exec_ref in executions:
+            original_id: str | None = None
+            try:
+                source_run = (prefetched_runs or {}).get(exec_ref)
+                if source_run is None:
+                    source_run = self._client_ref._get_pipeline_run(
+                        exec_ref, hydrate=True
+                    )
+                _raise_if_running_source(source_run, exec_ref)
+                original_id = str(source_run.id)
+                if on_error == "collect":
+                    at_status = replay_at_status(run=source_run, at=at)
+                    if at_status in {"missing", "no_checkpoints"}:
+                        skipped_rows.append(
+                            ReplaySkippedRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=source_run, at=at),
+                            )
+                        )
+                        continue
+                    if at_status == "ambiguous":
+                        failures.append(
+                            ReplayFailureRow(
+                                original_exec_ref=exec_ref,
+                                original_exec_id=original_id,
+                                reason=replay_at_skip_reason(run=source_run, at=at),
+                            )
+                        )
+                        continue
 
-        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
-        return self.get(replayed_exec_id)
+                replay_pipeline = _resolve_pipeline_for_replay(source_run)
+                replay_plan = build_replay_plan(
+                    run=source_run,
+                    at=at,
+                    flow_overrides=flow_overrides,
+                    checkpoint_overrides=checkpoint_overrides,
+                    invocation_overrides=invocation_overrides,
+                    skip=skip,
+                )
+                if plan_requires_runtime_transport(replay_plan):
+                    raise KitaruRuntimeError(
+                        "Replay request includes runtime-only overrides (`code`, "
+                        "targeted `model`, or adapter `input`), but Kitaru could "
+                        "not resolve the flow wrapper needed to transport "
+                        "KITARU_REPLAY_CONTEXT. Run replay from the project "
+                        "directory or remove those overrides."
+                    )
+                plan_document = replay_plan.document
+
+                replay_metadata: dict[str, Any] = {
+                    "at_checkpoint": at,
+                    "replay_path": "pipeline_fallback",
+                }
+                track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
+                try:
+                    with _temporary_active_project(self._client_ref._project):
+                        replayed_run = replay_pipeline.replay(
+                            pipeline_run=source_run.id,
+                            skip=replay_plan.steps_to_skip,
+                            skip_successful_steps=False,
+                            input_overrides=replay_plan.input_overrides or None,
+                            step_input_overrides=replay_plan.step_input_overrides
+                            or None,
+                        )
+                except Exception as exc:
+                    failure_origin = classify_failure_origin(
+                        status_reason=str(exc),
+                        traceback=None,
+                        default=FailureOrigin.BACKEND,
+                    )
+                    track(
+                        AnalyticsEvent.REPLAY_FAILED,
+                        {
+                            **replay_metadata,
+                            "error_type": type(exc).__name__,
+                            "failure_origin": failure_origin.value,
+                        },
+                    )
+                    if failure_origin == FailureOrigin.DIVERGENCE:
+                        raise execution_error_from_failure(
+                            "Replay divergence detected for execution "
+                            f"'{exec_ref}': {exc}",
+                            exec_id=str(source_run.id),
+                            status="failed",
+                            origin=failure_origin,
+                        ) from exc
+                    raise KitaruBackendError(
+                        f"Failed to replay execution '{exec_ref}': {exc}"
+                    ) from exc
+
+                replayed_exec_id = str(getattr(replayed_run, "id", ""))
+                if not replayed_exec_id:
+                    track(
+                        AnalyticsEvent.REPLAY_FAILED,
+                        {
+                            **replay_metadata,
+                            "error_type": "KitaruRuntimeError",
+                            "failure_origin": FailureOrigin.RUNTIME.value,
+                        },
+                    )
+                    raise KitaruRuntimeError(
+                        "Replay did not produce a pipeline run ID."
+                    )
+
+                track(
+                    AnalyticsEvent.FLOW_REPLAYED,
+                    {"replay_path": "pipeline_fallback"},
+                )
+                replay_handle = FlowHandle(
+                    replayed_run,
+                    project=self._client_ref._project,
+                )
+                with _temporary_active_project(self._client_ref._project):
+                    safe_persist_replay_submission_metadata(
+                        replay_exec_id=replayed_exec_id,
+                        original_exec_id=original_id,
+                        submission_id=submission_id,
+                        tag=tag,
+                        steps_to_skip=replay_plan.steps_to_skip,
+                    )
+                row_status: Literal["submitted", "completed", "failed"] = "submitted"
+                if wait:
+                    replayed_exec_id = self._await_replay_completion(replay_handle)
+                    row_status = "completed"
+                elif getattr(
+                    getattr(replayed_run, "status", None), "is_finished", False
+                ):
+                    self._persist_replay_terminal_llm_usage_if_terminal(
+                        replayed_exec_id
+                    )
+                compare_ids.extend([original_id, replayed_exec_id])
+                results.append(
+                    ReplayResultRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        replay_exec_id=replayed_exec_id,
+                        status=row_status,
+                        compare_url=safe_compare_url_for_executions(
+                            [original_id, replayed_exec_id]
+                        ),
+                        handle=None if wait else replay_handle,
+                    )
+                )
+            except Exception as exc:
+                if on_error == "fail":
+                    raise
+                failures.append(
+                    ReplayFailureRow(
+                        original_exec_ref=exec_ref,
+                        original_exec_id=original_id,
+                        reason=str(exc),
+                    )
+                )
+
+        return ReplaySubmission.create(
+            submission_id=submission_id,
+            tag=tag,
+            at=at,
+            wait=wait,
+            plan=plan_document,
+            results=results,
+            failures=failures,
+            skipped=skipped_rows,
+            compare_url=safe_compare_url_for_executions(compare_ids),
+        )
+
+    def cohort(
+        self,
+        *,
+        flow: str,
+        at: str,
+        deployment: str | None = None,
+        deployment_version: int | None = None,
+        order_by: str = "-started_at",
+        limit: int = 50,
+        originals_only: bool = True,
+        status: str | Sequence[str] = "completed",
+        since: Any = None,
+        until: Any = None,
+    ) -> Any:
+        """Build a cohort selection query for ``resolve()``."""
+        from kitaru.cohort import cohort as build_cohort_query
+
+        return build_cohort_query(
+            flow=flow,
+            at=at,
+            deployment=deployment,
+            deployment_version=deployment_version,
+            order_by=order_by,
+            limit=limit,
+            originals_only=originals_only,
+            status=status,
+            since=since,
+            until=until,
+            client=self._client_ref,
+        )
 
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""
@@ -1321,6 +1930,9 @@ class _ExecutionsAPI:
         if size is not None and page is None:
             page = 1
 
+        if flow is not None and _normalize_flow_name(flow) is None:
+            return []
+
         start_index = 0
         stop_index: int | None = None
         if limit is not None:
@@ -1340,6 +1952,16 @@ class _ExecutionsAPI:
         else:
             page_size = 50
 
+        server_filters: dict[str, Any] = {}
+        if flow is not None:
+            server_filters["pipeline_name"] = _pipeline_name_filter_value(flow)
+        if status_filter is not None:
+            server_filters["status"] = _list_status_filter_value(status_filter)
+        resolve_wait_status = status_filter in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.WAITING,
+        }
+
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
                 sort_by="desc:created",
@@ -1347,6 +1969,7 @@ class _ExecutionsAPI:
                 size=page_size,
                 project=self._client_ref._project,
                 hydrate=True,
+                **server_filters,
             )
             runs = list(run_page.items)
             if not runs:
@@ -1357,8 +1980,11 @@ class _ExecutionsAPI:
                     run=run,
                     client=self._client_ref,
                     include_details=False,
+                    resolve_wait_status=resolve_wait_status,
                 )
 
+                # Server filters only reduce fetched runs; these public checks
+                # still decide the final result because flow/status can be derived.
                 if flow is not None and execution.flow_name != flow:
                     continue
                 if status_filter is not None and execution.status != status_filter:
@@ -1376,6 +2002,83 @@ class _ExecutionsAPI:
             backend_page += 1
 
         return results
+
+    def statistics(
+        self,
+        *,
+        group_by: Sequence[ExecutionStatisticsGrouping | str] = (),
+        metrics: Sequence[ExecutionStatisticsMetric | Mapping[str, Any] | str] = (),
+        flow: str | None = None,
+        status: ExecutionStatus | str | None = None,
+        stack: str | None = None,
+        tags: Sequence[str] | None = None,
+        max_groups: int = 1000,
+    ) -> ExecutionStatistics:
+        """Return grouped execution statistics with optional numeric metrics."""
+        statistics = get_execution_statistics(
+            client=self._client_ref,
+            group_by=group_by,
+            metrics=metrics,
+            flow=flow,
+            status=status,
+            stack=stack,
+            tags=tags,
+            max_groups=max_groups,
+        )
+
+        normalized_groupings = normalize_execution_statistics_groupings(group_by)
+        normalized_metrics = normalize_execution_statistics_metrics(metrics)
+        grouping_dimensions = {grouping.dimension for grouping in normalized_groupings}
+        metric_sources = {metric.source for metric in normalized_metrics}
+        track(
+            AnalyticsEvent.EXECUTION_STATISTICS_QUERIED,
+            {
+                "grouping_count": len(normalized_groupings),
+                "metric_count": len(normalized_metrics),
+                "has_duration_metric": (
+                    ExecutionStatisticsMetricSource.DURATION in metric_sources
+                ),
+                "has_step_count_metric": (
+                    ExecutionStatisticsMetricSource.STEP_COUNT in metric_sources
+                ),
+                "has_cached_step_count_metric": (
+                    ExecutionStatisticsMetricSource.CACHED_STEP_COUNT in metric_sources
+                ),
+                "has_output_artifact_count_metric": (
+                    ExecutionStatisticsMetricSource.OUTPUT_ARTIFACT_COUNT
+                    in metric_sources
+                ),
+                "has_metadata_metric": (
+                    ExecutionStatisticsMetricSource.METADATA in metric_sources
+                ),
+                "has_status_grouping": (
+                    ExecutionStatisticsDimension.STATUS in grouping_dimensions
+                ),
+                "has_flow_grouping": (
+                    ExecutionStatisticsDimension.FLOW in grouping_dimensions
+                ),
+                "has_stack_grouping": (
+                    ExecutionStatisticsDimension.STACK in grouping_dimensions
+                ),
+                "has_tag_grouping": (
+                    ExecutionStatisticsDimension.TAG in grouping_dimensions
+                ),
+                "has_time_grouping": (
+                    ExecutionStatisticsDimension.TIME in grouping_dimensions
+                ),
+                "has_metadata_grouping": (
+                    ExecutionStatisticsDimension.METADATA in grouping_dimensions
+                ),
+                "has_flow_filter": flow is not None,
+                "has_status_filter": status is not None,
+                "has_stack_filter": stack is not None,
+                "tag_filter_count": len(tags or ()),
+                "max_groups": max_groups,
+                "result_group_count": len(statistics.groups),
+                "truncated": statistics.truncated,
+            },
+        )
+        return statistics
 
     def latest(
         self,
@@ -1781,6 +2484,7 @@ class _DeploymentsAPI:
             )
         return FlowHandle(
             run,
+            project=self._client_ref._project,
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )
@@ -2349,8 +3053,62 @@ class _APIKeysAPI:
             ) from exc
 
 
+class _ProjectScopedAPIUnavailable:
+    """Placeholder for project-scoped APIs before a project is selected."""
+
+    def __getattr__(self, name: str) -> NoReturn:
+        raise KitaruUsageError(
+            "This Kitaru client has no active project. Set KITARU_PROJECT "
+            "before using execution, artifact, or deployment APIs."
+        )
+
+
+class _ProjectsAPI:
+    """Project-management operations for a Kitaru client."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+
+    def current(self) -> ProjectInfo:
+        """Return the active Kitaru project."""
+        return _current_project(client_factory=self._client_ref._client)
+
+    def list(self) -> builtins.list[ProjectInfo]:
+        """List Kitaru projects visible to the current user."""
+        return _list_projects(client_factory=self._client_ref._client)
+
+    def get(self, name_or_id: str) -> ProjectInfo:
+        """Return a Kitaru project by name or ID."""
+        return _get_project(name_or_id, client_factory=self._client_ref._client)
+
+    def create(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        display_name: str | None = None,
+        activate: bool = True,
+    ) -> ProjectCreateResult:
+        """Create a Kitaru project on ZenML Pro/Cloud and optionally activate it."""
+        return _create_project(
+            name,
+            description=description,
+            display_name=display_name,
+            activate=activate,
+            client_factory=self._client_ref._client,
+        )
+
+    def use(self, name_or_id: str) -> ProjectInfo:
+        """Set the active Kitaru project on ZenML Pro/Cloud."""
+        return _use_project(name_or_id, client_factory=self._client_ref._client)
+
+    def delete(self, name_or_id: str) -> ProjectDeleteResult:
+        """Delete a Kitaru project on ZenML Pro/Cloud."""
+        return _delete_project(name_or_id, client_factory=self._client_ref._client)
+
+
 class KitaruClient:
-    """Client for Kitaru executions, artifacts, deployments, and auth."""
+    """Client for Kitaru executions, artifacts, deployments, projects, and auth."""
 
     def __init__(
         self,
@@ -2395,9 +3153,16 @@ class KitaruClient:
         self._project = resolved_connection.project
 
         self.auth = _AuthAPI(self)
-        self.executions = _ExecutionsAPI(self)
-        self.artifacts = _ArtifactsAPI(self)
-        self.deployments = _DeploymentsAPI(self)
+        self.projects = _ProjectsAPI(self)
+        if not _require_project and self._project is None:
+            unavailable = _ProjectScopedAPIUnavailable()
+            self.executions = unavailable
+            self.artifacts = unavailable
+            self.deployments = unavailable
+        else:
+            self.executions = _ExecutionsAPI(self)
+            self.artifacts = _ArtifactsAPI(self)
+            self.deployments = _DeploymentsAPI(self)
 
     @classmethod
     def for_auth_management(cls) -> KitaruClient:
@@ -2407,6 +3172,17 @@ class KitaruClient:
         project for env-driven remote connections. Auth management is
         server-level, so this constructor validates server/auth pairing while
         intentionally skipping project validation.
+        """
+        return cls(_require_project=False)
+
+    @classmethod
+    def for_project_management(cls) -> KitaruClient:
+        """Create a client for project-management operations.
+
+        Reading projects happens before a project-scoped operation can run.
+        Project create/use/delete additionally require ZenML Pro/Cloud through
+        the shared project helpers. This constructor validates server/auth
+        pairing while intentionally skipping the active-project requirement.
         """
         return cls(_require_project=False)
 
@@ -2481,6 +3257,14 @@ __all__ = [
     "Deployment",
     "Execution",
     "ExecutionEvent",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
+    "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
     "KitaruClient",

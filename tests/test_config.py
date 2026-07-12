@@ -5,22 +5,29 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
+import tomllib
+import types
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, call, patch
+from uuid import UUID
 
 import click
 import pytest
 from zenml.config.docker_settings import DockerSettings
-from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
+from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID, ENV_ZENML_ACTIVE_STACK_ID
 from zenml.enums import StackComponentType
 from zenml.exceptions import EntityExistsError
+from zenml.models.v2.misc.info_models import ComponentInfo
 from zenml.utils import io_utils, yaml_utils
 
 import kitaru.config as config_module
+from kitaru._config import _stacks as config_stacks_module
+from kitaru._config._active_stack_env import active_stack_env_override_warning
 from kitaru._env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
@@ -28,6 +35,7 @@ from kitaru.config import (
     KITARU_CONFIG_PATH_ENV,
     KITARU_DEFAULT_MODEL_ENV,
     KITARU_IMAGE_ENV,
+    KITARU_LLM_ESTIMATED_COSTS_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_MODEL_REGISTRY_ENV,
@@ -41,6 +49,7 @@ from kitaru.config import (
     ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
+    ModalStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
     ResolvedConnectionConfig,
@@ -52,6 +61,7 @@ from kitaru.config import (
     _coerce_image_input,
     _create_azureml_stack_operation,
     _create_kubernetes_stack_operation,
+    _create_modal_stack_operation,
     _create_sagemaker_stack_operation,
     _create_stack_operation,
     _create_vertex_stack_operation,
@@ -82,6 +92,25 @@ from kitaru.config import (
     use_stack,
 )
 from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+
+
+def _install_fake_modal_package(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install enough fake Modal modules for ZenML Modal config validation."""
+    modal_pkg = types.ModuleType("modal")
+    modal_pkg.__path__ = []
+    modal_config = cast(Any, types.ModuleType("modal.config"))
+    modal_config.config = {}
+    monkeypatch.setitem(sys.modules, "modal", modal_pkg)
+    monkeypatch.setitem(sys.modules, "modal.config", modal_config)
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+
+
+def test_pyproject_declares_modal_optional_extra() -> None:
+    """Package metadata should expose Modal as an explicit optional extra."""
+    pyproject_path = Path(__file__).parents[1] / "pyproject.toml"
+    pyproject = tomllib.loads(pyproject_path.read_text())
+
+    assert pyproject["project"]["optional-dependencies"]["modal"] == ["modal>=1.4,<2"]
 
 
 class _FakeStackPage:
@@ -122,6 +151,37 @@ def _stack_component(
         connector=connector,
         service_connector_resource_id=service_connector_resource_id,
         connector_resource_id=connector_resource_id,
+        resource_id=resource_id,
+    )
+
+
+def _modal_image_builder_component(
+    component_id: str = "img-id",
+    name: str = "modal-image-builder",
+) -> SimpleNamespace:
+    """Return the persisted local image builder used by Modal stack tests."""
+    return _stack_component(
+        component_id,
+        name,
+        flavor="local",
+        configuration={"use_subprocess_call": True},
+    )
+
+
+def _service_connector_model(
+    *,
+    connector_id: str,
+    name: str,
+    connector_type: str,
+    resource_type: str,
+    resource_id: str | None,
+) -> SimpleNamespace:
+    """Return a minimal service connector model stub for stack tests."""
+    return SimpleNamespace(
+        id=connector_id,
+        name=name,
+        type=connector_type,
+        resource_types=[resource_type],
         resource_id=resource_id,
     )
 
@@ -414,7 +474,7 @@ def _kitaru_config_path() -> Path:
 def test_apply_env_translations_sets_zenml_mirrors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Public KITARU env vars should populate the equivalent ZenML vars."""
+    """Public KITARU env vars should populate safe ZenML mirror vars."""
     monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
     monkeypatch.setenv("KITARU_PROJECT", "demo-project")
@@ -426,10 +486,33 @@ def test_apply_env_translations_sets_zenml_mirrors(
 
     assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
     assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
-    assert os.environ["ZENML_ACTIVE_PROJECT_ID"] == "demo-project"
+    assert ENV_ZENML_ACTIVE_PROJECT_ID not in os.environ
     assert os.environ["ZENML_DEBUG"] == "false"
     assert os.environ["ZENML_ANALYTICS_OPT_IN"] == "true"
     assert os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] == "kitaru-cli"
+
+
+def test_apply_env_translations_keeps_project_names_kitaru_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Name selectors should not poison ZenML's UUID-only project env var."""
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "production")
+
+    apply_env_translations()
+
+    assert ENV_ZENML_ACTIVE_PROJECT_ID not in os.environ
+
+
+def test_apply_env_translations_copies_project_uuid_for_zenml_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UUID project selectors should still populate ZenML's compatibility env var."""
+    project_id = "12345678-1234-5678-1234-567812345678"
+    monkeypatch.setenv(KITARU_PROJECT_ENV, project_id)
+
+    apply_env_translations()
+
+    assert os.environ[ENV_ZENML_ACTIVE_PROJECT_ID] == project_id
 
 
 def test_apply_env_translations_warns_and_overwrites_conflicts(
@@ -1047,6 +1130,31 @@ def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
         resolve_model_selection(None)
 
 
+def test_active_stack_env_override_warning_treats_uuid_equivalent_ids_as_same() -> None:
+    """Env and saved stack IDs should match like ZenML UUID parsing does."""
+    stack_id = "12345678-1234-5678-1234-567812345678"
+
+    warning = active_stack_env_override_warning(
+        selected_stack_name="default",
+        selected_stack_id=stack_id,
+        environ={ENV_ZENML_ACTIVE_STACK_ID: stack_id.upper()},
+    )
+
+    assert warning is None
+
+
+def test_active_stack_env_override_warning_reports_raw_env_value() -> None:
+    """Warning text should show the value the user has in their shell."""
+    warning = active_stack_env_override_warning(
+        selected_stack_name="default",
+        selected_stack_id="stack-default-id",
+        environ={ENV_ZENML_ACTIVE_STACK_ID: "  stale-stack-id  "},
+    )
+
+    assert warning is not None
+    assert f"{ENV_ZENML_ACTIVE_STACK_ID}='  stale-stack-id  '" in warning[1]
+
+
 def test_current_stack_returns_active_stack_info() -> None:
     """current_stack should expose the currently active stack."""
     active_stack = SimpleNamespace(id="stack-local-id", name="local")
@@ -1057,6 +1165,38 @@ def test_current_stack_returns_active_stack_info() -> None:
 
     assert stack.id == "stack-local-id"
     assert stack.name == "local"
+    assert stack.is_active is True
+
+
+def test_use_stack_returns_resolved_stack_without_post_activation_active_read() -> None:
+    """use_stack should not re-read env-sensitive active stack state."""
+    selected = SimpleNamespace(id="stack-default-id", name="default")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.activated_stack_ids: list[str] = []
+
+        def activate_stack(self, stack_id: str) -> None:
+            self.activated_stack_ids.append(stack_id)
+
+        @property
+        def active_stack_model(self) -> SimpleNamespace:
+            raise AssertionError("use_stack should not re-read the active stack")
+
+    client = FakeClient()
+
+    with patch(
+        "kitaru._config._stacks._resolve_stack_for_show",
+        return_value=selected,
+    ):
+        stack = config_stacks_module.use_stack(
+            "default",
+            client_factory=lambda: client,
+        )
+
+    assert client.activated_stack_ids == ["stack-default-id"]
+    assert stack.id == "stack-default-id"
+    assert stack.name == "default"
     assert stack.is_active is True
 
 
@@ -1133,6 +1273,9 @@ def test_list_stack_entries_include_managed_flag() -> None:
                     ],
                     StackComponentType.ARTIFACT_STORE: [
                         _stack_component("art-id", "local-storage", flavor="local")
+                    ],
+                    StackComponentType.SANDBOX: [
+                        _stack_component("sandbox-id", "local-sandbox", flavor="local")
                     ],
                 },
             ),
@@ -1243,6 +1386,16 @@ def test_show_stack_operation_returns_local_stack_details() -> None:
                     configuration={"path": "/tmp/kitaru"},
                 )
             ],
+            StackComponentType.SANDBOX: [
+                _stack_component(
+                    "sandbox-dev-id",
+                    "dev-sandbox",
+                    flavor="local",
+                    configuration={
+                        "sandbox_environment": {"SECRET_VALUE": "do-not-print"}
+                    },
+                )
+            ],
         },
     )
     client_mock = Mock()
@@ -1261,11 +1414,15 @@ def test_show_stack_operation_returns_local_stack_details() -> None:
     assert [component.role for component in details.components] == [
         "runner",
         "storage",
+        "sandbox",
     ]
     assert details.components[0].name == "dev-runner"
     assert details.components[0].backend == "local"
     assert details.components[0].details == ()
     assert details.components[1].details == (("location", "/tmp/kitaru"),)
+    assert details.components[2].name == "dev-sandbox"
+    assert details.components[2].backend == "local"
+    assert details.components[2].details == ()
     client_mock.get_stack.assert_called_once_with("stack-dev-id", hydrate=True)
 
 
@@ -1383,6 +1540,63 @@ def test_show_stack_operation_returns_sagemaker_stack_details() -> None:
     assert details.components[2].details == (
         ("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),
     )
+
+
+def test_show_stack_operation_reconstructs_registry_default_repository() -> None:
+    """stack show should display registry host plus default repository together."""
+    stack_summary = _stack_model(stack_id="stack-modal-id", name="my-modal")
+    hydrated_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="my-modal",
+        labels={"kitaru.managed": "true", "kitaru.stack_type": "modal"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-artifacts",
+                    flavor="s3",
+                    configuration={"path": "s3://bucket/kitaru"},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-registry",
+                    flavor="aws",
+                    configuration={
+                        "uri": "123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+                        "default_repository": "kitaru",
+                    },
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-modal")
+
+    assert details.stack_type == "modal"
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+        "image_builder",
+    ]
+    assert details.components[2].details == (
+        ("location", "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"),
+    )
+    assert details.components[3].backend == "local"
+    assert details.components[3].details == (("use_subprocess_call", "True"),)
 
 
 def test_show_stack_operation_returns_azureml_stack_details() -> None:
@@ -1556,6 +1770,7 @@ def test_create_stack_creates_local_components_and_activates() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -1581,6 +1796,12 @@ def test_create_stack_creates_local_components_and_activates() -> None:
                 component_type=StackComponentType.ARTIFACT_STORE,
                 configuration={},
             ),
+            call(
+                name="dev",
+                flavor="local",
+                component_type=StackComponentType.SANDBOX,
+                configuration={},
+            ),
         ]
     )
     assert result.stack.name == "dev"
@@ -1589,6 +1810,7 @@ def test_create_stack_creates_local_components_and_activates() -> None:
     assert result.components_created == (
         "dev (orchestrator)",
         "dev (artifact_store)",
+        "dev (sandbox)",
     )
     assert result.stack_type == "local"
     assert result.service_connectors_created == ()
@@ -1619,7 +1841,12 @@ def test_create_stack_dispatcher_defaults_to_local_flow() -> None:
     ) as mock_create_local:
         result = _create_stack_operation("dev")
 
-    mock_create_local.assert_called_once_with("dev", activate=True, labels=None)
+    mock_create_local.assert_called_once_with(
+        "dev",
+        activate=True,
+        labels=None,
+        sandbox_flavor="local",
+    )
     assert result is expected_result
 
 
@@ -2042,6 +2269,105 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
     }
 
 
+def test_create_kubernetes_stack_operation_attaches_explicit_sandbox() -> None:
+    """Remote stack creation should attach a sandbox only when requested."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name="dev-aws",
+    )
+    created_stack.components[StackComponentType.SANDBOX] = [
+        _stack_component("sandbox-id", "dev-sandbox", flavor="local")
+    ]
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        sandbox={
+            "forward_env": False,
+            "sandbox_environment": {"MY_VAR": "value"},
+        }
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            activate=False,
+            sandbox_flavor="local",
+            component_overrides=overrides,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    sandbox = stack_request.components[StackComponentType.SANDBOX][0]
+    assert sandbox.flavor == "local"
+    assert getattr(sandbox, "service_connector_index", None) is None
+    assert sandbox.configuration == {
+        "forward_env": False,
+        "sandbox_environment": {"MY_VAR": "value"},
+    }
+    assert result.components_created == (
+        "dev-orchestrator (orchestrator)",
+        "dev-artifacts (artifact_store)",
+        "dev-registry (container_registry)",
+        "dev-sandbox (sandbox)",
+    )
+    assert result.resources == {
+        "provider": "aws",
+        "cluster": "demo-cluster",
+        "region": "eu-west-1",
+        "namespace": "default",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        "sandbox": "local",
+    }
+
+
+def test_create_kubernetes_stack_rejects_sandbox_overrides_without_sandbox() -> None:
+    """Remote backend calls must not drop sandbox overrides silently."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    client_mock = Mock()
+    client_mock.zen_store = Mock()
+    overrides = StackComponentConfigOverrides(sandbox={"forward_env": False})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    message = str(exc_info.value)
+    assert "sandbox" in message
+    assert "sandbox_flavor" in message
+    client_mock._validate_stack_configuration.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+    client_mock.create_service_connector.assert_not_called()
+
+
 def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
     tmp_path: Path,
 ) -> None:
@@ -2371,6 +2697,1130 @@ def test_create_sagemaker_stack_operation_creates_aws_stack_and_activates() -> N
         "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
         "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
     }
+
+
+def test_create_modal_stack_dispatcher_routes_modal_requests() -> None:
+    """Dispatcher should pass Modal requests through to the Modal helper."""
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+    )
+    expected_result = SimpleNamespace(stack_type="modal")
+
+    with patch(
+        "kitaru.config._create_modal_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_modal:
+        result = _create_stack_operation(
+            "modal-dev",
+            stack_type=StackType.MODAL,
+            remote_spec=spec,
+            sandbox_flavor="modal",
+        )
+
+    assert result is expected_result
+    mock_create_modal.assert_called_once_with(
+        "modal-dev",
+        spec=spec,
+        activate=True,
+        labels=None,
+        sandbox_flavor="modal",
+    )
+
+
+def test_create_modal_stack_operation_requires_modal_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing Modal dependencies should fail before Kitaru opens a client."""
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+    monkeypatch.setitem(sys.modules, "modal", None)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match=r"kitaru\[modal\]"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rewrites_late_missing_modal_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZenML validation import failures should keep the Kitaru install hint."""
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.return_value = []
+    client_mock._validate_stack_configuration.side_effect = ModuleNotFoundError(
+        "No module named 'modal'",
+        name="modal",
+    )
+
+    monkeypatch.setattr(
+        config_module._config_stacks,
+        "_require_modal_stack_support",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        config_module._config_stacks,
+        "_prevalidate_stack_request_components",
+        lambda stack_request: None,
+    )
+
+    with pytest.raises(KitaruUsageError, match=r"kitaru\[modal\]"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            client_factory=lambda: client_mock,
+        )
+
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_creates_stack_without_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal create should build runner/storage/registry/image-builder/sandbox."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component("art-id", "modal-dev-artifacts", flavor="s3")
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component("reg-id", "modal-dev-registry", flavor="aws")
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.return_value = []
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        orchestrator={
+            "synchronous": False,
+            "token_id": "ak-test",
+            "token_secret": "as-test",
+            "timeout": 7200,
+        },
+        sandbox={"timeout": 1800, "app_name": "kitaru-agent-sandbox"},
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            activate=False,
+            sandbox_flavor="modal",
+            component_overrides=overrides,
+        )
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.get_stack.assert_not_called()
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "modal-dev"
+    assert stack_request.service_connectors == []
+    image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert isinstance(image_builder, ComponentInfo)
+    assert image_builder.flavor == "local"
+    assert image_builder.configuration == {"use_subprocess_call": True}
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "modal"
+    assert orchestrator.configuration == {
+        "synchronous": False,
+        "token_id": "ak-test",
+        "token_secret": "as-test",
+        "timeout": 7200,
+    }
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "s3"
+    assert artifact_store.configuration == {"path": "s3://bucket/path"}
+    assert getattr(artifact_store, "service_connector_index", None) is None
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "aws"
+    assert container_registry.configuration == {
+        "uri": "123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        "default_repository": "repo",
+    }
+    assert (
+        f"{container_registry.configuration['uri']}/"
+        f"{container_registry.configuration['default_repository']}"
+        == spec.container_registry
+    )
+    assert getattr(container_registry, "service_connector_index", None) is None
+
+    sandbox = stack_request.components[StackComponentType.SANDBOX][0]
+    assert sandbox.flavor == "modal"
+    assert sandbox.configuration == {
+        "timeout": 1800,
+        "app_name": "kitaru-agent-sandbox",
+    }
+
+    assert result.stack_type == "modal"
+    assert result.components_created == (
+        "modal-dev-orchestrator (orchestrator)",
+        "modal-dev-artifacts (artifact_store)",
+        "modal-dev-registry (container_registry)",
+        "modal-dev-image-builder (image_builder)",
+        "modal-dev-sandbox (sandbox)",
+    )
+    assert result.service_connectors_created == ()
+    assert result.resources == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+        "sandbox": "modal",
+    }
+
+
+def test_create_modal_stack_operation_reuses_existing_aws_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal create should reuse matching server-side S3 and ECR connectors."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="s3://zenml-k8s-339712793861-3794f302c1ca/kitaru",
+        container_registry=(
+            "339712793861.dkr.ecr.eu-central-1.amazonaws.com/zenml-k8s-3794f302c1ca"
+        ),
+    )
+    s3_connector_id = "f964c5e4-d060-442c-8f35-af977bb3c3f8"
+    ecr_connector_id = "f058457a-1194-4c4a-bc1c-de5a345e783a"
+    s3_connector = _service_connector_model(
+        connector_id=s3_connector_id,
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://zenml-k8s-339712793861-3794f302c1ca",
+    )
+    ecr_connector = _service_connector_model(
+        connector_id=ecr_connector_id,
+        name="aws-k8s-stack-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id=(
+            "339712793861.dkr.ecr.eu-central-1.amazonaws.com/zenml-k8s-3794f302c1ca"
+        ),
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws-k8s-stack-s3"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    def _list_service_connectors(**kwargs: Any) -> list[SimpleNamespace]:
+        if kwargs["resource_type"] == "s3-bucket":
+            return [s3_connector]
+        if kwargs["resource_type"] == "docker-registry":
+            return [ecr_connector]
+        return []
+
+    client_mock.list_service_connectors.side_effect = _list_service_connectors
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            activate=False,
+        )
+
+    client_mock.create_service_connector.assert_not_called()
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.labels == {
+        "kitaru.managed": "true",
+        "kitaru.reused_service_connectors": "true",
+    }
+    assert stack_request.service_connectors == [
+        UUID(s3_connector_id),
+        UUID(ecr_connector_id),
+    ]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.service_connector_index == 0
+    assert (
+        artifact_store.service_connector_resource_id
+        == "s3://zenml-k8s-339712793861-3794f302c1ca"
+    )
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.service_connector_index == 1
+    assert (
+        container_registry.service_connector_resource_id
+        == "339712793861.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+    assert container_registry.configuration == {
+        "uri": "339712793861.dkr.ecr.eu-central-1.amazonaws.com",
+        "default_repository": "zenml-k8s-3794f302c1ca",
+    }
+    assert result.service_connectors_created == (
+        "aws-k8s-stack-s3",
+        "aws-k8s-stack-ecr",
+    )
+
+
+def test_create_modal_stack_operation_prefers_specific_over_unscoped_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scoped connector matches should win over broad provider connectors."""
+    _install_fake_modal_package(monkeypatch)
+    broad_connector = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000099",
+        name="aws_connector",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    broad_connector.resource_types = ["s3-bucket", "docker-registry"]
+    s3_connector_id = "f964c5e4-d060-442c-8f35-af977bb3c3f8"
+    ecr_connector_id = "f058457a-1194-4c4a-bc1c-de5a345e783a"
+    s3_connector = _service_connector_model(
+        connector_id=s3_connector_id,
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://bucket",
+    )
+    ecr_connector = _service_connector_model(
+        connector_id=ecr_connector_id,
+        name="aws-k8s-stack-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws-k8s-stack-s3"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws-k8s-stack-ecr"),
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [broad_connector, s3_connector]
+        if kwargs["resource_type"] == "s3-bucket"
+        else [broad_connector, ecr_connector]
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+            activate=False,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.service_connectors == [
+        UUID(s3_connector_id),
+        UUID(ecr_connector_id),
+    ]
+
+
+def test_create_modal_stack_operation_reuses_shared_unscoped_connector_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One broad provider connector can satisfy both Modal storage and registry."""
+    _install_fake_modal_package(monkeypatch)
+    connector_id = "00000000-0000-0000-0000-000000000123"
+    broad_connector = _service_connector_model(
+        connector_id=connector_id,
+        name="aws_connector",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    broad_connector.resource_types = ["s3-bucket", "docker-registry"]
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=SimpleNamespace(name="aws_connector"),
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=SimpleNamespace(name="aws_connector"),
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.return_value = [broad_connector]
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+            activate=False,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.service_connectors == [UUID(connector_id)]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    registry = stack_request.components[StackComponentType.CONTAINER_REGISTRY][0]
+    assert artifact_store.service_connector_index == 0
+    assert registry.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+    assert (
+        registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+    assert result.service_connectors_created == ("aws_connector",)
+
+
+def test_create_modal_stack_operation_rejects_multiple_unscoped_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multiple broad connectors for a resource type should be ambiguous."""
+    _install_fake_modal_package(monkeypatch)
+    first = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000001",
+        name="aws_connector_a",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    second = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000002",
+        name="aws_connector_b",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="   ",
+    )
+    registry = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000003",
+        name="aws-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [first, second] if kwargs["resource_type"] == "s3-bucket" else [registry]
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "ambiguous existing service connectors" in message
+    assert "aws_connector_a" in message
+    assert "aws_connector_b" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_partial_existing_connector_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal discovery should fail when only one required connector exists."""
+    _install_fake_modal_package(monkeypatch)
+    s3_connector = _service_connector_model(
+        connector_id="f964c5e4-d060-442c-8f35-af977bb3c3f8",
+        name="aws-k8s-stack-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="zenml-k8s-339712793861-3794f302c1ca",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [s3_connector] if kwargs["resource_type"] == "s3-bucket" else []
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://zenml-k8s-339712793861-3794f302c1ca/kitaru",
+                container_registry=(
+                    "339712793861.dkr.ecr.eu-central-1.amazonaws.com/"
+                    "zenml-k8s-3794f302c1ca"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "only part" in message
+    assert "container registry" in message
+    assert "docker-registry" in message
+    assert "339712793861.dkr.ecr.eu-central-1.amazonaws.com" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_ambiguous_existing_connectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal discovery should fail when a resource has multiple connector matches."""
+    _install_fake_modal_package(monkeypatch)
+    first = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000001",
+        name="aws-s3-a",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="s3://bucket",
+    )
+    second = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000002",
+        name="aws-s3-b",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id="bucket",
+    )
+    registry = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000003",
+        name="aws-ecr",
+        connector_type="aws",
+        resource_type="docker-registry",
+        resource_id="123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo",
+    )
+    client_mock = Mock()
+    client_mock.list_service_connectors.side_effect = lambda **kwargs: (
+        [first, second] if kwargs["resource_type"] == "s3-bucket" else [registry]
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry=(
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/repo"
+                ),
+            ),
+        )
+
+    message = str(exc_info.value)
+    assert "ambiguous existing service connectors" in message
+    assert "aws-s3-a" in message
+    assert "aws-s3-b" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_modal_stack_operation_attaches_aws_connector_to_storage_and_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS-backed Modal credentials should link S3/ECR but not Modal components."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry=("123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"),
+        region="eu-central-1",
+        credentials="aws-profile:ml-team",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component("art-id", "modal-dev-artifacts", flavor="s3")
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component("reg-id", "modal-dev-registry", flavor="aws")
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
+            ],
+        },
+    )
+    connector = SimpleNamespace(name="modal-dev-aws")
+    hydrated_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-dev-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-dev-artifacts",
+                    flavor="s3",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-dev-registry",
+                    flavor="aws",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-dev-image-builder")
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-id", "modal-dev-sandbox", flavor="modal")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            sandbox_flavor="modal",
+        )
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-dev",
+        connector_type="aws",
+        resource_type="aws-generic",
+        auth_method="implicit",
+        configuration={"region": "eu-central-1", "profile_name": "ml-team"},
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    client_mock.list_service_connectors.assert_not_called()
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert len(stack_request.service_connectors) == 1
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "aws"
+    assert connector_info.auth_method == "implicit"
+    assert connector_info.configuration == {
+        "region": "eu-central-1",
+        "profile_name": "ml-team",
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "modal"
+    assert getattr(orchestrator, "service_connector_index", None) is None
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "s3"
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "aws"
+    assert container_registry.configuration == {
+        "uri": "123456789012.dkr.ecr.eu-central-1.amazonaws.com",
+        "default_repository": "kitaru",
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.eu-central-1.amazonaws.com"
+    )
+
+    sandbox = stack_request.components[StackComponentType.SANDBOX][0]
+    assert getattr(sandbox, "service_connector_index", None) is None
+    client_mock.get_stack.assert_called_once_with("stack-modal-id", hydrate=True)
+    assert result.service_connectors_created == ("modal-dev-aws",)
+    assert result.resources == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": (
+            "123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"
+        ),
+        "region": "eu-central-1",
+        "sandbox": "modal",
+    }
+
+
+def test_create_modal_stack_operation_attaches_gcp_connector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """GCP-backed Modal credentials should reuse the existing GCP connector flow."""
+    _install_fake_modal_package(monkeypatch)
+    service_account_path = tmp_path / "modal-gcp.json"
+    service_account_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "demo-project",
+            "client_email": "demo@demo-project.iam.gserviceaccount.com",
+        }
+    )
+    service_account_path.write_text(service_account_json, encoding="utf-8")
+    spec = ModalStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/kitaru-images",
+        region="us-central1",
+        credentials=f"gcp-service-account:{service_account_path}",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    connector = SimpleNamespace(name="modal-gcp")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-gcp",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-gcp-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-gcp-artifacts",
+                    flavor="gcp",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-gcp-registry",
+                    flavor="gcp",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-gcp-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation("modal-gcp", spec=spec, activate=False)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-gcp",
+        connector_type="gcp",
+        resource_type="gcp-generic",
+        auth_method="service-account",
+        configuration={
+            "project_id": "demo-project",
+            "service_account_json": service_account_json,
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.service_connector_resource_id == "gs://bucket"
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert (
+        container_registry.service_connector_resource_id
+        == "us-central1-docker.pkg.dev/demo-project/kitaru-images"
+    )
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert getattr(orchestrator, "service_connector_index", None) is None
+    assert result.service_connectors_created == ("modal-gcp",)
+    assert result.resources == {
+        "provider": "gcp",
+        "artifact_store": "gs://bucket/path",
+        "container_registry": "us-central1-docker.pkg.dev/demo-project/kitaru-images",
+        "region": "us-central1",
+    }
+
+
+def test_create_modal_stack_operation_attaches_azure_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure-backed Modal credentials should reuse the Azure connector flow."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        container_registry="demo.azurecr.io/kitaru",
+        subscription_id="00000000-0000-0000-0000-000000000123",
+        credentials="azure-access-token:token-123",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    connector = SimpleNamespace(name="modal-azure")
+    created_stack = _stack_model(
+        stack_id="stack-modal-id",
+        name="modal-azure",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-id", "modal-azure-orchestrator", flavor="modal")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-id",
+                    "modal-azure-artifacts",
+                    flavor="azure",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _stack_component(
+                    "reg-id",
+                    "modal-azure-registry",
+                    flavor="azure",
+                    connector=connector,
+                )
+            ],
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-id", "modal-azure-image-builder")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_modal_stack_operation("modal-azure", spec=spec)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="modal-azure",
+        connector_type="azure",
+        resource_type="azure-generic",
+        auth_method="access-token",
+        configuration={
+            "subscription_id": "00000000-0000-0000-0000-000000000123",
+            "token": "token-123",
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.configuration == {
+        "path": "abfs://container@demo.dfs.core.windows.net/kitaru/path"
+    }
+    assert (
+        artifact_store.service_connector_resource_id
+        == "abfs://container@demo.dfs.core.windows.net"
+    )
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.service_connector_resource_id == "demo.azurecr.io"
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert getattr(orchestrator, "service_connector_index", None) is None
+    assert result.service_connectors_created == ("modal-azure",)
+    assert result.resources == {
+        "provider": "azure",
+        "artifact_store": "abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        "container_registry": "demo.azurecr.io/kitaru",
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+    }
+
+
+def test_create_modal_stack_operation_rejects_aws_credentials_without_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS Modal connector requests need a cloud region."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="AWS-backed Modal cloud credentials"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                credentials="aws-profile:ml-team",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_no_verify_without_connector_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal verify=False should not create a cloud connector by itself."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="only applies when Kitaru is creating"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                verify=False,
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_mismatched_credentialed_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Credentialed Modal stacks should not mix cloud storage and registry providers."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="same cloud provider"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="gs://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+                region="us-east-1",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_mismatched_connectorless_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal storage and registry providers must match even without a connector."""
+    _install_fake_modal_package(monkeypatch)
+    client_factory = Mock(name="client_factory")
+
+    with pytest.raises(KitaruUsageError, match="same cloud provider"):
+        config_module._config_stacks._create_modal_stack_operation(
+            "modal-dev",
+            spec=ModalStackSpec(
+                artifact_store="gs://bucket/path",
+                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+            ),
+            client_factory=client_factory,
+        )
+
+    client_factory.assert_not_called()
+
+
+def test_create_modal_stack_operation_rejects_unpaired_token_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal token overrides should use ZenML's pair validation before backend calls."""
+    _install_fake_modal_package(monkeypatch)
+    spec = ModalStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo/repo",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = _stack_model(stack_id="default-id", name="default")
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[client_mock.active_stack_model],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.list_service_connectors.return_value = []
+    overrides = StackComponentConfigOverrides(orchestrator={"token_id": "ak-test"})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError, match="token_id and token_secret"),
+    ):
+        _create_modal_stack_operation(
+            "modal-dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_modal_stack_request_includes_local_subprocess_image_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modal stack requests should include a stored subprocess image builder."""
+    _install_fake_modal_package(monkeypatch)
+
+    stack_request = config_module._config_stacks._build_modal_stack_request(
+        "modal-dev",
+        spec=ModalStackSpec(
+            artifact_store="s3://bucket/path",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
+        ),
+        labels=None,
+    )
+
+    image_builder = stack_request.components[StackComponentType.IMAGE_BUILDER][0]
+    assert isinstance(image_builder, ComponentInfo)
+    assert image_builder.flavor == "local"
+    assert image_builder.configuration == {"use_subprocess_call": True}
 
 
 def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> None:
@@ -2942,6 +4392,7 @@ def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -2978,10 +4429,12 @@ def test_create_local_stack_operation_applies_component_overrides() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
     overrides = StackComponentConfigOverrides(
         artifact_store={"path": "/tmp/kitaru-artifacts"},
+        sandbox={"forward_env": False},
     )
 
     with patch("kitaru.config.Client", return_value=client_mock):
@@ -2993,6 +4446,8 @@ def test_create_local_stack_operation_applies_component_overrides() -> None:
     assert artifact_store_call.kwargs["configuration"] == {
         "path": "/tmp/kitaru-artifacts"
     }
+    sandbox_call = client_mock.create_stack_component.call_args_list[2]
+    assert sandbox_call.kwargs["configuration"] == {"forward_env": False}
 
 
 def test_create_stack_rejects_existing_stack_name() -> None:
@@ -3043,6 +4498,7 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.side_effect = RuntimeError("stack create failed")
 
@@ -3054,6 +4510,7 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
 
     client_mock.delete_stack_component.assert_has_calls(
         [
+            call("sandbox-dev-id", StackComponentType.SANDBOX),
             call("art-dev-id", StackComponentType.ARTIFACT_STORE),
             call("orc-dev-id", StackComponentType.ORCHESTRATOR),
         ]
@@ -3098,6 +4555,7 @@ def test_create_stack_applies_managed_label_and_preserves_extra_labels() -> None
     client_mock.create_stack_component.side_effect = [
         SimpleNamespace(id="orc-dev-id"),
         SimpleNamespace(id="art-dev-id"),
+        SimpleNamespace(id="sandbox-dev-id"),
     ]
     client_mock.create_stack.return_value = created_stack
 
@@ -3154,11 +4612,19 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
         labels={"kitaru.managed": "true"},
         orchestrator_id="orc-dev-id",
         artifact_store_id="art-dev-id",
+        components={
+            StackComponentType.IMAGE_BUILDER: [
+                _modal_image_builder_component("img-dev-id", "dev-image-builder")
+            ],
+            StackComponentType.SANDBOX: [
+                _stack_component("sandbox-dev-id", "dev", flavor="local")
+            ],
+        },
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
     client_mock.get_stack.return_value = dev
-    client_mock.list_stacks.side_effect = [[dev], [dev]]
+    client_mock.list_stacks.side_effect = [[dev], [dev], [dev], [dev]]
 
     with patch("kitaru.config.Client", return_value=client_mock):
         result = _delete_stack_operation("dev", recursive=True)
@@ -3169,6 +4635,8 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
     assert result.components_deleted == (
         "dev (orchestrator)",
         "dev (artifact_store)",
+        "dev-image-builder (image_builder)",
+        "dev (sandbox)",
     )
     assert result.recursive is True
 
@@ -3253,7 +4721,10 @@ def test_delete_stack_recursive_kubernetes_deletes_unshared_connector() -> None:
         _FakeStackPage(items=[default], total_pages=1, max_size=50),
     ]
     client_mock.list_service_connectors.return_value = [
-        SimpleNamespace(name="dev-connector")
+        SimpleNamespace(
+            name="dev-connector",
+            labels={"kitaru.managed": "true"},
+        )
     ]
 
     with patch("kitaru.config.Client", return_value=client_mock):
@@ -3272,6 +4743,34 @@ def test_delete_stack_recursive_kubernetes_deletes_unshared_connector() -> None:
         "dev-artifacts (artifact_store)",
         "dev-registry (container_registry)",
     )
+
+
+def test_delete_stack_recursive_skips_connector_cleanup_for_reused_connectors() -> None:
+    """Recursive delete should preserve reused connectors even if Kitaru made them."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    dev.labels["kitaru.reused_service_connectors"] = "true"
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(
+            name="dev-connector",
+            labels={"kitaru.managed": "true"},
+        )
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.list_service_connectors.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
 
 
 def test_delete_stack_recursive_kubernetes_keeps_shared_connector() -> None:
@@ -3514,6 +5013,7 @@ def test_configure_sets_runtime_execution_defaults() -> None:
         stack="gpu-prod",
         cache=False,
         retries=2,
+        llm_estimated_costs="off",
         image={
             "base_image": "python:3.12-slim",
             "environment": {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
@@ -3523,6 +5023,7 @@ def test_configure_sets_runtime_execution_defaults() -> None:
     assert snapshot.stack == "gpu-prod"
     assert snapshot.cache is False
     assert snapshot.retries == 2
+    assert snapshot.llm_estimated_costs == "off"
     assert snapshot.image is not None
     assert snapshot.image.base_image == "python:3.12-slim"
     assert snapshot.image.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
@@ -3530,13 +5031,20 @@ def test_configure_sets_runtime_execution_defaults() -> None:
 
 def test_configure_can_clear_runtime_override_fields() -> None:
     """configure should allow clearing previously set runtime overrides."""
-    configure(stack="gpu-prod", cache=False, retries=2)
+    configure(stack="gpu-prod", cache=False, retries=2, llm_estimated_costs="off")
 
-    snapshot = configure(stack=None, cache=None, retries=None, image=None)
+    snapshot = configure(
+        stack=None,
+        cache=None,
+        retries=None,
+        image=None,
+        llm_estimated_costs=None,
+    )
 
     assert snapshot.stack is None
     assert snapshot.cache is None
     assert snapshot.retries is None
+    assert snapshot.llm_estimated_costs is None
     assert snapshot.image is None
 
 
@@ -3548,13 +5056,32 @@ def test_configure_sets_runtime_project_override() -> None:
     assert resolved.project == "staging-project"
 
 
-def test_configure_clears_runtime_project_override() -> None:
-    """configure(project=None) should clear a previously set project override."""
+def test_configure_clears_runtime_project_override_without_persisted_project() -> None:
+    """Clearing the runtime project override should reveal no saved project."""
     configure(project="staging-project")
     configure(project=None)
 
-    resolved = resolve_connection_config()
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(),
+    ):
+        resolved = resolve_connection_config()
+
     assert resolved.project is None
+
+
+def test_configure_clears_runtime_project_override_to_persisted_project() -> None:
+    """Clearing the runtime project override should reveal the saved project."""
+    configure(project="staging-project")
+    configure(project=None)
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(project="persisted-project"),
+    ):
+        resolved = resolve_connection_config()
+
+    assert resolved.project == "persisted-project"
 
 
 def test_configure_project_independent_of_execution() -> None:
@@ -3569,12 +5096,114 @@ def test_configure_project_independent_of_execution() -> None:
     assert conn_resolved.project == "staging-project"
 
 
-def test_global_connection_config_does_not_infer_project() -> None:
-    """Global connection config should not include inferred project."""
+def test_global_connection_config_includes_persisted_active_project() -> None:
+    """Global connection config should include the saved active project."""
     from kitaru.config import _read_global_connection_config
 
-    config = _read_global_connection_config()
-    assert config.project is None
+    store = SimpleNamespace(
+        url="https://persisted.example.com",
+        api_key="persisted-token",
+    )
+    with (
+        patch(
+            "kitaru.config.GlobalConfiguration",
+            return_value=SimpleNamespace(store=store),
+        ),
+        patch(
+            "kitaru.config._read_persisted_active_project", return_value="project-id"
+        ),
+    ):
+        config = _read_global_connection_config()
+
+    assert config.server_url == "https://persisted.example.com"
+    assert config.auth_token == "persisted-token"
+    assert config.project == "project-id"
+
+
+def test_persisted_active_project_prefers_repo_local_config() -> None:
+    """Persisted active project should follow repo-local then global precedence."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_client = SimpleNamespace(
+        _config=SimpleNamespace(active_project=SimpleNamespace(id="repo-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=fake_client),
+        patch("kitaru.config.GlobalConfiguration") as global_config,
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "repo-project-id"
+    global_config.assert_not_called()
+
+
+def test_persisted_active_project_falls_back_to_global_config() -> None:
+    """Global active project should be used when repo-local config is absent."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_client = SimpleNamespace(_config=None)
+    fake_global = SimpleNamespace(
+        get_active_project=Mock(return_value=SimpleNamespace(id="global-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=fake_client),
+        patch("kitaru.config.GlobalConfiguration", return_value=fake_global),
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "global-project-id"
+
+
+def test_persisted_active_project_falls_back_to_global_when_client_fails() -> None:
+    """A repo-local lookup failure should not erase a valid global project."""
+    from kitaru.config import _read_persisted_active_project
+
+    fake_global = SimpleNamespace(
+        get_active_project=Mock(return_value=SimpleNamespace(id="global-project-id"))
+    )
+
+    with (
+        patch("kitaru.config.Client", side_effect=RuntimeError("local config failed")),
+        patch("kitaru.config.GlobalConfiguration", return_value=fake_global),
+    ):
+        result = _read_persisted_active_project()
+
+    assert result == "global-project-id"
+
+
+def test_persisted_active_project_ignores_direct_zenml_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persisted project reads should not initialize an env-driven remote store."""
+    from kitaru.config import _read_persisted_active_project
+
+    monkeypatch.setenv("ZENML_STORE_URL", "https://server.example.com")
+
+    with patch("kitaru.config.Client") as client_cls:
+        result = _read_persisted_active_project()
+
+    assert result is None
+    client_cls.assert_not_called()
+
+
+def test_persisted_active_project_keeps_api_key_only_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token-only env var should not suppress persisted project reads."""
+    from kitaru.config import _read_persisted_active_project
+
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    fake_client = SimpleNamespace(
+        _config=SimpleNamespace(active_project=SimpleNamespace(id="repo-project-id"))
+    )
+
+    with patch("kitaru.config.Client", return_value=fake_client) as client_cls:
+        result = _read_persisted_active_project()
+
+    assert result == "repo-project-id"
+    client_cls.assert_called_once_with()
 
 
 def test_kitaru_config_path_uses_kitaru_dir() -> None:
@@ -3736,6 +5365,7 @@ def test_resolve_execution_config_applies_phase10_precedence(
 stack = "project-stack"
 cache = false
 retries = 1
+llm_estimated_costs = "off"
 
 [tool.kitaru.image]
 base_image = "python:3.12"
@@ -3749,6 +5379,7 @@ SHARED = "project"
     monkeypatch.setenv(KITARU_STACK_ENV, "env-stack")
     monkeypatch.setenv(KITARU_CACHE_ENV, "true")
     monkeypatch.setenv(KITARU_RETRIES_ENV, "3")
+    monkeypatch.setenv(KITARU_LLM_ESTIMATED_COSTS_ENV, "auto")
     monkeypatch.setenv(
         KITARU_IMAGE_ENV,
         (
@@ -3771,6 +5402,7 @@ SHARED = "project"
             decorator_overrides=KitaruConfig(
                 cache=True,
                 retries=5,
+                llm_estimated_costs="off",
                 image=ImageSettings(
                     environment={"FROM_DECORATOR": "1", "SHARED": "decorator"}
                 ),
@@ -3778,6 +5410,7 @@ SHARED = "project"
             invocation_overrides=KitaruConfig(
                 stack="invocation-stack",
                 retries=6,
+                llm_estimated_costs="auto",
                 image=ImageSettings(
                     environment={"FROM_INVOCATION": "1", "SHARED": "invocation"}
                 ),
@@ -3789,6 +5422,7 @@ SHARED = "project"
     assert resolved.stack_source == "invocation"
     assert resolved.cache is True
     assert resolved.retries == 6
+    assert resolved.llm_estimated_costs == "auto"
     assert resolved.image is not None
     assert resolved.image.base_image == "python:3.13"
     assert resolved.image.environment == {
@@ -3956,6 +5590,24 @@ def test_kitaru_not_duplicated_when_pinned_version_in_requirements() -> None:
     docker_settings = image_settings_to_docker_settings(image_settings)
 
     assert docker_settings.requirements == ["kitaru>=0.2.0", "httpx"]
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "kitaru[pydantic-ai]",
+        "kitaru[pydantic-ai,openai]",
+    ],
+)
+def test_kitaru_not_duplicated_when_extras_in_requirements(
+    requirement: str,
+) -> None:
+    """Kitaru should not be added if a requirement already includes extras."""
+    image_settings = ImageSettings(requirements=[requirement])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == [requirement]
 
 
 def test_kitaru_not_duplicated_when_git_url_in_requirements() -> None:
@@ -4392,6 +6044,69 @@ def test_connection_validation_requires_project_for_env_remote_server(
 
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
         resolve_connection_config(validate_for_use=True)
+
+
+def test_blank_zenml_project_env_does_not_satisfy_env_remote_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank compatibility project env should not count as explicit project."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_PROJECT_ID, "   ")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_validation_rejects_persisted_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved project must not complete a fresh env-driven remote connection."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with (
+        patch(
+            "kitaru.config._read_global_connection_config",
+            return_value=KitaruConfig(project="persisted-project"),
+        ),
+        pytest.raises(KitaruUsageError, match="KITARU_PROJECT"),
+    ):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_resolution_drops_persisted_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project-management clients should not inherit saved project for env server."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(project="persisted-project"),
+    ):
+        resolved = resolve_connection_config(
+            validate_for_use=True,
+            require_project=False,
+        )
+
+    assert resolved.server_url == "https://server.example.com"
+    assert resolved.auth_token == "token-123"
+    assert resolved.project is None
+
+
+def test_connection_validation_accepts_runtime_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime project selection should satisfy env-driven remote validation."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    configure(project="runtime-project")
+
+    resolved = resolve_connection_config(validate_for_use=True)
+
+    assert resolved.project == "runtime-project"
 
 
 def test_connection_validation_accepts_zenml_project_fallback(

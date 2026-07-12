@@ -258,6 +258,12 @@ src/kitaru/_ui/bundle_manifest.json
 !.codex/skills/
 AGENTS.override.md
 .agents/skills/*
+!.agents/skills/kitaru-dev/
+!.agents/skills/kitaru-dev/**
+!.agents/skills/kitaru-docs/
+!.agents/skills/kitaru-docs/**
+!.agents/skills/kitaru-tests-release/
+!.agents/skills/kitaru-tests-release/**
 
 # Agent Skills
 .pi/
@@ -270,3 +276,11 @@ skills-lock.json
 
 # Local scratch — single-developer scratch flow files at repo root
 /my_flow.py
+.claude/skills/logfire-instrumentation
+.clawpatch/
+docs/investigations/
+docs/plans/
+docs/reviews/
+plans/
+replay-verify-reports-live/
+replay-verify-reports/

@@ -43,11 +43,16 @@ class AnalyticsEvent(StrEnum):
     LOCAL_SERVER_STOPPED = "Kitaru local server stopped"
 
     # Flow lifecycle
+    FLOW_ATTEMPTED = "Kitaru flow attempted"
     FLOW_SUBMITTED = "Kitaru flow submitted"
+    FLOW_FAILED = "Kitaru flow failed"
     FLOW_TERMINAL = "Kitaru flow terminal"
     FLOW_REPLAYED = "Kitaru flow replayed"
     REPLAY_REQUESTED = "Kitaru flow replay requested"
     REPLAY_FAILED = "Kitaru flow replay failed"
+    REPLAY_MANY_REQUESTED = "Kitaru flow replay many requested"
+    COHORT_RESOLVED = "Kitaru cohort resolved"
+    DIFF_REQUESTED = "Kitaru execution diff requested"
 
     # Execution management
     WAIT_CREATED = "Kitaru wait created"
@@ -55,15 +60,21 @@ class AnalyticsEvent(StrEnum):
     EXECUTION_RETRIED = "Kitaru execution retried"
     EXECUTION_RESUMED = "Kitaru execution resumed"
     EXECUTION_CANCELLED = "Kitaru execution cancelled"
+    EXECUTION_STATISTICS_QUERIED = "Kitaru execution statistics queried"
 
     # Feature adoption
+    LLM_ATTEMPTED = "Kitaru LLM attempted"
     LLM_CALLED = "Kitaru LLM called"
+    LLM_FAILED = "Kitaru LLM failed"
     ARTIFACT_SAVED = "Kitaru artifact saved"
     ARTIFACT_LOADED = "Kitaru artifact loaded"
     SECRET_UPSERTED = "Kitaru secret upserted"
     SECRET_READ = "Kitaru secret read"
     STACK_CREATED = "Kitaru stack created"
     STACK_ACTIVATED = "Kitaru stack activated"
+    PROJECT_CREATED = "Kitaru project created"
+    PROJECT_ACTIVATED = "Kitaru project activated"
+    PROJECT_DELETED = "Kitaru project deleted"
     MODEL_ALIAS_REGISTERED = "Kitaru model alias registered"
     LOG_STORE_CONFIGURED = "Kitaru log store configured"
     CHECKPOINT_INVOKED = "Kitaru checkpoint invoked"
@@ -90,6 +101,9 @@ class AnalyticsEvent(StrEnum):
     CLAUDE_AGENT_SDK_RUN_COMPLETED = "Kitaru Claude Agent SDK run completed"
     GEMINI_INTERACTIONS_WRAPPED = "Kitaru Gemini Interactions wrapped"
     GEMINI_INTERACTIONS_RUN_COMPLETED = "Kitaru Gemini Interactions run completed"
+    GOOGLE_ADK_WRAPPED = "Kitaru Google ADK wrapped"
+    GOOGLE_ADK_RUN_COMPLETED = "Kitaru Google ADK run completed"
+    GOOGLE_ADK_CALL_CHECKPOINTED = "Kitaru Google ADK call checkpointed"
     LANGGRAPH_WRAPPED = "Kitaru LangGraph wrapped"
     LANGGRAPH_RUN_COMPLETED = "Kitaru LangGraph run completed"
     LANGGRAPH_INTERRUPTED = "Kitaru LangGraph interrupted"

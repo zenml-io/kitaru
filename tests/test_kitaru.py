@@ -70,13 +70,36 @@ class TestPublicExports:
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
+    def test_replay_context_exports_exist(self) -> None:
+        assert hasattr(kitaru, "ReplayRuntimeContext")
+        assert hasattr(kitaru, "get_replay_runtime_context")
+        assert hasattr(kitaru, "is_replay")
+
+    def test_run_sandbox_command_exists(self) -> None:
+        assert hasattr(kitaru, "run_sandbox_command")
+
+    def test_sandbox_command_result_exists(self) -> None:
+        assert hasattr(kitaru, "SandboxCommandResult")
+
     def test_all_exports_match(self) -> None:
         expected = {
             "AuthAPIKey",
             "AuthAPIKeyWithValue",
             "AuthServiceAccount",
+            "CohortDiff",
+            "CohortQuery",
+            "CohortResult",
             "Deployment",
+            "ExecutionDiff",
             "ExecutionEvent",
+            "ExecutionStatistics",
+            "ExecutionStatisticsDimension",
+            "ExecutionStatisticsGroup",
+            "ExecutionStatisticsGrouping",
+            "ExecutionStatisticsMetric",
+            "ExecutionStatisticsMetricAggregation",
+            "ExecutionStatisticsMetricSource",
+            "ExecutionStatisticsTimeGranularity",
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
@@ -93,30 +116,55 @@ class TestPublicExports:
             "KitaruRuntimeError",
             "KitaruStackIntegrationDependencyError",
             "KitaruStateError",
+            "KitaruTimeoutError",
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
+            "ProjectCreateResult",
+            "ProjectDeleteResult",
+            "ProjectInfo",
+            "ReplayRuntimeContext",
+            "ReplaySubmission",
+            "SandboxCommandResult",
             "Secret",
             "SecretSummary",
             "StackInfo",
+            "build_compare_url",
+            "build_compare_url_for_executions",
+            "build_compare_urls",
             "checkpoint",
+            "cohort",
+            "compare_url_for_executions",
             "configure",
             "connect",
+            "create_project",
             "create_secret",
             "create_stack",
             "current_execution_id",
+            "current_project",
             "current_stack",
+            "delete_project",
             "delete_secret",
             "delete_stack",
+            "diff",
+            "diff_cohort",
+            "diff_matrix",
             "events",
             "flow",
+            "get_project",
+            "get_replay_runtime_context",
             "get_secret",
+            "is_replay",
+            "list_projects",
+            "list_secrets",
             "list_stacks",
             "llm",
             "load",
             "log",
             "progress",
+            "run_sandbox_command",
             "save",
+            "use_project",
             "use_stack",
             "wait",
         }
@@ -131,6 +179,13 @@ class TestDirectImportStyle:
 
         assert flow is kitaru.flow
         assert checkpoint is kitaru.checkpoint
+
+    def test_direct_replay_context_imports(self) -> None:
+        from kitaru import ReplayRuntimeContext, get_replay_runtime_context, is_replay
+
+        assert ReplayRuntimeContext is kitaru.ReplayRuntimeContext
+        assert get_replay_runtime_context is kitaru.get_replay_runtime_context
+        assert is_replay is kitaru.is_replay
 
 
 class TestImplementedConnectionPrimitive:

@@ -5,11 +5,17 @@ icon: diagram-project
 
 # Flows
 
-A **flow** is the outer durable boundary in Kitaru — the unit of work your
-platform invokes and the runner executes. Everything inside the flow is tracked
-at checkpoint boundaries: persisted outputs, retry, replay, resume, and wait.
-Your harness (Pydantic AI, LangGraph, Claude Agent SDK, raw Python) lives inside
-the checkpoints. Your platform sits in front of the flow's invocation API. See
+A **flow** is the durable boundary for one agent run — the unit your platform
+invokes and the runner executes. It matters because the flow is what you can
+later **replay**: every model call and tool call inside it is recorded at
+[checkpoint](checkpoints.md) boundaries, so a finished run can be reproduced
+faithfully and rerun with one input changed. A flow is a dynamic ZenML pipeline;
+it runs on the same stacks, server, and dashboard as your ZenML pipelines.
+
+Everything inside the flow is tracked at checkpoint boundaries: persisted
+outputs, retry, replay, resume, and wait. Your harness (Pydantic AI, LangGraph,
+Claude Agent SDK, raw Python) lives inside the checkpoints. Your platform sits in
+front of the flow's invocation API. See
 [Harness, Runtime, Platform](harness-runtime-platform.md) for the bigger
 picture.
 
@@ -48,12 +54,15 @@ Use `.run()` to start an execution:
 handle = my_agent.run(url="https://example.com")
 print(handle.exec_id)   # unique execution identifier
 # ... do other work ...
-result = handle.wait()   # block until finished
+result = handle.wait(timeout=30)  # wait for at most 30 seconds locally
 ```
 
 `.run()` submits the execution and immediately returns a `FlowHandle`. The flow
 runs in the background while your code continues. Call `handle.wait()` when you
-need the result.
+need the result: it waits for the execution to finish, then returns the persisted
+run output from the flow's `return` statement. Pass `timeout=` to limit how long
+your local Python process waits. Omitting it, or passing `None`, waits
+indefinitely.
 
 For a synchronous one-liner, chain `.wait()`:
 
@@ -66,6 +75,37 @@ To target a remote stack for one execution, pass `stack=`:
 ```python
 handle = my_agent.run(url="https://example.com", stack="production")
 ```
+
+## Why the boundary matters: replay
+
+Because the flow recorded every checkpoint, you can re-execute a finished run
+from a checkpoint with `flow.replay(...)`. Keep the `exec_id` a run returns —
+that's the handle into replay.
+
+```python
+handle = my_agent.run(url="https://example.com")
+result = handle.wait()
+exec_id = handle.exec_id
+
+# Faithful rerun with no change = the control/baseline.
+baseline = my_agent.replay(exec_id, at="fetch_data")
+
+# Replay again with one flow input changed (a different model).
+variant = my_agent.replay(
+    exec_id,
+    at="fetch_data",
+    flow_overrides={"model": "claude-opus-4-8"},
+)
+```
+
+`at` selects the checkpoint to re-execute from. `flow_overrides` changes the
+flow's **inputs** for the replay run (for example `model` or `prompt_profile`).
+Because the baseline reproduces the original run, a diff between baseline and
+variant isolates your change rather than replay noise. This re-executes the real
+run with one input swapped — it is not re-scoring stored outputs like an eval.
+
+See [Replay and Overrides](../guides/replay-and-overrides.md) for selector rules,
+checkpoint-level overrides, and the CLI/MCP entry points.
 
 ## Deploying and invoking flows
 
@@ -97,13 +137,37 @@ execution:
 |---|---|
 | `handle.exec_id` | The unique execution identifier (a string you can store or log) |
 | `handle.status` | Current execution status (refreshed on each access) |
-| `handle.wait()` | Block until the execution finishes, then return the result |
-| `handle.get()` | Return the result immediately if finished, otherwise raise an error |
+| `handle.wait(timeout=None)` | Wait for completion and return the persisted run output. If the optional local timeout expires first, raise `KitaruTimeoutError`. |
+| `handle.get()` | Return the persisted run output immediately if finished, otherwise raise an error |
 
 {% hint style="info" %}
 `handle.get()` does **not** wait. If the execution is still running, it raises a
-`KitaruStateError`. Use `handle.wait()` when you want to block.
+`KitaruStateError`. Use `handle.wait()` when you want to block. For flows
+that explicitly return a value, both methods return the saved run output. For
+flows that do not return a value, inspect the persisted artifacts instead.
 {% endhint %}
+
+### Limiting how long your code waits
+
+Pass a positive number of seconds when your caller cannot wait indefinitely:
+
+```python
+import kitaru
+
+handle = my_agent.run(url="https://example.com")
+
+try:
+    result = handle.wait(timeout=30)
+except kitaru.KitaruTimeoutError as exc:
+    print(exc.exec_id, exc.timeout_seconds, exc.elapsed_seconds, exc.last_status)
+    # The execution is still running remotely. Wait again when you are ready.
+    result = handle.wait()
+```
+
+The timeout stops only this call to `wait()`. It does not cancel, pause, retry,
+or otherwise change the remote execution, and the same handle remains usable.
+`KitaruTimeoutError` reports the execution ID, configured timeout, elapsed
+time, and last observed status through the four attributes shown above.
 
 ### How errors surface
 

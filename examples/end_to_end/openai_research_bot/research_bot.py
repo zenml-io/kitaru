@@ -21,9 +21,7 @@ from pydantic import BaseModel
 import kitaru
 from kitaru import ImageSettings, checkpoint, flow
 from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
-from kitaru.client import KitaruClient
 from kitaru.config import classify_stack_deployment_type
-from kitaru.errors import KitaruAmbiguousFlowResultError
 
 try:  # Package import path used by tests.
     from .bot_agents import (
@@ -264,7 +262,7 @@ def durability_drill_gate(
         raise RuntimeError(
             "Intentional durability drill failure after the search stage. "
             f"Unset {FAIL_AFTER_SEARCHES_ENV} and replay this execution with "
-            "`kitaru executions replay <EXECUTION_ID> --from "
+            "`kitaru executions replay <EXECUTION_ID> --at "
             "durability_drill_gate`; Kitaru should reuse the completed "
             "planner/search outputs."
         )
@@ -501,17 +499,7 @@ def _run_once(
         run_kwargs["image"] = image_override
 
     handle = openai_research_bot.run(**run_kwargs)
-    try:
-        return str(handle.wait())
-    except KitaruAmbiguousFlowResultError:
-        artifacts = KitaruClient().artifacts.list(
-            handle.exec_id,
-            name="final_report",
-            limit=1,
-        )
-        if not artifacts:
-            raise
-        return str(artifacts[0].load())
+    return str(handle.wait())
 
 
 def main(argv: list[str] | None = None) -> int:

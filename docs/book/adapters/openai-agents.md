@@ -5,8 +5,11 @@ icon: robot
 
 # OpenAI Agents Adapter
 
-Kitaru's OpenAI Agents adapter lets you keep your existing OpenAI Agents SDK
-agent logic while adding Kitaru durability around it.
+`KitaruRunner` wraps an existing OpenAI Agents SDK `Agent` so every model and
+tool call runs as a durable checkpoint inside a Kitaru flow. You keep your agent
+logic unchanged; you gain durable execution, and with it the ability to
+[replay a real run with one input changed](../guides/replay-and-overrides.md)
+and diff the result.
 
 ```python
 from agents import Agent
@@ -17,8 +20,10 @@ runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 ```
 
 The runtime default is `checkpoint_strategy="calls"` (per-call checkpoints —
-see below); pass `"runner_call"` whenever you want a single terminal
-checkpoint so `flow.run(...).wait()` returns the run result directly.
+see below). If your flow returns the runner result or a value derived from it,
+`flow.run(...).wait()` returns that persisted run output after completion. Pass
+`"runner_call"` when you want the OpenAI runner call itself to be one coarse
+checkpoint.
 
 You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
 `OpenAIRunRequest`.
@@ -152,7 +157,7 @@ you need Kitaru checkpoints there too.
 
 You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
 
-### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
+### `checkpoint_strategy="runner_call"`
 
 Kitaru places one checkpoint around the outer OpenAI `Runner.run(...)` call. That
 single checkpoint becomes the flow's terminal artifact, so
@@ -160,26 +165,133 @@ single checkpoint becomes the flow's terminal artifact, so
 `"runner_call"` is deliberately specific: it means Kitaru is wrapping the outer
 OpenAI runner call, not claiming to own every SDK-internal step.
 
-Use this when you want one coarse replay boundary for the whole agent run, or
-whenever you want a clean Python value back from `.wait()`.
+Use this when you want one coarse replay unit for the whole agent run.
 
 ### `checkpoint_strategy="calls"` (default)
 
 Kitaru catches supported model/tool calls individually as separate peer
 checkpoints under the flow.
 
-Use this when you want finer replay units (for example: if call 6 fails, calls
-1–5 can come from cache).
+Use this when you want finer replay units: if call 6 fails, calls 1–5 can come
+from cache, and you can replay from any individual call's checkpoint.
 
-Because the per-call checkpoints are siblings under the flow with no single
-sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises
-`KitaruAmbiguousFlowResultError`. The per-checkpoint artifacts are still
-fully visible in the Kitaru UI and retrievable via `KitaruClient` — the
-error message points at them. If you need a clean `.wait()` return value,
-switch to `checkpoint_strategy="runner_call"`. Wrapping the `runner.run_sync()`
-call in your own `@checkpoint` is **not** a workaround here — the adapter
-guards against it and will raise, because per-call checkpoints cannot be
-nested inside another Kitaru checkpoint.
+The per-call checkpoints are siblings under the flow, but a flow that explicitly
+returns a value still has one persisted run output. In that common shape,
+`flow.run(...).wait()` returns the flow's output after completion while the
+per-checkpoint artifacts remain visible in the Kitaru UI and retrievable via
+`KitaruClient`. If your flow does not return a value, inspect those artifacts
+instead. Wrapping the `runner.run_sync()` call in your own `@checkpoint` is
+**not** a workaround for changing per-call placement — the adapter guards against
+it and will raise, because per-call checkpoints cannot be nested inside another
+Kitaru checkpoint.
+
+## Sandbox command tool
+
+Use `sandbox_command_tool(...)` when you want an OpenAI agent to run a command
+through the sandbox on your current Kitaru stack:
+
+```python
+from agents import Agent
+
+from kitaru.adapters.openai_agents import KitaruRunner, sandbox_command_tool
+
+agent = Agent(
+    name="diagnostic_agent",
+    instructions=(
+        "Use kitaru_sandbox_command for shell inspection tasks. The tool returns "
+        "JSON. Check exit_code before trusting stdout."
+    ),
+    model="gpt-5-nano",
+    tools=[
+        sandbox_command_tool(
+            max_chars=20_000,
+            timeout_seconds=30,
+            cleanup="destroy",
+        )
+    ],
+)
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+```
+
+Here is what happens, step by step:
+
+```text
+OpenAI model emits a local function-tool call
+→ OpenAI Agents SDK invokes the Kitaru tool callback
+→ the callback parses {"command": "...", "cwd": "..."}
+→ Kitaru calls run_sandbox_command(...)
+→ your current stack's sandbox runs the command
+→ the callback returns compact JSON to the model
+```
+
+The model can provide only:
+
+- `command` — required, non-empty string
+- `cwd` — optional working directory inside the sandbox
+
+The application keeps control of `max_chars`, `timeout_seconds`, and `cleanup`
+when it creates the tool. The model cannot set `env`, `max_chars`, the runtime
+limit, or cleanup behavior. `sandbox_command_tool(...)` uses a finite default
+`timeout_seconds=30.0`; pass a different finite value when your app needs a
+shorter or longer command budget.
+
+{% hint style="warning" %}
+This is not a secret-protection boundary. The model cannot pass a custom `env`
+object to the tool, but it still chooses the command. If the sandbox can
+read `/workspace/.env`, cloud credentials, SSH keys, internal network endpoints,
+or inherited environment variables, then a model-chosen command can try to read
+or exfiltrate them. In concrete terms: `sandbox_command_tool(...)` blocks "run
+this command with these extra environment variables", but it does not block
+"print the environment that is already there" or "read this file that the
+sandbox user can already read".
+
+Use the least-privileged sandbox you can: no unnecessary secrets, no broad cloud
+credentials, and only the network access the task truly needs. For prompts or
+users you do not fully trust, wrap the tool in your own allowlist or validator so
+only approved commands and working directories reach `run_sandbox_command(...)`.
+{% endhint %}
+
+The compact JSON returned to the model contains:
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "timed_out": false,
+  "cleanup_succeeded": true,
+  "cleanup_error": null
+}
+```
+
+The tool deliberately omits stack, sandbox, and session IDs from the model-visible
+result. Those are operational details for Kitaru, not facts the model needs in
+order to answer the user. Tell the model to inspect `exit_code` first: a command
+can write to `stdout` and still fail. If `timed_out` is `true`, Kitaru stopped
+waiting for the command after the app-owned timeout and returns `exit_code: -1`.
+
+Your current Kitaru stack must have exactly one sandbox component. If there is no sandbox,
+Kitaru raises an error and does not run the command. If there is more than one
+sandbox, Kitaru raises instead of guessing. The bad version would be: you
+expected a cheap local sandbox, Kitaru silently picked a different one, and the
+model ran a command somewhere you did not intend.
+
+Strategy behavior is the same as other local `FunctionTool` work:
+
+- With `checkpoint_strategy="runner_call"`, Kitaru saves one outer checkpoint for
+  the whole OpenAI runner call. The sandbox command runs during that SDK run.
+- With `checkpoint_strategy="calls"`, Kitaru also saves the sandbox command as a
+  separate `tool_call` checkpoint. Replaying the same command with the same tool
+  settings can reuse that checkpoint instead of calling the sandbox again.
+
+This helper does **not** redirect OpenAI-hosted tools into Kitaru's sandbox.
+`CodeInterpreterTool`, hosted shell containers, hosted MCP, and other
+provider-hosted tools run on OpenAI's side. Kitaru can still wrap the outer
+runner call around them, but their execution environment is not the sandbox on
+your current Kitaru stack.
 
 ## Streaming with Kitaru durability
 
@@ -323,8 +435,8 @@ OpenAI Agents SDK structured outputs work through the adapter. If your agent is
 created with `Agent(output_type=...)`, Kitaru preserves the SDK result object and
 its typed `final_output` in both supported strategies:
 
-- `checkpoint_strategy="runner_call"` records the outer runner call and returns
-  the structured result from `.wait()` cleanly.
+- `checkpoint_strategy="runner_call"` records the outer runner call as one
+  checkpoint.
 - `checkpoint_strategy="calls"` records supported model and tool calls
   individually, while the SDK still produces the typed final output for your
   Python code.
@@ -424,6 +536,14 @@ runner = KitaruRunner(
 
 `OpenAICapturePolicy` defaults are designed for useful traces: child events, input, final output, run state, interruption payloads, usage, and OTel correlation are on; raw response items are off by default because they can be noisy.
 
+## Usage and cost statistics
+
+When `save_usage=True` (the default), each completed or interrupted runner call logs one canonical `llm_usage_v1` record. That record uses the OpenAI Agents result usage payload when the SDK exposes one, and it uses the runner name plus the adapter run label as the stable record identity.
+
+If you pass a `cost_calculator=` to `KitaruRunner`, Kitaru stores the returned value as `estimated_cost_usd`. Calculator failures are non-fatal: the runner still returns the OpenAI result, adds a warning, and leaves the estimated cost empty. Without a user calculator, Kitaru estimates with `genai-prices` when the SDK usage summary names a single OpenAI model and includes priceable token counts. If the run does not expose a reliable model name, Kitaru records tokens only rather than pricing a multi-model or handoff run with the wrong model. OpenAI Agents records do not store provider-reported actual cost in this adapter path, so `actual_cost_usd` is normally empty.
+
+Kitaru normally rolls these records into the execution-level LLM usage summary when the execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. Set `save_usage=False` when you do not want the adapter to persist canonical usage metadata for that runner call.
+
 Two privacy switches are worth calling out:
 
 - `save_input=False` keeps raw model/tool inputs out of artifacts and redacts
@@ -442,15 +562,25 @@ This example uses the real OpenAI API (not a stub model), so set your key:
 
 ```bash
 uv sync --extra local --extra openai-agents
+uv run kitaru init
+uv run kitaru stack create dev
 export OPENAI_API_KEY='OPENAI_API_KEY_VALUE'
 # default model in the example is gpt-5-nano
 # optional override: any OpenAI model you have access to
 # export OPENAI_AGENTS_MODEL='<another-openai-model>'
 uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
 
+# sandbox command tool example
+uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+
 # streaming runner-call example
 uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
 ```
+
+`uv run kitaru stack create dev` creates and activates the local stack whose
+sandbox is used by the sandbox command tool example. If you switch stacks,
+make sure your current stack has exactly one sandbox component before running
+that example.
 
 ## End-to-end research bot example
 
@@ -492,7 +622,7 @@ Look for these artifacts in the Kitaru UI:
 To test the durable-retry story directly, set
 `KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1` before running the example. It will
 fail after the submitted searches complete. Unset the flag and run
-`kitaru executions replay <EXECUTION_ID> --from durability_drill_gate`; the
+`kitaru executions replay <EXECUTION_ID> --at durability_drill_gate`; the
 replay should reuse the completed planner/search checkpoints and continue into
 the writer. `retry` tries to restart the same failed execution and may be
 unavailable on server-backed stacks after a run has concluded.

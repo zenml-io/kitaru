@@ -7,10 +7,18 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from kitaru._llm_usage import (
+    CalculatedCostMetadata,
+    build_usage_record,
+    calculated_or_genai_cost_metadata,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
+from ._constants import ADAPTER_ID
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import GeminiInteractionCapturePolicy
 from ._runner import (
@@ -29,7 +37,11 @@ from ._tracking import (
     EventTracker,
     tracker_scope,
 )
-from ._types import GeminiInteractionRequest, GeminiInteractionResult
+from ._types import (
+    GeminiInteractionRequest,
+    GeminiInteractionResult,
+    GeminiUsageSummary,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointStrategy,
@@ -47,6 +59,7 @@ _DIRECT_EXECUTION_WARNING = (
     "checkpoint can call Google again and duplicate Gemini-side tool calls, "
     "managed-agent work, sandbox mutations, or API cost."
 )
+_CANONICAL_LLM_SURFACE = "gemini_interaction"
 
 ArtifactCaptureOperation = Literal["build_artifact_payload", "save_artifact"]
 InteractionSurface = Literal["run", "run_sync", "run_stream", "run_stream_sync"]
@@ -181,6 +194,7 @@ class KitaruGeminiInteractionsRunner:
         cache_identity: str | None = None,
         allow_direct_execution_inside_checkpoint: bool = False,
         poll_interval_s: float = 2.0,
+        cost_calculator: Callable[[GeminiUsageSummary], float | None] | None = None,
     ) -> None:
         if not isinstance(name, str) or not name.strip():
             raise KitaruUsageError(
@@ -209,6 +223,7 @@ class KitaruGeminiInteractionsRunner:
             allow_direct_execution_inside_checkpoint
         )
         self._poll_interval_s = poll_interval_s
+        self._cost_calculator = cost_calculator
         self._checkpoint_config: CheckpointConfig = validate_checkpoint_config(
             checkpoint_config,
             context="checkpoint_config",
@@ -224,6 +239,7 @@ class KitaruGeminiInteractionsRunner:
                 "allow_direct_execution_inside_checkpoint": (
                     self._allow_direct_execution_inside_checkpoint
                 ),
+                "has_cost_calculator": cost_calculator is not None,
             },
         )
 
@@ -552,6 +568,11 @@ class KitaruGeminiInteractionsRunner:
         ]
         if capture_failure_metadata:
             metadata["capture_failures"] = capture_failure_metadata
+        cost_metadata = self._cost_metadata(
+            payload=payload,
+            request=request,
+            warnings=warnings,
+        )
         result = GeminiInteractionResult(
             status=payload.status,
             interaction_id=payload.interaction_id,
@@ -562,6 +583,7 @@ class KitaruGeminiInteractionsRunner:
             environment_id=payload.environment_id,
             steps=payload.steps,
             usage=payload.usage,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             duration_ms=payload.duration_ms,
             poll_count=payload.poll_count,
             sdk_version=payload.sdk_version,
@@ -580,6 +602,14 @@ class KitaruGeminiInteractionsRunner:
             warnings=warnings,
             metadata=metadata,
         )
+        self._log_canonical_llm_call_record(
+            result,
+            payload=payload,
+            tracker=tracker,
+            request=request,
+            cost_metadata=cost_metadata,
+        )
+        warnings = result.warnings
         if self._capture.emit_events:
             tracker.record_interaction(
                 status="completed",
@@ -595,6 +625,130 @@ class KitaruGeminiInteractionsRunner:
                 },
             )
         return result
+
+    def _usage_summary(
+        self,
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+    ) -> GeminiUsageSummary | None:
+        if payload.usage is None:
+            return None
+        model, requested_model, resolved_model = self._usage_model_fields(
+            payload=payload,
+            request=request,
+        )
+        token_usage = token_usage_from_mapping(payload.usage)
+        return GeminiUsageSummary(
+            model_name=model,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
+            input_tokens=token_usage["input_tokens"],
+            output_tokens=token_usage["output_tokens"],
+            total_tokens=token_usage["total_tokens"],
+            cached_input_tokens=token_usage["cached_input_tokens"],
+            reasoning_tokens=token_usage["reasoning_tokens"],
+            raw_usage=token_usage["raw"],
+        )
+
+    def _cost_metadata(
+        self,
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+        warnings: list[str],
+    ) -> CalculatedCostMetadata:
+        usage_summary = self._usage_summary(payload=payload, request=request)
+        usage_payload = (
+            usage_summary.model_dump(mode="json") if usage_summary is not None else None
+        )
+        return calculated_or_genai_cost_metadata(
+            calculator=self._cost_calculator,
+            calculator_usage=usage_summary,
+            genai_provider="google_gemini",
+            genai_model=(
+                usage_summary.resolved_model or usage_summary.model_name
+                if usage_summary is not None
+                else None
+            ),
+            genai_usage=usage_payload,
+            warnings=warnings,
+            adapter_name="Gemini Interactions",
+            calculator_source_label="gemini.cost_calculator",
+        )
+
+    def _log_canonical_llm_call_record(
+        self,
+        result: GeminiInteractionResult,
+        *,
+        payload: GeminiInteractionPayload,
+        tracker: EventTracker,
+        request: GeminiInteractionRequest,
+        cost_metadata: CalculatedCostMetadata | None = None,
+    ) -> None:
+        """Log one canonical LLM call record, even when tokens are absent.
+
+        The canonical status describes the provider call: Gemini returned a
+        stable interaction response, so this record is completed. The public
+        ``GeminiInteractionResult.status`` can still be ``requires_action`` when
+        the stable response asks the caller to send a follow-up turn.
+        """
+        if not self._capture.save_usage or not (
+            is_inside_flow() or is_inside_checkpoint()
+        ):
+            return
+        if cost_metadata is None:
+            cost_metadata = self._cost_metadata(
+                payload=payload,
+                request=request,
+                warnings=result.warnings,
+            )
+        try:
+            model, requested_model, resolved_model = self._usage_model_fields(
+                payload=payload,
+                request=request,
+            )
+            usage_record = build_usage_record(
+                adapter=ADAPTER_ID,
+                surface=_CANONICAL_LLM_SURFACE,
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=payload.usage,
+                model=model,
+                requested_model=requested_model,
+                resolved_model=resolved_model,
+                provider="google_gemini",
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
+                latency_ms=payload.duration_ms,
+                status="completed",
+                billing_effect="incurred",
+                cache_status="executed",
+                warnings=result.warnings,
+            )
+        except Exception:
+            return
+        log_usage_record(usage_record)
+
+    @staticmethod
+    def _usage_model_fields(
+        *,
+        payload: GeminiInteractionPayload,
+        request: GeminiInteractionRequest,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return canonical model fields without treating agents as models."""
+        if request.target_kind == "model":
+            return (
+                payload.model or request.model,
+                request.model,
+                payload.model,
+            )
+        if payload.model is not None:
+            return payload.model, None, payload.model
+        return None, None, None
 
     def _persist_capture_artifacts(
         self,
@@ -757,7 +911,7 @@ class KitaruGeminiInteractionsRunner:
         plan: _InteractionPlan | None = None,
     ) -> str:
         payload: dict[str, Any] = {
-            "adapter": "gemini_interactions",
+            "adapter": ADAPTER_ID,
             "checkpoint_strategy": "interaction",
             "google_genai_version": google_genai_version(),
             "runner_name": self._name,

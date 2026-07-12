@@ -27,7 +27,6 @@ from kitaru.adapters.langgraph import (
     LANGGRAPH_STREAM_EVENT_KINDS,
     LANGGRAPH_STREAM_TERMINAL_EVENT_KINDS,
     KitaruGraphRunner,
-    LangGraphRunRequest,
     LangGraphRunResult,
 )
 from kitaru.client import KitaruClient
@@ -142,9 +141,7 @@ def main() -> None:
 
     @flow
     def streaming_flow(ticket: str) -> LangGraphRunResult:
-        return runner.stream(
-            LangGraphRunRequest.start({"ticket": ticket}, thread_id=THREAD_ID)
-        )
+        return runner.stream({"ticket": ticket}, thread_id=THREAD_ID)
 
     handle = streaming_flow.run("ticket-42", cache=False)
     exec_id = handle.exec_id

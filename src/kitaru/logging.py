@@ -54,33 +54,79 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
         checkpoint_id = _get_current_checkpoint_id()
         if checkpoint_id is None:
             raise KitaruStateError(_LOG_MISSING_CHECKPOINT_ID_ERROR)
-        checkpoint_uuid = _parse_scope_uuid(
-            checkpoint_id, scope_name="checkpoint", api_name="log"
-        )
-        return (
-            RunMetadataResource(
-                id=checkpoint_uuid,
-                type=MetadataResourceTypes.STEP_RUN,
-            ),
-            checkpoint_uuid,
-        )
+        return _checkpoint_run_resource(checkpoint_id)
 
     if _is_inside_flow():
         execution_id = _get_current_execution_id()
         if execution_id is None:
             raise KitaruStateError(_LOG_MISSING_EXECUTION_ID_ERROR)
-        execution_uuid = _parse_scope_uuid(
-            execution_id, scope_name="execution", api_name="log"
-        )
-        return (
-            RunMetadataResource(
-                id=execution_uuid,
-                type=MetadataResourceTypes.PIPELINE_RUN,
-            ),
-            None,
-        )
+        return (_pipeline_run_resource(execution_id), None)
 
     raise KitaruContextError(_LOG_OUTSIDE_FLOW_ERROR)
+
+
+def _pipeline_run_resource(run_id: str) -> RunMetadataResource:
+    """Build a pipeline-run metadata resource for an explicit run ID."""
+    run_uuid = _parse_scope_uuid(run_id, scope_name="execution", api_name="log")
+    return RunMetadataResource(
+        id=run_uuid,
+        type=MetadataResourceTypes.PIPELINE_RUN,
+    )
+
+
+def _checkpoint_run_resource(step_id: str) -> tuple[RunMetadataResource, UUID]:
+    """Build a step-run metadata resource for an explicit checkpoint ID."""
+    checkpoint_uuid = _parse_scope_uuid(
+        step_id,
+        scope_name="checkpoint",
+        api_name="log",
+    )
+    return (
+        RunMetadataResource(
+            id=checkpoint_uuid,
+            type=MetadataResourceTypes.STEP_RUN,
+        ),
+        checkpoint_uuid,
+    )
+
+
+def log_to_execution(
+    run_id: str,
+    *,
+    _client: Any | None = None,
+    **kwargs: Any,
+) -> None:
+    """Attach structured metadata to a specific execution.
+
+    This helper is for SDK observation paths such as ``FlowHandle.wait()`` that
+    need to write pipeline-run metadata after user code has finished and there
+    is no active flow context anymore.
+    """
+    client = _client if _client is not None else Client()
+    client.create_run_metadata(
+        metadata=kwargs,
+        resources=[_pipeline_run_resource(run_id)],
+    )
+
+
+def log_to_checkpoint(
+    step_id: str,
+    *,
+    _client: Any | None = None,
+    **kwargs: Any,
+) -> None:
+    """Attach structured metadata to a specific checkpoint step run.
+
+    This helper is for code paths that need to publish metadata by checkpoint
+    step ID when there is no active checkpoint context.
+    """
+    client = _client if _client is not None else Client()
+    resource, checkpoint_uuid = _checkpoint_run_resource(step_id)
+    client.create_run_metadata(
+        metadata=kwargs,
+        resources=[resource],
+        publisher_step_id=checkpoint_uuid,
+    )
 
 
 def log(**kwargs: Any) -> None:

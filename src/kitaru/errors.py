@@ -33,6 +33,39 @@ class KitaruStateError(KitaruError, RuntimeError):
     """Raised when execution state does not allow the requested operation."""
 
 
+if TYPE_CHECKING:
+    from kitaru._client._models import ExecutionStatus
+    from kitaru.client import ExecutionStatus as KitaruExecutionStatus
+
+
+class KitaruTimeoutError(KitaruStateError, TimeoutError):
+    """Raised when a local wait ends before the remote execution finishes."""
+
+    exec_id: str
+    timeout_seconds: float
+    elapsed_seconds: float
+    last_status: KitaruExecutionStatus
+
+    def __init__(
+        self,
+        *,
+        exec_id: str,
+        timeout_seconds: float,
+        elapsed_seconds: float,
+        last_status: KitaruExecutionStatus,
+    ) -> None:
+        super().__init__(
+            f"Timed out waiting for execution '{exec_id}' after "
+            f"{elapsed_seconds} seconds (configured timeout: {timeout_seconds} "
+            f"seconds; last status: {last_status.value}). The remote execution "
+            "was not changed and may still be running."
+        )
+        self.exec_id = exec_id
+        self.timeout_seconds = timeout_seconds
+        self.elapsed_seconds = elapsed_seconds
+        self.last_status = last_status
+
+
 class KitaruRuntimeError(KitaruError, RuntimeError):
     """Raised for runtime/serialization/materialization failures."""
 
@@ -45,10 +78,6 @@ class KitaruAmbiguousFlowResultError(KitaruRuntimeError):
     persisted and visible in the Kitaru UI / via ``KitaruClient`` — the
     exception message points at them.
     """
-
-
-if TYPE_CHECKING:
-    from kitaru._client._models import ExecutionStatus
 
 
 def _coerce_execution_status(
@@ -289,6 +318,7 @@ __all__ = [
     "KitaruStackNotRemoteExecutableStateError",
     "KitaruStackNotRemoteExecutableUsageError",
     "KitaruStateError",
+    "KitaruTimeoutError",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",

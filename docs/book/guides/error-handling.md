@@ -5,8 +5,12 @@ icon: triangle-exclamation
 
 # Error Handling
 
-Kitaru exposes a typed exception hierarchy so you can distinguish usage,
-context, state, runtime, backend, and execution failures.
+Because every model call and tool call in a flow is recorded as a durable
+checkpoint, failures are journaled, not lost — you get the failing checkpoint,
+its retry attempts, and a typed exception you can branch on. Kitaru's exception
+hierarchy distinguishes usage, context, state, runtime, backend, and execution
+failures so you can react precisely and replay a failed run from the last good
+checkpoint.
 
 ## Core exception types
 
@@ -14,7 +18,7 @@ context, state, runtime, backend, and execution failures.
 import kitaru
 
 try:
-    result = my_flow.run(...).get()
+    result = my_flow.run(...).wait()
 except kitaru.KitaruUserCodeError as exc:
     # user checkpoint/flow code raised
     print(exc.exec_id, exc.status, exc.failure_origin)
@@ -64,16 +68,19 @@ for checkpoint in execution.checkpoints:
 
 ## Replay divergence behavior
 
-`client.executions.replay(...)` may fail immediately with
-`kitaru.KitaruDivergenceError` when the backend detects an incompatible durable
-call sequence.
+Replay re-executes a recorded run from a checkpoint. If the new run can't follow
+the recorded durable call sequence — for example, the code changed in a way that
+breaks the checkpoint contract — Kitaru raises `kitaru.KitaruDivergenceError`
+instead of silently producing an unfaithful baseline.
 
-Even when replay submission succeeds, divergence can still surface later on the
-replayed execution as normal execution failure metadata:
+`client.executions.replay(...)` may fail immediately with this error when the
+backend detects an incompatible call sequence at submission time. Even when
+submission succeeds, divergence can surface later on the replayed execution as
+normal failure metadata:
 
 ```python
-replayed = client.executions.replay(exec_id, from_="write_draft")
-latest = replayed.refresh()
+submission = client.executions.replay(exec_id, at="write_draft")
+latest = client.executions.get(submission.results[0].replay_exec_id)
 
 if latest.failure and latest.failure.origin == kitaru.FailureOrigin.DIVERGENCE:
     print("Replay divergence:", latest.failure.message)

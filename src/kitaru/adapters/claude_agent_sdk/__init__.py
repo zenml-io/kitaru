@@ -16,6 +16,14 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard only
 from ._agent import KitaruClaudeRunner
 from ._events import ClaudeAdapterEvent, ClaudeEventError, ClaudeRunEvent
 from ._policy import ClaudeCapturePolicy
+from ._sandbox_tool import (
+    DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS,
+    KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME,
+    KITARU_SANDBOX_COMMAND_TOOL_NAME,
+    KITARU_SANDBOX_MCP_SERVER_NAME,
+    allowed_tool_name,
+    create_kitaru_sandbox_mcp_server,
+)
 from ._streaming import (
     CLAUDE_STREAM_COMPLETED,
     CLAUDE_STREAM_EVENT,
@@ -24,7 +32,11 @@ from ._streaming import (
     CLAUDE_STREAM_STARTED,
     CLAUDE_STREAM_TERMINAL_EVENT_KINDS,
 )
-from ._types import ClaudeRunRequest, ClaudeRunResult
+from ._types import (
+    ClaudeRunRequest,
+    ClaudeRunResult,
+    ClaudeUsageSummary,
+)
 from ._utils import (
     CheckpointConfig,
     CheckpointRuntime,
@@ -38,6 +50,10 @@ __all__ = [
     "CLAUDE_STREAM_FAILED",
     "CLAUDE_STREAM_STARTED",
     "CLAUDE_STREAM_TERMINAL_EVENT_KINDS",
+    "DEFAULT_CLAUDE_SANDBOX_COMMAND_MAX_CHARS",
+    "KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME",
+    "KITARU_SANDBOX_COMMAND_TOOL_NAME",
+    "KITARU_SANDBOX_MCP_SERVER_NAME",
     "CheckpointConfig",
     "CheckpointRuntime",
     "ClaudeAdapterEvent",
@@ -46,6 +62,9 @@ __all__ = [
     "ClaudeRunEvent",
     "ClaudeRunRequest",
     "ClaudeRunResult",
+    "ClaudeUsageSummary",
     "KitaruClaudeRunner",
+    "allowed_tool_name",
+    "create_kitaru_sandbox_mcp_server",
     "validate_checkpoint_strategy",
 ]

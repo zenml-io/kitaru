@@ -23,6 +23,7 @@ def test_gemini_interactions_example_help(capsys: pytest.CaptureFixture[str]) ->
     assert "--dry-run" in output
     assert "--show-text-deltas" in output
     assert "--hide-text-deltas" in output
+    assert "sandbox-function" in output
 
 
 def test_gemini_interactions_example_dry_run_without_credentials(
@@ -56,6 +57,33 @@ def test_gemini_interactions_example_dry_run_accepts_show_text_deltas(
     output = capsys.readouterr().out
     assert "Dry run only: no Google request was made" in output
     assert "Stream metadata" in output
+
+
+def test_gemini_interactions_example_sandbox_function_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    gemini_interactions_adapter.main(["--dry-run", "--mode", "sandbox-function"])
+
+    output = capsys.readouterr().out
+    assert "Sandbox function dry run" in output
+    assert "Fake Gemini requires_action result" in output
+    assert "Status: requires_action" in output
+    assert "sandbox_python_version" in output
+    assert "Fake Kitaru sandbox command result" in output
+    assert "python --version" in output
+    assert "payload_output_max_chars" in output
+    assert "stdout_payload_truncated" in output
+    assert '"result_payload_sent_to_gemini": [' in output
+    assert '"type": "text"' in output
+    assert '\\"cleanup\\": {' in output
+    assert '"error"' not in output
+    assert "run the sandbox command from a @checkpoint" in output
+    assert "Fake Gemini function_result request" in output
+    assert "dry-run-call-id" in output
 
 
 def test_gemini_interactions_example_main_shows_text_deltas_by_default(
@@ -185,6 +213,161 @@ def test_gemini_interactions_example_antigravity_foreground_override() -> None:
     assert request.store is True
 
 
+def test_gemini_interactions_example_sandbox_function_request_uses_model_tool() -> None:
+    args = argparse.Namespace(
+        mode="sandbox-function",
+        prompt="call the sandbox function",
+        model="gemini-test",
+        timeout=123.0,
+        foreground_antigravity=False,
+    )
+
+    request = gemini_interactions_adapter._build_request(args)
+
+    assert request.model == "gemini-test"
+    assert request.agent is None
+    assert request.tools == [gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL]
+    assert request.metadata["mode"] == "sandbox-function"
+
+
+def test_gemini_interactions_example_sandbox_showcase_requires_action() -> None:
+    result = gemini_interactions_adapter.GeminiInteractionResult(
+        status="completed",
+        interaction_id="interaction-1",
+        model="gemini-test",
+    )
+
+    with pytest.raises(RuntimeError, match="expected Gemini to request"):
+        gemini_interactions_adapter.run_sandbox_python_version_function._func(result)
+
+
+def test_gemini_interactions_example_sandbox_showcase_two_turn_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_request = gemini_interactions_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+    first_result = gemini_interactions_adapter.GeminiInteractionResult(
+        status="requires_action",
+        interaction_id="interaction-1",
+        model="gemini-test",
+        steps=[
+            gemini_interactions_adapter.GeminiInteractionStepSummary(
+                index=0,
+                type="function_call",
+                call_id="call-1",
+                tool_name=gemini_interactions_adapter.SANDBOX_FUNCTION_NAME,
+            )
+        ],
+    )
+    requests: list[gemini_interactions_adapter.GeminiInteractionRequest] = []
+
+    class FakeRunner:
+        def run_sync(
+            self,
+            request: gemini_interactions_adapter.GeminiInteractionRequest,
+        ) -> gemini_interactions_adapter.GeminiInteractionResult:
+            requests.append(request)
+            if len(requests) == 1:
+                return first_result
+            return gemini_interactions_adapter.GeminiInteractionResult(
+                status="completed",
+                interaction_id="interaction-2",
+                previous_interaction_id=request.previous_interaction_id,
+                model="gemini-test",
+                output_text="The sandbox is running Python 3.12.0.",
+            )
+
+    def fake_request_sandbox_function_call(
+        request: gemini_interactions_adapter.GeminiInteractionRequest,
+        *,
+        stream: bool = False,
+        show_text_deltas: bool = False,
+    ) -> gemini_interactions_adapter.GeminiInteractionResult:
+        assert stream is False
+        assert show_text_deltas is False
+        return FakeRunner().run_sync(request)
+
+    def fake_run_sandbox_function(
+        result: gemini_interactions_adapter.GeminiInteractionResult,
+    ) -> gemini_interactions_adapter.GeminiSandboxFunctionExecution:
+        call = result.function_calls[0]
+        sandbox_result = gemini_interactions_adapter._fake_sandbox_command_result()
+        payload = (
+            gemini_interactions_adapter._sandbox_python_version_spec().build_payload(
+                call,
+                sandbox_result,
+            )
+        )
+        request = gemini_interactions_adapter.GeminiInteractionRequest.function_result(
+            previous_interaction_id=result.interaction_id or "interaction-1",
+            function_call_id=call.call_id,
+            function_name=call.function_name,
+            function_result=payload,
+            model=result.model,
+            tools=[gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL],
+        )
+        return gemini_interactions_adapter.GeminiSandboxFunctionExecution(
+            call=call,
+            sandbox_result=sandbox_result,
+            function_result_payload=payload,
+            function_result_request=request,
+        )
+
+    def fake_finish_sandbox_function(
+        execution: gemini_interactions_adapter.GeminiSandboxFunctionExecution,
+        *,
+        stream: bool = False,
+        show_text_deltas: bool = False,
+    ) -> gemini_interactions_adapter.GeminiInteractionResult:
+        assert stream is False
+        assert show_text_deltas is False
+        return FakeRunner().run_sync(execution.function_result_request)
+
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "request_sandbox_python_version_function_call",
+        fake_request_sandbox_function_call,
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "run_sandbox_python_version_function",
+        fake_run_sandbox_function,
+    )
+    monkeypatch.setattr(
+        gemini_interactions_adapter,
+        "finish_sandbox_python_version_function",
+        fake_finish_sandbox_function,
+    )
+
+    final_result = (
+        gemini_interactions_adapter.run_gemini_sandbox_function_showcase._func(
+            initial_request,
+        )
+    )
+
+    assert final_result.status == "completed"
+    assert len(requests) == 2
+    assert requests[0] is initial_request
+    continuation = requests[1]
+    assert continuation.kind == "function_result"
+    assert continuation.previous_interaction_id == "interaction-1"
+    assert continuation.function_call_id == "call-1"
+    assert continuation.input == [
+        {
+            "type": "function_result",
+            "call_id": "call-1",
+            "name": gemini_interactions_adapter.SANDBOX_FUNCTION_NAME,
+            "result": continuation.function_result_payload,
+        }
+    ]
+    payload = continuation.function_result_payload
+    assert isinstance(payload, list)
+    assert payload[0]["type"] == "text"
+    assert continuation.tools == [gemini_interactions_adapter.SANDBOX_FUNCTION_TOOL]
+
+
 def test_gemini_interactions_example_show_text_deltas_builds_opt_in_runner() -> None:
     default_runner = gemini_interactions_adapter._build_runner()
     opt_in_runner = gemini_interactions_adapter._build_runner(
@@ -237,6 +420,19 @@ def test_gemini_interactions_example_vertex_requires_project_and_location(
 
     assert "GOOGLE_CLOUD_PROJECT" in str(exc_info.value)
     assert "GOOGLE_CLOUD_LOCATION" in str(exc_info.value)
+
+
+def test_gemini_interactions_example_vertex_rejects_sandbox_function_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+
+    with pytest.raises(SystemExit) as exc_info:
+        gemini_interactions_adapter._guard_vertex_mode("sandbox-function")
+
+    message = str(exc_info.value)
+    assert "sandbox-function mode" in message
+    assert "--mode antigravity" in message
 
 
 def test_gemini_interactions_example_coerces_foreign_model_result() -> None:

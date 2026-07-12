@@ -12,16 +12,23 @@ import yaml
 from zenml.utils import yaml_utils
 
 from kitaru._config import _stacks as stack_ops
+from kitaru._config._sandbox_stack_components import LOCAL_SANDBOX_FLAVOR
 from kitaru._config._stacks import (
     AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,
+    ModalStackSpec,
     RemoteStackSpec,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackComponentTarget,
     StackType,
     VertexStackSpec,
+)
+from kitaru._modal_registry import (
+    ecr_region_from_registry,
+    gcp_location_from_registry,
+    infer_modal_registry_provider,
 )
 
 _CREATE_ALLOWED_STACK_TYPES = (
@@ -30,14 +37,16 @@ _CREATE_ALLOWED_STACK_TYPES = (
     StackType.VERTEX,
     StackType.SAGEMAKER,
     StackType.AZUREML,
+    StackType.MODAL,
 )
 _DEFAULT_INTERFACE_STACK_TYPES = _CREATE_ALLOWED_STACK_TYPES
-_REMOTE_STACK_TYPES = (
+_CLOUD_CONNECTOR_STACK_TYPES = (
     StackType.KUBERNETES,
     StackType.VERTEX,
     StackType.SAGEMAKER,
     StackType.AZUREML,
 )
+_REMOTE_STACK_TYPES = (*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)
 _FIELD_ORDER = (
     "artifact_store",
     "container_registry",
@@ -49,6 +58,7 @@ _FIELD_ORDER = (
     "execution_role",
     "namespace",
     "credentials",
+    "sandbox",
     "verify",
 )
 _REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
@@ -76,19 +86,24 @@ _REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
         "resource_group",
         "workspace",
     ),
+    StackType.MODAL: (
+        "artifact_store",
+        "container_registry",
+    ),
 }
 _FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
     "artifact_store": frozenset(_REMOTE_STACK_TYPES),
     "container_registry": frozenset(_REMOTE_STACK_TYPES),
     "cluster": frozenset({StackType.KUBERNETES}),
-    "region": frozenset(_REMOTE_STACK_TYPES),
-    "subscription_id": frozenset({StackType.AZUREML}),
+    "region": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
+    "subscription_id": frozenset({StackType.AZUREML, StackType.MODAL}),
     "resource_group": frozenset({StackType.AZUREML}),
     "workspace": frozenset({StackType.AZUREML}),
     "execution_role": frozenset({StackType.SAGEMAKER}),
     "namespace": frozenset({StackType.KUBERNETES}),
-    "credentials": frozenset(_REMOTE_STACK_TYPES),
-    "verify": frozenset(_REMOTE_STACK_TYPES),
+    "credentials": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
+    "sandbox": frozenset(_CREATE_ALLOWED_STACK_TYPES),
+    "verify": frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
 }
 _FIXED_PROVIDER_BY_STACK_TYPE = {
     StackType.VERTEX: CloudProvider.GCP,
@@ -117,6 +132,7 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.VERTEX: "--type vertex",
         StackType.SAGEMAKER: "--type sagemaker",
         StackType.AZUREML: "--type azureml",
+        StackType.MODAL: "--type modal",
     },
     field_labels={
         "artifact_store": "--artifact-store",
@@ -130,6 +146,7 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "--namespace",
         "credentials": "--credentials",
         "verify": "--no-verify",
+        "sandbox": "--sandbox",
         "extra": "--extra",
         "async": "--async",
     },
@@ -142,6 +159,7 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.VERTEX: '`stack_type="vertex"`',
         StackType.SAGEMAKER: '`stack_type="sagemaker"`',
         StackType.AZUREML: '`stack_type="azureml"`',
+        StackType.MODAL: '`stack_type="modal"`',
     },
     field_labels={
         "artifact_store": "`artifact_store`",
@@ -155,6 +173,7 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "`namespace`",
         "credentials": "`credentials`",
         "verify": "`verify`",
+        "sandbox": "`sandbox`",
         "extra": "`extra`",
         "async": "`async_mode`",
         "stack_type": "`stack_type`",
@@ -170,6 +189,7 @@ class ManageStackCreateRequest:
     activate: bool
     stack_type: StackType
     remote_spec: RemoteStackSpec | None = None
+    sandbox_flavor: str | None = None
     component_overrides: StackComponentConfigOverrides = field(
         default_factory=StackComponentConfigOverrides
     )
@@ -201,6 +221,7 @@ class _StackCreateInputs:
     execution_role: str | None = None
     namespace: str | None = None
     credentials: str | None = None
+    sandbox: str | None = None
     verify: bool | None = None
     component_overrides: StackComponentConfigOverrides | None = None
     async_mode: bool | None = None
@@ -220,6 +241,7 @@ class _CreateStackOperation(Protocol):
         activate: bool,
         remote_spec: RemoteStackSpec | None,
         component_overrides: StackComponentConfigOverrides | None = None,
+        sandbox_flavor: str | None = None,
     ) -> stack_ops._StackCreateResult: ...
 
 
@@ -263,6 +285,7 @@ _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "execution-role",
     "namespace",
     "credentials",
+    "sandbox",
     "verify",
     "extra",
     "async",
@@ -280,6 +303,7 @@ _STACK_CREATE_FILE_STRING_KEYS = {
     "execution_role",
     "namespace",
     "credentials",
+    "sandbox",
 }
 _STACK_CREATE_FILE_BOOLEAN_KEYS = {
     "activate",
@@ -350,6 +374,111 @@ def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
     )
 
 
+def _modal_cloud_connector_inputs_requested(
+    *,
+    region: str | None,
+    subscription_id: str | None,
+    credentials: str | None,
+) -> bool:
+    """Return whether Modal stack inputs request a Kitaru cloud connector."""
+    return bool(
+        region is not None or subscription_id is not None or credentials is not None
+    )
+
+
+def _validate_modal_cloud_connector_inputs(
+    *,
+    provider: CloudProvider,
+    artifact_store: str,
+    container_registry: str,
+    region: str | None,
+    subscription_id: str | None,
+    credentials: str | None,
+    verify: bool,
+    labels: StackOptionLabels,
+) -> None:
+    """Reject impossible Modal cloud credential combinations early."""
+    registry_provider = infer_modal_registry_provider(container_registry)
+    if registry_provider != provider.value:
+        raise ValueError(
+            "Modal stacks must use an artifact store and container registry "
+            "from the same cloud provider. "
+            f"Artifact store '{artifact_store}' is {provider.value}, but registry "
+            f"'{container_registry}' is {registry_provider}."
+        )
+
+    if not _modal_cloud_connector_inputs_requested(
+        region=region,
+        subscription_id=subscription_id,
+        credentials=credentials,
+    ):
+        if not verify:
+            raise ValueError(
+                f"{labels.field_labels['verify']} only applies when Kitaru is "
+                "creating a cloud connector for a Modal stack. Add the needed "
+                "cloud connector input, such as "
+                f"{labels.field_labels['region']}, "
+                f"{labels.field_labels['subscription_id']}, or "
+                f"{labels.field_labels['credentials']}, or remove "
+                f"{labels.field_labels['verify']}."
+            )
+        return
+
+    region_label = labels.field_labels["region"]
+    subscription_label = labels.field_labels["subscription_id"]
+    if provider == CloudProvider.AWS:
+        if subscription_id is not None:
+            raise ValueError(
+                f"AWS-backed Modal stacks do not use {subscription_label}. Use "
+                f"{region_label} for the AWS/ECR region, or use an Azure artifact "
+                "store and ACR registry for Azure credentials."
+            )
+        if region is None:
+            raise ValueError(
+                f"AWS-backed Modal cloud credentials require {region_label}. "
+                "This is the AWS/ECR region for the S3/ECR connector. Modal "
+                "placement still uses `--extra orchestrator.region=...`."
+            )
+        ecr_region = ecr_region_from_registry(container_registry)
+        if ecr_region is not None and ecr_region != region:
+            raise ValueError(
+                f"AWS-backed Modal cloud credentials require {region_label} to "
+                "match the ECR registry host. "
+                f"{region_label} was '{region}', but the registry host uses "
+                f"'{ecr_region}'. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+    if provider == CloudProvider.GCP:
+        if subscription_id is not None:
+            raise ValueError(
+                f"GCP-backed Modal stacks do not use {subscription_label}. Use a "
+                "gs:// artifact store and a GAR/GCR registry; Kitaru infers the "
+                "GCP project from the registry URI."
+            )
+        gcp_location = gcp_location_from_registry(container_registry)
+        if region is not None and gcp_location is not None and region != gcp_location:
+            raise ValueError(
+                f"GCP-backed Modal cloud credentials require {region_label} to "
+                "match the GAR/GCR registry host when both are provided. "
+                f"{region_label} was '{region}', but the registry host uses "
+                f"'{gcp_location}'. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+    if provider == CloudProvider.AZURE:
+        if subscription_id is None:
+            raise ValueError(
+                f"Azure-backed Modal cloud credentials require {subscription_label} "
+                "so Kitaru can create the Azure service connector for Blob/ADLS "
+                "and ACR. Modal placement still uses "
+                "`--extra orchestrator.region=...`."
+            )
+        return
+
+
 def _render_field_labels(field_names: list[str], *, labels: StackOptionLabels) -> str:
     """Render interface-specific labels for one or more stack fields."""
     return ", ".join(labels.field_labels[field_name] for field_name in field_names)
@@ -371,7 +500,11 @@ def _render_stack_type_requirement(
 
 def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
     """Return a human-friendly label for a set of allowed stack types."""
-    if allowed_stack_types == frozenset(_REMOTE_STACK_TYPES):
+    if allowed_stack_types in {
+        frozenset(_REMOTE_STACK_TYPES),
+        frozenset(_CLOUD_CONNECTOR_STACK_TYPES),
+        frozenset((*_CLOUD_CONNECTOR_STACK_TYPES, StackType.MODAL)),
+    }:
         return "Remote stack options"
     if len(allowed_stack_types) == 1:
         stack_type = next(iter(allowed_stack_types))
@@ -380,6 +513,7 @@ def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
             StackType.VERTEX: "Vertex",
             StackType.SAGEMAKER: "SageMaker",
             StackType.AZUREML: "AzureML",
+            StackType.MODAL: "Modal",
         }.get(stack_type, stack_type.value.capitalize())
         return f"{display_name}-only options"
     return "Stack-specific options"
@@ -428,7 +562,11 @@ def _validate_explicit_field_usage(
 
 
 _LOCAL_COMPONENT_OVERRIDE_TARGETS = frozenset(
-    {StackComponentTarget.ORCHESTRATOR, StackComponentTarget.ARTIFACT_STORE}
+    {
+        StackComponentTarget.ORCHESTRATOR,
+        StackComponentTarget.ARTIFACT_STORE,
+        StackComponentTarget.SANDBOX,
+    }
 )
 _REMOTE_COMPONENT_OVERRIDE_TARGETS = frozenset(StackComponentTarget)
 
@@ -473,6 +611,7 @@ def merge_component_overrides(
             base.container_registry,
             override.container_registry,
         ),
+        sandbox=_merge_nested_mapping(base.sandbox, override.sandbox),
     )
 
 
@@ -785,6 +924,7 @@ def build_remote_stack_spec(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     labels: StackOptionLabels,
 ) -> RemoteStackSpec | None:
@@ -800,6 +940,7 @@ def build_remote_stack_spec(
         "execution_role": execution_role is not None,
         "namespace": namespace is not None,
         "credentials": credentials is not None,
+        "sandbox": sandbox is not None,
         "verify": not verify,
     }
     _validate_explicit_field_usage(
@@ -918,6 +1059,26 @@ def build_remote_stack_spec(
             verify=verify,
         )
 
+    if stack_type == StackType.MODAL:
+        _validate_modal_cloud_connector_inputs(
+            provider=provider,
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            region=normalized_region,
+            subscription_id=normalized_subscription_id,
+            credentials=normalized_credentials,
+            verify=verify,
+            labels=labels,
+        )
+        return ModalStackSpec(
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            region=normalized_region,
+            subscription_id=normalized_subscription_id,
+            credentials=normalized_credentials,
+            verify=verify,
+        )
+
     raise ValueError(f"Unsupported stack type: {stack_type.value}")
 
 
@@ -936,6 +1097,7 @@ def build_stack_create_request(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     component_overrides: StackComponentConfigOverrides | None = None,
     async_enabled: bool = False,
@@ -958,6 +1120,19 @@ def build_stack_create_request(
         component_overrides,
         labels=labels,
     )
+    normalized_sandbox = normalize_optional_stack_string(sandbox)
+    if sandbox is not None and normalized_sandbox is None:
+        raise ValueError(f"{labels.field_labels['sandbox']} cannot be empty.")
+    if normalized_sandbox is None and normalized_stack_type == StackType.LOCAL:
+        normalized_sandbox = LOCAL_SANDBOX_FLAVOR
+    overrides = component_overrides or StackComponentConfigOverrides()
+    if normalized_sandbox is None and overrides.sandbox:
+        raise ValueError(
+            f"{_target_field_label(StackComponentTarget.SANDBOX, labels=labels)} "
+            f"requires {labels.field_labels['sandbox']} because sandbox overrides "
+            "only apply when the created stack has a sandbox."
+        )
+
     return ManageStackCreateRequest(
         name=name,
         activate=activate,
@@ -974,9 +1149,11 @@ def build_stack_create_request(
             execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
+            sandbox=sandbox,
             verify=verify,
             labels=labels,
         ),
+        sandbox_flavor=normalized_sandbox,
         component_overrides=apply_async_override(
             component_overrides,
             async_enabled=async_enabled,
@@ -1012,6 +1189,7 @@ def build_stack_create_request_from_inputs(
         execution_role=inputs.execution_role,
         namespace=inputs.namespace,
         credentials=inputs.credentials,
+        sandbox=inputs.sandbox,
         verify=inputs.verify if inputs.verify is not None else default_verify,
         component_overrides=inputs.component_overrides,
         async_enabled=inputs.async_mode is True,
@@ -1038,6 +1216,7 @@ def build_manage_stack_request(
     execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
+    sandbox: str | None,
     verify: bool,
     extra: Mapping[str, Any] | None = None,
     async_mode: bool = False,
@@ -1064,6 +1243,7 @@ def build_manage_stack_request(
             execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
+            sandbox=sandbox,
             verify=verify,
             component_overrides=(
                 normalize_component_overrides_mapping(
@@ -1098,6 +1278,7 @@ def build_manage_stack_request(
                 ("execution_role", execution_role is not None),
                 ("namespace", namespace is not None),
                 ("credentials", credentials is not None),
+                ("sandbox", sandbox is not None),
                 ("verify", not verify),
                 ("extra", extra is not None),
                 ("async", async_mode),
@@ -1134,6 +1315,8 @@ def execute_stack_create_request(
         "activate": request.activate,
         "remote_spec": request.remote_spec,
     }
+    if request.sandbox_flavor is not None:
+        create_kwargs["sandbox_flavor"] = request.sandbox_flavor
     if not request.component_overrides.is_empty():
         create_kwargs["component_overrides"] = request.component_overrides
     return operation(request.name, **create_kwargs)

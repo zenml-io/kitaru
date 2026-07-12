@@ -23,23 +23,25 @@ concurrency:
   group: ui-prerelease-smoke-${{ github.ref }}-${{ inputs.ui-tag }}
   cancel-in-progress: false
 env:
-  ZENML_SERVER_TAG: 0.94.6
+  KITARU_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
+  ZENML_SERVER_TAG: 0.96.1
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           path: trusted
           persist-credentials: false
       - name: Checkout Kitaru ref under test
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: ${{ inputs.kitaru-ref }}
           path: kitaru
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           python-version: '3.12'
       - name: Download selected Kitaru UI prerelease
@@ -84,7 +86,8 @@ jobs:
           -t kitaru-ui-prerelease-smoke .
       - name: Start server container
         if: ${{ inputs.docker-smoke }}
-        run: docker run -d --rm --name kitaru-ui-prerelease-smoke -p 18080:8080 kitaru-ui-prerelease-smoke
+        run: docker run -d --rm --name kitaru-ui-prerelease-smoke -p 18080:8080 -e
+          KITARU_ANALYTICS_OPT_IN=false -e ZENML_ANALYTICS_OPT_IN=false kitaru-ui-prerelease-smoke
       - name: Wait for health endpoint
         if: ${{ inputs.docker-smoke }}
         run: |

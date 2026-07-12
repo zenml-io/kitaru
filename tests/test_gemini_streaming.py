@@ -19,6 +19,7 @@ from tests._gemini_fake_sdk import (
     install_fake_google_genai,
     purge_gemini_adapter_modules,
 )
+from tests._gemini_usage_helpers import collect_usage_records
 
 
 @pytest.fixture
@@ -334,7 +335,17 @@ def _completed_without_nested_status_stream() -> list[Any]:
     ]
 
 
-def _requires_action_stream(*, arguments: str = '{"city":"Delft"}') -> list[Any]:
+def _requires_action_stream(
+    *,
+    arguments: str = '{"city":"Delft"}',
+    function_name_field: str = "name",
+    function_name: str = "lookup",
+) -> list[Any]:
+    function_call_step = {
+        "id": "call-1",
+        "type": "function_call",
+        function_name_field: function_name,
+    }
     return [
         _event(
             "interaction.created",
@@ -343,11 +354,7 @@ def _requires_action_stream(*, arguments: str = '{"city":"Delft"}') -> list[Any]
         _event(
             "step.start",
             step_index=0,
-            step=SimpleNamespace(
-                id="call-1",
-                type="function_call",
-                name="lookup",
-            ),
+            step=SimpleNamespace(**function_call_step),
         ),
         _event(
             "step.delta",
@@ -583,6 +590,43 @@ def test_publisher_hides_user_role_text_even_when_text_deltas_enabled(
     assert "private user text" not in repr(payload)
 
 
+def test_publisher_uses_function_name_fallback_for_tool_argument_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = _collect_live_events(monkeypatch)
+    streaming = importlib.import_module("kitaru.adapters.gemini._streaming")
+    publisher = streaming.GeminiStreamPublisher(
+        runner_name="gemini",
+        surface="run_stream_sync",
+    )
+
+    publisher.event(
+        _event(
+            "step.start",
+            step_index=0,
+            step=SimpleNamespace(
+                id="call-1",
+                type="function_call",
+                function_name="lookup_function",
+            ),
+        )
+    )
+    publisher.event(
+        _event(
+            "step.delta",
+            step_index=0,
+            delta={"type": "arguments_delta", "delta": '{"city":"Delft"}'},
+        )
+    )
+
+    start_payload = events[0][1]
+    arguments_payload = events[1][1]
+    assert start_payload["tool_name"] == "lookup_function"
+    assert arguments_payload["category"] == "tool_arguments_delta"
+    assert arguments_payload["tool_name"] == "lookup_function"
+    assert "Delft" not in repr(arguments_payload)
+
+
 def test_publisher_hides_tool_arguments_and_flushes_terminal_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -610,6 +654,31 @@ def test_publisher_hides_tool_arguments_and_flushes_terminal_events(
     assert arguments_payload["category"] == "tool_arguments_delta"
     assert arguments_payload["tool_name"] == "lookup"
     assert "Delft" not in repr(arguments_payload)
+
+
+@pytest.mark.parametrize("usage_field", ["usage_metadata", "usageMetadata"])
+def test_publisher_marks_has_usage_for_usage_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    usage_field: str,
+) -> None:
+    events = _collect_live_events(monkeypatch)
+    streaming = importlib.import_module("kitaru.adapters.gemini._streaming")
+    publisher = streaming.GeminiStreamPublisher(
+        runner_name="gemini",
+        surface="run_stream",
+    )
+
+    publisher.event(
+        _event(
+            "interaction.completed",
+            interaction=SimpleNamespace(id="interaction-usage", status="completed"),
+            **{usage_field: SimpleNamespace(total_tokens=9)},
+        )
+    )
+
+    payload = events[-1][1]
+    assert payload["category"] == "interaction_completed"
+    assert payload["has_usage"] is True
 
 
 def test_publisher_unknown_event_does_not_expose_arbitrary_name(
@@ -679,6 +748,90 @@ def test_stream_bridge_create_drains_callback_and_accumulates_completed_result(
     assert result.stream_metadata is not None
     assert result.stream_metadata["event_count"] == 7
     assert result.stream_metadata["last_event_id"] == "evt-7"
+
+
+@pytest.mark.parametrize("usage_field", ["usage_metadata", "usageMetadata"])
+def test_stream_bridge_reads_final_usage_aliases(
+    gemini_adapter: types.ModuleType,
+    usage_field: str,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            [
+                _event(
+                    "interaction.created",
+                    interaction=SimpleNamespace(
+                        id="interaction-usage",
+                        status="in_progress",
+                        model="gemini-test",
+                    ),
+                ),
+                _event(
+                    "interaction.completed",
+                    interaction=SimpleNamespace(
+                        id="interaction-usage",
+                        status="completed",
+                        model="gemini-test",
+                        **{usage_field: SimpleNamespace(total_tokens=13)},
+                    ),
+                ),
+                _event("done"),
+            ]
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.usage == {"total_tokens": 13}
+
+
+def test_stream_bridge_reads_event_usage_alias_when_interaction_omits_usage(
+    gemini_adapter: types.ModuleType,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            [
+                _event(
+                    "interaction.completed",
+                    interaction=SimpleNamespace(
+                        id="interaction-event-usage",
+                        status="completed",
+                        model="gemini-test",
+                    ),
+                    usageMetadata={"total_tokens": 21},
+                ),
+                _event("done"),
+            ]
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello", model="gemini-test"
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.usage == {"total_tokens": 21}
 
 
 def test_stream_bridge_accumulates_content_delta_events(
@@ -1193,6 +1346,43 @@ def test_stream_bridge_background_fallback_unstable_status_raises_poll_instructi
     assert client.interactions.get_calls == [("background-1", {})]
 
 
+@pytest.mark.parametrize(
+    ("function_name_field", "function_name"),
+    [("tool_name", "lookup_tool"), ("function_name", "lookup_function")],
+)
+def test_stream_bridge_accumulates_requires_action_function_name_fallbacks(
+    gemini_adapter: types.ModuleType,
+    function_name_field: str,
+    function_name: str,
+) -> None:
+    runner_module = importlib.import_module("kitaru.adapters.gemini._runner")
+    client = FakeClient(
+        [
+            _requires_action_stream(
+                function_name_field=function_name_field,
+                function_name=function_name,
+            )
+        ]
+    )
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "lookup weather",
+        model="gemini-test",
+    )
+
+    result = asyncio.run(
+        runner_module.run_gemini_interaction_streamed(
+            request=request,
+            client=client,
+            client_factory=None,
+            allow_sync_stream=True,
+        )
+    )
+
+    assert result.status == "requires_action"
+    assert result.steps[0].call_id == "call-1"
+    assert result.steps[0].tool_name == function_name
+
+
 def test_stream_bridge_accumulates_requires_action(
     gemini_adapter: types.ModuleType,
 ) -> None:
@@ -1354,6 +1544,35 @@ def test_run_stream_rejects_sync_only_client_before_provider_create(
 
     assert client.interactions.create_calls == []
     assert client.interactions.get_calls == []
+
+
+def test_run_stream_sync_logs_canonical_gemini_usage_record(
+    monkeypatch: pytest.MonkeyPatch,
+    gemini_adapter: types.ModuleType,
+) -> None:
+    _patch_flow_checkpoint(monkeypatch)
+    records = collect_usage_records(monkeypatch)
+    client = FakeClient([_completed_stream()])
+    runner = gemini_adapter.KitaruGeminiInteractionsRunner(name="gemini", client=client)
+    request = gemini_adapter.GeminiInteractionRequest.start(
+        "hello",
+        model="gemini-test",
+    )
+
+    result = runner.run_stream_sync(request)
+
+    assert result.status == "completed"
+    assert result.usage == {"total_tokens": 7}
+    assert len(records) == 1
+    record = records[0]
+    assert record["adapter"] == "gemini_interactions"
+    assert record["surface"] == "gemini_interaction"
+    assert record["model"] == "gemini-test"
+    assert record["requested_model"] == "gemini-test"
+    assert record["resolved_model"] == "gemini-test"
+    assert record["usage"]["total_tokens"] == 7
+    assert record["cost"]["source"] == "none"
+    assert record["billing_effect"] == "incurred"
 
 
 def test_runner_stream_lifecycle_publish_failures_do_not_replace_success(

@@ -13,8 +13,9 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
@@ -34,6 +35,9 @@ from kitaru._config import _execution_spec as _config_execution_spec
 from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
+from kitaru._config import _projects as _config_projects
+from kitaru._config import _sandbox as _config_sandbox
+from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru._config import _stacks as _config_stacks
 from kitaru._env import ZENML_CONFIG_PATH_ENV as _ZENML_CONFIG_PATH_ENV
 from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
@@ -52,6 +56,7 @@ _LOG_STORE_BACKEND_PATTERN = _config_log_store._LOG_STORE_BACKEND_PATTERN
 _MODEL_ALIAS_PATTERN = _config_models._MODEL_ALIAS_PATTERN
 _STACK_MANAGED_LABEL_KEY = _config_stacks._STACK_MANAGED_LABEL_KEY
 _STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
+_LOCAL_SANDBOX_FLAVOR = _sandbox_components.LOCAL_SANDBOX_FLAVOR
 
 KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
 KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
@@ -67,8 +72,10 @@ KITARU_STACK_ENV = _config_env.KITARU_STACK_ENV
 KITARU_CACHE_ENV = _config_env.KITARU_CACHE_ENV
 KITARU_RETRIES_ENV = _config_env.KITARU_RETRIES_ENV
 KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
+KITARU_LLM_ESTIMATED_COSTS_ENV = _config_env.KITARU_LLM_ESTIMATED_COSTS_ENV
 KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
 KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
+KITARU_UI_URL_ENV = _config_env.KITARU_UI_URL_ENV
 KITARU_MODEL_REGISTRY_ENV = _kitaru_env.KITARU_MODEL_REGISTRY_ENV
 ZENML_CONFIG_PATH_ENV = _ZENML_CONFIG_PATH_ENV
 ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
@@ -84,6 +91,7 @@ _UNSET = object()
 ImageSettings = _config_images.ImageSettings
 ImageInput = _config_images.ImageInput
 KitaruConfig = _config_core.KitaruConfig
+LLMEstimatedCostsPolicy = _config_core.LLMEstimatedCostsPolicy
 ResolvedExecutionConfig = _config_core.ResolvedExecutionConfig
 ResolvedConnectionConfig = _config_core.ResolvedConnectionConfig
 ActiveEnvironmentVariable = _config_core.ActiveEnvironmentVariable
@@ -99,6 +107,12 @@ ModelRegistryConfig = _config_models.ModelRegistryConfig
 ModelAliasEntry = _config_models.ModelAliasEntry
 ResolvedModelSelection = _config_models.ResolvedModelSelection
 
+ProjectInfo = _config_projects.ProjectInfo
+ProjectCreateResult = _config_projects.ProjectCreateResult
+ProjectDeleteResult = _config_projects.ProjectDeleteResult
+
+SandboxCommandResult = _config_sandbox.SandboxCommandResult
+
 StackInfo = _config_stacks.StackInfo
 StackType = _config_stacks.StackType
 CloudProvider = _config_stacks.CloudProvider
@@ -106,6 +120,7 @@ KubernetesStackSpec = _config_stacks.KubernetesStackSpec
 VertexStackSpec = _config_stacks.VertexStackSpec
 SagemakerStackSpec = _config_stacks.SagemakerStackSpec
 AzureMLStackSpec = _config_stacks.AzureMLStackSpec
+ModalStackSpec = _config_stacks.ModalStackSpec
 RemoteStackSpec = _config_stacks.RemoteStackSpec
 StackComponentConfigOverrides = _config_stacks.StackComponentConfigOverrides
 _ResolvedConnectorSpec = _config_stacks._ResolvedConnectorSpec
@@ -150,6 +165,7 @@ _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 _normalize_model_alias = _config_models._normalize_model_alias
 _read_env_model_registry = _config_models._read_env_model_registry
 _normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
+DEFAULT_SANDBOX_COMMAND_MAX_CHARS = _config_sandbox.DEFAULT_SANDBOX_COMMAND_MAX_CHARS
 _extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
 _mask_environment_value = _config_log_store._mask_environment_value
 
@@ -189,6 +205,39 @@ _infer_stack_details_type = _config_stacks._infer_stack_details_type
 _stack_info_from_model = _config_stacks._stack_info_from_model
 _iter_available_stacks = _config_stacks._iter_available_stacks
 
+_project_info_from_model = _config_projects._project_info_from_model
+current_project = _config_projects.current_project
+list_projects = _config_projects.list_projects
+get_project = _config_projects.get_project
+create_project = _config_projects.create_project
+delete_project = _config_projects.delete_project
+use_project = _config_projects.use_project
+
+
+def _read_persisted_active_project() -> str | None:
+    """Read repo-local/global active project without applying env overrides."""
+    if os.environ.get(ZENML_STORE_URL_ENV):
+        return None
+
+    try:
+        client = Client()
+        local_config = getattr(client, "_config", None)
+        if local_config is not None:
+            try:
+                local_project = local_config.active_project
+            except Exception:
+                local_project = None
+            if local_project is not None:
+                return str(local_project.id)
+    except Exception:
+        pass
+
+    try:
+        global_project = GlobalConfiguration().get_active_project()
+    except Exception:
+        return None
+    return str(global_project.id) if global_project is not None else None
+
 
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
@@ -200,13 +249,15 @@ def _read_global_execution_config() -> KitaruConfig:
 def _read_global_connection_config() -> KitaruConfig:
     """Read connection defaults from global user config/runtime state.
 
-    Only reads ``server_url`` and ``auth_token`` from ZenML's persisted
-    store configuration. Project is intentionally omitted here — it is
-    only populated by explicit overrides (env var or runtime configure).
+    This is the lowest-precedence connection layer. It reads server URL and
+    auth token from ZenML's persisted store configuration, plus the active
+    project saved in repo-local config when available, otherwise global config.
+    Environment variables are intentionally handled by later layers.
     """
     with _suppress_zenml_cli_messages():
         return _config_core._read_global_connection_config_impl(
             global_configuration_factory=GlobalConfiguration,
+            active_project_getter=_read_persisted_active_project,
         )
 
 
@@ -228,6 +279,56 @@ def resolve_execution_config(
     )
 
 
+@lru_cache(maxsize=32)
+def _cached_project_llm_estimated_costs(
+    start_dir: str | None,
+    pyproject_path: str | None,
+    pyproject_mtime_ns: int | None,
+) -> LLMEstimatedCostsPolicy | None:
+    """Return the project-level LLM estimated-cost policy.
+
+    ``pyproject_path`` and ``pyproject_mtime_ns`` are cache-key inputs so a
+    changed project config file naturally invalidates this read.
+    """
+    del pyproject_path, pyproject_mtime_ns
+    return _read_project_config(
+        Path(start_dir) if start_dir is not None else None
+    ).llm_estimated_costs
+
+
+def resolve_llm_estimated_cost_policy(
+    *,
+    start_dir: Path | None = None,
+) -> LLMEstimatedCostsPolicy:
+    """Resolve direct ``kitaru.llm()`` estimated-cost policy.
+
+    Direct LLM calls use the execution-config precedence chain entries that can
+    exist at call time: project config, environment variables, then runtime
+    ``kitaru.configure(...)`` overrides. The default is ``"auto"``.
+    """
+    runtime_policy = _read_runtime_execution_config().llm_estimated_costs
+    if runtime_policy is not None:
+        return runtime_policy
+
+    env_policy = _read_execution_env_config().llm_estimated_costs
+    if env_policy is not None:
+        return env_policy
+
+    pyproject_path = _find_pyproject(start_dir)
+    pyproject_mtime_ns = (
+        pyproject_path.stat().st_mtime_ns if pyproject_path is not None else None
+    )
+    project_policy = _cached_project_llm_estimated_costs(
+        str(start_dir) if start_dir is not None else None,
+        str(pyproject_path) if pyproject_path is not None else None,
+        pyproject_mtime_ns,
+    )
+    if project_policy is not None:
+        return project_policy
+
+    return "auto"
+
+
 def resolve_connection_config(
     *,
     explicit: KitaruConfig | None = None,
@@ -237,10 +338,11 @@ def resolve_connection_config(
     """Resolve connection configuration with connection-specific precedence.
 
     Precedence (lowest to highest):
-    1. Global ZenML-backed defaults (server_url, auth_token only)
-    2. Environment variable overrides (KITARU_SERVER_URL, etc.)
-    3. Runtime overrides from ``kitaru.configure(project=...)``
-    4. Explicit argument passed by the caller
+    1. Persisted ZenML-backed defaults (server_url, auth_token, active project)
+    2. Direct ZenML compatibility environment variables
+    3. Public Kitaru environment variables
+    4. Runtime overrides from ``kitaru.configure(project=...)``
+    5. Explicit argument passed by the caller
     """
     return _config_env.resolve_connection_config_impl(
         explicit=explicit,
@@ -512,6 +614,7 @@ def _create_kubernetes_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     return _config_stacks._create_kubernetes_stack_operation(
@@ -520,6 +623,7 @@ def _create_kubernetes_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -531,6 +635,7 @@ def _create_vertex_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a Vertex AI stack via ZenML's one-shot stack API."""
     return _config_stacks._create_vertex_stack_operation(
@@ -539,6 +644,7 @@ def _create_vertex_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -550,6 +656,7 @@ def _create_sagemaker_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a SageMaker stack via ZenML's one-shot stack API."""
     return _config_stacks._create_sagemaker_stack_operation(
@@ -558,6 +665,7 @@ def _create_sagemaker_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -569,6 +677,7 @@ def _create_azureml_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create an AzureML stack via ZenML's one-shot stack API."""
     return _config_stacks._create_azureml_stack_operation(
@@ -577,6 +686,28 @@ def _create_azureml_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
+        client_factory=Client,
+    )
+
+
+def _create_modal_stack_operation(
+    name: str,
+    *,
+    spec: ModalStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
+) -> _StackCreateResult:
+    """Create a Modal stack via ZenML's one-shot stack API."""
+    return _config_stacks._create_modal_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         client_factory=Client,
     )
 
@@ -589,6 +720,7 @@ def _create_stack_operation(
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     result = _config_stacks._create_stack_operation(
@@ -598,6 +730,7 @@ def _create_stack_operation(
         labels=labels,
         remote_spec=remote_spec,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
         operation_overrides=cast(
             dict[StackType, Callable[..., _StackCreateResult]],
             {
@@ -606,6 +739,7 @@ def _create_stack_operation(
                 StackType.VERTEX: _create_vertex_stack_operation,
                 StackType.SAGEMAKER: _create_sagemaker_stack_operation,
                 StackType.AZUREML: _create_azureml_stack_operation,
+                StackType.MODAL: _create_modal_stack_operation,
             },
         ),
     )
@@ -628,6 +762,7 @@ def _create_local_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
     return _config_stacks._create_local_stack_operation(
@@ -635,6 +770,7 @@ def _create_local_stack_operation(
         activate=activate,
         labels=labels,
         component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor or _LOCAL_SANDBOX_FLAVOR,
         client_factory=Client,
         current_stack_getter=current_stack,
     )
@@ -654,6 +790,51 @@ def _delete_stack_operation(
         client_factory=Client,
         current_stack_getter=current_stack,
     )
+
+
+def run_sandbox_command(
+    command: str | Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    max_chars: int = DEFAULT_SANDBOX_COMMAND_MAX_CHARS,
+    timeout_seconds: float | None = None,
+    cleanup: Literal["destroy", "close"] = "destroy",
+) -> SandboxCommandResult:
+    """Execute one command through the active stack's sandbox component.
+
+    Args:
+        command: Command to execute, as a provider-interpreted string or an
+            argv-style command list. For exact argument splitting, pass a
+            sequence.
+        cwd: Optional working directory inside the sandbox.
+        env: Optional environment variables for the command. These values are
+            passed to the sandbox provider but are not included in the result.
+        max_chars: Maximum characters to collect from each output stream.
+        timeout_seconds: Optional application-owned timeout for command
+            execution. If the command does not finish in time, Kitaru asks the
+            process to stop, cleans up the session on a best-effort basis, and
+            returns a structured timeout result.
+        cleanup: Whether to destroy or close the fresh sandbox session after the
+            command completes.
+
+    Returns:
+        Structured command output and cleanup status.
+    """
+    return _config_sandbox.run_sandbox_command(
+        command,
+        cwd=cwd,
+        env=env,
+        max_chars=max_chars,
+        timeout_seconds=timeout_seconds,
+        cleanup=cleanup,
+        client_factory=Client,
+    )
+
+
+def _active_sandbox_cache_identity() -> dict[str, str | None]:
+    """Return cache identity for the active stack's single sandbox component."""
+    return _config_sandbox.active_sandbox_cache_identity(client_factory=Client)
 
 
 def list_stacks() -> list[StackInfo]:
@@ -706,7 +887,6 @@ def use_stack(name_or_id: str) -> StackInfo:
     result = _config_stacks.use_stack(
         name_or_id,
         client_factory=Client,
-        current_stack_getter=current_stack,
     )
 
     from kitaru.analytics import AnalyticsEvent, track
@@ -777,13 +957,15 @@ def configure(
     image: ImageInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
+    llm_estimated_costs: str | None | object = _UNSET,
     project: str | None | object = _UNSET,
 ) -> KitaruConfig:
     """Set process-local runtime defaults.
 
-    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
-    update the execution precedence chain. The ``project`` field updates
-    the connection precedence chain and is intended as an internal /
+    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``,
+    ``llm_estimated_costs``) update the execution precedence chain. The
+    ``project`` field updates the connection precedence chain and is intended
+    as an internal /
     testing escape hatch — it is not a normal user-facing setting.
 
     Args:
@@ -791,6 +973,9 @@ def configure(
         image: Default image settings override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
+        llm_estimated_costs: Estimated-cost policy for direct ``kitaru.llm()``
+            calls. Use ``"auto"`` to calculate estimates when possible, ``"off"``
+            to disable calculation, or ``None`` to clear the runtime override.
         project: Project override (internal/testing). Set to ``None``
             to clear.
 
@@ -802,6 +987,7 @@ def configure(
         image=image,
         cache=cache,
         retries=retries,
+        llm_estimated_costs=llm_estimated_costs,
         project=project,
         unset_sentinel=_UNSET,
     )

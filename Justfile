@@ -1,7 +1,7 @@
 # Pinned ZenML server image version — bump here when upgrading.
 # Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
 # workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
-ZENML_SERVER_TAG := "0.94.6"
+ZENML_SERVER_TAG := "0.96.1"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
@@ -137,10 +137,23 @@ ui-smoke:
     test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
     KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
 
-# Build dev base image for remote stack testing (K8s, etc.)
+# Run release-grade smoke with structured results.
+# Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
+# Remote stack smoke stays opt-in; build/push a flow image with
+# `just dev-image REPO=<operator-image-repo>`, then pass operator-provided
+# remote config via KITARU_REMOTE_SMOKE_* env vars or ./scripts/smoke-test.sh flags.
+release-smoke *ARGS:
+    ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
+
+# Audit the public example coverage manifest without running examples or providers.
+example-coverage-audit:
+    uv run --with pyyaml python scripts/audit-example-coverage.py
+
+# Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.
-# Pass REPO to override the target registry/image.
-dev-image REPO="strickvl/kitaru-dev":
+# Remote-smoke operators must pass their own target registry/image.
+dev-image REPO="":
+    @test -n "{{ REPO }}" || { printf 'Error: pass REPO=<operator-image-repo> for the remote smoke flow image.\n' >&2; exit 1; }
     docker build -f docker/Dockerfile.dev -t kitaru-dev .
     docker tag kitaru-dev {{ REPO }}:latest
     docker push {{ REPO }}:latest

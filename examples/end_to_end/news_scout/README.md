@@ -114,7 +114,7 @@ dashboard.
 
 ```
 @flow news_scout
-  ├── scout_agent.run_sync(prompt)
+  ├── new_scout_agent().run_sync(prompt)
   │     ├── model_request_1      ← checkpoint
   │     ├── search_news_tool     ← checkpoint
   │     ├── model_request_2      ← checkpoint
@@ -161,7 +161,7 @@ frozen execution spec.
 
 ```bash
 kitaru executions list
-kitaru executions replay <exec_id> --from search_news_tool_3
+kitaru executions replay <exec_id> --at search_news_tool_3
 kitaru executions retry <exec_id>
 ```
 

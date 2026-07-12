@@ -5,8 +5,12 @@ icon: list-check
 
 # Manage Executions with KitaruClient and CLI
 
-`KitaruClient` is the programmatic API for managing and inspecting executions
-outside your flow functions.
+`KitaruClient` is the programmatic API for inspecting and acting on executions
+outside your flow functions. It is how you look up a real run by its `exec_id`,
+read its checkpoints and cost, resolve waits, and drive the run/replay/improve
+loop, replaying a recorded execution from a checkpoint with one input changed.
+The same surface is exposed over the CLI and the MCP server, so a coding agent
+can do all of this too.
 
 {% hint style="info" %}
 `KitaruClient` and the CLI use your current Kitaru connection context. If you
@@ -64,6 +68,304 @@ completed_for_flow = client.executions.list(
 latest = client.executions.latest(flow="content_pipeline")
 ```
 
+## Execution statistics
+
+Use execution statistics when you want counts, trends, or health checks across a
+cohort without fetching every execution first, the difference between "show me
+the last 20 executions" and "how many failed this week?" Kitaru runs the
+aggregate query on the active runtime and returns a small grouped result. Each
+group includes an execution count; you can also request numeric metrics such as
+average duration or the sum of a numeric metadata key (e.g. cost per flow), which
+is how you compare a cohort before and after a change.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+# One global count for the current project.
+stats = client.executions.statistics()
+print(stats.groups[0].execution_count)
+
+# Count executions by public Kitaru status.
+by_status = client.executions.statistics(group_by=["status"])
+for group in by_status.groups:
+    print(group.keys["status"], group.execution_count)
+
+# Count daily health by status.
+daily_health = client.executions.statistics(group_by=["time:day", "status"])
+
+# Count executions by status and include average run duration per status.
+status_with_duration = client.executions.statistics(
+    group_by=["status"],
+    metrics=["duration_avg:duration:avg"],
+)
+for group in status_with_duration.groups:
+    print(group.keys["status"], group.execution_count, group.metrics["duration_avg"])
+
+# Sum a numeric execution metadata key by flow.
+cost_by_flow = client.executions.statistics(
+    group_by=["flow"],
+    metrics=[
+        {
+            "name": "cost_usd_sum",
+            "source": "metadata",
+            "aggregation": "sum",
+            "metadata_key": "cost_usd",
+        }
+    ],
+)
+
+# Count one flow's failures by stack.
+flow_failures = client.executions.statistics(
+    group_by=["stack", "status"],
+    flow="content_pipeline",
+    status="failed",
+)
+```
+
+The CLI exposes the same surface:
+
+```bash
+# One global count
+kitaru executions statistics
+
+# Failure/success mix for the current project
+kitaru executions statistics --group-by status
+
+# Failure/success mix with average run duration per status
+kitaru executions statistics --group-by status --metric duration_avg:duration:avg
+
+# Daily execution health, script-friendly JSON
+kitaru executions statistics --group-by time:day --group-by status --output json
+kitaru executions statistics --group-by status -o json
+
+# Second page of grouped status results
+kitaru executions statistics --group-by status --page 2 --size 20
+
+# Sum a numeric execution metadata key by flow
+kitaru executions statistics \
+  --group-by flow \
+  --metric cost_usd_sum:metadata:cost_usd:sum
+
+# A focused question for one flow and two required tags
+kitaru executions statistics \
+  --group-by status \
+  --flow content_pipeline \
+  --tag nightly \
+  --tag customer-facing
+```
+
+Text output is intentionally small:
+
+```text
+Kitaru execution statistics
+Status      Executions
+completed   12
+failed      2
+running     1
+```
+
+When you request metrics, text output adds one column per metric:
+
+```text
+Kitaru execution statistics
+Status      Executions   Duration Avg
+completed   12           43.2
+failed      2            18.7
+running     1
+```
+
+Statistics JSON output uses the shared `--output json` / `-o json` option.
+When `--page` or `--size` is used, `group_count` is the number of groups in the
+current response page. Like other Kitaru CLI JSON outputs, statistics JSON does
+not include separate pagination metadata. `--max-groups` limits the total groups
+returned by the statistics query before CLI pagination is applied.
+
+Supported groupings are:
+
+- `status` → public Kitaru status (`running`, `waiting`, `completed`, `failed`, `cancelled`)
+- `flow` → `flow_id`
+- `stack` → `stack_id`
+- `tag` → tag value
+- `time:hour`, `time:day`, `time:week`, `time:month`
+- `metadata:<key>` → the value stored for that execution metadata key
+
+Supported metric sources are:
+
+- `duration`
+- `step_count`
+- `cached_step_count`
+- `output_artifact_count`
+- `metadata:<key>` through a metric spec that sets `source="metadata"` and
+  `metadata_key="<key>"`
+
+Supported aggregations are `avg`, `sum`, `min`, and `max`.
+
+CLI metric specs use this format:
+
+- `<name>:<source>:<avg|sum|min|max>` for built-in sources
+- `<name>:metadata:<metadata_key>:<avg|sum|min|max>` for metadata
+
+{% hint style="warning" %}
+Grouping by `metadata:<key>` includes the matching metadata values in the
+statistics output. Only use it for metadata keys whose values are safe to show
+to whoever can read the CLI, SDK, or MCP response.
+{% endhint %}
+
+{% hint style="warning" %}
+Metadata metrics read numeric execution metadata. If the metadata value is
+stored as text or as a nested object, the active Kitaru runtime cannot aggregate
+it as a number. Store the value as an integer or float when you want to use it
+in statistics.
+{% endhint %}
+
+### LLM usage and cost metadata
+
+When an execution makes LLM calls through `kitaru.llm()` or the supported agent
+adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
+that made or reused the provider work. One usage record usually means one
+provider interaction or one adapter-level graph/agent invocation, depending on
+which adapter produced it. When the execution finishes, Kitaru reads those
+checkpoint records and writes two execution-level views. `FlowHandle.wait()` and
+`FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written:
+
+- `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
+  Python client parse it into `execution.llm_usage_summary`. It tells you what
+  happened in one execution. Its `usage_record_count`,
+  `incurred_usage_record_count`, and `reused_usage_record_count` fields count
+  Kitaru usage records, not raw provider API calls.
+- Common LLM totals are available as execution-statistics shortcuts:
+  `llm_display_cost`, `llm_estimated_cost`, `llm_total_tokens`, and
+  `llm_incurred_tokens`. These shortcuts read the flat execution-level numeric
+  metadata that Kitaru writes for statistics, so users do not need to spell the
+  internal `_v1` metadata keys for common cost and token totals.
+
+Cost fields are intentionally split:
+
+- `actual_cost_usd` means the provider reported a final cost for this exact
+  call. Treat this as observability, not as a billing invoice.
+- `estimated_cost_usd` means Kitaru or an SDK calculated a cost from token counts
+  and pricing data. Direct `kitaru.llm()` calls and framework adapters write this
+  field automatically when Kitaru has reliable provider, model, and token data
+  that `genai-prices` can price. Claude Agent SDK `total_cost_usd` is also
+  recorded here because it is an SDK-side estimate, not a provider invoice line.
+  Adapter-level user calculators also write this field.
+- `display_cost_usd` uses actual cost for a record when present, otherwise
+  estimated cost. Treat it as observability, not as a billing invoice.
+
+Automatic `genai-prices` cost estimates are on by default. After the provider
+or adapter call succeeds, Kitaru sends the known provider, model name, and token
+usage to [`genai-prices`](https://github.com/pydantic/genai-prices), stores the
+returned value as `estimated_cost_usd`, and records provenance like this:
+
+```text
+cost.source = "calculator"
+cost.source_label = "genai-prices"
+cost.pricing_version = "genai-prices:<installed package version>"
+actual_cost_usd = null
+estimated_cost_usd = <calculated USD estimate>
+```
+
+The provider or adapter call always comes first. If `genai-prices` is missing,
+cannot price the model, returns an invalid value, or cannot read its price data,
+Kitaru still returns the model response and records the token counts. The
+`llm_usage_v1` record gets a warning and no estimated cost, so the execution
+summary increments `records_without_cost_count` for that record.
+
+Kitaru does not guess when a usage record combines multiple models or lacks a
+trusted provider/model identity. In that case it records tokens only. User
+`cost_calculator=` hooks still take priority over the built-in estimate; if a
+user calculator fails, Kitaru records that calculator error instead of hiding it
+with a fallback estimate.
+
+To disable automatic `genai-prices` estimates for a process, set:
+
+```bash
+export KITARU_LLM_ESTIMATED_COSTS=off
+```
+
+You can also set the runtime policy from Python:
+
+```python
+import kitaru
+
+kitaru.configure(llm_estimated_costs="off")  # or "auto" to enable again
+```
+
+Use `[tool.kitaru] llm_estimated_costs = "off"` in `pyproject.toml` when you want
+a repository default. The environment variable and `kitaru.configure(...)` are
+useful for temporary opt-out without editing the project file.
+
+{% hint style="warning" %}
+`estimated_cost_usd` is not an invoice. It depends on the installed
+`genai-prices` package and its price data. Providers can change prices, apply
+account-specific discounts, or round bills differently. Use the estimate for
+observability and trend analysis, not financial reconciliation.
+{% endhint %}
+
+Useful statistics queries:
+
+```bash
+# Sum display cost and total token volume for one flow.
+# Display cost is an observability number, not an invoice.
+kitaru executions statistics \
+  --flow content_pipeline \
+  --metric llm_display_cost \
+  --metric llm_total_tokens
+
+# Sum estimated cost by flow.
+kitaru executions statistics \
+  --group-by flow \
+  --metric llm_estimated_cost
+
+# Sum incurred token volume by day.
+kitaru executions statistics \
+  --group-by time:day \
+  --metric llm_incurred_tokens
+```
+
+The shortcut names above mean "sum this common LLM total". The raw
+`<name>:metadata:<metadata_key>:<avg|sum|min|max>` form still exists for custom
+numeric execution metadata and for advanced internal debugging, but you should
+not need `kitaru_llm_*_v1` keys for common LLM cost and token totals.
+
+{% hint style="info" %}
+Kitaru normally writes terminal LLM summaries when executions finish, so a
+remote execution can get `llm_usage_summary_v1` and the flat `kitaru_llm_*_v1`
+statistics keys even if no local SDK process calls `.wait()` or `.get()`. Those
+methods can still populate missing summaries for older executions or terminal executions where the finish-time summary was not written.
+{% endhint %}
+
+Supported filters are `flow`, `status`, `stack`, `tags`, and `max_groups`.
+Multiple tag filters mean "executions that have all of these tags". When
+`max_groups` truncates a time-grouped result, Kitaru keeps the newest time rows
+and still displays the rows from oldest to newest.
+
+{% hint style="info" %}
+`flow` and `stack` groupings currently return IDs (`flow_id` and `stack_id`),
+not display names. This avoids guessing when a flow or stack has been renamed
+or deleted. You can still filter by a flow or stack name.
+{% endhint %}
+
+{% hint style="info" %}
+The current statistics surface supports grouping by time and metadata, but not
+filtering by time range or metadata values yet. If you need "last 7 days" or
+"only executions where `customer_tier=enterprise`", fetch/list those executions
+separately or add a stable tag for that cohort before querying statistics.
+{% endhint %}
+
+Agent and operations summaries should use this same general surface. For
+example, an assistant can ask for daily volume first, then drill into only the
+unhealthy cohort:
+
+```python
+client.executions.statistics(group_by=["time:day"])
+client.executions.statistics(group_by=["flow", "status"])
+client.executions.statistics(group_by=["stack", "status"], status="failed")
+client.executions.statistics(group_by=["metadata:customer_tier", "status"])
+```
+
 ## Fetch runtime logs
 
 ```python
@@ -96,23 +398,34 @@ runner already exited), call `resume(...)`:
 execution = client.executions.resume(exec_id)
 ```
 
-## Retry, replay, and cancel
+## Replay, retry, and cancel
+
+Replay is the core of the improve loop: it re-executes a recorded run into a
+**new** execution from a checkpoint boundary, optionally with inputs changed.
+Replaying with no overrides reproduces the baseline; replaying with one thing
+changed (a different model or prompt) lets you diff the two and attribute the
+difference to your change. Retry, by contrast, resumes the **same** failed
+execution in place.
 
 ```python
-# Same-execution retry (failed executions only)
-retried = client.executions.retry(exec_id)
-
-# Replay into a new execution from a checkpoint boundary
+# Replay into a new execution from a checkpoint boundary.
+# Override flow inputs (e.g. topic) and prior checkpoint outputs.
 replayed = client.executions.replay(
     exec_id,
-    from_="write_draft",
-    overrides={"checkpoint.research": "Edited notes"},
-    topic="New topic",
+    at="write_draft",
+    flow_overrides={"topic": "New topic"},
+    checkpoint_overrides={"research": {"output": "Edited notes"}},
 )
+
+# Same-execution retry (failed executions only)
+retried = client.executions.retry(exec_id)
 
 # Cancel a running execution
 cancelled = client.executions.cancel(exec_id)
 ```
+
+For the full replay/diff workflow, see the
+[ZenML Learn Agents guide](https://docs.zenml.io/user-guides/agents-guide).
 
 ## Execution convenience methods
 
@@ -126,14 +439,16 @@ fresh = execution.refresh()          # re-fetch latest state
 retried = execution.retry()          # retry a failed execution
 resumed = execution.resume()         # resume after wait input
 cancelled = execution.cancel()       # cancel a running execution
-replayed = execution.replay(from_="write_draft", overrides={...})
+replayed = execution.replay(at="write_draft", checkpoint_overrides={"research": {"output": "Edited notes"}})
 
 checkpoints = execution.list_checkpoints()
 artifacts = execution.list_artifacts()
 ```
 
-These are equivalent to calling `client.executions.retry(exec_id)` etc. — they
-return a new `Execution` snapshot rather than mutating the existing object.
+These are equivalent to calling `client.executions.retry(exec_id)` etc.
+`refresh`, `retry`, `resume`, and `cancel` return a new `Execution` snapshot
+rather than mutating the existing object; `replay` returns a `ReplaySubmission`
+describing the new replay execution(s).
 
 ## Inspect or abort waits programmatically
 
@@ -179,6 +494,8 @@ kitaru executions get kr-a8f3c2 --output json
 kitaru executions list
 kitaru executions list --status waiting --flow content_pipeline --limit 20
 kitaru executions list --status waiting --output json
+kitaru executions statistics --group-by status
+kitaru executions statistics --group-by time:day --group-by status --output json
 kitaru executions logs kr-a8f3c2 --checkpoint write_draft
 kitaru executions logs kr-a8f3c2 --output json
 
@@ -192,7 +509,7 @@ kitaru executions input kr-a8f3c2 --abort
 kitaru executions input kr-a8f3c2 --interactive
 kitaru executions input --interactive  # sweep all waiting executions
 kitaru executions resume kr-a8f3c2
-kitaru executions replay kr-a8f3c2 --from write_draft --args '{"topic":"New topic"}' --overrides '{"checkpoint.research":"Edited notes"}'
+kitaru executions replay kr-a8f3c2 --at write_draft --flow-overrides '{"topic":"New topic"}' --checkpoint-overrides '{"research":{"output":"Edited notes"}}'
 kitaru executions retry kr-a8f3c2
 kitaru executions cancel kr-a8f3c2
 ```
@@ -210,14 +527,24 @@ kitaru-mcp
 Then use tool calls like:
 
 - `kitaru_executions_list(status="waiting")`
+- `kitaru_executions_statistics(group_by=["status"])`
 - `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
+- `kitaru_executions_abort_wait(exec_id=..., wait=...)`
+- `kitaru_executions_resume(exec_id=...)`
 - `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`
 
-If the execution does not continue automatically after wait input is resolved
-(e.g. the original runner already exited), use the CLI or SDK `resume(...)` call.
-MCP does not currently expose a separate resume tool.
+Use the pending-wait name or ID shown by the execution, or already known by the
+workflow. Resolve that wait with `kitaru_executions_input` or explicitly abort
+it with `kitaru_executions_abort_wait`, then inspect the returned execution's
+`status` and singular `pending_wait`. If `pending_wait` is absent but the
+execution does not continue, call `kitaru_executions_resume` (for example,
+because the original runner exited).
+
+Aborting a wait resolves only that selected wait; it does not cancel the whole
+execution. The input and abort-wait tools do not call resume themselves, though
+an existing runner may continue after the wait is resolved.
 
 See the full setup guide at [MCP Server](../agent-native/mcp-server.md).
 

@@ -5,32 +5,29 @@ icon: comments
 
 # Claude Agent SDK Adapter
 
-The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) gives you
-Claude Code as a library: Claude can read files, edit files, run commands, use
-MCP servers, call tools, follow permissions, and keep a session transcript.
-Kitaru does **not** replace that agent loop.
-
-Kitaru adds an outer durable execution boundary around it:
+Run a [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk) invocation
+as a Kitaru checkpoint so each completed Claude call becomes a durable unit you
+can replay, skip, and audit inside a larger flow. The Claude SDK gives you
+Claude Code as a library (read/edit files, run commands, use MCP servers, call
+tools, follow permissions, keep a session transcript); Kitaru does **not**
+replace that agent loop, it records the boundary around it:
 
 ```text
 one completed Claude Agent SDK invocation = one Kitaru checkpoint
 ```
 
-That boundary is useful when a Claude call is one part of a larger workflow.
-Imagine this flow:
+That boundary matters when a Claude call is one step of a multi-step workflow:
 
 ```text
 collect inputs → ask Claude to analyze them → write report → notify reviewer
 ```
 
 If Claude finishes the analysis and the later `write report` checkpoint fails,
-Kitaru can replay the flow and reuse the completed Claude result instead of
-calling Claude again. You keep the Claude session ID, final text, usage/cost
-metadata, message records, and Kitaru artifacts that explain what happened.
-
-The adapter focuses on the completed Claude SDK invocation as the durable unit:
-one prompt enters the SDK, Claude finishes, and Kitaru stores the completed
-result and capture envelope.
+replaying the flow reuses the completed Claude result instead of calling Claude
+again. You keep the Claude session ID, final text, usage/cost metadata, message
+records, and Kitaru artifacts that explain what happened. One prompt enters the
+SDK, Claude finishes, and Kitaru stores the completed result and capture
+envelope as the durable unit.
 
 ## The mental model
 
@@ -457,8 +454,41 @@ inspection and audits:
 - best-effort local transcript JSONL payload
 - redacted options manifest
 - final output
-- usage and cost information when the SDK reports it
+- usage and estimated cost information when the SDK reports it or your calculator provides it
 - one invocation event and one run summary
+
+## Usage and cost statistics
+
+Each successful Claude invocation logs one canonical `llm_usage_v1` record. The record uses the adapter run label as its stable identity and includes the SDK `usage` payload when Claude reports one.
+
+When the Claude SDK reports `total_cost_usd`, Kitaru records it as `estimated_cost_usd`, not `actual_cost_usd`. The SDK value is useful for spend dashboards, but it is still a calculated SDK value rather than a provider invoice line. If the SDK does not report a cost, a `cost_calculator=` you pass to `KitaruClaudeRunner` takes priority; Kitaru calls it with a `ClaudeUsageSummary` and records the returned non-negative number as an estimated USD cost. Without an SDK estimate or user calculator, Kitaru estimates with `genai-prices` when the usage points to one known Anthropic model.
+
+```python
+from kitaru.adapters.claude_agent_sdk import ClaudeUsageSummary, KitaruClaudeRunner
+
+
+def calculate_claude_cost(usage: ClaudeUsageSummary) -> float | None:
+    if usage.input_tokens is None or usage.output_tokens is None:
+        return None
+    # Replace these example rates with your own contract or billing source.
+    return (usage.input_tokens / 1_000_000 * 3.0) + (
+        usage.output_tokens / 1_000_000 * 15.0
+    )
+
+
+runner = KitaruClaudeRunner(
+    name="claude_summary",
+    cost_calculator=calculate_claude_cost,
+)
+```
+
+The fallback `genai-prices` estimate is still an observability estimate, not a provider invoice. If Claude usage spans multiple models or does not identify the model, Kitaru records tokens only instead of guessing.
+
+Some Claude SDK results expose `model_usage` instead of the top-level `usage` payload. In that case, Kitaru uses `model_usage` as a fallback for the canonical usage record. If both are present, Kitaru uses `usage` and does not add `model_usage` on top; otherwise the same tokens could be counted twice.
+
+The canonical record is independent of the durable adapter event log. Turning `emit_events=False` suppresses the invocation event and run summary artifacts, but it does not stop the lightweight LLM usage metadata record. Set `save_usage=False` when you do not want Claude usage persisted; that disables both the separate usage artifact and the canonical invocation record used for execution-level LLM summaries.
+
+Kitaru normally rolls these records into the execution-level usage summary when the execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. If Claude reports usage but not cost, the usage record keeps token counts and leaves cost fields empty unless you pass a calculator.
 
 You can reduce what is stored with `ClaudeCapturePolicy`:
 
@@ -661,6 +691,133 @@ def report_flow(prompt: str) -> str:
 ```
 
 That way the durable file write is visible to Kitaru as its own checkpoint.
+
+## Kitaru-owned sandbox command tool
+
+Sometimes you do want Claude to run a command, but you want that command to go
+through the sandbox on your current Kitaru stack instead of through Claude's
+built-in `Bash` tool. Use Kitaru's Claude Agent SDK MCP helper for that
+case.
+
+The concrete path is:
+
+```text
+Claude prompt
+  -> Claude Agent SDK invocation
+  -> Claude calls mcp__kitaru__run_command
+  -> Kitaru runs kitaru.run_sandbox_command(...) in your current stack's sandbox
+  -> Claude receives stdout, stderr, exit_code, and cleanup metadata
+  -> Kitaru stores one completed ClaudeRunResult for the whole invocation
+```
+
+Here is the supported registration shape:
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions
+from kitaru.adapters.claude_agent_sdk import (
+    KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME,
+    KitaruClaudeRunner,
+    create_kitaru_sandbox_mcp_server,
+)
+
+sandbox_server = create_kitaru_sandbox_mcp_server()
+
+runner = KitaruClaudeRunner(
+    name="claude_sandboxed",
+    options_factory=lambda request: ClaudeAgentOptions(
+        cwd=request.cwd,
+        resume=request.resume_session_id,
+        max_turns=request.max_turns,
+        mcp_servers={"kitaru": sandbox_server},
+        strict_mcp_config=True,
+        tools=[],
+        permission_mode="dontAsk",
+        disallowed_tools=["Bash"],
+        allowed_tools=[KITARU_SANDBOX_COMMAND_ALLOWED_TOOL_NAME],
+    ),
+)
+```
+
+Do not pass the Kitaru MCP tool through `ClaudeAgentOptions(tools=[...])`.
+Claude Agent SDK uses `tools=` for built-in tool names and presets. Custom tools
+created with `tool(...)` are registered through `create_sdk_mcp_server(...)` and
+`ClaudeAgentOptions(mcp_servers=...)`, which is what
+`create_kitaru_sandbox_mcp_server()` builds for you.
+
+If you customize the server or tool name, build the matching allowed-tools entry
+with `allowed_tool_name(server_name, tool_name)` instead of hand-writing the
+`mcp__...` string:
+
+```python
+from kitaru.adapters.claude_agent_sdk import allowed_tool_name
+```
+
+This helper does **not** transparently redirect Claude's built-in `Bash`. If you
+want command execution to be Kitaru-owned, disable Claude's built-in tools with
+`tools=[]`, pre-approve the Kitaru MCP tool with `allowed_tools=[...]`, and use
+`permission_mode="dontAsk"` so any non-approved tool request is denied instead of
+prompting. Claude's own `ClaudeAgentOptions(sandbox=...)` is also separate: it
+configures Claude-owned Bash sandboxing, not Kitaru stack sandbox execution.
+
+The MCP tool accepts these inputs from Claude:
+
+- `command`: a shell command string or argv-style list; Kitaru bounds command length before sending it to the sandbox
+- `cwd`: optional working directory inside the sandbox; Kitaru bounds its length before sending it to the sandbox
+- `env`: optional command environment; Kitaru bounds the number and size of variables so one MCP call cannot send an enormous env payload
+- `max_chars`: optional per-stream output collection limit; Claude may lower the per-call limit but cannot raise it above the helper's configured `default_max_chars`
+- `cleanup`: optional session cleanup policy, either `"destroy"` or `"close"`
+
+The tool output is JSON text. A successful sandbox call returns
+`status="completed"`, the command, cwd, stdout, stderr, exit code, truncation
+flags, stack identity, sandbox identity, session ID, and cleanup status. The MCP
+tool advertises Claude's `maxResultSizeChars` annotation so Claude can receive
+large sandbox outputs without applying its smaller default MCP truncation path.
+Claude Code still caps that annotation at 500,000 characters, so Kitaru's Claude
+MCP helper uses a lower `default_max_chars` than raw
+`kitaru.run_sandbox_command(...)`: stdout, stderr, and the surrounding JSON fields
+must all fit inside Claude's result-size ceiling. Kitaru checks the exact JSON
+text that will be returned to Claude; if JSON escaping makes the result too large,
+it trims stdout and/or stderr and flips the corresponding truncation flag before
+Claude receives it. If you configure a larger `default_max_chars` than the helper
+can safely advertise, Kitaru raises at setup time instead of returning output that
+says `stdout_truncated=false` while Claude only received part of the JSON. A
+non-zero `exit_code` is still `status="completed"`; the sandbox ran the command
+and returned process data, so Claude can decide what to do next.
+
+If Kitaru cannot run the command, the tool returns `status="failed"` with an
+error object containing the exception type, a category such as `usage`, `state`,
+`feature_not_available`, `backend`, or `runtime`, and a message.
+
+Your current Kitaru stack must have exactly one sandbox component. If it has none,
+Kitaru refuses to run the command. If it has more than one, Kitaru refuses to guess.
+That avoids the bad outcome where Claude asks for a simple inspection command
+and Kitaru silently runs it in the wrong sandbox.
+
+{% hint style="warning" %}
+Kitaru redacts non-trivial `env` values, plus values from secret-like keys such
+as `TOKEN`, `API_KEY`, or `PASSWORD`, from the returned tool output. Claude may
+still record the tool **input** in its own messages or transcript. Avoid passing
+secrets through `env` unless you are comfortable with those values appearing in
+Claude-side records.
+{% endhint %}
+
+This still uses the adapter's invocation checkpoint model. If the whole Claude
+invocation is re-run before Kitaru has a completed checkpoint to reuse, Claude
+may call `mcp__kitaru__run_command` again. Treat commands with side effects the
+same way you would treat any command that might be retried: make them safe to
+repeat, or move the side effect into a separate Kitaru checkpoint after Claude
+returns.
+
+A runnable showcase lives in the repository at
+`examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_sandbox_tool.py`.
+By default, that showcase passes a small temporary directory as Claude's own
+working directory, uses Claude Code's `--bare` mode, selects the tool-capable
+`sonnet` model alias, and sets a small Claude SDK budget cap. The sandbox command
+still runs through your current stack's sandbox. This default avoids the bad
+surprise where a tiny `python --version` demo causes Claude Code to load a large
+repository context. Pass `--claude-cwd /path/to/project` only when you actually
+want Claude to see that project, and pass `--model <model>` when you want a
+different Claude model.
 
 ## Claude file checkpointing is different
 

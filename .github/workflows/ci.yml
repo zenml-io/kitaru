@@ -16,6 +16,7 @@ concurrency:
 permissions:
   contents: read
 env:
+  KITARU_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   ZENML_MCP_ANALYTICS_DEV: true
@@ -26,10 +27,10 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -39,38 +40,48 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@7b04f660f4ee4f048d18fd341887cf28dfbedfe2  # v1.46.3
+      - uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
   typecheck:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
       - run: uv sync --frozen
       - run: uv run ty check
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
       - run: uv sync --frozen
       - name: Run pip-audit (with documented ignore list)
         run: |
           awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
+  example-coverage-audit:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      - name: Audit public example coverage manifest
+        run: uv run --with pyyaml python scripts/audit-example-coverage.py
   links:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
       # Pinned to a post-v2.8.0 master commit because the v2.8.0 release
@@ -78,7 +89,7 @@ jobs:
       # (subfolder layout) and defaults to lychee v0.23.0, which doesn't
       # understand the new `include_fragments` enum in lychee.toml. The
       # pinned SHA freezes behavior; revisit when a tagged release lands.
-      - uses: lycheeverse/lychee-action@6da1d14f3a43098a294b7696d93d938aa8d20fc0  # master @ 2026-05-03
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8  # master @ 2026-05-03
         with:
           # Source MDX uses docs-app-root routes such as /guides/...; site.yml
           # validates those after docs build/materialization. This job checks raw Markdown.
@@ -92,9 +103,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
-      ZENML_SERVER_TAG: 0.94.6
+      ZENML_SERVER_TAG: 0.96.1
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
       - name: Download stable Kitaru UI
@@ -107,7 +118,8 @@ jobs:
           --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
           -t kitaru-ci-server .
       - name: Start server container
-        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
+        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 -e KITARU_ANALYTICS_OPT_IN=false
+          -e ZENML_ANALYTICS_OPT_IN=false kitaru-ci-server
       - name: Wait for health endpoint
         run: |
           set -euo pipefail
@@ -158,10 +170,10 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           python-version: '3.12'
       - name: Download stable Kitaru UI
@@ -174,6 +186,25 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+  google-adk-contract:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    env:
+      KITARU_REQUIRE_GOOGLE_ADK_CONTRACT: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          python-version: '3.12'
+      - name: Run installed Google ADK no-provider contract tests
+        run: >-
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/kitaru-google-adk-contract-env"
+          uv run --python 3.12 --no-dev --extra google-adk --with pytest
+          pytest -o addopts='-vv'
+          tests/test_google_adk_installed_contract.py
+          tests/test_google_adk_example.py
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -192,6 +223,10 @@ jobs:
             python-version: '3.13'
             sync-command: uv sync --frozen
             pytest-command: uv run pytest --ignore=tests/mcp
+          - name: py314-base
+            python-version: '3.14'
+            sync-command: uv sync --frozen
+            pytest-command: uv run pytest --ignore=tests/mcp
           - name: py311-mcp
             python-version: '3.11'
             sync-command: uv sync --frozen --extra mcp
@@ -200,12 +235,16 @@ jobs:
             python-version: '3.12'
             sync-command: uv sync --frozen --extra mcp
             pytest-command: uv run pytest tests/mcp
+          - name: py314-mcp
+            python-version: '3.14'
+            sync-command: uv sync --frozen --extra mcp
+            pytest-command: uv run pytest tests/mcp
     name: test (${{ matrix.name }})
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           python-version: ${{ matrix.python-version }}
       - run: ${{ matrix.sync-command }}

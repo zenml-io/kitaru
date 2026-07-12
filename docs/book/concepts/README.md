@@ -1,20 +1,33 @@
 ---
-description: The mental model behind Kitaru's durable execution primitives.
+description: The mental model behind Kitaru — run, replay, improve.
 icon: lightbulb
 ---
 
 # Core Concepts
 
-Kitaru sits in the **runtime layer** of your agent stack. Underneath it are the
-**harness** your team picked (Pydantic AI, LangGraph, Claude Agent SDK, raw
-Python) and the **model(s)** that harness drives. On top sits the **platform**
-your org already runs (auth, observability, policy, UI). Kitaru's job is to make
-the run durable — checkpoints, replay, resume, wait states, versioned
-deployments — without forcing a graph DSL or a rewrite of your control flow.
+Kitaru is the runtime for production AI agents. It records every run as durable
+checkpoints, lets you replay a real run with one thing changed, and helps you
+roll the winning change across recent runs. The loop is **run → replay →
+improve**.
 
-Start with [Harness, Runtime, Platform](harness-runtime-platform.md) if you want
-the big-picture split, or [How It Works](how-it-works.md) for the three-planes
-model (control / orchestration / execution) and what-runs-where in local dev vs
+A Kitaru flow is a dynamic ZenML pipeline and a checkpoint is like a step, so
+agents run on the same stacks, server, and dashboard as your ZenML pipelines.
+
+1. **Run (durable).** Every model call and tool call is recorded as a
+   checkpoint. This is the enabler for everything below, not the headline.
+2. **Replay (the differentiator).** Re-execute a real run from a checkpoint. A
+   rerun with no change reproduces the original — that faithful baseline is your
+   control. Replay again with one input changed (a different model, a different
+   prompt) and diff the two. Because the baseline reproduced, the difference is
+   your change, not replay noise. This re-executes the real run; it is not
+   re-scoring outputs like an eval.
+3. **Improve.** Apply the same change across a cohort of recent runs, measure
+   cost, latency, and quality, and keep the winner.
+
+Durable execution is the mechanism that makes replay faithful. Start with
+[Harness, Runtime, Platform](harness-runtime-platform.md) for where Kitaru fits
+in an agent stack, or [How It Works](how-it-works.md) for the three-planes model
+(control / orchestration / execution) and what runs where in local dev vs
 production.
 
 ## Core ideas
@@ -34,6 +47,8 @@ Kitaru's current release includes:
 
 * `@flow` — mark a function as a durable workflow
 * `@checkpoint` — mark a function as a persisted work unit
+* `flow.run(...).wait()` — run a flow to completion; the handle carries `.exec_id`
+* `flow.replay(exec_id, at="<checkpoint>", flow_overrides={...})` — re-execute a recorded run from a checkpoint, optionally overriding flow inputs such as `model` or `prompt_profile`
 * `kitaru.log()` — attach structured metadata to the current scope
 * `kitaru.wait()` — pause a flow until external input is supplied
 * `kitaru.llm()` — make tracked model calls with prompt/response capture
@@ -44,9 +59,13 @@ Kitaru's current release includes:
 * `KitaruClient` — inspect executions, fetch logs, resolve waits, retry, replay, and browse artifacts
 * `FlowHandle` — interact with a running or finished execution
 
+Replay and diff are also exposed over an MCP server and the `kitaru` CLI
+(`kitaru executions replay <id> --at <checkpoint> --flow-overrides <json>`),
+so a coding agent can drive the run → replay → improve loop directly.
+
 {% hint style="info" %}
 All of the primitives listed here ship today. Some capabilities are
-backend-dependent — for example, runtime log retrieval requires a server-backed
+backend-dependent — runtime log retrieval, for example, requires a server-backed
 connection — but they are part of the supported Kitaru surface.
 {% endhint %}
 

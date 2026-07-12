@@ -41,9 +41,10 @@ def _load_scout_from_path() -> ModuleType:
 def scout_module(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Import examples/end_to_end/news_scout/scout.py with env vars pre-set.
 
-    The module constructs a PydanticAI Agent at import time, which requires an
-    ANTHROPIC_API_KEY in the environment even to initialize. Set dummy keys
-    before import and evict the cached submodules so the fresh env is picked up.
+    The agent is built by a factory inside the flow body, so import itself does
+    not need a provider key. Dummy keys are set so ``new_scout_agent()`` can be
+    called in the wiring test; the cached submodules are evicted so the fresh
+    env is picked up.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("XAI_API_KEY", "test-xai-key")
@@ -65,16 +66,47 @@ def scout_module(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def test_scout_module_imports_and_wires_the_agent(scout_module: Any) -> None:
-    """Importing the module builds the granular-checkpoint agent + image."""
+    """The factory builds the granular-checkpoint agent; the flow + image exist."""
     from kitaru.adapters.pydantic_ai import KitaruAgent
 
-    assert isinstance(scout_module.scout_agent, KitaruAgent)
-    assert scout_module.scout_agent.name == "news_scout"
+    agent = scout_module.new_scout_agent()
+    assert isinstance(agent, KitaruAgent)
+    assert agent.name == "news_scout"
 
     # Flow is a proper Kitaru flow definition with the image attached.
     assert scout_module.news_scout is not None
     # The image config exists and declares the expected extras.
     assert scout_module.SCOUT_IMAGE is not None
+
+
+def test_module_imports_without_provider_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Importing the module must not need a provider key.
+
+    The remote runner pod imports this module before the run's secret is
+    applied to the environment. Building the agent inside the flow body (not at
+    module scope) keeps import key-free, so the eager Anthropic client is only
+    constructed once the secret is present at run time.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("KITARU_SCOUT_MODEL", raising=False)  # default anthropic model
+
+    monkeypatch.syspath_prepend(str(_EXAMPLE_DIR))
+    for module_name in [
+        name
+        for name in list(sys.modules)
+        if name == "scout"
+        or name.startswith("tools")
+        or name.startswith("utils")
+        or name == "models"
+        or name == "prompts"
+    ]:
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    module = _load_scout_from_path()
+    assert module.news_scout is not None
 
 
 @pytest.mark.parametrize(
@@ -178,6 +210,8 @@ def test_image_settings_carries_non_secret_env_and_pinned_requirements(
     assert scout_module._image_override_for_active_stack() is None
 
     requirements = scout_module.SCOUT_IMAGE.requirements or []
-    assert any("pydantic-ai-slim" in req for req in requirements)
-    # Pinned below 1.80 for ZenML otel-sdk compatibility — don't regress.
-    assert any("<1.80" in req for req in requirements)
+    # The pin must overlap Kitaru's own pydantic-ai range and stay above the
+    # CVE-2026-48782 fix floor. Provider extras are kept so the slim package
+    # ships the Anthropic + OpenAI clients.
+    assert any("pydantic-ai-slim[anthropic,openai]" in req for req in requirements)
+    assert any(">=1.102.0" in req for req in requirements)

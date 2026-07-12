@@ -17,6 +17,7 @@ from ._agent import KitaruRunner
 from ._events import OpenAIAdapterEvent, OpenAIEventError, OpenAIRunEvent
 from ._hitl import build_resume_request, wait_for_approval
 from ._policy import OpenAICapturePolicy
+from ._sandbox_tool import sandbox_command_tool
 from ._streaming import (
     OPENAI_STREAM_COMPLETED,
     OPENAI_STREAM_EVENT,
@@ -62,6 +63,7 @@ __all__ = [
     "OpenAIUsageSummary",
     "ToolCheckpointOverride",
     "build_resume_request",
+    "sandbox_command_tool",
     "validate_checkpoint_strategy",
     "wait_for_approval",
 ]

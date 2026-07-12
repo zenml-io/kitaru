@@ -5,11 +5,11 @@ icon: rocket
 
 # Deploy and invoke flows
 
-This guide walks through the deployment workflow you will probably use in a real
-team: one person publishes a flow, tests a canary version, promotes it, and then
-other people or agents invoke it by name.
+A deployment is a saved, versioned entrypoint for a flow, so other people, systems, or agents can run it by name without importing your source. It turns a flow you run locally into a stable route others invoke, replay, and improve against.
 
-The short mental model is:
+This guide covers the workflow a real team uses: one person publishes a flow, tests a canary version, promotes it, and then others invoke it by name.
+
+The mental model is:
 
 1. **Producer deploys** from source: `kitaru deploy flows/research.py:research_agent`.
 2. **Kitaru versions** the deployment automatically: `v1`, then `v2`, then `v3`.
@@ -38,14 +38,14 @@ def research_agent(topic: str) -> str:
     return write_summary(notes)
 ```
 
-When you are still developing locally, you can run it directly from source:
+While developing locally, you run it directly from source:
 
 ```python
 research_agent.run(topic="durable execution").wait()
 ```
 
-A deployment is for the next step: saving a reusable, versioned entrypoint so
-other processes can invoke the flow without importing `flows/research.py`.
+A deployment is the next step: a saved, versioned entrypoint other processes can
+invoke without importing `flows/research.py`.
 
 ## Step 1: deploy the first version
 

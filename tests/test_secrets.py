@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 from zenml.exceptions import EntityExistsError
 
+import kitaru
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruUsageError
 from kitaru.secrets import (
@@ -17,7 +18,201 @@ from kitaru.secrets import (
     create_secret,
     delete_secret,
     get_secret,
+    list_secrets,
 )
+
+
+def test_list_secrets_is_exported_from_package_root() -> None:
+    """The listing helper should follow the existing top-level import pattern."""
+    assert kitaru.list_secrets is list_secrets
+
+
+def test_list_secrets_scans_all_backend_pages_at_fixed_size() -> None:
+    """SDK listing should fetch every reported page with the same scan size."""
+    client = Mock()
+    client.list_secrets.side_effect = [
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    name="charlie",
+                    id="3",
+                    private=False,
+                    values={},
+                )
+            ],
+            total_pages=3,
+        ),
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    name="alpha",
+                    id="1",
+                    private=False,
+                    values={},
+                )
+            ]
+        ),
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    name="bravo",
+                    id="2",
+                    private=False,
+                    values={},
+                )
+            ]
+        ),
+    ]
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summaries = list_secrets()
+
+    assert client.list_secrets.call_args_list == [
+        call(page=1, size=50),
+        call(page=2, size=50),
+        call(page=3, size=50),
+    ]
+    assert [summary.name for summary in summaries] == ["alpha", "bravo", "charlie"]
+
+
+def test_list_secrets_returns_metadata_without_raw_values() -> None:
+    """SDK listing should normalize IDs and expose key names, not values."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                name="provider-creds",
+                id=123,
+                private=True,
+                values={"Z_TOKEN": object(), "A_KEY": object()},
+                secret_values={"Z_TOKEN": "secret-z", "A_KEY": "secret-a"},
+                has_missing_values=True,
+            )
+        ],
+        total_pages=1,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summary = list_secrets()[0]
+
+    assert summary.model_dump() == {
+        "name": "provider-creds",
+        "id": "123",
+        "private": True,
+        "keys": ["A_KEY", "Z_TOKEN"],
+        "has_missing_values": True,
+    }
+
+
+def test_list_secrets_returns_empty_keys_without_backend_values() -> None:
+    """SDK listing should reflect backend responses that omit value metadata."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                name="provider-creds",
+                id="secret-id",
+                private=False,
+                values={},
+            )
+        ],
+        total_pages=1,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summaries = list_secrets()
+
+    assert summaries == [
+        SecretSummary(
+            name="provider-creds",
+            id="secret-id",
+            private=False,
+            keys=[],
+            has_missing_values=False,
+        )
+    ]
+
+
+def test_list_secrets_orders_by_case_insensitive_name_then_id() -> None:
+    """SDK listing should return deterministic global ordering."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(name="bravo", id="3", private=False, values={}),
+            SimpleNamespace(name="alpha", id="2", private=False, values={}),
+            SimpleNamespace(name="Alpha", id="1", private=False, values={}),
+        ],
+        total_pages=1,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summaries = list_secrets()
+
+    assert [(summary.name, summary.id) for summary in summaries] == [
+        ("Alpha", "1"),
+        ("alpha", "2"),
+        ("bravo", "3"),
+    ]
+
+
+def test_list_secrets_returns_empty_list_for_empty_backend() -> None:
+    """An accessible backend with no secrets should return an empty list."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(items=[], total_pages=1)
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        assert list_secrets() == []
+
+
+def test_list_secrets_maps_later_page_failure_to_backend_error() -> None:
+    """Later page failures should become Kitaru backend errors."""
+    client = Mock()
+    client.list_secrets.side_effect = [
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    name="first-page-secret",
+                    id="1",
+                    private=False,
+                    values={},
+                )
+            ],
+            total_pages=2,
+        ),
+        RuntimeError("offline"),
+    ]
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        pytest.raises(KitaruBackendError, match="Failed to list secrets: offline"),
+    ):
+        list_secrets()
+
+    assert client.list_secrets.call_args_list == [
+        call(page=1, size=50),
+        call(page=2, size=50),
+    ]
+
+
+def test_list_secrets_maps_malformed_response_to_backend_error() -> None:
+    """Malformed backend items should not escape as public summaries."""
+    client = Mock()
+    client.list_secrets.return_value = SimpleNamespace(
+        items=[SimpleNamespace(id="missing-name", private=False, values={})],
+        total_pages=1,
+    )
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        pytest.raises(
+            KitaruBackendError,
+            match=(
+                "Failed to list secrets: Backend returned a secret "
+                "without a readable name"
+            ),
+        ),
+    ):
+        list_secrets()
 
 
 def test_get_secret_fetches_exact_secret_and_normalizes_values() -> None:

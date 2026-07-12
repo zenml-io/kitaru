@@ -5,6 +5,8 @@ icon: download
 
 # Installation
 
+Install Kitaru to run, replay, and improve agents from your own environment. One package gives you the SDK, the CLI, and an optional local server and UI, all running on the same stacks and dashboard as ZenML pipelines.
+
 Kitaru requires **Python 3.11 or newer**.
 
 You can verify your interpreter with:
@@ -35,17 +37,32 @@ This gives you the full SDK, CLI, and everything you need to run flows locally.
 |---|---|
 | `local` | Local server and UI for browsing executions in a local web UI |
 | `mcp` | MCP server for querying executions from AI assistants |
+| `modal` | Python dependencies needed to create and validate Modal-backed stacks |
 | `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
+| `openai` | OpenAI SDK for `kitaru.llm()` calls to OpenAI models |
+| `anthropic` | Anthropic SDK for `kitaru.llm()` calls to Claude models |
+| `llm` | Both `openai` and `anthropic` provider packages in one install |
 
 ```bash
 uv add "kitaru[mcp,pydantic-ai,local]"
 # or: pip install "kitaru[mcp,pydantic-ai,local]"
+
+# Modal stacks: uv add "kitaru[modal]"
+# or: pip install "kitaru[modal]"
+
+# Provider extras: uv add "kitaru[openai]"
+# or: pip install "kitaru[openai]"
 ```
+
+The `modal` extra does not create Modal tokens, Docker registry logins, cloud
+credentials, buckets, or registries. It only installs the Python packages Kitaru
+needs to validate and create Modal stack components.
 
 If you use Claude Code or another MCP-capable assistant, install
 `kitaru[mcp]` so your assistant can query executions, inspect logs and
-artifacts, provide input to waiting runs, and start replays through structured
-tool calls. See [MCP Server](../agent-native/mcp-server.md) for setup.
+artifacts, provide input to waiting runs, and drive replays and diffs through
+structured tool calls. This is what lets a coding agent hill-climb on your
+runs. See [MCP Server](../agent-native/mcp-server.md) for setup.
 
 ## Verify Installation
 

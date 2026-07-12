@@ -5,8 +5,9 @@ icon: tags
 
 # Logging and Metadata
 
-Kitaru has two separate observability channels. Understanding the difference
-between them avoids confusion:
+Metadata is the structured data you attach to a run so you can compare runs later. When you diff a baseline against a replay, or measure a cohort, the numbers you read back are the ones you logged here: `cost`, `latency`, `tokens`, `model`. Log it once and it travels with the execution and its checkpoints.
+
+Kitaru has two separate observability channels:
 
 | Channel | What it does | How you use it |
 |---|---|---|
@@ -114,6 +115,10 @@ Metadata values should be **JSON-serializable**:
 
 Standard keys like `cost`, `tokens`, `latency`, and `model` are common
 conventions, but you can use any key name that makes sense for your workflow.
+
+{% hint style="info" %}
+These are the keys that pay off at replay time. After `flow.replay(exec_id, at="...", flow_overrides={"model": "..."})`, a cross-run diff lines up the metadata from the baseline against the replay, so consistent keys like `cost` and `latency` make the difference your change produced easy to read.
+{% endhint %}
 
 ## Runtime logs (separate system)
 

@@ -111,6 +111,11 @@ _REWRITE_RULES: list[tuple[re.Pattern[str], _TerminalKind | None, str]] = [
         "Starting flow `{0}`.",
     ),
     (
+        re.compile(r"^Pipeline `(.+?)` completed successfully\.$"),
+        "success",
+        "Flow `{0}` completed successfully.",
+    ),
+    (
         re.compile(r"^Pipeline completed successfully\.$"),
         "success",
         "Flow completed.",

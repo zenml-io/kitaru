@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, call, patch
+from typing import Any
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+import kitaru.config as config_module
+from kitaru._cli._executions import _execution_statistics_table
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
+from kitaru._client._statistics import (
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
+    normalize_execution_statistics_metrics,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     ActiveConfigSelectionProvenance,
@@ -25,7 +34,12 @@ from kitaru.cli import (
     _parse_secret_assignments,
     app,
 )
-from kitaru.client import ExecutionStatus, LogEntry
+from kitaru.client import (
+    ExecutionStatistics,
+    ExecutionStatisticsGroup,
+    ExecutionStatus,
+    LogEntry,
+)
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
@@ -33,6 +47,7 @@ from kitaru.config import (
     ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
+    ModalStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
     SagemakerStackSpec,
@@ -41,11 +56,15 @@ from kitaru.config import (
     VertexStackSpec,
 )
 from kitaru.errors import (
+    KitaruBackendError,
     KitaruDeploymentInputValuesError,
+    KitaruFeatureNotAvailableError,
     KitaruStackNotRemoteExecutableUsageError,
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
+from kitaru.secrets import SecretSummary
 
 
 class _BrokenGlobalConfig:
@@ -95,6 +114,7 @@ def _execution_stub(
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
     checkpoints: list[SimpleNamespace] | None = None,
+    llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
@@ -113,6 +133,37 @@ def _execution_stub(
         frozen_execution_spec=None,
         original_exec_id=None,
         checkpoints=checkpoints or [],
+        llm_usage_summary=llm_usage_summary,
+        llm_usage_records=[],
+    )
+
+
+def _replay_submission_stub(
+    *,
+    at: str = "write_summary",
+    wait: bool = True,
+    tag: str | None = None,
+    results: list[ReplayResultRow] | None = None,
+    compare_url: str | None = None,
+) -> ReplaySubmission:
+    """Build a lightweight ReplaySubmission for CLI tests."""
+    return ReplaySubmission.create(
+        tag=tag,
+        at=at,
+        wait=wait,
+        plan=ReplayPlanDocument(),
+        results=results
+        or [
+            ReplayResultRow(
+                original_exec_ref="kr-111",
+                original_exec_id="kr-111",
+                replay_exec_id="kr-222",
+                status="submitted",
+                compare_url="http://localhost:8237/compare?executions=kr-111,kr-222",
+            )
+        ],
+        compare_url=compare_url,
+        submission_id="rs-test",
     )
 
 
@@ -128,6 +179,47 @@ def test_cli_command_modules_use_dependency_seam_not_legacy_facade() -> None:
     assert offenders == []
 
 
+def _project_stub(
+    *,
+    name: str = "prod",
+    project_id: str | None = None,
+    display_name: str | None = None,
+    description: str | None = None,
+    is_active: bool = False,
+) -> SimpleNamespace:
+    """Build a lightweight project object for CLI tests."""
+    return SimpleNamespace(
+        id=project_id or f"project-{name}-id",
+        name=name,
+        display_name=display_name,
+        description=description,
+        is_active=is_active,
+    )
+
+
+def _project_create_result_stub(
+    *,
+    name: str = "staging",
+    activated: bool = True,
+    is_active: bool | None = None,
+    previous_active_project: str | None = "prod",
+) -> SimpleNamespace:
+    """Build a lightweight project-create result object for CLI tests."""
+    return SimpleNamespace(
+        project=_project_stub(
+            name=name,
+            is_active=activated if is_active is None else is_active,
+        ),
+        previous_active_project=previous_active_project,
+        activated=activated,
+    )
+
+
+def _project_delete_result_stub(*, name: str = "staging") -> SimpleNamespace:
+    """Build a lightweight project-delete result object for CLI tests."""
+    return SimpleNamespace(deleted_project=_project_stub(name=name))
+
+
 def _stack_create_result_stub(
     *,
     name: str = "dev",
@@ -139,11 +231,14 @@ def _stack_create_result_stub(
     resources: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight stack-create result object for CLI tests."""
+    default_components = (f"{name} (orchestrator)", f"{name} (artifact_store)")
+    if stack_type == "local":
+        default_components = (*default_components, f"{name} (sandbox)")
+
     return SimpleNamespace(
         stack=SimpleNamespace(id=f"stack-{name}-id", name=name, is_active=is_active),
         previous_active_stack=previous_active_stack,
-        components_created=components_created
-        or (f"{name} (orchestrator)", f"{name} (artifact_store)"),
+        components_created=components_created or default_components,
         stack_type=stack_type,
         service_connectors_created=service_connectors_created,
         resources=resources,
@@ -194,6 +289,13 @@ def _stack_details_stub(
                 name=f"{name}-registry",
                 backend="aws",
                 details=(("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),),
+                purpose=None,
+            ),
+            SimpleNamespace(
+                role="sandbox",
+                name=f"{name}-sandbox",
+                backend="local",
+                details=(),
                 purpose=None,
             ),
         ],
@@ -483,6 +585,7 @@ def test_executions_help_lists_all_supported_subcommands(
         "resume",
         "retry",
         "cancel",
+        "statistics",
     ):
         assert command in output
 
@@ -2267,6 +2370,15 @@ def test_executions_get_renders_execution_details(
             SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
             SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
         ],
+        llm_usage_summary={
+            "usage_record_count": 2,
+            "incurred_usage_record_count": 1,
+            "reused_usage_record_count": 1,
+            "total_tokens": 42,
+            "display_cost_usd": 0.125,
+            "actual_cost_usd": 0.1,
+            "estimated_cost_usd": 0.025,
+        },
     )
     fake_client = Mock()
     fake_client.executions.get.return_value = execution
@@ -2287,6 +2399,74 @@ def test_executions_get_renders_execution_details(
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
     assert "Checkpoints: research (completed), write (running)" in output
+    assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_malformed_llm_usage_summary_honestly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed LLM usage summary numbers should not render as real zeroes."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": "not-an-int",
+            "incurred_usage_record_count": True,
+            "reused_usage_record_count": None,
+            "total_tokens": "not-an-int",
+            "display_cost_usd": "not-a-number",
+            "actual_cost_usd": float("nan"),
+            "estimated_cost_usd": None,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: summary metadata is malformed" in output
+    assert "0 calls (0 incurred, 0 reused), 0 tokens" not in output
+    assert "display cost $0.000000" not in output
+
+
+def test_executions_get_renders_valid_zero_llm_usage_summary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A complete zero summary should still render as real zero usage."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+        llm_usage_summary={
+            "usage_record_count": 0,
+            "incurred_usage_record_count": 0,
+            "reused_usage_record_count": 0,
+            "total_tokens": 0,
+            "display_cost_usd": 0.0,
+            "actual_cost_usd": 0.0,
+            "estimated_cost_usd": 0.0,
+        },
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM usage: 0 usage records (0 incurred, 0 reused), 0 tokens" in output
+    assert "display cost $0.000000" in output
 
 
 def test_executions_list_applies_filters(
@@ -2387,6 +2567,623 @@ def test_executions_list_accepts_page_and_size() -> None:
         page=2,
         size=10,
     )
+
+
+def _statistics_with_status_groups(
+    *groups: tuple[str, int],
+    truncated: bool = False,
+) -> ExecutionStatistics:
+    """Build execution statistics grouped by status for CLI tests."""
+    return ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": status}, execution_count=count)
+            for status, count in groups
+        ],
+        truncated=truncated,
+    )
+
+
+def test_executions_statistics_forwards_filters_and_repeatable_options() -> None:
+    """`kitaru executions statistics` should delegate to the SDK surface."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "failed", "flow_id": "flow-123"},
+                execution_count=2,
+                metrics={"duration_avg": 4.2},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--group-by",
+                "flow",
+                "--metric",
+                "duration_avg:duration:avg",
+                "--flow",
+                "content_pipeline",
+                "--status",
+                "failed",
+                "--stack",
+                "prod",
+                "--tag",
+                "nightly",
+                "--tag",
+                "customer-facing",
+                "--max-groups",
+                "25",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["status", "flow"],
+        metrics=["duration_avg:duration:avg"],
+        flow="content_pipeline",
+        status="failed",
+        stack="prod",
+        tags=["nightly", "customer-facing"],
+        max_groups=25,
+    )
+
+
+def test_executions_statistics_forwards_llm_shortcuts_and_emits_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """LLM shortcut metric strings should pass through to the SDK unchanged."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-123"},
+                execution_count=3,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--flow",
+                "my_flow",
+                "--group-by",
+                "flow",
+                "--metric",
+                "llm_display_cost",
+                "--metric",
+                "llm_total_tokens",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["flow"],
+        metrics=["llm_display_cost", "llm_total_tokens"],
+        flow="my_flow",
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"]["groups"] == [
+        {
+            "keys": {"flow_id": "flow-123"},
+            "execution_count": 3,
+            "metrics": {"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+        }
+    ]
+
+
+def test_executions_statistics_text_orders_llm_shortcut_columns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text metric columns should follow requested shortcut order."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=3,
+                metrics={"llm_total_tokens": 128.0, "llm_display_cost": 0.42},
+            )
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--metric",
+                "llm_display_cost",
+                "--metric",
+                "llm_total_tokens",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert output.index("Llm Display Cost") < output.index("Llm Total Tokens")
+    assert "0.42" in output
+    assert "128.0" in output
+
+
+def test_executions_statistics_rejects_invalid_llm_shortcut_like_metric(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid shortcut-like metrics should use the normal CLI error path."""
+    fake_client = Mock()
+
+    def _statistics(**kwargs: Any) -> ExecutionStatistics:
+        normalize_execution_statistics_metrics(kwargs["metrics"])
+        raise AssertionError("invalid metric should fail before statistics return")
+
+    fake_client.executions.statistics.side_effect = _statistics
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--metric", "llm_not_a_real_shortcut"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        "Unsupported execution statistics metric 'llm_not_a_real_shortcut'"
+        in captured.err
+    )
+
+
+def test_executions_statistics_metric_help_lists_llm_shortcuts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The metric help text should advertise the common LLM shortcuts."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    for shortcut in LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY.split(", "):
+        assert shortcut in output
+
+
+def test_executions_statistics_accepts_pagination_without_forwarding_it() -> None:
+    """Statistics pagination should page CLI output, not SDK queries."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.statistics.assert_called_once_with(
+        group_by=["status"],
+        metrics=[],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+
+
+def test_executions_statistics_pages_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Statistics text output should contain only the requested group page."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "completed" not in output
+    assert "failed" in output
+    assert "running" not in output
+    assert "Page 2 (size 1, showing 1 of 3)" in output
+
+
+def test_executions_statistics_renders_grouped_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Grouped statistics should render dynamic columns plus execution counts."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"duration_avg": 5.5},
+            ),
+            ExecutionStatisticsGroup(keys={"status": "failed"}, execution_count=2),
+            ExecutionStatisticsGroup(keys={"status": "running"}, execution_count=1),
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--group-by", "status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru execution statistics" in output
+    assert "Status" in output
+    assert "Executions" in output
+    assert "Duration Avg" in output
+    assert "completed" in output
+    assert "failed" in output
+    assert "running" in output
+    assert "12" in output
+    assert "5.5" in output
+    assert "2" in output
+    assert "1" in output
+
+
+def test_executions_statistics_table_uses_requested_metric_order() -> None:
+    """Metric columns should follow request order, not response dict order."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed"},
+                execution_count=12,
+                metrics={"cost_sum": 2.5, "duration_avg": 5.5},
+            )
+        ],
+        truncated=False,
+    )
+
+    columns, rows = _execution_statistics_table(
+        statistics,
+        requested_metric_names=["duration_avg", "cost_sum"],
+    )
+
+    assert columns == ["Status", "Executions", "Duration Avg", "Cost Sum"]
+    assert rows == [["completed", "12", "5.5", "2.5"]]
+
+
+def test_executions_statistics_renders_truncation_note(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text statistics output should tell users when rows are truncated."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=7)
+        ],
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--group-by", "status", "--max-groups", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Results truncated at --max-groups 1" in output
+    assert "Narrow filters or increase --max-groups" in output
+
+
+def test_executions_statistics_renders_global_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No-grouping statistics should render one global execution count."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru execution statistics" in output
+    assert "Executions" in output
+    assert "18" in output
+
+
+@pytest.mark.parametrize(
+    "output_args",
+    (["-o", "json"], ["--output", "json"]),
+)
+def test_executions_statistics_emits_json(
+    capsys: pytest.CaptureFixture[str],
+    output_args: list[str],
+) -> None:
+    """JSON statistics output should use the standard single-item envelope."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"status": "completed", "day": "2026-05-30"},
+                execution_count=7,
+                metrics={"duration_avg": 9.5},
+            ),
+            ExecutionStatisticsGroup(
+                keys={"status": "failed", "day": "2026-05-30"},
+                execution_count=2,
+                metrics={"duration_avg": 3.0},
+            ),
+        ],
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "time:day",
+                "--group-by",
+                "status",
+                *output_args,
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "executions.statistics",
+        "item": {
+            "groups": [
+                {
+                    "keys": {"status": "completed", "day": "2026-05-30"},
+                    "execution_count": 7,
+                    "metrics": {"duration_avg": 9.5},
+                },
+                {
+                    "keys": {"status": "failed", "day": "2026-05-30"},
+                    "execution_count": 2,
+                    "metrics": {"duration_avg": 3.0},
+                },
+            ],
+            "truncated": True,
+            "group_count": 2,
+        },
+    }
+
+
+def test_executions_statistics_pages_json_without_pagination_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Paged JSON statistics should keep the single-item command envelope."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+        truncated=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "statistics",
+                "--group-by",
+                "status",
+                "--page",
+                "2",
+                "--size",
+                "1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"command", "item"}
+    assert "items" not in payload
+    item = payload["item"]
+    assert "page" not in item
+    assert "size" not in item
+    assert "total_count" not in item
+    assert item == {
+        "groups": [
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {},
+            }
+        ],
+        "truncated": True,
+        "group_count": 1,
+    }
+
+
+def test_executions_statistics_uses_default_size_for_partial_pagination(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Providing only --page should use the shared default page size."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": f"status-{i}"}, execution_count=i)
+            for i in range(25)
+        ],
+        truncated=False,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--page", "2"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "status-19" not in output
+    assert "status-20" in output
+    assert "status-24" in output
+    assert "Page 2 (size 20, showing 5 of 25)" in output
+
+
+def test_executions_statistics_uses_default_page_for_partial_pagination(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Providing only --size should use the first page."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--size", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "completed" in output
+    assert "failed" not in output
+    assert "Page 1 (size 1, showing 1 of 2)" in output
+
+
+@pytest.mark.parametrize(
+    ("pagination_args", "expected_message"),
+    [
+        (["--page", "0"], "`--page` must be >= 1."),
+        (["--size", "0"], "`--size` must be >= 1."),
+    ],
+)
+def test_executions_statistics_pagination_validation_json_error(
+    capsys: pytest.CaptureFixture[str],
+    pagination_args: list[str],
+    expected_message: str,
+) -> None:
+    """Invalid statistics pagination should respect JSON error output."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", *pagination_args, "--output", "json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload == {
+        "command": "executions.statistics",
+        "error": {"message": expected_message},
+    }
+
+
+def test_executions_statistics_out_of_range_page_is_empty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Out-of-range statistics pages should be successful empty responses."""
+    fake_client = Mock()
+    fake_client.executions.statistics.return_value = _statistics_with_status_groups(
+        ("completed", 12),
+        ("failed", 2),
+        ("running", 1),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "statistics", "--page", "99", "--size", "20"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "none found" in output
+    assert "Page 99 (size 20, showing 0 of 3)" in output
+
+
+def test_executions_statistics_rejects_invalid_max_groups(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI max-groups validation should fail before calling the SDK."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "statistics", "--max-groups", "0"])
+
+    assert exc_info.value.code == 1
+    error = capsys.readouterr().err
+    assert "--max-groups" in error
+    assert "between 1 and 10000" in error
 
 
 def test_executions_list_rejects_limit_with_page(
@@ -2505,17 +3302,13 @@ def test_secrets_list_past_end_does_not_claim_none_found(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Paging past the end of a non-empty secret list must not say 'none found'."""
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_a, secret_b],
-        total_pages=1,
-        max_size=2,
-    )
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=False, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+    ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "9", "--size", "1"])
@@ -3212,16 +4005,12 @@ def test_executions_input_multiple_waits_non_interactive_errors(
     assert "multiple pending waits" in err.lower() or "--interactive" in err
 
 
-def test_executions_replay_parses_json_and_reports_success(
+def test_executions_replay_parses_unified_overrides_and_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions replay` should parse JSON and call replay API."""
+    """`kitaru executions replay` should parse new override flags."""
     fake_client = Mock()
-    fake_client.executions.replay.return_value = _execution_stub(
-        exec_id="kr-222",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.RUNNING,
-    )
+    fake_client.executions.replay.return_value = _replay_submission_stub()
 
     with (
         patch("kitaru.cli.KitaruClient", return_value=fake_client),
@@ -3232,46 +4021,285 @@ def test_executions_replay_parses_json_and_reports_success(
                 "executions",
                 "replay",
                 "kr-111",
-                "--from",
+                "--at",
                 "write_summary",
-                "--args",
+                "--flow-overrides",
                 '{"topic":"new topic"}',
-                "--overrides",
-                '{"checkpoint.research":"edited"}',
+                "--checkpoint-overrides",
+                '{"research":{"output":"edited"}}',
+                "--invocation-overrides",
+                '{"call-1":{"model":"gpt-5-nano"}}',
+                "--skip",
+                "lookup_policy_tool,write_draft",
+                "--tag",
+                "best-replay-june",
+                "--wait",
+                "--on-error",
+                "fail",
             ]
         )
 
     assert exc_info.value.code == 0
     fake_client.executions.replay.assert_called_once_with(
-        "kr-111",
-        from_="write_summary",
-        overrides={"checkpoint.research": "edited"},
-        topic="new topic",
+        ["kr-111"],
+        at="write_summary",
+        flow_overrides={"topic": "new topic"},
+        checkpoint_overrides={"research": {"output": "edited"}},
+        invocation_overrides={"call-1": {"model": "gpt-5-nano"}},
+        skip=["lookup_policy_tool", "write_draft"],
+        tag="best-replay-june",
+        wait=True,
+        on_error="fail",
     )
     output = capsys.readouterr().out
     assert "Replayed execution: kr-222" in output
-    assert "Status: running" in output
+    assert "Status: submitted" in output
+    assert "Compare original vs replay:" in output
+    assert "compare?executions=kr-111,kr-222" in output
 
 
-def test_executions_replay_rejects_invalid_overrides_json(
+def test_executions_replay_multiple_ids_json_envelope(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions replay` should fail when `--overrides` is invalid JSON."""
+    """Multiple parent IDs should pass as a list and emit ReplaySubmission JSON."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _replay_submission_stub(
+        at="lookup_policy_tool",
+        wait=False,
+        results=[
+            ReplayResultRow(
+                original_exec_ref="kr-a",
+                original_exec_id="kr-a",
+                replay_exec_id="kr-a-replay",
+                status="submitted",
+            ),
+            ReplayResultRow(
+                original_exec_ref="kr-b",
+                original_exec_id="kr-b",
+                replay_exec_id="kr-b-replay",
+                status="submitted",
+            ),
+        ],
+        compare_url="http://localhost:8237/compare?executions=kr-a,kr-a-replay,kr-b,kr-b-replay",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-a",
+                "kr-b",
+                "--at",
+                "lookup_policy_tool",
+                "--no-wait",
+                "--on-error",
+                "collect",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay.assert_called_once_with(
+        ["kr-a", "kr-b"],
+        at="lookup_policy_tool",
+        flow_overrides=None,
+        checkpoint_overrides=None,
+        invocation_overrides=None,
+        skip=None,
+        tag=None,
+        wait=False,
+        on_error="collect",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "executions.replay"
+    assert payload["item"]["submission_id"] == "rs-test"
+    assert payload["item"]["summary"] == {
+        "submitted": 2,
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert payload["item"]["results"][0]["replay_exec_id"] == "kr-a-replay"
+
+
+def test_executions_replay_omitted_wait_forwards_none(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Omitting wait should let the SDK choose the single/batch default."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _replay_submission_stub()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "replay", "kr-111", "--at", "write_summary"])
+
+    assert exc_info.value.code == 0
+    assert fake_client.executions.replay.call_args.kwargs["wait"] is None
+
+
+@pytest.mark.parametrize(
+    ("flag", "option_name"),
+    [
+        ("--flow-overrides", "--flow-overrides"),
+        ("--checkpoint-overrides", "--checkpoint-overrides"),
+        ("--invocation-overrides", "--invocation-overrides"),
+    ],
+)
+def test_executions_replay_rejects_invalid_override_json(
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    option_name: str,
+) -> None:
+    """Override JSON parse errors should name the exact failed option."""
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
                 "executions",
                 "replay",
                 "kr-111",
-                "--from",
+                "--at",
                 "write_summary",
-                "--overrides",
+                flag,
                 "{invalid",
             ]
         )
 
     assert exc_info.value.code == 1
-    assert "Invalid JSON for `--overrides`" in capsys.readouterr().err
+    assert f"Invalid JSON for `{option_name}`" in capsys.readouterr().err
+
+
+def test_executions_replay_loads_exec_ids_from_file(
+    tmp_path: Path,
+) -> None:
+    """`--ids-file` should accept a JSON object with exec_ids."""
+    ids_path = tmp_path / "ids.json"
+    ids_path.write_text('{"exec_ids":["kr-a","kr-b"]}')
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _replay_submission_stub()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay",
+                "--ids-file",
+                str(ids_path),
+                "--at",
+                "lookup_policy_tool",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert fake_client.executions.replay.call_args.args[0] == ["kr-a", "kr-b"]
+
+
+def test_executions_replay_ids_file_rejects_non_string_ids(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--ids-file` should fail clearly for malformed execution ID lists."""
+    ids_path = tmp_path / "ids.json"
+    ids_path.write_text('{"exec_ids":[{"bad":"shape"}]}')
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "replay",
+                "--ids-file",
+                str(ids_path),
+                "--at",
+                "lookup_policy_tool",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "must contain only string execution IDs" in capsys.readouterr().err
+
+
+def test_executions_replay_help_hides_old_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Prototype replay flags should no longer be public CLI options."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "replay", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    for old_flag in ("--args", "--input", "--mock-output", "--tool", "--llm-model"):
+        assert old_flag not in output
+
+
+def test_executions_replay_rejects_old_args_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Old replay flags should not be accepted by the command parser."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--at",
+                "write_summary",
+                "--args",
+                "{}",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+    assert "--args" in capsys.readouterr().err
+
+
+def test_executions_replay_many_is_not_registered(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`executions replay-many` should be removed from the public CLI."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "replay-many" not in capsys.readouterr().out
+
+
+def test_executions_diff_matrix_json_uses_new_command_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`executions diff-matrix` should replace the old diff-cohort command."""
+    with (
+        patch("kitaru.diff.diff_cohort", return_value=object()) as diff_cohort,
+        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": []}),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff-matrix", "kr-a", "kr-b", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    diff_cohort.assert_called_once_with(["kr-a", "kr-b"])
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.diff_matrix",
+        "item": {"rows": []},
+    }
+
+
+def test_executions_diff_cohort_is_not_registered(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The old diff-cohort public alias should be gone."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "diff-cohort" not in capsys.readouterr().out
 
 
 def test_executions_resume_reports_success(
@@ -3290,6 +4318,30 @@ def test_executions_resume_reports_success(
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["executions", "resume", "kr-123"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.resume.assert_called_once_with("kr-123")
+    output = capsys.readouterr().out
+    assert "Resumed execution: kr-123" in output
+    assert "Status: running" in output
+
+
+def test_executions_resume_accepts_exec_id_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions resume --exec-id` should match positional behavior."""
+    fake_client = Mock()
+    fake_client.executions.resume.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "resume", "--exec-id", "kr-123"])
 
     assert exc_info.value.code == 0
     fake_client.executions.resume.assert_called_once_with("kr-123")
@@ -3386,6 +4438,37 @@ def test_login_delegates_to_remote_connect(
 
     output = capsys.readouterr().out
     assert "Connected to Kitaru server: https://example.com" in output
+    assert "Project: demo-project" in output
+    assert "Active project" not in output
+
+
+def test_login_remote_without_project_does_not_print_project(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Remote login without --project should not guess or print a project."""
+    with (
+        patch("kitaru.cli.login_to_server") as mock_login,
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="https://example.com",
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login", "https://example.com/"])
+
+    assert exc_info.value.code == 0
+    mock_login.assert_called_once_with(
+        "https://example.com/",
+        api_key=None,
+        refresh=False,
+        project=None,
+        no_verify_ssl=False,
+        ssl_ca_cert=None,
+        timeout=60,
+    )
+    output = capsys.readouterr().out
+    assert "Connected to Kitaru server: https://example.com" in output
+    assert "Project:" not in output
     assert "Active project" not in output
 
 
@@ -4503,32 +5586,23 @@ def test_secrets_show_displays_values_when_requested(
     assert "Value (OPENAI_API_KEY): sk-123" in output
 
 
-def test_secrets_list_renders_all_pages_sorted(
+def test_secrets_list_renders_shared_order(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should merge all pages and sort by secret name."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = [
-        SimpleNamespace(items=[secret_z], total_pages=2, max_size=1),
-        SimpleNamespace(items=[secret_a], total_pages=2, max_size=1),
+    """`kitaru secrets list` should render the SDK's deterministic order."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
     ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets) as mock_list_secrets,
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])
 
     assert exc_info.value.code == 0
-    calls = fake_client.list_secrets.call_args_list
-    assert len(calls) == 2
-    backend_scan_size = calls[0].kwargs["size"]
-    assert calls == [
-        call(page=1, size=backend_scan_size),
-        call(page=2, size=backend_scan_size),
-    ]
+    mock_list_secrets.assert_called_once_with()
     output = capsys.readouterr().out
     assert "Kitaru secrets" in output
     assert "alpha: secret-a (private)" in output
@@ -4538,61 +5612,53 @@ def test_secrets_list_renders_all_pages_sorted(
     )
 
 
-def test_secrets_list_uses_stable_backend_page_size(
+def test_secrets_list_json_contains_metadata_without_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Backend scan pagination should not switch sizes after the first page."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    observed_sizes: list[int] = []
-
-    def list_secrets(*, page: int, size: int | None = None) -> SimpleNamespace:
-        if size is None:
-            raise AssertionError("backend scan calls must pass an explicit size")
-        observed_sizes.append(size)
-        if page == 1:
-            return SimpleNamespace(
-                items=[secret_z],
-                total_pages=2,
-                max_size=size + 100,
-            )
-        if page == 2 and size == observed_sizes[0]:
-            return SimpleNamespace(items=[secret_a], total_pages=2, max_size=size + 100)
-        return SimpleNamespace(items=[], total_pages=2, max_size=size + 100)
-
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = list_secrets
-
-    with (
-        patch("kitaru.cli.Client", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["secrets", "list"])
-
-    assert exc_info.value.code == 0
-    assert len(observed_sizes) == 2
-    assert observed_sizes[0] == observed_sizes[1]
-    output = capsys.readouterr().out
-    assert "alpha: secret-a (private)" in output
-    assert "zeta: secret-z (public)" in output
-
-
-def test_secrets_list_paginates_after_sorting(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`secrets list` should slice after deterministic name/id ordering."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_z, secret_b, secret_a],
-        total_pages=1,
-        max_size=3,
+    """JSON list output should include key names but never secret values."""
+    secret = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        keys=["OPENAI_API_KEY"],
+        has_missing_values=False,
     )
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=[secret]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "secrets.list",
+        "items": [
+            {
+                "id": "secret-id",
+                "name": "openai-creds",
+                "visibility": "private",
+                "keys": ["OPENAI_API_KEY"],
+                "has_missing_values": False,
+            }
+        ],
+        "count": 1,
+    }
+
+
+def test_secrets_list_paginates_after_shared_ordering(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI should slice the complete list after the SDK has ordered it."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+    ]
+
+    with (
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "1", "--size", "2"])
@@ -4605,12 +5671,15 @@ def test_secrets_list_paginates_after_sorting(
     assert "Page 1 (size 2, showing 2 of 3)" in output
 
 
-def test_secrets_list_surfaces_client_errors(
+def test_secrets_list_surfaces_sdk_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should surface backend errors as CLI errors."""
+    """`kitaru secrets list` should surface SDK errors as CLI errors."""
     with (
-        patch("kitaru.cli.Client", side_effect=RuntimeError("offline")),
+        patch(
+            "kitaru.secrets.list_secrets",
+            side_effect=KitaruBackendError("Failed to list secrets: offline"),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])
@@ -4665,6 +5734,344 @@ def test_secrets_delete_surfaces_backend_errors(
 
     assert exc_info.value.code == 1
     assert "already deleted" in capsys.readouterr().err
+
+
+def test_project_list_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project list` should render visible projects and active marker."""
+    with (
+        patch("kitaru.cli.list_projects") as mock_list_projects,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_projects.return_value = [
+            _project_stub(name="dev", is_active=False),
+            _project_stub(name="prod", is_active=True),
+        ]
+        app(["project", "list"])
+
+    assert exc_info.value.code == 0
+    mock_list_projects.assert_called_once_with(page=1, size=20)
+    output = capsys.readouterr().out
+    assert "Kitaru projects" in output
+    assert "dev: project-dev-id" in output
+    assert "prod: project-prod-id (active)" in output
+
+
+def test_project_current_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project current` should show active project details."""
+    with (
+        patch("kitaru.cli.current_project") as mock_current_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "current"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru project" in output
+    assert "Project: prod" in output
+    assert "Project ID: project-prod-id" in output
+
+
+def test_project_show_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project show` should render Kitaru project details."""
+    with (
+        patch("kitaru.cli.get_project") as mock_get_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_get_project.return_value = _project_stub(
+            name="prod",
+            display_name="Production",
+            description="Production project",
+            is_active=True,
+        )
+        app(["project", "show", "prod"])
+
+    assert exc_info.value.code == 0
+    mock_get_project.assert_called_once_with("prod")
+    output = capsys.readouterr().out
+    assert "Kitaru project" in output
+    assert "Name: prod" in output
+    assert "Display name: Production" in output
+    assert "Description: Production project" in output
+    assert "Active: yes" in output
+
+
+def test_project_help_mentions_pro_cloud_for_mutations(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Project mutation help should explain the ZenML Pro/Cloud requirement."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["project", "--help"])
+    assert exc_info.value.code == 0
+    assert "pro/cloud" in capsys.readouterr().out.lower()
+
+    for command in ("create", "use", "delete"):
+        with pytest.raises(SystemExit) as command_exc_info:
+            app(["project", command, "--help"])
+        assert command_exc_info.value.code == 0
+        assert "pro/cloud" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    ("command", "patch_target", "args"),
+    [
+        (
+            "project.create",
+            "kitaru.cli.create_project",
+            ["project", "create", "staging"],
+        ),
+        ("project.use", "kitaru.cli.use_project", ["project", "use", "staging"]),
+        (
+            "project.delete",
+            "kitaru.cli.delete_project",
+            ["project", "delete", "staging", "--yes"],
+        ),
+    ],
+)
+def test_project_mutation_text_errors_preserve_feature_error(
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    patch_target: str,
+    args: list[str],
+) -> None:
+    message = f"Kitaru {command} requires a ZenML Pro/Cloud server."
+    with (
+        patch(patch_target, side_effect=KitaruFeatureNotAvailableError(message)),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    assert message in capsys.readouterr().err
+
+
+def test_project_create_json_error_preserves_feature_error_type(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    message = "Kitaru project create requires a ZenML Pro/Cloud server."
+    with (
+        patch(
+            "kitaru.cli.create_project",
+            side_effect=KitaruFeatureNotAvailableError(message),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["project", "create", "staging", "--output", "json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "command": "project.create",
+        "error": {
+            "message": message,
+            "type": "KitaruFeatureNotAvailableError",
+        },
+    }
+
+
+def test_project_use_delegates_to_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project use` should activate and report the selected project."""
+    with (
+        patch("kitaru.cli.use_project") as mock_use_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "use", "prod"])
+
+    assert exc_info.value.code == 0
+    mock_use_project.assert_called_once_with("prod")
+    output = capsys.readouterr().out
+    assert "Activated project: prod" in output
+    assert "Project ID: project-prod-id" in output
+
+
+def test_project_create_reports_auto_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create` should create and activate by default."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub()
+        app(["project", "create", "staging"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    output = capsys.readouterr().out
+    assert "Created project: staging" in output
+    assert "Activated project: prod → staging" in output
+
+
+def test_project_create_no_activate_skips_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create --no-activate` should not activate the new project."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub(
+            activated=False,
+        )
+        app(["project", "create", "staging", "--no-activate"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=False)
+    output = capsys.readouterr().out
+    assert "Created project: staging" in output
+    assert "Activated project" not in output
+
+
+def test_project_create_warns_when_env_overrides_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project create` should not claim effective activation if env wins."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub(
+            activated=True,
+            is_active=False,
+        )
+        app(["project", "create", "staging"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    streams = capsys.readouterr()
+    assert "Created project: staging" in streams.out
+    assert "Activated project" not in streams.out
+    assert "Project activation is still overridden" in streams.err
+    assert "KITARU_PROJECT" in streams.err
+
+
+def test_project_delete_requires_yes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project delete` should fail before backend calls without --yes."""
+    with (
+        patch("kitaru.cli.delete_project") as mock_delete_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["project", "delete", "staging"])
+
+    assert exc_info.value.code == 1
+    mock_delete_project.assert_not_called()
+    error_output = capsys.readouterr().err
+    assert "Kitaru will not delete project 'staging'" in error_output
+    assert "Re-run with --yes if you want to delete it." in error_output
+
+
+def test_project_delete_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru project delete --yes` should delete and report the project."""
+    with (
+        patch("kitaru.cli.delete_project") as mock_delete_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_project.return_value = _project_delete_result_stub()
+        app(["project", "delete", "staging", "--yes"])
+
+    assert exc_info.value.code == 0
+    mock_delete_project.assert_called_once_with("staging")
+    assert "Deleted project: staging" in capsys.readouterr().out
+
+
+def test_project_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project list --output json` should emit serialized projects."""
+    with (
+        patch("kitaru.cli.list_projects") as mock_list_projects,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_projects.return_value = [
+            _project_stub(name="dev", is_active=False),
+            _project_stub(name="prod", is_active=True),
+        ]
+        app(["project", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_list_projects.assert_called_once_with(page=1, size=20)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.list",
+        "items": [
+            {
+                "id": "project-dev-id",
+                "name": "dev",
+                "display_name": None,
+                "description": None,
+                "is_active": False,
+            },
+            {
+                "id": "project-prod-id",
+                "name": "prod",
+                "display_name": None,
+                "description": None,
+                "is_active": True,
+            },
+        ],
+        "count": 2,
+    }
+
+
+def test_project_current_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project current --output json` should emit one project item."""
+    with (
+        patch("kitaru.cli.current_project") as mock_current_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_project.return_value = _project_stub(name="prod", is_active=True)
+        app(["project", "current", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.current",
+        "item": {
+            "id": "project-prod-id",
+            "name": "prod",
+            "display_name": None,
+            "description": None,
+            "is_active": True,
+        },
+    }
+
+
+def test_project_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru project create --output json` should include activation metadata."""
+    with (
+        patch("kitaru.cli.create_project") as mock_create_project,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_project.return_value = _project_create_result_stub()
+        app(["project", "create", "staging", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_create_project.assert_called_once_with("staging", activate=True)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "project.create",
+        "item": {
+            "id": "project-staging-id",
+            "name": "staging",
+            "display_name": None,
+            "description": None,
+            "is_active": True,
+            "previous_active_project": "prod",
+            "activated": True,
+        },
+    }
 
 
 def test_stack_list_renders_snapshot(
@@ -4735,8 +6142,38 @@ def test_stack_show_renders_translated_component_snapshot(
         "Image registry: my-k8s-registry (aws); location: "
         "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
     )
+    assert "Sandbox: my-k8s-sandbox (local)" in output
     assert "artifact_store" not in output
     assert "container_registry" not in output
+
+
+def test_stack_show_renders_image_builder_component(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack show` should label Modal image builders clearly."""
+    with (
+        patch("kitaru.cli._show_stack_operation") as mock_show_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_show_stack.return_value = _stack_details_stub(
+            name="my-modal",
+            stack_type="modal",
+            components=[
+                SimpleNamespace(
+                    role="image_builder",
+                    name="my-modal-image-builder",
+                    backend="local",
+                    details=(("use_subprocess_call", "True"),),
+                    purpose=None,
+                )
+            ],
+        )
+        app(["stack", "show", "my-modal"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Image builder: my-modal-image-builder (local)" in output
+    assert "use subprocess call: True" in output
 
 
 def test_stack_show_json_output(
@@ -4786,6 +6223,11 @@ def test_stack_show_json_output(
                     "details": {
                         "location": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
                     },
+                },
+                {
+                    "role": "sandbox",
+                    "name": "my-k8s-sandbox",
+                    "backend": "local",
                 },
             ],
         },
@@ -4838,6 +6280,60 @@ def test_stack_use_delegates_to_config(
     assert "Stack ID: stack-prod-id" in output
 
 
+def test_stack_use_warns_when_zenml_active_stack_env_overrides_saved_config(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`stack use` should warn when an env var still overrides saved config."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+
+    with (
+        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_stack.return_value = SimpleNamespace(
+            id="stack-default-id",
+            name="default",
+            is_active=True,
+        )
+        app(["stack", "use", "default"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "Activated stack: default" in captured.out
+    assert "Stack ID: stack-default-id" in captured.out
+    assert ENV_ZENML_ACTIVE_STACK_ID in captured.err
+    assert "stale-stack-id" in captured.err
+    assert "Unset" in captured.err
+
+
+def test_stack_use_json_warns_on_stderr_when_env_overrides_saved_config(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON `stack use` output should remain parseable when warning."""
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_STACK_ID, "stale-stack-id")
+
+    with (
+        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_stack.return_value = SimpleNamespace(
+            id="stack-default-id",
+            name="default",
+            is_active=True,
+        )
+        app(["stack", "use", "default", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["command"] == "stack.use"
+    assert payload["item"]["id"] == "stack-default-id"
+    assert ENV_ZENML_ACTIVE_STACK_ID in captured.err
+    assert "stale-stack-id" in captured.err
+
+
 def test_stack_use_surfaces_validation_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -4872,6 +6368,7 @@ def test_stack_create_reports_auto_activation(
         stack_type=StackType.LOCAL,
         activate=True,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -4898,6 +6395,7 @@ def test_stack_create_no_activate_skips_active_stack_line(
         stack_type=StackType.LOCAL,
         activate=False,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -4925,6 +6423,7 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
             "components_created": [
                 "dev (orchestrator)",
                 "dev (artifact_store)",
+                "dev (sandbox)",
             ],
             "stack_type": "local",
         },
@@ -4941,7 +6440,7 @@ def test_stack_create_rejects_kubernetes_flags_for_local_stack(
     assert exc_info.value.code == 1
     assert (
         "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml: --artifact-store"
+        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -4956,7 +6455,7 @@ def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
     assert exc_info.value.code == 1
     assert (
         "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml: --artifact-store"
+        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -5013,6 +6512,19 @@ def test_stack_create_azureml_requires_all_mandatory_flags(
     assert (
         "--type azureml requires: --artifact-store, --container-registry, "
         "--subscription-id, --resource-group, --workspace."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_modal_requires_storage_and_registry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal stack creation should only require artifact store and registry."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "modal"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type modal requires: --artifact-store, --container-registry."
     ) in capsys.readouterr().err
 
 
@@ -5119,8 +6631,8 @@ def test_stack_create_local_rejects_azureml_only_flags(
 
     assert exc_info.value.code == 1
     assert (
-        "AzureML-only options require --type azureml: --subscription-id"
-        in capsys.readouterr().err
+        "Stack-specific options require --type azureml or --type modal: "
+        "--subscription-id" in capsys.readouterr().err
     )
 
 
@@ -5129,7 +6641,7 @@ def test_stack_create_rejects_unsupported_stack_type_json(
 ) -> None:
     """Invalid stack types should use the structured JSON error contract."""
     with pytest.raises(SystemExit) as exc_info:
-        app(["stack", "create", "dev", "--type", "modal", "--output", "json"])
+        app(["stack", "create", "dev", "--type", "spaceship", "--output", "json"])
 
     assert exc_info.value.code == 1
     payload = json.loads(capsys.readouterr().err)
@@ -5137,8 +6649,8 @@ def test_stack_create_rejects_unsupported_stack_type_json(
         "command": "stack.create",
         "error": {
             "message": (
-                "Unsupported stack type: modal. Use 'local', "
-                "'kubernetes', 'vertex', 'sagemaker', or 'azureml'."
+                "Unsupported stack type: spaceship. Use 'local', "
+                "'kubernetes', 'vertex', 'sagemaker', 'azureml', or 'modal'."
             ),
             "type": "ValueError",
         },
@@ -5167,7 +6679,7 @@ region: us-east-1
     assert exc_info.value.code == 1
     assert (
         "Unsupported stack type: . Use 'local', 'kubernetes', 'vertex', "
-        "'sagemaker', or 'azureml'." in capsys.readouterr().err
+        "'sagemaker', 'azureml', or 'modal'." in capsys.readouterr().err
     )
 
 
@@ -5285,6 +6797,122 @@ def test_stack_create_kubernetes_builds_aws_spec() -> None:
         "credentials": None,
         "verify": True,
     }
+
+
+def test_stack_create_kubernetes_passes_explicit_sandbox() -> None:
+    """`--sandbox` should pass an explicit sandbox flavor for remote stacks."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            resources={
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "sandbox": "local",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+                "--sandbox",
+                "local",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
+
+
+def test_stack_create_rejects_blank_sandbox(capsys: pytest.CaptureFixture[str]) -> None:
+    """Blank sandbox flavor strings should fail validation."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--sandbox", "   "])
+
+    assert exc_info.value.code == 1
+    assert "--sandbox cannot be empty." in capsys.readouterr().err
+
+
+def test_stack_create_remote_rejects_sandbox_extra_without_sandbox(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Remote stack sandbox overrides require an explicit sandbox flavor."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "sandbox.forward_env=false",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "--extra sandbox.*" in stderr
+    assert "--sandbox" in stderr
+    mock_create_stack.assert_not_called()
+
+
+def test_stack_create_file_rejects_sandbox_extra_without_sandbox(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """YAML sandbox overrides for remote stacks require top-level sandbox."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+extra:
+  sandbox:
+    forward_env: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "--extra sandbox.*" in stderr
+    assert "--sandbox" in stderr
+    mock_create_stack.assert_not_called()
 
 
 def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify() -> (
@@ -5501,6 +7129,408 @@ def test_stack_create_azureml_builds_spec() -> None:
     }
 
 
+def test_stack_create_modal_builds_spec_with_sandbox_and_overrides() -> None:
+    """Modal stacks should accept storage, registry, sandbox, async, and extras."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="prod-modal",
+            stack_type="modal",
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
+                ),
+                "sandbox": "modal",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+                "--sandbox",
+                "modal",
+                "--async",
+                "--extra",
+                "orchestrator.synchronous=false",
+                "--extra",
+                "orchestrator.token_id=ak-test",
+                "--extra",
+                "orchestrator.token_secret=as-test",
+                "--extra",
+                "sandbox.timeout=1800",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("prod-modal",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        "region": None,
+        "subscription_id": None,
+        "credentials": None,
+        "verify": True,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "synchronous": False,
+            "token_id": "ak-test",
+            "token_secret": "as-test",
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {"timeout": 1800},
+    }
+
+
+def test_stack_create_modal_missing_dependency_shows_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI should show the Modal extra hint instead of a raw import error."""
+    config_module._config_stacks._load_modal_component_validation_metadata.cache_clear()
+    monkeypatch.setitem(sys.modules, "modal", None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "kitaru[modal]" in stderr
+    assert "Traceback" not in stderr
+    assert "No module named 'modal'" not in stderr
+
+
+def test_stack_create_modal_builds_aws_cloud_credential_spec() -> None:
+    """AWS-backed Modal stacks should accept cloud connector flags."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="prod-modal",
+            stack_type="modal",
+            service_connectors_created=("prod-modal-aws",),
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"
+                ),
+                "region": "eu-central-1",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru",
+                "--region",
+                "eu-central-1",
+                "--credentials",
+                "aws-profile:ml-team",
+                "--no-verify",
+                "--extra",
+                "orchestrator.token_id=ak-test",
+                "--extra",
+                "orchestrator.token_secret=as-test",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": (
+            "123456789012.dkr.ecr.eu-central-1.amazonaws.com/kitaru"
+        ),
+        "region": "eu-central-1",
+        "subscription_id": None,
+        "credentials": "aws-profile:ml-team",
+        "verify": False,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.orchestrator == {
+        "token_id": "ak-test",
+        "token_secret": "as-test",
+    }
+
+
+def test_stack_create_modal_rejects_aws_credentials_without_region(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AWS cloud credentials need a cloud region; Modal placement is separate."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+                "--credentials",
+                "aws-profile:ml-team",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "AWS-backed Modal cloud credentials require" in stderr
+    assert "--region" in stderr
+    assert "--extra orchestrator.region" in stderr
+
+
+def test_stack_create_modal_rejects_no_verify_without_cloud_connector_input(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--no-verify should not request a Modal cloud connector by itself."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "--no-verify only applies when Kitaru is creating" in stderr
+    assert "--region" in stderr
+    assert "--credentials" in stderr
+
+
+def test_stack_create_modal_rejects_mismatched_credentialed_registry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal storage and registry providers should match even without credentials."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "prod-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "same cloud provider" in stderr
+    assert "gs://bucket/kitaru" in stderr
+
+
+def test_stack_create_modal_builds_gcp_cloud_credential_spec() -> None:
+    """GCP-backed Modal stacks should pass GCP credential inputs through."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="gcp-modal",
+            stack_type="modal",
+            service_connectors_created=("gcp-modal-gcp",),
+            resources={
+                "provider": "gcp",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+                "region": "us-central1",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "gcp-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--credentials",
+                "gcp-service-account:/tmp/key.json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": "us-central1",
+        "subscription_id": None,
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": True,
+    }
+
+
+def test_stack_create_modal_builds_azure_cloud_credential_spec() -> None:
+    """Azure-backed Modal stacks should accept Azure connector inputs."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="azure-modal",
+            stack_type="modal",
+            service_connectors_created=("azure-modal-azure",),
+            resources={
+                "provider": "azure",
+                "artifact_store": "az://container/kitaru",
+                "container_registry": "demo.azurecr.io/kitaru",
+                "subscription_id": "00000000-0000-0000-0000-000000000123",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "azure-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "az://container/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/kitaru",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--credentials",
+                "azure-access-token:token-123",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "az://container/kitaru",
+        "container_registry": "demo.azurecr.io/kitaru",
+        "region": None,
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "credentials": "azure-access-token:token-123",
+        "verify": False,
+    }
+
+
+def test_stack_create_modal_builds_spec_from_yaml_file(tmp_path: Path) -> None:
+    """YAML Modal stack creation should accept nested orchestrator/sandbox extra."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-modal
+type: modal
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+sandbox: modal
+async: true
+extra:
+  orchestrator:
+    modal_environment: production
+    timeout: 7200
+  sandbox:
+    app_name: kitaru-agent-sandbox
+    timeout: 1800
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-modal",
+            stack_type="modal",
+        )
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": None,
+        "subscription_id": None,
+        "credentials": None,
+        "verify": True,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "modal_environment": "production",
+            "timeout": 7200,
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {
+            "app_name": "kitaru-agent-sandbox",
+            "timeout": 1800,
+        },
+    }
+
+
 def test_stack_create_sagemaker_builds_spec_from_yaml_file(tmp_path: Path) -> None:
     """SageMaker stack creation should accept execution_role from YAML input."""
     stack_file = _write_stack_create_file(
@@ -5641,6 +7671,7 @@ def test_stack_create_vertex_passes_extra_and_async_overrides() -> None:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "my-team"},
+        "sandbox": {},
     }
 
 
@@ -5689,7 +7720,7 @@ def test_stack_create_local_rejects_async_flag(
     assert exc_info.value.code == 1
     assert (
         "--async requires --type kubernetes, --type vertex, "
-        "--type sagemaker, or --type azureml."
+        "--type sagemaker, --type azureml, or --type modal."
     ) in capsys.readouterr().err
 
 
@@ -5703,12 +7734,17 @@ type: vertex
 artifact_store: gs://bucket/kitaru
 container_registry: us-central1-docker.pkg.dev/demo/repo
 region: us-central1
+sandbox: local
 async: true
 extra:
   orchestrator:
     pipeline_root: gs://bucket/root
   container_registry:
     default_repository: from-yaml
+  sandbox:
+    forward_env: false
+    sandbox_environment:
+      FROM_YAML: yes
 """.strip(),
     )
 
@@ -5730,10 +7766,13 @@ extra:
                 "orchestrator.custom_job_parameters.machine_type=n1-standard-4",
                 "--extra",
                 "container_registry.default_repository=from-cli",
+                "--extra",
+                "sandbox.sandbox_environment.FROM_CLI=enabled",
             ]
         )
 
     assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
     overrides = mock_create_stack.call_args.kwargs["component_overrides"]
     assert isinstance(overrides, StackComponentConfigOverrides)
     assert overrides.model_dump() == {
@@ -5744,6 +7783,10 @@ extra:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "from-cli"},
+        "sandbox": {
+            "forward_env": False,
+            "sandbox_environment": {"FROM_YAML": True, "FROM_CLI": "enabled"},
+        },
     }
 
 
@@ -5951,6 +7994,64 @@ def test_stack_create_azureml_text_output(
     assert "Artifacts:" in output and "az://container/kitaru" in output
     assert "Registry:" in output and "demo.azurecr.io/team/image" in output
     assert "Active stack: default → my-azure" in output
+
+
+def test_stack_create_modal_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Modal stack creation should render provider and resource details."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-modal",
+            stack_type="modal",
+            components_created=(
+                "my-modal-orchestrator (orchestrator)",
+                "my-modal-artifacts (artifact_store)",
+                "my-modal-registry (container_registry)",
+                "my-modal-image-builder (image_builder)",
+                "my-modal-sandbox (sandbox)",
+            ),
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru"
+                ),
+                "sandbox": "modal",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-modal",
+                "--type",
+                "modal",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru",
+                "--sandbox",
+                "modal",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-modal (modal)" in output
+    assert "Provider:" in output and "aws" in output
+    assert "Artifacts:" in output and "s3://bucket/kitaru" in output
+    assert (
+        "Registry:" in output
+        and "123456789012.dkr.ecr.us-east-1.amazonaws.com/kitaru" in output
+    )
+    assert "Image builder:" in output
+    assert "my-modal-image-builder (image_builder)" in output
+    assert "Sandbox:" in output and "modal" in output
+    assert "Active stack: default → my-modal" in output
 
 
 def test_stack_create_kubernetes_json_output(
@@ -6269,6 +8370,7 @@ activate: true
         stack_type=StackType.LOCAL,
         activate=True,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
 
@@ -8133,7 +10235,7 @@ def _snapshot_with_active_context_provenance() -> RuntimeSnapshot:
             effective_id="repo-stack-id",
             resolved_id="resolved-stack-id",
             resolved_name="prod",
-            environment_variable="ZENML_ACTIVE_STACK_ID",
+            environment_variable=ENV_ZENML_ACTIVE_STACK_ID,
             environment_id=None,
             repository_root="/work/repo",
             repository_config_path="/work/repo/.kitaru/config.yaml",

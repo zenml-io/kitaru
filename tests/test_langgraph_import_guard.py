@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 
 import pytest
 
@@ -47,6 +48,20 @@ def test_transitive_langgraph_import_error_is_not_masked(
 
     with pytest.raises(ModuleNotFoundError, match="langchain_core"):
         importlib.import_module("kitaru.adapters.langgraph")
+
+
+def test_package_import_stays_safe_when_sandbox_tool_api_is_missing_until_factory_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _purge_langgraph_adapter_modules(monkeypatch)
+    monkeypatch.setitem(sys.modules, "langgraph", types.ModuleType("langgraph"))
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", None)
+
+    adapter = importlib.import_module("kitaru.adapters.langgraph")
+
+    assert adapter.create_sandbox_command_tool
+    with pytest.raises(KitaruFeatureNotAvailableError, match="StructuredTool"):
+        adapter.create_sandbox_command_tool()
 
 
 def test_langchain_middleware_import_guard_uses_langgraph_extra_guidance(

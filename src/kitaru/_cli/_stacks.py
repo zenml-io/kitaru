@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
+from kitaru._config._active_stack_env import active_stack_env_override_warning
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_stacks import (
     CLI_STACK_OPTION_LABELS,
@@ -38,6 +39,7 @@ from ._helpers import (
     _emit_json_items,
     _emit_pagination_note,
     _emit_snapshot,
+    _emit_warning,
     _exit_with_error,
     _paginate_items,
     _print_success,
@@ -68,6 +70,7 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
         StackType.VERTEX.value,
         StackType.SAGEMAKER.value,
         StackType.AZUREML.value,
+        StackType.MODAL.value,
     }:
         return []
 
@@ -109,6 +112,18 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     container_registry = resources.get("container_registry")
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
+
+    image_builder_components = [
+        component_label
+        for component_label in getattr(result, "components_created", ())
+        if str(component_label).endswith(" (image_builder)")
+    ]
+    if image_builder_components:
+        rows.append(("Image builder:", ", ".join(image_builder_components)))
+
+    sandbox = resources.get("sandbox")
+    if sandbox:
+        rows.append(("Sandbox:", str(sandbox)))
 
     execution_role = resources.get("execution_role")
     if stack_type == StackType.SAGEMAKER.value and execution_role:
@@ -161,6 +176,8 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
         "runner": "Runner",
         "storage": "Storage",
         "image_registry": "Image registry",
+        "image_builder": "Image builder",
+        "sandbox": "Sandbox",
         "additional_component": "Additional component",
     }
     label_counts: dict[str, int] = {}
@@ -310,14 +327,25 @@ def use(
         exit_with_error=_exit_with_error,
     )
 
+    warning = active_stack_env_override_warning(
+        selected_stack_name=selected_stack.name,
+        selected_stack_id=str(selected_stack.id),
+    )
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
+        if warning is not None:
+            message, detail = warning
+            _emit_warning(message, output=output_format, detail=detail)
         return
 
     _print_success(
         f"Activated stack: {selected_stack.name}",
         detail=f"Stack ID: {selected_stack.id}",
     )
+    if warning is not None:
+        message, detail = warning
+        _emit_warning(message, output=output_format, detail=detail)
 
 
 @stack_app.command
@@ -341,15 +369,30 @@ def create(
     ] = None,
     type: Annotated[
         str | None,
-        Parameter(help="Stack type: local, kubernetes, vertex, sagemaker, or azureml."),
+        Parameter(
+            help=(
+                "Stack type: local, kubernetes, vertex, sagemaker, azureml, "
+                "or modal. Modal creation requires `kitaru[modal]`."
+            )
+        ),
     ] = None,
     artifact_store: Annotated[
         str | None,
         Parameter(
             help=(
-                "Artifact store URI for remote stacks "
-                "(Kubernetes: s3:// or gs://; Vertex: gs://; SageMaker: s3://; "
-                "AzureML: az://, abfs://, or abfss://)."
+                "Artifact store URI for remote stacks. Modal accepts s3://, gs://, "
+                "az://, abfs://, or abfss://; other stack types may require one "
+                "provider-specific URI scheme."
+            )
+        ),
+    ] = None,
+    sandbox: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Sandbox flavor to attach. Local stacks default to `local`; remote "
+                "stacks attach a sandbox only when this option is provided. The "
+                "flavor must be available in the active ZenML installation/server."
             )
         ),
     ] = None,
@@ -357,8 +400,8 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Container registry URI for Kubernetes, Vertex, SageMaker, or "
-                "AzureML stacks."
+                "Container registry URI for Kubernetes, Vertex, SageMaker, "
+                "AzureML, or Modal stacks."
             )
         ),
     ] = None,
@@ -370,14 +413,22 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Cloud region for Kubernetes, Vertex, SageMaker, or AzureML "
-                "stacks. Optional for AzureML."
+                "Cloud provider region for Kubernetes, Vertex, SageMaker, "
+                "AzureML, or credentialed Modal stack components. Optional for "
+                "AzureML. For Modal, this is the cloud artifact/registry region "
+                "where applicable; Modal placement uses "
+                "--extra orchestrator.region=... instead."
             )
         ),
     ] = None,
     subscription_id: Annotated[
         str | None,
-        Parameter(help="Azure subscription ID for AzureML stacks."),
+        Parameter(
+            help=(
+                "Azure subscription ID for AzureML stacks or credentialed "
+                "Azure-backed Modal stack components."
+            )
+        ),
     ] = None,
     resource_group: Annotated[
         str | None,
@@ -399,8 +450,11 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Optional credentials reference for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks."
+                "Optional cloud credentials reference for Kubernetes, Vertex, "
+                "SageMaker, AzureML, or credentialed Modal stack components. "
+                "Modal API credentials are separate: use "
+                "--extra orchestrator.token_id=... and token_secret=... for "
+                "Modal tokens."
             )
         ),
     ] = None,
@@ -410,7 +464,8 @@ def create(
             name=["--extra"],
             help=(
                 "Advanced component defaults as TARGET.FIELD=VALUE. "
-                "Valid targets: orchestrator, artifact_store, container_registry. "
+                "Valid targets: orchestrator, artifact_store, container_registry, "
+                "sandbox. "
                 "VALUE uses YAML parsing, so booleans, numbers, lists, and objects "
                 "are accepted."
             ),
@@ -430,14 +485,14 @@ def create(
         bool | None,
         Parameter(
             help=(
-                "Skip credential verification for Kubernetes, Vertex, "
-                "SageMaker, or AzureML stacks."
+                "Skip cloud connector verification for Kubernetes, Vertex, "
+                "SageMaker, AzureML, or credentialed Modal stack components."
             )
         ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local, Kubernetes-backed, Vertex AI, SageMaker, or AzureML stack."""
+    """Create a local, Kubernetes, Vertex AI, SageMaker, AzureML, or Modal stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
 
@@ -449,6 +504,7 @@ def create(
                 type=type,
                 activate=False if no_activate else None,
                 artifact_store=artifact_store,
+                sandbox=sandbox,
                 container_registry=container_registry,
                 cluster=cluster,
                 region=region,

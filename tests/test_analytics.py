@@ -147,7 +147,9 @@ def test_track_returns_false_when_both_version_helpers_raise() -> None:
 
 def test_flow_lifecycle_event_canonical_strings() -> None:
     """Flow-lifecycle events should carry the expected canonical strings."""
+    assert AnalyticsEvent.FLOW_ATTEMPTED == "Kitaru flow attempted"
     assert AnalyticsEvent.FLOW_SUBMITTED == "Kitaru flow submitted"
+    assert AnalyticsEvent.FLOW_FAILED == "Kitaru flow failed"
     assert AnalyticsEvent.REPLAY_REQUESTED == "Kitaru flow replay requested"
     assert AnalyticsEvent.REPLAY_FAILED == "Kitaru flow replay failed"
 
@@ -165,6 +167,17 @@ def test_core_funnel_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_RETRIED == "Kitaru execution retried"
     assert AnalyticsEvent.EXECUTION_RESUMED == "Kitaru execution resumed"
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
+    assert (
+        AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
+        == "Kitaru execution statistics queried"
+    )
+
+
+def test_project_event_canonical_strings() -> None:
+    """Project events should carry the expected canonical strings."""
+    assert AnalyticsEvent.PROJECT_CREATED == "Kitaru project created"
+    assert AnalyticsEvent.PROJECT_ACTIVATED == "Kitaru project activated"
+    assert AnalyticsEvent.PROJECT_DELETED == "Kitaru project deleted"
 
 
 def test_deployment_event_canonical_strings() -> None:
@@ -182,7 +195,9 @@ def test_deployment_event_canonical_strings() -> None:
 
 def test_feature_adoption_event_canonical_strings() -> None:
     """Feature-adoption events should carry the expected canonical strings."""
+    assert AnalyticsEvent.LLM_ATTEMPTED == "Kitaru LLM attempted"
     assert AnalyticsEvent.LLM_CALLED == "Kitaru LLM called"
+    assert AnalyticsEvent.LLM_FAILED == "Kitaru LLM failed"
     assert AnalyticsEvent.ARTIFACT_SAVED == "Kitaru artifact saved"
     assert AnalyticsEvent.ARTIFACT_LOADED == "Kitaru artifact loaded"
     assert AnalyticsEvent.SECRET_UPSERTED == "Kitaru secret upserted"

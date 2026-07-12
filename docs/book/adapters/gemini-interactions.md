@@ -5,19 +5,26 @@ icon: gem
 
 # Gemini Interactions Adapter
 
-The [Google Gemini Interactions API](https://ai.google.dev/) gives you a hosted
-interaction runtime: you send a request to Gemini or a Google-managed agent,
-Google runs the interaction, and you receive an interaction response.
+This adapter makes Gemini Interactions API turns replayable inside a Kitaru
+flow: each stable Gemini interaction response becomes one durable checkpoint, so
+you can replay the surrounding flow without re-running Gemini for turns that
+already finished. Use it when a Gemini call is one step in a larger durable
+workflow.
 
-Kitaru does **not** replace that runtime. It adds an outer durable workflow
-boundary around it:
+{% hint style="info" %}
+**Using Google ADK instead?** Use the [Google ADK adapter](google-adk.md) if your application runs a `google.adk` agent or runner. This page is for direct Gemini Interactions API calls, including Antigravity managed-agent runs.
+{% endhint %}
+
+The [Google Gemini Interactions API](https://ai.google.dev/) is a hosted
+interaction runtime: you send a request to Gemini or a Google-managed agent,
+Google runs the interaction, and you receive a response. Kitaru does **not**
+replace that runtime. It wraps an outer durable boundary around it:
 
 ```text
 one stable Gemini interaction response = one Kitaru checkpoint
 ```
 
-That boundary is useful when a Gemini interaction is one step in a larger flow.
-Imagine this workflow:
+A Gemini checkpoint behaves like any other checkpoint in a flow. Consider:
 
 ```text
 collect input → ask Gemini to analyze it → write report → wait for approval → publish
@@ -96,7 +103,9 @@ The adapter gives existing Gemini Interactions users:
 - one durable Kitaru checkpoint around each stable Gemini interaction response
 - replay-skip for completed Gemini turns inside larger Kitaru flows
 - a typed `GeminiInteractionResult` with status, interaction IDs, output text,
-  model/agent, environment ID when reported, usage, timing, and warnings
+  model/agent, environment ID when reported, usage, estimated cost when Kitaru
+  can estimate one automatically or a configured calculator returns one, timing,
+  and warnings
 - safe step summaries from `interaction.steps` so your flow can respond to
   handoff points without storing raw provider payloads by default. Step
   summaries keep metadata such as type, status, and call IDs; `text_preview` is
@@ -114,6 +123,77 @@ The adapter gives existing Gemini Interactions users:
 Google's Interactions API is still a preview/Beta-style surface. Treat schemas,
 agent names, and hosted-agent behavior as more likely to change than stable
 Gemini text-generation APIs.
+
+## Usage and cost statistics
+
+When `save_usage=True` (the default), the Gemini adapter records two related
+things after a stable provider response:
+
+```text
+Gemini returns usage metadata
+  -> result.usage keeps the raw token metadata
+  -> Kitaru logs one llm_usage_v1 statistics record for the interaction
+```
+
+That canonical statistics record uses Gemini token fields such as
+`prompt_token_count` / `promptTokenCount`, `candidates_token_count` /
+`candidatesTokenCount`, `cached_content_token_count` /
+`cachedContentTokenCount`, and `thoughts_token_count` / `thoughtsTokenCount` when
+Google reports them. Kitaru normally rolls those token counts into
+execution-level LLM usage summary fields and flat statistics keys when the
+execution finishes. `FlowHandle.wait()` and `FlowHandle.get()` can populate
+missing summaries for older executions or executions where the finish-time summary was not written.
+
+The canonical usage record's `status` describes the provider call, not the next
+thing your application must do. So a Gemini interaction that returns
+`GeminiInteractionResult.status == "requires_action"` still writes a canonical
+LLM usage record with `status="completed"`: Google returned a stable response,
+and that response is asking your code to send a follow-up turn.
+
+Google reports token usage metadata for these calls, but Kitaru does not receive
+a provider-reported per-call dollar cost from Gemini Interactions. By default,
+Kitaru estimates with `genai-prices` when the interaction names a Gemini model
+and includes priceable input/output/cache-read token counts. That value is stored
+as `estimated_cost_usd`, not `actual_cost_usd`.
+
+If Kitaru cannot identify the model, cannot price the model, or only has token
+categories that `genai-prices` does not price, the record keeps the tokens and
+leaves the cost empty. Kitaru does not add `thoughts_token_count` /
+`thoughtsTokenCount` to output tokens. It also does not subtract thought tokens
+from Gemini candidate/output token counts unless Google's usage contract proves
+those counts include thoughts.
+
+If you know the pricing you want to use, pass `cost_calculator=` to
+`KitaruGeminiInteractionsRunner`. Kitaru calls it with a `GeminiUsageSummary`
+containing the requested/resolved model fields and normalized token counts, then
+records the returned non-negative number as `estimated_cost_usd`. Return `None`
+when your calculator cannot estimate the call; Kitaru leaves the cost empty and
+records the usage as a no-estimate token record.
+
+```python
+from kitaru.adapters.gemini import GeminiUsageSummary, KitaruGeminiInteractionsRunner
+
+
+def calculate_gemini_cost(usage: GeminiUsageSummary) -> float | None:
+    if usage.input_tokens is None or usage.output_tokens is None:
+        return None
+    # Replace these example rates with your own contract or billing source.
+    return (usage.input_tokens / 1_000_000 * 0.35) + (
+        usage.output_tokens / 1_000_000 * 1.05
+    )
+
+
+runner = KitaruGeminiInteractionsRunner(
+    name="gemini_summary",
+    cost_calculator=calculate_gemini_cost,
+)
+```
+
+User calculators take priority over the built-in estimate. If you disable automatic estimates with `KITARU_LLM_ESTIMATED_COSTS=off`, or if pricing is not possible, `records_without_cost_count` can still increase. It means “this provider call had no dollar-cost value attached,” not “usage tracking failed.” Token counts can still be present and aggregated.
+
+Set `save_usage=False` when you do not want Gemini usage persisted. That disables
+both the raw usage artifact and the canonical `llm_usage_v1` metadata record for
+that interaction, even if Gemini-specific events are still enabled.
 
 ## Install
 
@@ -521,7 +601,9 @@ if result.status == "requires_action":
         previous_interaction_id=result.interaction_id,
         function_call_id=call.call_id,
         function_name=call.tool_name,
-        function_result={"approved": True},
+        function_result=[
+            {"type": "text", "text": '{"approved": true}'},
+        ],
         model="gemini-3.5-flash",
     )
     result = runner.run_sync(answer)
@@ -531,6 +613,114 @@ Keep human-in-the-loop waits at flow scope. For example, let the flow inspect th
 `requires_action` result, call `kitaru.wait()` if a person must decide, then send
 the later `function_result` interaction after the wait resumes. That keeps the
 pause visible to Kitaru instead of hiding it inside a provider-owned turn.
+
+### Running caller-owned custom functions in Kitaru's sandbox
+
+Kitaru also provides a helper for the narrow case where Gemini asks for a custom
+function and your application owns that function body. The helper does not run
+automatically. Your code must register the function names it is willing to run.
+
+A concrete safe example is a function named `sandbox_python_version`:
+
+```text
+Gemini interaction checkpoint
+  -> Gemini returns status="requires_action"
+  -> result.steps contains call_id="call_123" and tool_name="sandbox_python_version"
+
+Kitaru-owned sandbox checkpoint
+  -> your registry says sandbox_python_version means: run "python --version"
+  -> Kitaru runs that command through kitaru.run_sandbox_command(...)
+  -> non-zero exits are kept as result data instead of becoming Gemini-helper errors
+
+Gemini interaction checkpoint
+  -> your flow sends GeminiInteractionRequest.function_result(...)
+  -> Gemini continues from the same interaction id
+```
+
+In code, the middle checkpoint looks like this. The checkpoint matters:
+`execute_gemini_sandbox_function_call(...)` runs a sandbox command, so Kitaru
+rejects direct flow-body use by default to avoid replay running the command a
+second time.
+
+
+```python
+import kitaru
+from kitaru.adapters.gemini import (
+    GeminiInteractionResult,
+    GeminiSandboxFunctionExecution,
+    GeminiSandboxFunctionSpec,
+    execute_gemini_sandbox_function_call,
+)
+
+@kitaru.checkpoint
+def run_requested_function(
+    result: GeminiInteractionResult,
+) -> GeminiSandboxFunctionExecution:
+    return execute_gemini_sandbox_function_call(
+        result,
+        {
+            "sandbox_python_version": GeminiSandboxFunctionSpec(
+                function_name="sandbox_python_version",
+                command="python --version",
+            )
+        },
+    )
+```
+
+The returned `GeminiSandboxFunctionExecution` contains the matched call metadata,
+the local `SandboxCommandResult`, the content-block payload sent to Gemini, and
+the ready-to-send `GeminiInteractionRequest.function_result(...)`.
+
+V1 intentionally does **not** parse model-supplied function arguments and only
+builds model-targeted continuations that use stored Gemini interaction history.
+It rejects provider-agent/Antigravity results, `agent=...` overrides, and
+`store=False` stateless continuations. Stateless function-result calls must send
+the full previous interaction history plus the function-result step, while this
+helper only has the stable `requires_action` summary. The helper matches by safe
+step metadata that Kitaru already exposes: step index, step type, call ID, and
+function name. Registered commands can be static, or they can be built from that
+safe call metadata. If you need model arguments later, that needs a separate
+opt-in design because those arguments live in raw provider payloads and may
+contain private user data.
+
+The default function-result payload is a Gemini text content block containing a
+compact JSON object. That JSON object includes:
+
+- `ok`
+- `exit_code`
+- `stdout` and `stderr`, clipped to a compact model-facing size by default
+- stdout/stderr truncation flags, including whether the helper clipped the
+  model-facing payload
+- cleanup policy and cleanup success
+- redaction flags and warnings when Kitaru changed model-facing stdout or
+  stderr before sending it back to Gemini
+
+It does not include environment variables, full stack IDs, sandbox IDs, session
+IDs, the command string, or a raw cleanup error string in the payload sent back
+to Gemini. The local `SandboxCommandResult` remains available to your own code
+for debugging.
+
+Kitaru redacts the default model-facing stdout and stderr before building that
+payload. It removes exact values provided through `GeminiSandboxFunctionSpec.env`,
+common secret-like key/value patterns, and bearer or authorization tokens. This
+is best-effort protection, not a guarantee: a command can still print sensitive
+text in a shape no generic redactor recognizes. Design sandbox commands so they
+do not print secrets. If you provide a custom `result_payload_builder`, that
+builder owns its own redaction before returning anything that will be sent to
+Gemini.
+
+This helper does not move Google-owned execution into Kitaru. Antigravity
+internals, built-in Gemini code execution, hosted MCP, web execution, and
+Google-owned tools still run wherever Google runs them. Kitaru can only
+checkpoint the custom function body that your application explicitly executes.
+
+The runnable example includes a dry-run-first showcase:
+
+```bash
+uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py \
+  --dry-run \
+  --mode sandbox-function
+```
 
 ## Polling background interactions
 
@@ -607,6 +797,8 @@ live client object or anything whose `repr()` can change between processes.
 - `steps`, a list of `GeminiInteractionStepSummary` records derived primarily
   from `interaction.steps`
 - `usage` when reported by the SDK
+- `estimated_cost_usd` when Kitaru can estimate one automatically or a configured
+  calculator returns one
 - `poll_count`, `duration_ms`, `sdk_version`, and non-sensitive `metadata`
 - artifact names for captured request manifest, output, usage, event log, and
   run summary
@@ -708,10 +900,10 @@ those call bodies. Google runs them inside its hosted interaction runtime. The
 adapter would be lying if it claimed it could replay those internals
 independently.
 
-A future client-tool mode may be possible for tools that your Python process
-executes itself: Gemini reaches `requires_action`, Kitaru runs the local tool
-body, and a later interaction sends the matching function result. That would
-only cover the local tool body Kitaru actually runs. It would still not make
+Caller-owned custom functions are supported through the explicit sandbox helper
+shown above: Gemini reaches `requires_action`, Kitaru runs a registered sandbox
+command, and a later interaction sends the matching function result. That only
+covers the function body Kitaru actually runs. It still does not make
 Google-owned managed-agent internals replayable.
 
 ## Recommended durability pattern
@@ -792,15 +984,18 @@ To inspect the example without making a Gemini API call:
 ```bash
 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --help
 uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --stream
+uv run python examples/integrations/gemini_interactions_agent/gemini_interactions_adapter.py --dry-run --mode sandbox-function
 ```
 
-The example includes:
+The example supports:
 
 - `--help` for smoke tests
 - `--dry-run` for a no-network preview
 - `--stream` to use `run_stream_sync(...)` for real calls and preview stream
   metadata in dry runs
 - `--mode model` using `gemini-3.5-flash`
+- `--mode sandbox-function` for caller-owned custom functions that run through
+  Kitaru's active sandbox
 - `--mode antigravity` as an explicit slower/costlier managed-agent demo
 
 ## Troubleshooting

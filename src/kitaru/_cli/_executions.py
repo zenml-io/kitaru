@@ -3,19 +3,37 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from cyclopts import Parameter
 
+from kitaru._client._statistics import (
+    LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
+    normalize_execution_statistics_metrics,
+    validate_statistics_max_groups,
+)
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.client import Execution, ExecutionStatus, LogEntry, PendingWait
-from kitaru.errors import build_recovery_command, format_recovery_hint
+from kitaru.client import (
+    Execution,
+    ExecutionStatistics,
+    ExecutionStatus,
+    LogEntry,
+    PendingWait,
+)
+from kitaru.errors import (
+    KitaruUsageError,
+    build_recovery_command,
+    format_recovery_hint,
+)
 from kitaru.inspection import (
     serialize_execution,
+    serialize_execution_statistics,
     serialize_execution_summary,
     serialize_log_entry,
 )
@@ -36,6 +54,7 @@ from ._helpers import (
     _format_timestamp,
     _is_input_interactive,
     _is_interactive,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
     _validate_pagination,
@@ -86,6 +105,49 @@ def _parse_json_object(
             '(for example: \'{"topic": "AI"}\').'
         )
     return parsed
+
+
+def _load_replay_exec_ids(path: str) -> list[str]:
+    """Load replay parent execution IDs from a JSON file."""
+    ids_path = Path(path).expanduser()
+    source_label = f"--ids-file file '{ids_path}'"
+    try:
+        payload = _parse_json_value(ids_path.read_text(), option_name=source_label)
+    except OSError as exc:
+        raise KitaruUsageError(f"Unable to read ID file '{ids_path}': {exc}") from exc
+    except ValueError as exc:
+        raise KitaruUsageError(str(exc)) from exc
+
+    item = payload.get("item") if isinstance(payload, dict) else None
+    if isinstance(item, dict) and "exec_ids" in item:
+        payload = item
+
+    raw_ids: Any
+    if isinstance(payload, list):
+        raw_ids = payload
+    elif isinstance(payload, dict):
+        raw_ids = payload.get("exec_ids")
+    else:
+        raw_ids = None
+
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' must contain a JSON list or an object with "
+            "a non-empty exec_ids list."
+        )
+
+    non_string_ids = [item for item in raw_ids if not isinstance(item, str)]
+    if non_string_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' must contain only string execution IDs."
+        )
+
+    exec_ids = [exec_id.strip() for exec_id in raw_ids if exec_id.strip()]
+    if not exec_ids:
+        raise KitaruUsageError(
+            f"ID file '{ids_path}' did not contain any non-empty execution IDs."
+        )
+    return exec_ids
 
 
 def _parse_image_option(
@@ -164,6 +226,55 @@ def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
     return ", ".join(entries)
 
 
+def _display_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _display_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        float_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(float_value):
+        return None
+    return float_value
+
+
+def _format_llm_usage_summary(summary: Mapping[str, Any] | None) -> str:
+    """Render a compact LLM usage summary for execution details."""
+    if not summary:
+        return "none"
+    usage_record_count = _display_int(summary.get("usage_record_count"))
+    incurred = _display_int(summary.get("incurred_usage_record_count"))
+    reused = _display_int(summary.get("reused_usage_record_count"))
+    total_tokens = _display_int(summary.get("total_tokens"))
+    display_cost = _display_float(summary.get("display_cost_usd"))
+    actual_cost = _display_float(summary.get("actual_cost_usd"))
+    estimated_cost = _display_float(summary.get("estimated_cost_usd"))
+    if None in (
+        usage_record_count,
+        incurred,
+        reused,
+        total_tokens,
+        display_cost,
+        actual_cost,
+        estimated_cost,
+    ):
+        return "summary metadata is malformed"
+    return (
+        f"{usage_record_count} usage records ({incurred} incurred, {reused} reused), "
+        f"{total_tokens} tokens, display cost ${display_cost:.6f} "
+        f"(actual ${actual_cost:.6f}, estimated ${estimated_cost:.6f})"
+    )
+
+
 def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
     """Build label/value rows for execution details output."""
     pending_wait_name = "none"
@@ -187,6 +298,7 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
         ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
+        ("LLM usage", _format_llm_usage_summary(execution.llm_usage_summary)),
     ]
 
 
@@ -203,6 +315,77 @@ def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
         ]
         for execution in executions
     ]
+
+
+def _statistics_column_label(key: str) -> str:
+    """Render a statistics key as a readable table column label."""
+    if key == "flow_id":
+        return "Flow ID"
+    if key == "stack_id":
+        return "Stack ID"
+    words = key.replace("_", " ").replace("-", " ").split()
+    return " ".join(
+        word.upper() if word.lower() == "id" else word.capitalize() for word in words
+    )
+
+
+def _ordered_mapping_keys(mappings: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Return mapping keys in first-seen order across all mappings."""
+    columns: list[str] = []
+    for mapping in mappings:
+        for key in mapping:
+            if key not in columns:
+                columns.append(key)
+    return columns
+
+
+def _execution_statistics_metric_columns(
+    statistics: ExecutionStatistics,
+    requested_metric_names: Sequence[str] = (),
+) -> list[str]:
+    """Return metric columns, preferring the user's requested metric order."""
+    response_columns = _ordered_mapping_keys(
+        group.metrics for group in statistics.groups
+    )
+    columns = [
+        metric_name
+        for metric_name in requested_metric_names
+        if metric_name in response_columns
+    ]
+    columns.extend(
+        metric_name for metric_name in response_columns if metric_name not in columns
+    )
+    return columns
+
+
+def _execution_statistics_table(
+    statistics: ExecutionStatistics,
+    *,
+    requested_metric_names: Sequence[str] = (),
+) -> tuple[list[str], list[list[str]]]:
+    """Build dynamic table headers and rows for execution statistics."""
+    group_columns = _ordered_mapping_keys(group.keys for group in statistics.groups)
+    metric_columns = _execution_statistics_metric_columns(
+        statistics,
+        requested_metric_names=requested_metric_names,
+    )
+    columns = [
+        *[_statistics_column_label(column) for column in group_columns],
+        "Executions",
+        *[_statistics_column_label(column) for column in metric_columns],
+    ]
+    rows = [
+        [
+            *[str(group.keys.get(column, "")) for column in group_columns],
+            str(group.execution_count),
+            *[
+                "" if group.metrics.get(column) is None else str(group.metrics[column])
+                for column in metric_columns
+            ],
+        ]
+        for group in statistics.groups
+    ]
+    return columns, rows
 
 
 def _format_log_timestamp(value: str | None) -> str:
@@ -561,6 +744,146 @@ def list____(
             size=resolved_size,
             returned_count=len(executions),
             output=output_format,
+        )
+
+
+@executions_app.command
+def statistics(
+    *,
+    group_by: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--group-by"],
+            help=(
+                "Grouping to apply. Repeat for multiple groupings. Supported "
+                "values: status, flow, stack, tag, time:hour, time:day, "
+                "time:week, time:month, metadata:<key>."
+            ),
+        ),
+    ] = None,
+    metric: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--metric"],
+            help=(
+                "Metric to compute. Repeat for multiple metrics. Use "
+                "<name>:<source>:<avg|sum|min|max> for built-in sources "
+                "(duration, step_count, cached_step_count, output_artifact_count) "
+                "or <name>:metadata:<metadata_key>:<avg|sum|min|max>. "
+                "Common LLM shortcuts: "
+                f"{LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY}."
+            ),
+        ),
+    ] = None,
+    flow: Annotated[
+        str | None,
+        Parameter(help="Optional flow-name or flow-ID filter."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        Parameter(
+            help="Optional status filter (running/waiting/completed/failed/cancelled)."
+        ),
+    ] = None,
+    stack: Annotated[
+        str | None,
+        Parameter(help="Optional stack-name or stack-ID filter."),
+    ] = None,
+    tag: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--tag"],
+            help="Tag filter. Repeat to require multiple tags.",
+        ),
+    ] = None,
+    max_groups: Annotated[
+        int,
+        Parameter(help="Maximum number of public statistics groups to return."),
+    ] = 1000,
+    page: Annotated[
+        int | None, Parameter(help="1-based page number to return.")
+    ] = None,
+    size: Annotated[
+        int | None, Parameter(help="Number of groups to return per page.")
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Show grouped execution statistics."""
+    command = "executions.statistics"
+    output_format = _resolve_output_format(output)
+    pagination_requested = page is not None or size is not None
+    resolved_page = DEFAULT_LIST_PAGE if page is None else page
+    resolved_size = DEFAULT_LIST_SIZE if size is None else size
+    if pagination_requested:
+        resolved_page, resolved_size = _validate_pagination(
+            page=resolved_page,
+            size=resolved_size,
+            command=command,
+            output=output_format,
+        )
+    try:
+        validate_statistics_max_groups(max_groups, label="--max-groups")
+    except KitaruUsageError as exc:
+        _exit_with_error(command, str(exc), output=output_format)
+
+    statistics_result = run_with_cli_error_boundary(
+        lambda: (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.statistics(
+                group_by=group_by or [],
+                metrics=metric or [],
+                flow=flow,
+                status=status,
+                stack=stack,
+                tags=tag,
+                max_groups=max_groups,
+            )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    display_statistics = statistics_result
+    if pagination_requested:
+        display_statistics = ExecutionStatistics(
+            groups=_paginate_items(
+                statistics_result.groups,
+                page=resolved_page,
+                size=resolved_size,
+            ),
+            truncated=statistics_result.truncated,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_execution_statistics(display_statistics),
+            output=output_format,
+        )
+        return
+
+    requested_metric_names = [
+        metric.name for metric in normalize_execution_statistics_metrics(metric or [])
+    ]
+    columns, rows = _execution_statistics_table(
+        display_statistics,
+        requested_metric_names=requested_metric_names,
+    )
+    _emit_table("Kitaru execution statistics", columns, rows)
+    if pagination_requested:
+        _emit_pagination_note(
+            page=resolved_page,
+            size=resolved_size,
+            returned_count=len(display_statistics.groups),
+            total_count=len(statistics_result.groups),
+            output=output_format,
+        )
+    if display_statistics.truncated:
+        print(
+            f"Results truncated at --max-groups {max_groups}. "
+            "Narrow filters or increase --max-groups."
         )
 
 
@@ -1017,52 +1340,122 @@ def input_(
 
 @executions_app.command
 def replay_(
-    exec_id: Annotated[
-        str,
-        Parameter(help="Execution ID."),
-    ],
+    exec_ids: Annotated[
+        list[str] | None,
+        Parameter(help="Execution ID(s) to replay."),
+    ] = None,
     *,
-    from_: Annotated[
+    ids_file: Annotated[
+        str | None,
+        Parameter(
+            name=["--ids-file"],
+            help=(
+                "JSON file containing execution IDs as a list or as an object "
+                "with an exec_ids list."
+            ),
+        ),
+    ] = None,
+    at: Annotated[
         str,
         Parameter(
-            help="Checkpoint selector (name, invocation ID, or call ID).",
-            alias=["--from"],
+            help=(
+                "Invocation ID or call ID where replay switches from playback "
+                "to live execution."
+            ),
         ),
     ],
-    args: Annotated[
+    flow_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--flow-overrides"],
+            help="Flow input overrides as a JSON object.",
+        ),
+    ] = None,
+    checkpoint_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--checkpoint-overrides"],
+            help=(
+                "Checkpoint-scope overrides as a JSON object keyed by checkpoint name."
+            ),
+        ),
+    ] = None,
+    invocation_overrides: Annotated[
+        str | None,
+        Parameter(
+            name=["--invocation-overrides"],
+            help=(
+                "Invocation-scope overrides as a JSON object keyed by "
+                "invocation or call ID."
+            ),
+        ),
+    ] = None,
+    skip: Annotated[
         str | None,
         Parameter(
             help=(
-                "Flow input overrides as a JSON object "
-                '(for example \'{"topic": "New topic"}\').'
-            )
+                "Comma-separated invocation IDs or call IDs to force playback in "
+                "the live tail."
+            ),
         ),
     ] = None,
-    overrides: Annotated[
+    tag: Annotated[
         str | None,
-        Parameter(help=("Replay overrides as a JSON object with `checkpoint.*` keys.")),
+        Parameter(help="Tag to apply to replay children."),
+    ] = None,
+    wait: Annotated[
+        bool | None,
+        Parameter(help="Block until replay children complete."),
+    ] = None,
+    on_error: Annotated[
+        Literal["collect", "fail"] | None,
+        Parameter(help="Whether to collect or fail on per-parent replay errors."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Replay an execution from a checkpoint boundary."""
+    """Replay one or more executions from a checkpoint cut point."""
     command = "executions.replay"
     output_format = _resolve_output_format(output)
 
-    def _replay_execution() -> Execution:
-        flow_inputs = _parse_json_object(args, option_name="--args")
-        parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
+    def _resolve_exec_ids() -> list[str]:
+        positional_ids = [item.strip() for item in (exec_ids or []) if item.strip()]
+        file_ids = _load_replay_exec_ids(ids_file) if ids_file else []
+        combined_ids = [*positional_ids, *file_ids]
+        if not combined_ids:
+            raise KitaruUsageError("Provide at least one execution ID or `--ids-file`.")
+        return combined_ids
+
+    def _replay_execution() -> Any:
+        resolved_exec_ids = _resolve_exec_ids()
+        parsed_skip = (
+            [item.strip() for item in skip.split(",") if item.strip()] if skip else None
+        )
         return (
             cli_dependencies()
             .kitaru_client()
             .executions.replay(
-                exec_id,
-                from_=from_,
-                overrides=parsed_overrides or None,
-                **flow_inputs,
+                resolved_exec_ids,
+                at=at,
+                flow_overrides=_parse_json_object(
+                    flow_overrides, option_name="--flow-overrides"
+                )
+                or None,
+                checkpoint_overrides=_parse_json_object(
+                    checkpoint_overrides, option_name="--checkpoint-overrides"
+                )
+                or None,
+                invocation_overrides=_parse_json_object(
+                    invocation_overrides, option_name="--invocation-overrides"
+                )
+                or None,
+                skip=parsed_skip,
+                tag=tag,
+                wait=wait,
+                on_error=on_error,
             )
         )
 
-    execution = run_with_cli_error_boundary(
+    submission = run_with_cli_error_boundary(
         _replay_execution,
         command=command,
         output=output_format,
@@ -1070,13 +1463,38 @@ def replay_(
     )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        payload = submission.to_json()
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    summary = submission.summary
+    results = submission.results
+    failures = submission.failures
+    skipped_rows = submission.skipped
+    if len(results) == 1 and not failures and not skipped_rows:
+        row = results[0]
+        _print_success(
+            f"Replayed execution: {row.replay_exec_id}",
+            detail=f"Status: {row.status}",
+        )
+        compare_url = row.compare_url or submission.compare_url
+        if compare_url:
+            print("\nCompare original vs replay:")
+            print(f"  {compare_url}")
         return
 
     _print_success(
-        f"Replayed execution: {execution.exec_id}",
-        detail=f"Status: {execution.status.value}",
+        "Replay submission complete",
+        detail=(
+            f"{summary.submitted} submitted, "
+            f"{summary.completed} completed, "
+            f"{summary.failed} failed, "
+            f"{summary.skipped} skipped."
+        ),
     )
+    if submission.compare_url:
+        print("\nCompare replay batch:")
+        print(f"  {submission.compare_url}")
 
 
 @executions_app.command
@@ -1110,16 +1528,38 @@ def retry_(
 @executions_app.command
 def resume_(
     exec_id: Annotated[
-        str,
+        str | None,
         Parameter(help="Execution ID."),
-    ],
+    ] = None,
+    *,
+    exec_id_option: Annotated[
+        str | None,
+        Parameter(name="--exec-id", help="Execution ID."),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Resume a paused execution when it did not continue automatically after input."""
     command = "executions.resume"
     output_format = _resolve_output_format(output)
+    if exec_id is None and exec_id_option is None:
+        _exit_with_error(
+            command,
+            "Execution ID is required. Provide it as an argument or with `--exec-id`.",
+            output=output_format,
+        )
+    if exec_id is not None and exec_id_option is not None:
+        _exit_with_error(
+            command,
+            "Execution ID can only be provided once. Use either the argument "
+            "or `--exec-id`.",
+            output=output_format,
+        )
+    resolved_exec_id = exec_id if exec_id is not None else exec_id_option
+    if resolved_exec_id is None:
+        raise AssertionError("Execution ID validation failed.")
+
     execution = run_with_cli_error_boundary(
-        lambda: cli_dependencies().kitaru_client().executions.resume(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.resume(resolved_exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -1160,4 +1600,171 @@ def cancel_(
     _print_success(
         f"Cancelled execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
+def diff_(
+    original: Annotated[
+        str,
+        Parameter(help="Original execution ID."),
+    ],
+    *executions: Annotated[
+        str,
+        Parameter(help="Optional replay execution IDs to compare."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Compare an original execution against replay executions."""
+    from kitaru.diff import diff, serialize_execution_diff
+
+    command = "executions.diff"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff(original, *executions)
+        return serialize_execution_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    compared_count = len(payload.get("compared", []))
+    _print_success(
+        f"Diff for {original}",
+        detail=f"Compared against {compared_count} replay execution(s).",
+    )
+    for url in payload.get("urls", []):
+        print(f"  ui: {url}")
+
+
+@executions_app.command(name="diff-matrix")
+def diff_matrix_(
+    *exec_ids: Annotated[
+        str,
+        Parameter(help="Original execution IDs to diff as a matrix."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Diff many original executions against their auto-discovered replays."""
+    from kitaru.diff import diff_cohort, serialize_cohort_diff
+
+    command = "executions.diff_matrix"
+    output_format = _resolve_output_format(output)
+
+    def _load_diff() -> dict[str, Any]:
+        result = diff_cohort(list(exec_ids))
+        return serialize_cohort_diff(result)
+
+    payload = run_with_cli_error_boundary(
+        _load_diff,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    row_count = len(payload.get("rows", []))
+    _print_success(
+        "Diff matrix complete",
+        detail=f"Compared {row_count} original execution(s).",
+    )
+
+
+@executions_app.command
+def cohort_(
+    *,
+    flow: Annotated[str, Parameter(help="Flow name to select executions from.")],
+    at: Annotated[
+        str,
+        Parameter(help="Replay anchor checkpoint used for pre-filtering."),
+    ],
+    deployment: Annotated[
+        str | None,
+        Parameter(help="Deployment tag pin (for example prod)."),
+    ] = None,
+    deployment_version: Annotated[
+        int | None,
+        Parameter(help="Deployment version pin."),
+    ] = None,
+    order_by: Annotated[
+        str,
+        Parameter(help="Sort field; prefix with '-' for descending."),
+    ] = "-started_at",
+    limit: Annotated[int, Parameter(help="Maximum executions to return.")] = 50,
+    since: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/after this ISO date/time."),
+    ] = None,
+    until: Annotated[
+        str | None,
+        Parameter(help="Include executions started on/before this ISO date/time."),
+    ] = None,
+    max_scan: Annotated[
+        int,
+        Parameter(help="Maximum executions to inspect while resolving."),
+    ] = 500,
+    include_failed: Annotated[
+        bool,
+        Parameter(help="Include failed executions in addition to completed."),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Resolve a cohort of original executions (dry-run selection only).
+
+    Use ``executions cohort -o json`` and ``executions replay --ids-file`` to
+    review selection before submitting replay work.
+    """
+    command = "executions.cohort"
+    output_format = _resolve_output_format(output)
+    status_filter: str | list[str] = (
+        ["completed", "failed"] if include_failed else "completed"
+    )
+
+    def _resolve_cohort() -> dict[str, Any]:
+        cohort_result = (
+            cli_dependencies()
+            .kitaru_client()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        return cohort_result.to_json()
+
+    payload = run_with_cli_error_boundary(
+        _resolve_cohort,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    matched = payload.get("matched", 0)
+    _print_success(
+        "Cohort resolved",
+        detail=(
+            f"{matched} execution(s) selected (scanned {payload.get('scanned', 0)})."
+        ),
     )

@@ -18,7 +18,6 @@ Then:
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import gradio as gr
 
@@ -27,6 +26,11 @@ from kitaru.client import ArtifactRef, Execution, ExecutionStatus, KitaruClient
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+
+from examples.chatbot.history_artifacts import (  # noqa: E402
+    HISTORY_ARTIFACT_NAME,
+    load_longest_usable_history,
+)
 
 FLOW_NAME = "chatbot"
 DEPLOYMENT_TAG = "prod"
@@ -85,32 +89,8 @@ def _poll_until_ready(exec_id: str) -> Execution | None:
 
 
 # ---------------------------------------------------------------------------
-# History (single source of truth: the latest 'history' artifact)
+# History (single source of truth: the best usable 'history' artifact)
 # ---------------------------------------------------------------------------
-
-
-def _history_length(a: ArtifactRef) -> int:
-    """Saved history length is monotonically increasing — use it as a turn index.
-
-    ``producing_call`` is just ``"greet"`` / ``"chat_turn"`` (no per-call digit
-    suffix), so we can't extract a turn index from it. Each saved history is
-    strictly longer than the previous one (greet=1, then +2 per chat_turn).
-    """
-    raw = (a.metadata or {}).get("length") if isinstance(a.metadata, dict) else None
-    return raw if isinstance(raw, int) else 0
-
-
-def _normalize_history(raw: Any) -> list[dict[str, str]]:
-    """Normalize a loaded history artifact value to messages-format dicts."""
-    if not raw:
-        return []
-    out: list[dict[str, str]] = []
-    for m in raw:
-        if isinstance(m, dict):
-            out.append({"role": str(m["role"]), "content": str(m["content"])})
-        else:
-            out.append({"role": str(m.role), "content": str(m.content)})
-    return out
 
 
 def _load_history(
@@ -119,28 +99,46 @@ def _load_history(
     arts: list[ArtifactRef] | None = None,
     retries: int = 1,
     retry_sleep: float = 0.5,
+    min_length: int = 0,
 ) -> list[dict[str, str]]:
-    """Load the latest ``history`` artifact given an ``exec_id`` or pre-fetched arts.
+    """Load the best usable ``history`` artifact for an execution.
 
     Pass ``arts`` when the caller already has a hydrated Execution (saves a
     ~1.5s artifacts.list roundtrip). Otherwise pass ``exec_id`` and we fetch.
     Use ``retries`` > 1 right after a flow first transitions to WAITING — the
-    artifact list can briefly trail the status update.
+    artifact list can briefly trail the status update. Pass ``min_length`` when
+    the caller already knows the shortest acceptable transcript length; this
+    prevents a stale non-empty artifact from replacing a locally pending turn.
     """
+    current_arts = arts
+    best_short_history: list[dict[str, str]] = []
     for attempt in range(retries):
-        if arts is None:
+        if current_arts is None:
             try:
-                arts = client.artifacts.list(exec_id, name="history") if exec_id else []
+                current_arts = (
+                    client.artifacts.list(exec_id, name=HISTORY_ARTIFACT_NAME)
+                    if exec_id
+                    else []
+                )
             except Exception:
-                arts = []
-        history_arts = [a for a in arts if a.name == "history"]
+                current_arts = []
+
+        history_arts = [a for a in current_arts if a.name == HISTORY_ARTIFACT_NAME]
         if history_arts:
-            latest = max(history_arts, key=_history_length)
-            return _normalize_history(latest.load())
-        arts = None  # force re-fetch on next attempt
+            history = load_longest_usable_history(history_arts)
+            if len(history) >= min_length and history:
+                return history
+            if len(history) > len(best_short_history):
+                best_short_history = history
+
+        # If the hydrated Execution had a stale artifact list, fetch a fresh
+        # list on the next attempt. If the caller only supplied artifact refs,
+        # retrying can still help when ``ArtifactRef.load()`` was transiently
+        # unavailable.
+        current_arts = None if exec_id else current_arts
         if attempt + 1 < retries:
             time.sleep(retry_sleep)
-    return []
+    return [] if min_length else best_short_history
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +259,12 @@ def new_chat():
         )
         return
 
-    history = _load_history(arts=ex.artifacts, retries=10, retry_sleep=0.5)
+    history = _load_history(
+        exec_id=ex.exec_id,
+        arts=ex.artifacts,
+        retries=10,
+        retry_sleep=0.5,
+    )
     wait_id = ex.pending_wait.wait_id if ex.pending_wait else None
     # NOTE: refresh sidebar choices but DON'T set `value=ex.exec_id` here — that
     # would fire `sessions.change → load_session`, racing with the state we just
@@ -283,7 +286,12 @@ def load_session(
     ex = _try_get(exec_id)
     if ex is None:
         return [], {}, gr.Textbox(interactive=False), "Could not load session."
-    history = _load_history(arts=ex.artifacts, retries=5, retry_sleep=0.4)
+    history = _load_history(
+        exec_id=ex.exec_id,
+        arts=ex.artifacts,
+        retries=5,
+        retry_sleep=0.4,
+    )
     wait_id = ex.pending_wait.wait_id if ex.pending_wait else None
     state = {"exec_id": exec_id, "wait_id": wait_id}
     status = (
@@ -366,7 +374,27 @@ def respond(message: str, history: list[dict], state: dict):
         new_history, next_wait_id = pending, None
     else:
         next_wait_id = ex.pending_wait.wait_id if ex.pending_wait else None
-        new_history = _load_history(arts=ex.artifacts) or pending
+        min_history_length = (
+            len(pending) + 1 if next_wait_id is not None else len(pending)
+        )
+        loaded_history = _load_history(
+            exec_id=ex.exec_id,
+            arts=ex.artifacts,
+            retries=3,
+            retry_sleep=0.3,
+            min_length=min_history_length,
+        )
+        if loaded_history:
+            new_history = loaded_history
+        else:
+            wait_question = getattr(ex.pending_wait, "question", None)
+            if next_wait_id is not None and wait_question:
+                new_history = [
+                    *pending,
+                    {"role": "assistant", "content": wait_question},
+                ]
+            else:
+                new_history = pending
 
     yield (
         new_history,

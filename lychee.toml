@@ -31,12 +31,20 @@ exclude = [
     "^https://twitter\\.com",
     # Slack invite redirect returns 403 to bots/link-checkers
     "^https://(www\\.)?zenml\\.io/slack",
+    # katacontainers.io refuses automated link-checker connections
+    "^https://katacontainers\\.io",
 ]
 
-# Paths to exclude from scanning
+# Paths to exclude from scanning.
+# CHANGELOG.md preserves historical release links, and planning/review folders are
+# internal agent scratch docs; stale links there should not block CI.
 exclude_path = [
     ".venv",
+    "CHANGELOG.md",
     "design",
+    "docs/investigations",
+    "docs/plans",
+    "docs/reviews",
     "prompt-exports",
 ]
 

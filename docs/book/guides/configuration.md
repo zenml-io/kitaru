@@ -5,9 +5,11 @@ icon: gear
 
 # Configuration
 
-This guide covers Kitaru's configuration system: where settings live on disk,
-how to set execution defaults, how headless environments are bootstrapped, and
-how precedence is resolved.
+This page is the reference for how Kitaru is configured: where settings live on
+disk, how to set execution defaults, the `KITARU_*` environment variables, and
+how all of these are resolved by precedence. Configuration is also what keeps
+runs reproducible — at flow start Kitaru freezes a fully resolved execution spec,
+so a [replay](replay-and-overrides.md) reruns under the same config it recorded.
 
 ## Config directory
 
@@ -53,6 +55,7 @@ kitaru.configure(
     stack="local",
     cache=False,
     retries=1,
+    llm_estimated_costs="auto",
     image=kitaru.ImageSettings(
         base_image="python:3.12-slim",
         environment={"LOG_LEVEL": "INFO"},
@@ -131,15 +134,10 @@ service-account API key created with `kitaru auth service-accounts ...` and
 `kitaru auth api-keys ...`. See [Authentication](authentication.md) for
 the full service-account/API-key flow.
 
-For normal interactive use:
-
-- `kitaru login` starts and connects to a local server
-- `kitaru login <server>` connects to a remote server
-
-The `KITARU_*` connection variables are mainly for Docker, CI, and other
-headless environments.
-
-Use them together for Docker, CI, or any other headless environment:
+For normal interactive use, prefer `kitaru login` (starts and connects to a
+local server) or `kitaru login <server>` (connects to a remote server). The
+`KITARU_*` connection variables are for Docker, CI, and other headless
+environments. Set them together:
 
 ```bash
 export KITARU_SERVER_URL=https://my-server.example.com
@@ -153,14 +151,22 @@ There are two guardrails:
 2. If a remote server is configured via env vars, `KITARU_PROJECT` is required
    at first use (`KitaruClient()`, `my_flow.run()`, replay, etc.).
 
+For interactive work, you can persist the project instead with
+`kitaru project use production` or choose it during login with
+`kitaru login <server> --project production`. For CI, Docker, and other
+headless processes, prefer `KITARU_PROJECT` so the job states its project
+explicitly.
+
 Auth-management commands are the exception to the project rule because service
 accounts and API keys belong to the server, not to a single project. For
 example, `kitaru auth api-keys rotate ...` can run with a server URL and auth
 token even when `KITARU_PROJECT` is not set.
 
-Internally, Kitaru translates these public env vars into the ZenML env vars the
-runtime already understands. That means you should configure `KITARU_*`, not
-`ZENML_*`, in normal Kitaru docs and examples.
+Internally, Kitaru translates the server URL and auth token into the ZenML env
+vars the runtime already understands. `KITARU_PROJECT` remains the Kitaru project
+selector for names like `production`; it is mirrored to `ZENML_ACTIVE_PROJECT_ID`
+only when the value is already a UUID for compatibility. That means you should
+configure `KITARU_*`, not `ZENML_*`, in normal Kitaru docs and examples.
 
 ### Execution
 
@@ -187,6 +193,7 @@ saved deployment snapshot.
 
 - `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
   explicit `model=` argument is provided.
+- `KITARU_LLM_ESTIMATED_COSTS` controls automatic `genai-prices` estimated-cost tracking for direct `kitaru.llm()` calls and framework adapters. Use `auto` (default) or `off`.
 - `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
 - `OLLAMA_HOST` sets the Ollama server address for `ollama/*` models
   (default: `http://localhost:11434`).
@@ -195,6 +202,8 @@ saved deployment snapshot.
 registered alias, Kitaru passes it straight through as a raw provider/model
 string. This lookup happens before Kitaru falls back to the locally configured
 default alias.
+
+Automatic estimated costs are calculated with [`genai-prices`](https://github.com/pydantic/genai-prices) after the provider or adapter call succeeds. Kitaru only estimates when it has reliable provider, model, and token data. If pricing fails, the model response and token counts are still recorded. See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata) for the actual-vs-estimated cost fields.
 
 If you want the full secret-backed setup path for `kitaru.llm()`, see
 [Secrets + Model Registration](secrets-and-model-registration.md).
@@ -218,7 +227,7 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 3. `kitaru.configure(...)`
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
-6. Persisted active stack fallback plus global user config (for example connection defaults)
+6. Persisted active project/stack fallback plus global user config (for example connection defaults)
 7. Built-in defaults (`retries=0`; cache is left unset so per-checkpoint cache settings and orchestrator defaults apply)
 
 In practice, `stack` starts unset in the built-in defaults and is then resolved
@@ -226,7 +235,7 @@ from the persisted active stack when one is available.
 
 For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
-1. Persisted global connection (`kitaru login`)
+1. Persisted connection and active project (`kitaru login`, `kitaru project use`)
 2. Direct `ZENML_*` env vars for compatibility
 3. `KITARU_*` env vars
 4. Runtime overrides from `kitaru.configure(...)`
@@ -238,6 +247,7 @@ For connection-specific resolution, Kitaru uses this lower-to-higher order:
 stack = "prod"
 cache = false
 retries = 2
+llm_estimated_costs = "auto"
 
 [tool.kitaru.image]
 base_image = "python:3.12-slim"
@@ -323,31 +333,49 @@ def my_flow(topic: str) -> str:
 
 ## Project selection
 
-There are really two different stories here:
+Project selection is first-class Kitaru state. For interactive work, use the CLI:
 
-1. **Persisted login / default setup** — if you connect with
-   `kitaru login <server>`, Kitaru can usually just follow the server-side
-   default project and you do not need to think about it much.
-2. **Env-driven remote bootstrap** — if you connect with `KITARU_SERVER_URL` /
-   `KITARU_AUTH_TOKEN`, then `KITARU_PROJECT` is required at first use.
+```bash
+kitaru project list
+kitaru project use production
+kitaru project current
+```
 
-Bare `kitaru login` is the local-server path instead: it does not use
+That persists `production` as the active project for later CLI and SDK calls.
+You can also choose a project while connecting to a remote server:
+
+```bash
+kitaru login https://kitaru.example.com --project production
+```
+
+For env-driven remote bootstrap, set `KITARU_PROJECT` alongside the server URL
+and auth token:
+
+```bash
+export KITARU_SERVER_URL=https://kitaru.example.com
+export KITARU_AUTH_TOKEN=kat_...
+export KITARU_PROJECT=production
+```
+
+This rule prevents a headless job from accidentally using a stale persisted
+project from some previous interactive session. The concrete story is: if a CI
+container starts with `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN`, Kitaru expects
+the container to also say `KITARU_PROJECT`. It does not silently borrow whatever
+project a developer used last week.
+
+When several sources name a project, higher-priority sources win:
+
+1. Process-local `kitaru.configure(project=...)`
+2. Public `KITARU_PROJECT`
+3. Compatibility `ZENML_ACTIVE_PROJECT_ID`
+4. Persisted active project from `kitaru login --project` or
+   `kitaru project use ...`
+
+Bare `kitaru login` is the local-server path: it does not use
 `KITARU_SERVER_URL` or `KITARU_AUTH_TOKEN`, and it warns instead of failing if
 those remote auth env vars are already set in your shell.
 
-You can set the project explicitly with either:
-
-- **Environment variable (preferred):** `KITARU_PROJECT=my-project`
-- **SDK call (advanced/internal):** `kitaru.configure(project="my-project")`
-
-{% hint style="info" %}
-`configure(project=...)` is an internal/testing escape hatch, not a normal
-user-facing setting. Prefer `KITARU_PROJECT` for standard usage.
-{% endhint %}
-
-When an explicit project override is set, it appears in `kitaru info` output
-as "Project override". It does not appear in `kitaru status` except as part of
-the raw Environment section when `KITARU_PROJECT` itself is active.
+See [Projects](projects.md) for the full CLI, SDK, and MCP project workflow.
 
 ## Headless / Docker / CI recipe
 

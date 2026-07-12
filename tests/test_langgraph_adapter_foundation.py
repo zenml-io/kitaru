@@ -13,10 +13,20 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from tests._genai_prices_helpers import install_fake_genai_calc_price
+
+
+def _config_with_injected_checkpointer(
+    checkpointer: object,
+) -> dict[str, dict[str, object]]:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    return {
+        "configurable": {agent_module.LANGGRAPH_CONFIG_CHECKPOINTER_KEY: checkpointer}
+    }
 
 
 @pytest.fixture
@@ -37,11 +47,24 @@ def test_public_import_surface(langgraph_adapter: types.ModuleType) -> None:
     assert langgraph_adapter.LangGraphCapturePolicy
     assert langgraph_adapter.LangGraphDurabilityPolicy
     assert langgraph_adapter.LangGraphStreamPolicy
+    assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_NAME == "run_sandbox_command"
+    assert (
+        "redacts the command text"
+        in langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION
+    )
+    assert langgraph_adapter.DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS == 20_000
+    assert langgraph_adapter.SandboxCommandToolArgs
+    assert langgraph_adapter.create_sandbox_command_tool
     assert langgraph_adapter.build_resume_request
     assert langgraph_adapter.wait_for_interrupt
 
     public_names = set(langgraph_adapter.__all__)
     assert "graph_call" not in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_NAME" in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_DESCRIPTION" in public_names
+    assert "DEFAULT_SANDBOX_COMMAND_TOOL_MAX_CHARS" in public_names
+    assert "SandboxCommandToolArgs" in public_names
+    assert "create_sandbox_command_tool" in public_names
 
     signature = inspect.signature(langgraph_adapter.KitaruGraphRunner)
     assert "checkpoint_strategy" in signature.parameters
@@ -396,6 +419,290 @@ class CheckpointableGraph:
 
     async def ainvoke(self, input: object, **_kwargs: object) -> object:
         return input
+
+
+def test_invoke_accepts_raw_fresh_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = runner.invoke({"x": 1}, thread_id="thread-1")
+
+    assert result.output == {"x": 1}
+    assert result.thread_id == "thread-1"
+
+
+async def _ainvoke_raw_fresh_input(runner: Any) -> Any:
+    return await runner.ainvoke({"x": 2}, thread_id="thread-async")
+
+
+def test_ainvoke_accepts_raw_fresh_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = asyncio.run(_ainvoke_raw_fresh_input(runner))
+
+    assert result.output == {"x": 2}
+    assert result.thread_id == "thread-async"
+
+
+def test_invoke_accepts_raw_none_input_with_thread_id(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    result = runner.invoke(None, thread_id="thread-none")
+
+    assert result.output is None
+    assert result.thread_id == "thread-none"
+
+
+def test_invoke_accepts_positional_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 3}, thread_id="request-thread"
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output == {"x": 3}
+    assert result.thread_id == "request-thread"
+
+
+def test_invoke_accepts_aliased_resume_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    assert (
+        aliased_types.LangGraphRunRequest is not langgraph_adapter.LangGraphRunRequest
+    )
+
+    command = SimpleNamespace(resume={"approved": True})
+    request = aliased_types.LangGraphRunRequest.resume(
+        command,
+        thread_id="aliased-request-thread",
+    )
+    seen_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_requests.append(request)
+        return langgraph_adapter.merge_config(request)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        CheckpointableGraph(),
+        config_factory=config_factory,
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output is command
+    assert result.thread_id == "aliased-request-thread"
+    assert isinstance(seen_requests[0], langgraph_adapter.LangGraphRunRequest)
+    assert not isinstance(seen_requests[0], aliased_types.LangGraphRunRequest)
+    canonical_request = cast(Any, seen_requests[0])
+    assert canonical_request.kind == "resume"
+    assert canonical_request.command is command
+    assert "input" not in canonical_request.model_fields_set
+    assert "command" in canonical_request.model_fields_set
+
+
+def test_invoke_accepts_aliased_start_run_request_with_explicit_none_input(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    request = aliased_types.LangGraphRunRequest.start(
+        None,
+        thread_id="aliased-none-input-thread",
+    )
+    seen_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_requests.append(request)
+        return langgraph_adapter.merge_config(request)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        CheckpointableGraph(),
+        config_factory=config_factory,
+    )
+
+    result = runner.invoke(request)
+
+    assert result.output is None
+    assert result.thread_id == "aliased-none-input-thread"
+    assert isinstance(seen_requests[0], langgraph_adapter.LangGraphRunRequest)
+    canonical_request = seen_requests[0]
+    assert canonical_request.kind == "start"
+    assert canonical_request.input is None
+    assert "input" in canonical_request.model_fields_set
+    assert "command" not in canonical_request.model_fields_set
+
+
+def test_invoke_treats_same_shaped_foreign_pydantic_model_as_raw_input(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class ForeignRunRequest(BaseModel):
+        schema_version: int = 1
+        kind: str = "start"
+        input: Any | None = None
+        command: Any | None = None
+        thread_id: str = "embedded-thread"
+        checkpoint_id: str | None = None
+        checkpoint_ns: str | None = None
+        context: Any | None = None
+        configurable: dict[str, Any] = Field(default_factory=dict)
+        config: dict[str, Any] = Field(default_factory=dict)
+        durability: str | None = None
+        metadata: dict[str, Any] = Field(default_factory=dict)
+
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    foreign_input = ForeignRunRequest(input={"x": 5})
+
+    result = runner.invoke(foreign_input, thread_id="raw-model-thread")
+
+    assert result.output is foreign_input
+    assert result.thread_id == "raw-model-thread"
+
+
+def test_invoke_accepts_keyword_run_request(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 4}, thread_id="request-keyword-thread"
+    )
+
+    result = runner.invoke(request=request)
+
+    assert result.output == {"x": 4}
+    assert result.thread_id == "request-keyword-thread"
+
+
+@pytest.mark.parametrize("thread_id", [None, "", "   ", 123])
+def test_raw_fresh_input_requires_non_empty_thread_id(
+    langgraph_adapter: types.ModuleType,
+    thread_id: object,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+
+    with pytest.raises(KitaruUsageError, match="thread_id"):
+        runner.invoke({"x": 1}, thread_id=cast(Any, thread_id))
+
+
+@pytest.mark.parametrize(
+    ("fresh_kwarg", "value"),
+    [
+        ("thread_id", "other-thread"),
+        ("checkpoint_id", None),
+        ("checkpoint_ns", "ns"),
+        ("context", {"tenant": "acme"}),
+        ("configurable", {"tenant": "acme"}),
+        ("config", {"tags": ["demo"]}),
+        ("durability", "sync"),
+        ("metadata", {"source": "test"}),
+    ],
+)
+def test_prebuilt_request_rejects_fresh_start_kwargs(
+    langgraph_adapter: types.ModuleType,
+    fresh_kwarg: str,
+    value: object,
+) -> None:
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 1}, thread_id="request-thread"
+    )
+
+    with pytest.raises(KitaruUsageError, match="prebuilt LangGraphRunRequest"):
+        runner.invoke(request, **{fresh_kwarg: value})
+
+
+def test_aliased_prebuilt_request_rejects_fresh_start_kwargs(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    aliased_types = importlib.import_module("src.kitaru.adapters.langgraph._types")
+    runner = langgraph_adapter.KitaruGraphRunner(CheckpointableGraph())
+    request = aliased_types.LangGraphRunRequest.resume(
+        SimpleNamespace(resume={"approved": True}),
+        thread_id="request-thread",
+    )
+
+    with pytest.raises(KitaruUsageError, match="prebuilt LangGraphRunRequest"):
+        runner.invoke(request, thread_id="fresh-thread")
+
+
+def test_raw_fresh_input_uses_same_request_config_path(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class RecordingGraph:
+        name = "recording"
+        checkpointer = object()
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, dict[str, Any], dict[str, Any]]] = []
+
+        def invoke(
+            self,
+            input: object,
+            *,
+            config: dict[str, Any],
+            context: object | None = None,
+            **kwargs: Any,
+        ) -> object:
+            self.calls.append((input, config, {"context": context, **kwargs}))
+            return input
+
+    seen_config_requests: list[object] = []
+    seen_context_requests: list[object] = []
+
+    def config_factory(request: object) -> dict[str, Any]:
+        seen_config_requests.append(request)
+        return {"configurable": {"factory": "yes", "thread_id": "factory-wrong"}}
+
+    def context_factory(request: object) -> dict[str, str]:
+        seen_context_requests.append(request)
+        return {"resolved": "context"}
+
+    graph = RecordingGraph()
+    runner = langgraph_adapter.KitaruGraphRunner(
+        graph,
+        config_factory=config_factory,
+        context_factory=context_factory,
+    )
+    start_kwargs = {
+        "thread_id": "config-thread",
+        "checkpoint_id": "checkpoint-1",
+        "checkpoint_ns": "ns",
+        "configurable": {"tenant": "acme", "thread_id": "configurable-wrong"},
+        "config": {"configurable": {"region": "eu", "thread_id": "config-wrong"}},
+        "metadata": {"source": "test"},
+    }
+
+    runner.invoke({"x": 1}, **start_kwargs)
+    explicit_request = langgraph_adapter.LangGraphRunRequest.start(
+        {"x": 1}, **start_kwargs
+    )
+    runner.invoke(explicit_request)
+
+    convenience_config = graph.calls[0][1]
+    explicit_config = graph.calls[1][1]
+
+    assert convenience_config == explicit_config
+    assert convenience_config["configurable"] == {
+        "factory": "yes",
+        "region": "eu",
+        "tenant": "acme",
+        "thread_id": "config-thread",
+        "checkpoint_id": "checkpoint-1",
+        "checkpoint_ns": "ns",
+    }
+    assert graph.calls[0][2]["context"] == {"resolved": "context"}
+    assert graph.calls[1][2]["context"] == {"resolved": "context"}
+    assert all(
+        isinstance(request, langgraph_adapter.LangGraphRunRequest)
+        for request in [*seen_config_requests, *seen_context_requests]
+    )
 
 
 def test_invoke_canonicalizes_foreign_graph_call_checkpoint_result(
@@ -811,6 +1118,493 @@ def test_successful_graph_call_saves_event_artifacts_in_checkpoint_scope(
     assert summary_metadata["thread_id"] == "thread-1"
 
 
+def test_find_usages_ignores_application_usage_dict_without_token_fields(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    assert (
+        agent_module._find_usages(
+            {"usage": {"feature": "beta"}},
+            max_depth=3,
+        )
+        == []
+    )
+
+
+def test_find_usages_accepts_zero_token_usage(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+
+    usages = agent_module._find_usages(
+        {"message": {"usage_metadata": {"input_tokens": 0, "output_tokens": 1}}},
+        max_depth=3,
+    )
+
+    assert usages == [{"input_tokens": 0, "output_tokens": 1}]
+
+
+def test_find_usages_deduplicates_shared_usage_references(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    shared_usage = {"input_tokens": 2, "output_tokens": 3}
+
+    usages = agent_module._find_usages(
+        {
+            "first": SimpleNamespace(usage_metadata=shared_usage),
+            "second": {"usage": shared_usage},
+            "third": [SimpleNamespace(usage=shared_usage)],
+        },
+        max_depth=3,
+    )
+
+    assert usages == [shared_usage]
+
+
+def test_graph_call_counts_request_response_token_aliases(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "usage": {
+                    "request_tokens": 4,
+                    "response_tokens": 6,
+                    "tokens_total": 10,
+                },
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 4
+    assert result.usage.output_tokens == 6
+    assert result.usage.total_tokens == 10
+    assert logged[0]["usage"]["input_tokens"] == 4
+    assert logged[0]["usage"]["output_tokens"] == 6
+    assert logged[0]["usage"]["total_tokens"] == 10
+
+
+def test_graph_call_prefers_completed_model_event_usage(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            tracker = tracking.get_current_tracker()
+            assert tracker is not None
+            first_event_id, first_context = tracker.start_model_event()
+            tracker.record_model_event(
+                first_event_id,
+                first_context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "fake-model",
+                    "usage": {"input_tokens": 2, "output_tokens": 3},
+                },
+            )
+            second_event_id, second_context = tracker.start_model_event()
+            tracker.record_model_event(
+                second_event_id,
+                second_context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "fake-model",
+                    "usage": {"input_tokens": 5, "output_tokens": 7},
+                },
+            )
+            return {
+                "usage": {"input_tokens": 100, "output_tokens": 200},
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.model_name == "fake-model"
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 10
+    assert result.usage.total_tokens == 17
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 10
+    assert logged[0]["usage"]["total_tokens"] == 17
+
+
+def test_graph_call_aggregates_multiple_output_usage_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content="first",
+                        type="ai",
+                        usage_metadata={"input_tokens": 2, "output_tokens": 3},
+                    ),
+                    SimpleNamespace(
+                        content="second",
+                        type="ai",
+                        usage_metadata={"input_tokens": 5, "output_tokens": 7},
+                    ),
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 10
+    assert result.usage.total_tokens == 17
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 10
+    assert logged[0]["usage"]["total_tokens"] == 17
+
+
+def test_graph_call_deduplicates_shared_output_usage_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+    shared_usage = {"input_tokens": 2, "output_tokens": 3}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content="first",
+                        type="ai",
+                        usage_metadata=shared_usage,
+                    ),
+                    {"usage": shared_usage},
+                    SimpleNamespace(usage=shared_usage),
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 2
+    assert result.usage.output_tokens == 3
+    assert result.usage.total_tokens == 5
+    assert logged[0]["usage"]["input_tokens"] == 2
+    assert logged[0]["usage"]["output_tokens"] == 3
+    assert logged[0]["usage"]["total_tokens"] == 5
+
+
+def test_graph_call_samples_raw_usage_metadata_for_many_payloads(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {
+                "messages": [
+                    SimpleNamespace(
+                        content=f"message-{index}",
+                        type="ai",
+                        usage_metadata={"input_tokens": 1, "output_tokens": 2},
+                    )
+                    for index in range(7)
+                ],
+                "echo": input,
+            }
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 7
+    assert result.usage.output_tokens == 14
+    assert result.usage.total_tokens == 21
+    assert result.usage.raw == {
+        "payload_count": 7,
+        "sample_count": 5,
+        "sample_limit": 5,
+        "truncated": True,
+        "samples": [{"input_tokens": 1, "output_tokens": 2} for _ in range(5)],
+    }
+    assert logged[0]["usage"]["input_tokens"] == 7
+    assert logged[0]["usage"]["output_tokens"] == 14
+    assert logged[0]["usage"]["total_tokens"] == 21
+    assert logged[0]["cost"]["source"] == "none"
+    assert logged[0]["cost"]["estimated_cost_usd"] is None
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected_model_ref", "expected_provider"),
+    [
+        ("openai/gpt-4o-mini", "gpt-4o-mini", "openai"),
+        ("gpt-4o-mini", "gpt-4o-mini", "openai"),
+        ("gpt-4o-mini-2024-07-18", "gpt-4o-mini-2024-07-18", "openai"),
+        ("claude-haiku-4-5", "claude-haiku-4-5", "anthropic"),
+        ("gemini-2.5-flash", "gemini-2.5-flash", "google"),
+        ("mistral-large-latest", "mistral-large-latest", "mistral"),
+        ("deepseek-chat", "deepseek-chat", "deepseek"),
+    ],
+)
+def test_graph_call_uses_genai_prices_for_known_single_model(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    model_name: str,
+    expected_model_ref: str,
+    expected_provider: str,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.67)
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    monkeypatch.setattr(
+        runner,
+        "_usage_from_model_events",
+        lambda _tracker: langgraph_adapter.LangGraphUsageSummary(
+            model_name=model_name,
+            input_tokens=3,
+            output_tokens=4,
+        ),
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.estimated_cost_usd == 0.67
+    assert logged[0]["cost"]["source"] == "calculator"
+    assert logged[0]["cost"]["source_label"] == "genai-prices"
+    assert logged[0]["cost"]["pricing_version"].startswith("genai-prices:")
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": expected_model_ref,
+            "provider_id": expected_provider,
+        }
+    ]
+
+
+def test_graph_call_uses_provider_from_model_event_metadata(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    logged: list[dict[str, Any]] = []
+    genai_calls = install_fake_genai_calc_price(monkeypatch, total_price=0.73)
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            tracker = tracking.get_current_tracker()
+            assert tracker is not None
+            event_id, context = tracker.start_model_event()
+            tracker.record_model_event(
+                event_id,
+                context,
+                status="completed",
+                duration_ms=1.0,
+                metadata={
+                    "model_name": "haiku-4-5",
+                    "ls_provider": "anthropic",
+                    "usage": {"input_tokens": 3, "output_tokens": 4},
+                },
+            )
+            return {"echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is not None
+    assert result.usage.model_name == "haiku-4-5"
+    assert result.usage.provider_name == "anthropic"
+    assert result.estimated_cost_usd == 0.73
+    assert logged[0]["cost"]["source"] == "calculator"
+    assert genai_calls == [
+        {
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "cache_read_tokens": None,
+                "cache_write_tokens": None,
+            },
+            "model_ref": "haiku-4-5",
+            "provider_id": "anthropic",
+        }
+    ]
+
+
+def test_graph_call_keeps_successful_run_when_cost_calculator_fails(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"input_tokens": 1, "output_tokens": 2}, "echo": input}
+
+    def fail_cost(_usage: object) -> float:
+        raise RuntimeError("pricing service down")
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        cost_calculator=fail_cost,
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.estimated_cost_usd is None
+    assert any("cost calculator failed" in warning for warning in result.warnings)
+    assert len(logged) == 1
+    assert logged[0]["cost"]["source"] == "calculator_error"
+    assert logged[0]["cost"]["source_label"] == "langgraph.cost_calculator"
+    assert logged[0]["cost"]["estimated_cost_usd"] is None
+    assert logged[0]["warnings"] == result.warnings
+
+
+def test_graph_call_logs_one_record_without_usage(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    logged: list[dict[str, Any]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = object()
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return {"usage": {"feature": "beta"}, "echo": input}
+
+    monkeypatch.setattr(agent_module, "log_usage_record", logged.append)
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph())
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"input": "value"},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.usage is None
+    assert len(logged) == 1
+    assert logged[0]["usage"]["total_tokens"] is None
+    assert logged[0]["cost"]["source"] == "none"
+    assert logged[0]["cost"]["source_label"] is None
+
+
 def test_failed_graph_call_saves_event_artifacts_in_checkpoint_scope(
     langgraph_adapter: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -976,6 +1770,327 @@ def test_durability_policy_supplies_default_graph_durability(
     )
 
     assert seen["durability"] == "exit"
+
+
+def test_default_durability_is_not_forwarded_without_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_request_durability_is_not_forwarded_without_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_request_durability_is_not_forwarded_for_explicit_none_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph()).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_request_durability_is_forwarded_for_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    seen: dict[str, object] = {}
+    config_checkpointer = object()
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    assert seen["durability"] == "sync"
+    assert not any(
+        "No LangGraph checkpointer" in warning for warning in result.warnings
+    )
+
+
+def test_strict_durability_policy_accepts_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    config_checkpointer = object()
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
+        durability=langgraph_adapter.LangGraphDurabilityPolicy(
+            require_checkpointer=True
+        ),
+    )
+
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+
+
+def test_analytics_metadata_records_config_injected_checkpointer(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    config_checkpointer = object()
+    track_calls: list[tuple[object, dict[str, object]]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer = None
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(
+        FakeGraph(),
+        config_factory=lambda _request: _config_with_injected_checkpointer(
+            config_checkpointer
+        ),
+    )
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+            durability="sync",
+        )
+    )
+
+    assert result.status == "completed"
+    analytics_metadata = next(
+        metadata
+        for _event, metadata in track_calls
+        if metadata.get("method") == "invoke"
+    )
+    assert analytics_metadata["forwarded_durability"] == "sync"
+    assert analytics_metadata["has_checkpointer"] is True
+
+
+@pytest.mark.parametrize(
+    ("checkpointer", "expected_forwarded_durability"),
+    [(None, None), (object(), "sync")],
+)
+def test_metadata_records_forwarded_durability(
+    langgraph_adapter: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpointer: object | None,
+    expected_forwarded_durability: str | None,
+) -> None:
+    agent_module = importlib.import_module("kitaru.adapters.langgraph._agent")
+    tracking = importlib.import_module("kitaru.adapters.langgraph._tracking")
+    saved: list[tuple[str, object, str]] = []
+    track_calls: list[tuple[object, dict[str, object]]] = []
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer: object | None
+
+        def __init__(self, checkpointer: object | None) -> None:
+            self.checkpointer = checkpointer
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            return input
+
+    monkeypatch.setattr(tracking, "is_inside_flow", lambda: True)
+    monkeypatch.setattr(tracking, "is_inside_checkpoint", lambda: True)
+    monkeypatch.setattr(
+        tracking.kitaru,
+        "save",
+        lambda name, value, *, type: saved.append((name, value, type)),
+    )
+    monkeypatch.setattr(tracking.kitaru, "log", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        agent_module,
+        "track",
+        lambda event, metadata: track_calls.append((event, metadata)),
+    )
+
+    runner = langgraph_adapter.KitaruGraphRunner(FakeGraph(checkpointer))
+    result = runner.invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    event_log = cast(list[dict[str, object]], saved[0][1])
+    run_summary = cast(dict[str, object], saved[1][1])
+    analytics_metadata = next(
+        metadata
+        for _event, metadata in track_calls
+        if metadata.get("method") == "invoke"
+    )
+
+    assert run_summary["durability"] == "sync"
+    assert run_summary["forwarded_durability"] == expected_forwarded_durability
+    assert event_log[0]["metadata"] == {
+        "kind": "start",
+        "durability": "sync",
+        "forwarded_durability": expected_forwarded_durability,
+        "has_checkpointer": checkpointer is not None,
+        "has_store": False,
+        "thread_id_present": True,
+        "configurable_keys": ["thread_id"],
+    }
+    assert analytics_metadata["durability"] == "sync"
+    assert analytics_metadata["forwarded_durability"] == expected_forwarded_durability
+
+
+@pytest.mark.parametrize("checkpointer", [False, True])
+def test_default_durability_is_not_forwarded_for_boolean_checkpointer_sentinel(
+    langgraph_adapter: types.ModuleType,
+    checkpointer: bool,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeGraph:
+        name = "fake"
+        checkpointer: bool
+
+        def __init__(self, checkpointer: bool) -> None:
+            self.checkpointer = checkpointer
+
+        def invoke(self, input: object, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return input
+
+    result = langgraph_adapter.KitaruGraphRunner(FakeGraph(checkpointer)).invoke(
+        langgraph_adapter.LangGraphRunRequest.start(
+            {"count": 1},
+            thread_id="thread-1",
+        )
+    )
+
+    assert result.status == "completed"
+    assert "durability" not in seen
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
+
+
+def test_strict_durability_policy_requires_actual_checkpointer_before_execution(
+    langgraph_adapter: types.ModuleType,
+) -> None:
+    class FakeGraph:
+        name = "fake"
+        checkpointer = False
+
+        def __init__(self) -> None:
+            self.executed = False
+
+        def invoke(self, input: object, **_kwargs: object) -> object:
+            self.executed = True
+            return input
+
+    graph = FakeGraph()
+    runner = langgraph_adapter.KitaruGraphRunner(
+        graph,
+        durability=langgraph_adapter.LangGraphDurabilityPolicy(
+            require_checkpointer=True
+        ),
+    )
+
+    with pytest.raises(KitaruUsageError, match="requires a graph checkpointer"):
+        runner.invoke(
+            langgraph_adapter.LangGraphRunRequest.start(
+                {"count": 1},
+                thread_id="thread-1",
+            )
+        )
+
+    assert graph.executed is False
 
 
 def test_capture_policy_can_disable_state_snapshot_inspection(

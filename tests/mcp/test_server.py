@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,20 +14,27 @@ import pytest
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
 from kitaru._flow_loading import _load_flow_target as _load_shared_flow_target
-from kitaru.client import ExecutionStatus
+from kitaru.client import ExecutionStatistics, ExecutionStatisticsGroup, ExecutionStatus
 from kitaru.config import (
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
     CloudProvider,
     ImageSettings,
     KubernetesStackSpec,
+    ModalStackSpec,
+    ProjectInfo,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackInfo,
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
@@ -40,24 +48,72 @@ from kitaru.mcp.server import (
     kitaru_deployments_list,
     kitaru_deployments_tag,
     kitaru_deployments_untag,
+    kitaru_executions_abort_wait,
     kitaru_executions_cancel,
+    kitaru_executions_diff_matrix,
     kitaru_executions_get,
     kitaru_executions_input,
     kitaru_executions_latest,
     kitaru_executions_list,
     kitaru_executions_replay,
+    kitaru_executions_resume,
     kitaru_executions_retry,
     kitaru_executions_run,
+    kitaru_executions_statistics,
     kitaru_info,
+    kitaru_projects_current,
+    kitaru_projects_list,
+    kitaru_projects_show,
+    kitaru_projects_use,
     kitaru_secrets_create,
+    kitaru_secrets_list,
     kitaru_stacks_list,
     kitaru_start_local_server,
     kitaru_status,
     kitaru_stop_local_server,
     manage_stack,
+    mcp,
     tracked_mcp_tool,
 )
 from kitaru.secrets import SecretSummary
+
+_REGISTERED_MCP_TOOL_FUNCTIONS = (
+    kitaru_executions_list,
+    kitaru_executions_statistics,
+    kitaru_executions_get,
+    kitaru_executions_latest,
+    get_execution_logs,
+    kitaru_executions_run,
+    kitaru_deployments_deploy,
+    kitaru_deployments_invoke,
+    kitaru_deployments_list,
+    kitaru_deployments_get,
+    kitaru_deployments_delete,
+    kitaru_deployments_tag,
+    kitaru_deployments_untag,
+    kitaru_executions_abort_wait,
+    kitaru_executions_cancel,
+    kitaru_executions_input,
+    kitaru_executions_resume,
+    kitaru_executions_retry,
+    kitaru_executions_replay,
+    kitaru_executions_diff_matrix,
+    kitaru_secrets_create,
+    kitaru_secrets_list,
+    kitaru_artifacts_list,
+    kitaru_artifacts_get,
+    kitaru_start_local_server,
+    kitaru_stop_local_server,
+    kitaru_status,
+    kitaru_projects_list,
+    kitaru_projects_current,
+    kitaru_projects_show,
+    kitaru_projects_use,
+    kitaru_stacks_list,
+    manage_stack,
+    kitaru_info,
+    kitaru_clean_preview,
+)
 
 
 def _write_flow_target_module(path: Path, *, marker: str) -> None:
@@ -78,6 +134,117 @@ def _load_mcp_flow_target(target: str) -> Any:
         target,
         module_name_prefix="_kitaru_mcp_run_target_",
     )
+
+
+def _mcp_tool_schemas_by_name() -> dict[str, dict[str, Any]]:
+    """Return FastMCP input schemas from the in-process registry."""
+    tools = asyncio.run(mcp.list_tools())
+    return {tool.name: tool.inputSchema for tool in tools}
+
+
+def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
+    tool_schemas = _mcp_tool_schemas_by_name()
+    expected_names = {func.__name__ for func in _REGISTERED_MCP_TOOL_FUNCTIONS}
+
+    assert expected_names <= set(tool_schemas)
+    assert "_wrapper" not in tool_schemas
+
+    input_schema = tool_schemas["kitaru_executions_input"]
+    assert set(input_schema["properties"]) == {"exec_id", "wait", "value"}
+    assert input_schema["required"] == ["exec_id", "wait", "value"]
+
+    resume_schema = tool_schemas["kitaru_executions_resume"]
+    assert set(resume_schema["properties"]) == {"exec_id"}
+    assert resume_schema["required"] == ["exec_id"]
+
+    abort_wait_schema = tool_schemas["kitaru_executions_abort_wait"]
+    assert set(abort_wait_schema["properties"]) == {"exec_id", "wait"}
+    assert abort_wait_schema["required"] == ["exec_id", "wait"]
+
+    invoke_schema = tool_schemas["kitaru_deployments_invoke"]
+    assert set(invoke_schema["properties"]) == {
+        "flow",
+        "version",
+        "tag",
+        "inputs",
+    }
+    assert invoke_schema["required"] == ["flow"]
+    assert invoke_schema["properties"]["version"]["default"] is None
+    assert invoke_schema["properties"]["tag"]["default"] is None
+    assert invoke_schema["properties"]["inputs"]["default"] is None
+
+    stack_schema = tool_schemas["manage_stack"]
+    assert {"action", "name"}.issubset(stack_schema["properties"])
+    assert stack_schema["required"] == ["action", "name"]
+    assert stack_schema["properties"]["action"]["enum"] == ["create", "delete"]
+    assert stack_schema["properties"]["stack_type"]["default"] == "local"
+    assert stack_schema["properties"]["activate"]["default"] is True
+    assert stack_schema["properties"]["recursive"]["default"] is False
+    assert stack_schema["properties"]["force"]["default"] is False
+    assert stack_schema["properties"]["async_mode"]["default"] is False
+    assert stack_schema["properties"]["verify"]["default"] is True
+    assert "extra" in stack_schema["properties"]
+
+    replay_schema = tool_schemas["kitaru_executions_replay"]
+    replay_properties = set(replay_schema["properties"])
+    assert replay_properties == {
+        "exec_ids",
+        "at",
+        "flow_overrides",
+        "checkpoint_overrides",
+        "invocation_overrides",
+        "skip",
+        "tag",
+        "wait",
+        "on_error",
+    }
+    assert replay_schema["required"] == ["exec_ids", "at"]
+    assert replay_schema["properties"]["on_error"].get("default") is None
+    on_error_variants = replay_schema["properties"]["on_error"]["anyOf"]
+    assert {"type": "null"} in on_error_variants
+    assert any(
+        variant.get("type") == "string"
+        and set(variant.get("enum", [])) == {"fail", "collect"}
+        for variant in on_error_variants
+    )
+    assert "kitaru_executions_replay_many" not in tool_schemas
+    assert "input" not in replay_properties
+    assert "output" not in replay_properties
+    assert "tool" not in replay_properties
+    assert "llm_model" not in replay_properties
+    assert "flow_inputs" not in replay_properties
+
+    projects_list_schema = tool_schemas["kitaru_projects_list"]
+    assert projects_list_schema.get("required", []) == []
+    assert projects_list_schema.get("properties", {}) == {}
+
+    projects_current_schema = tool_schemas["kitaru_projects_current"]
+    assert projects_current_schema.get("required", []) == []
+    assert projects_current_schema.get("properties", {}) == {}
+
+    projects_show_schema = tool_schemas["kitaru_projects_show"]
+    assert set(projects_show_schema["properties"]) == {"name_or_id"}
+    assert projects_show_schema["required"] == ["name_or_id"]
+
+    projects_use_schema = tool_schemas["kitaru_projects_use"]
+    assert set(projects_use_schema["properties"]) == {"name_or_id"}
+    assert projects_use_schema["required"] == ["name_or_id"]
+
+    assert "kitaru_projects_create" not in tool_schemas
+    assert "kitaru_projects_delete" not in tool_schemas
+    assert "kitaru_executions_diff_matrix" in tool_schemas
+    assert "kitaru_executions_diff_cohort" not in tool_schemas
+
+
+def test_secrets_list_schema_has_optional_pagination_parameters() -> None:
+    schema = _mcp_tool_schemas_by_name()["kitaru_secrets_list"]
+
+    assert set(schema["properties"]) == {"page", "size"}
+    assert schema["properties"]["page"]["type"] == "integer"
+    assert schema["properties"]["page"]["default"] == 1
+    assert schema["properties"]["size"]["type"] == "integer"
+    assert schema["properties"]["size"]["default"] == 20
+    assert schema.get("required", []) == []
 
 
 def test_load_flow_target_supports_module_paths(
@@ -217,6 +384,160 @@ def test_executions_list_delegates_filtering_to_shared_interface(
         limit=5,
     )
     assert payload[0]["exec_id"] == sample_execution.exec_id
+
+
+def test_executions_statistics_calls_client_and_serializes(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should delegate to the SDK and return serialized counts."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(keys={"status": "completed"}, execution_count=12),
+            ExecutionStatisticsGroup(
+                keys={"status": "failed"},
+                execution_count=2,
+                metrics={"duration_avg": 3.5},
+            ),
+        ],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_statistics(
+            group_by=["status"],
+            flow="content_pipeline",
+            status="completed",
+            stack="prod",
+            tags=["nightly", "customer-facing"],
+            metrics=["duration_avg:duration:avg"],
+            max_groups=25,
+        )
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=["status"],
+        metrics=["duration_avg:duration:avg"],
+        flow="content_pipeline",
+        status="completed",
+        stack="prod",
+        tags=["nightly", "customer-facing"],
+        max_groups=25,
+    )
+    assert payload == {
+        "groups": [
+            {
+                "keys": {"status": "completed"},
+                "execution_count": 12,
+                "metrics": {},
+            },
+            {
+                "keys": {"status": "failed"},
+                "execution_count": 2,
+                "metrics": {"duration_avg": 3.5},
+            },
+        ],
+        "truncated": False,
+        "group_count": 2,
+    }
+
+
+def test_executions_statistics_forwards_llm_shortcuts_and_serializes(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """MCP statistics should pass LLM shortcut metric strings to the SDK."""
+    statistics = ExecutionStatistics(
+        groups=[
+            ExecutionStatisticsGroup(
+                keys={"flow_id": "flow-123"},
+                execution_count=3,
+                metrics={"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            )
+        ],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_statistics(
+            group_by=["flow"],
+            metrics=["llm_display_cost", "llm_total_tokens"],
+            max_groups=20,
+        )
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=["flow"],
+        metrics=["llm_display_cost", "llm_total_tokens"],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=20,
+    )
+    assert payload == {
+        "groups": [
+            {
+                "keys": {"flow_id": "flow-123"},
+                "execution_count": 3,
+                "metrics": {"llm_display_cost": 0.42, "llm_total_tokens": 128.0},
+            }
+        ],
+        "truncated": False,
+        "group_count": 1,
+    }
+
+
+def test_executions_statistics_delegates_to_inspection_serializer(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics tool should share the same serializer as CLI/SDK transports."""
+    statistics = ExecutionStatistics(
+        groups=[ExecutionStatisticsGroup(keys={}, execution_count=18)],
+        truncated=False,
+    )
+    mock_kitaru_client.executions.statistics.return_value = statistics
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution_statistics",
+            return_value={"source": "inspection"},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_statistics()
+
+    mock_kitaru_client.executions.statistics.assert_called_once_with(
+        group_by=[],
+        metrics=[],
+        flow=None,
+        status=None,
+        stack=None,
+        tags=None,
+        max_groups=1000,
+    )
+    mock_serialize.assert_called_once_with(statistics)
+    assert payload == {"source": "inspection"}
+
+
+@pytest.mark.parametrize("max_groups", [0, 10_001])
+def test_executions_statistics_rejects_invalid_max_groups(max_groups: int) -> None:
+    """MCP statistics should reject max_groups outside the public range."""
+    with pytest.raises(ValueError, match="`max_groups` must be between 1 and 10000"):
+        kitaru_executions_statistics(max_groups=max_groups)
+
+
+def test_executions_statistics_preserves_error_boundary_behavior(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Statistics errors should pass through the shared MCP error boundary."""
+    mock_kitaru_client.executions.statistics.side_effect = KitaruUsageError(
+        "bad grouping"
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(KitaruUsageError, match="bad grouping"),
+    ):
+        kitaru_executions_statistics(group_by=["nope"])
 
 
 def test_executions_list_stack_filter_happens_after_fetch(
@@ -899,29 +1220,112 @@ def test_validate_pending_wait_input_ignores_missing_pending_wait(
     )
 
 
-def test_executions_replay_returns_structured_execution(
+def test_executions_replay_forwards_unified_arguments_and_returns_json(
     mock_kitaru_client: MagicMock,
-    sample_execution,
 ) -> None:
-    """Replay tool should return replay operation metadata and execution payload."""
-    mock_kitaru_client.executions.replay.return_value = sample_execution
+    """Replay tool should call the unified SDK API and return to_json directly."""
+    replay_json = {
+        "submission_id": "rs-123",
+        "tag": "candidate",
+        "at": "lookup_policy_tool",
+        "wait": True,
+        "plan": {},
+        "results": [{"original_exec_id": "kr-a", "replay_exec_id": "kr-r"}],
+        "failures": [],
+        "skipped": [],
+        "summary": {"submitted": 1, "completed": 1, "failed": 0, "skipped": 0},
+        "compare_url": "https://kitaru.example/compare",
+    }
+    submission = MagicMock()
+    submission.to_json.return_value = replay_json
+    mock_kitaru_client.executions.replay.return_value = submission
+
+    flow_overrides = {"prompt": "new prompt"}
+    checkpoint_overrides = {"lookup_policy_tool": {"output": {"tier": "gold"}}}
+    invocation_overrides = {"model_call_2": {"model": "gpt-4.1-mini"}}
+    skip = ["draft_email"]
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
         payload = kitaru_executions_replay(
-            "kr-a8f3c2",
-            from_="write_summary",
-            flow_inputs={"topic": "new topic"},
+            ["kr-a", "kr-b"],
+            at="lookup_policy_tool",
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag="candidate",
+            wait=True,
+            on_error="fail",
         )
 
     mock_kitaru_client.executions.replay.assert_called_once_with(
-        "kr-a8f3c2",
-        from_="write_summary",
-        overrides=None,
-        topic="new topic",
+        ["kr-a", "kr-b"],
+        at="lookup_policy_tool",
+        flow_overrides=flow_overrides,
+        checkpoint_overrides=checkpoint_overrides,
+        invocation_overrides=invocation_overrides,
+        skip=skip,
+        tag="candidate",
+        wait=True,
+        on_error="fail",
     )
-    assert payload["available"] is True
-    assert payload["operation"] == "replay"
-    assert payload["execution"]["exec_id"] == sample_execution.exec_id
+    submission.to_json.assert_called_once_with()
+    assert payload == replay_json
+
+
+def test_executions_replay_forwards_omitted_on_error_as_none(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Omitted MCP replay on_error should let the SDK apply its shared default."""
+    submission = MagicMock()
+    submission.to_json.return_value = {"submission_id": "rs-123"}
+    mock_kitaru_client.executions.replay.return_value = submission
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_replay(["kr-a"], at="lookup_policy_tool")
+
+    mock_kitaru_client.executions.replay.assert_called_once_with(
+        ["kr-a"],
+        at="lookup_policy_tool",
+        flow_overrides=None,
+        checkpoint_overrides=None,
+        invocation_overrides=None,
+        skip=None,
+        tag=None,
+        wait=None,
+        on_error=None,
+    )
+    assert payload == {"submission_id": "rs-123"}
+
+
+def test_mcp_does_not_expose_replay_many_tool() -> None:
+    """MCP exposes multi-ID replay through kitaru_executions_replay only."""
+    import kitaru.mcp.server as server
+
+    assert not hasattr(server, "kitaru_executions_replay_many")
+
+
+def test_executions_diff_matrix_returns_renamed_payload() -> None:
+    """Diff matrix tool should call the renamed helper and avoid cohort keys."""
+    diff_result = object()
+
+    with (
+        patch("kitaru.diff.diff_matrix", return_value=diff_result) as mock_diff_matrix,
+        patch(
+            "kitaru.diff.serialize_diff_matrix",
+            return_value={"rows": [{"original_exec_id": "kr-a"}]},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_diff_matrix(["kr-a", "kr-b"])
+
+    mock_diff_matrix.assert_called_once_with(["kr-a", "kr-b"])
+    mock_serialize.assert_called_once_with(diff_result)
+    assert payload == {
+        "available": True,
+        "operation": "diff_matrix",
+        "diff_matrix": {"rows": [{"original_exec_id": "kr-a"}]},
+    }
+    assert "cohort" not in payload
 
 
 def test_execution_mutation_tools_return_serialized_execution(
@@ -938,6 +1342,90 @@ def test_execution_mutation_tools_return_serialized_execution(
 
     assert cancel_payload["exec_id"] == sample_execution.exec_id
     assert retry_payload["exec_id"] == sample_execution.exec_id
+
+
+def test_executions_resume_delegates_and_serializes_execution(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Resume should delegate once and return the full normalized payload."""
+    mock_kitaru_client.executions.resume.return_value = sample_execution
+    normalized = {"exec_id": sample_execution.exec_id, "status": "running"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution",
+            return_value=normalized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_resume(sample_execution.exec_id)
+
+    mock_kitaru_client.executions.resume.assert_called_once_with(
+        sample_execution.exec_id
+    )
+    mock_serialize.assert_called_once_with(sample_execution)
+    assert payload == normalized
+
+
+def test_executions_abort_wait_delegates_and_serializes_execution(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Abort-wait should pass the selector by keyword and normalize the result."""
+    mock_kitaru_client.executions.abort_wait.return_value = sample_execution
+    normalized = {"exec_id": sample_execution.exec_id, "status": "waiting"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution",
+            return_value=normalized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_abort_wait(
+            sample_execution.exec_id,
+            wait="approve_draft",
+        )
+
+    mock_kitaru_client.executions.abort_wait.assert_called_once_with(
+        sample_execution.exec_id,
+        wait="approve_draft",
+    )
+    mock_serialize.assert_called_once_with(sample_execution)
+    assert payload == normalized
+
+
+@pytest.mark.parametrize(
+    ("tool", "client_method", "kwargs"),
+    [
+        (kitaru_executions_resume, "resume", {}),
+        (
+            kitaru_executions_abort_wait,
+            "abort_wait",
+            {"wait": "approve_draft"},
+        ),
+    ],
+)
+def test_execution_wait_mutations_preserve_client_state_errors(
+    mock_kitaru_client: MagicMock,
+    tool,
+    client_method: str,
+    kwargs: dict[str, str],
+) -> None:
+    """Wait mutation tools should re-raise SDK state errors without serializing."""
+    error = KitaruStateError("execution cannot make this transition")
+    getattr(mock_kitaru_client.executions, client_method).side_effect = error
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch("kitaru.inspection.serialize_execution") as mock_serialize,
+        pytest.raises(KitaruStateError) as exc_info,
+    ):
+        tool("kr-a8f3c2", **kwargs)
+
+    assert exc_info.value is error
+    mock_serialize.assert_not_called()
 
 
 def test_artifact_tools_call_client_and_serialize(
@@ -998,6 +1486,165 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     mock_serialize.assert_called_once_with(loaded_value)
     assert payload["value"] == "delegated"
     assert payload["value_type"] == "custom.Type"
+
+
+def test_secrets_list_uses_default_pagination() -> None:
+    summaries = [
+        SecretSummary(
+            name=f"secret-{index:02d}",
+            id=f"secret-id-{index:02d}",
+            private=False,
+            keys=["API_KEY"],
+        )
+        for index in range(25)
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ) as mock_list:
+        payload = kitaru_secrets_list()
+
+    mock_list.assert_called_once_with()
+    assert len(payload) == 20
+    assert [item["id"] for item in payload] == [
+        summary.id for summary in summaries[:20]
+    ]
+
+
+def test_secrets_list_applies_non_default_pagination_without_resorting() -> None:
+    summaries = [
+        SecretSummary(
+            name=name,
+            id=f"secret-id-{index}",
+            private=False,
+            keys=["API_KEY"],
+        )
+        for index, name in enumerate(["zeta", "alpha", "gamma", "beta", "delta"])
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ) as mock_list:
+        payload = kitaru_secrets_list(page=2, size=2)
+
+    mock_list.assert_called_once_with()
+    assert [item["id"] for item in payload] == [
+        summaries[2].id,
+        summaries[3].id,
+    ]
+
+
+def test_secrets_list_returns_empty_for_out_of_range_page() -> None:
+    summaries = [
+        SecretSummary(
+            name="openai-creds",
+            id="secret-id",
+            private=False,
+            keys=["OPENAI_API_KEY"],
+        )
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ):
+        payload = kitaru_secrets_list(page=2, size=20)
+
+    assert payload == []
+
+
+def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> None:
+    summaries = [
+        SecretSummary(
+            name="shared-creds",
+            id="public-id",
+            private=False,
+            keys=["OPENAI_API_KEY"],
+            has_missing_values=True,
+        ),
+        SecretSummary(
+            name="personal-creds",
+            id="private-id",
+            private=True,
+            keys=["ANTHROPIC_API_KEY"],
+        ),
+    ]
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=summaries,
+    ):
+        payload = kitaru_secrets_list()
+
+    assert payload == [
+        {
+            "id": "public-id",
+            "name": "shared-creds",
+            "visibility": "public",
+            "keys": ["OPENAI_API_KEY"],
+            "has_missing_values": True,
+        },
+        {
+            "id": "private-id",
+            "name": "personal-creds",
+            "visibility": "private",
+            "keys": ["ANTHROPIC_API_KEY"],
+            "has_missing_values": False,
+        },
+    ]
+
+
+def test_secrets_list_returns_empty_keys_when_backend_omits_value_metadata() -> None:
+    """MCP listing should serialize the metadata available in real list responses."""
+    summary = SecretSummary(
+        name="provider-creds",
+        id="secret-id",
+        private=False,
+        keys=[],
+        has_missing_values=False,
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.list_secrets",
+        return_value=[summary],
+    ):
+        payload = kitaru_secrets_list()
+
+    assert payload == [
+        {
+            "id": "secret-id",
+            "name": "provider-creds",
+            "visibility": "public",
+            "keys": [],
+            "has_missing_values": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize("page", [True, 0, -1])
+def test_secrets_list_rejects_invalid_page(page: Any) -> None:
+    with (
+        patch("kitaru.mcp.server.secrets_api.list_secrets") as mock_list,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        kitaru_secrets_list(page=page)
+
+    assert str(exc_info.value) == "`page` must be an integer >= 1."
+    mock_list.assert_not_called()
+
+
+@pytest.mark.parametrize("size", [True, 0, -1])
+def test_secrets_list_rejects_invalid_size(size: Any) -> None:
+    with (
+        patch("kitaru.mcp.server.secrets_api.list_secrets") as mock_list,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        kitaru_secrets_list(size=size)
+
+    assert str(exc_info.value) == "`size` must be an integer >= 1."
+    mock_list.assert_not_called()
 
 
 def test_secrets_create_returns_metadata_without_values() -> None:
@@ -1077,6 +1724,7 @@ def test_mcp_does_not_expose_secret_delete_tool() -> None:
     import kitaru.mcp.server as server
 
     assert not hasattr(server, "kitaru_secrets_delete")
+    assert "kitaru_secrets_delete" not in _mcp_tool_schemas_by_name()
 
 
 def test_start_local_server_returns_structured_payload() -> None:
@@ -1211,13 +1859,133 @@ def test_status_delegates_snapshot_serialization_to_inspection() -> None:
     assert payload == {"connection": "delegated", "source": "inspection"}
 
 
+def test_projects_list_delegates_to_shared_helpers_and_serializer() -> None:
+    projects = [
+        ProjectInfo(
+            id="project-prod-id",
+            name="production",
+            display_name="Production",
+            description=None,
+            is_active=True,
+        ),
+        ProjectInfo(
+            id="project-stage-id",
+            name="staging",
+            display_name=None,
+            description="Test changes safely",
+            is_active=False,
+        ),
+    ]
+
+    with patch(
+        "kitaru._config._projects.list_projects", return_value=projects
+    ) as mock_list:
+        payload = kitaru_projects_list()
+
+    mock_list.assert_called_once_with()
+    assert payload == [
+        {
+            "id": "project-prod-id",
+            "name": "production",
+            "display_name": "Production",
+            "description": None,
+            "is_active": True,
+        },
+        {
+            "id": "project-stage-id",
+            "name": "staging",
+            "display_name": None,
+            "description": "Test changes safely",
+            "is_active": False,
+        },
+    ]
+
+
+def test_projects_current_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-prod-id",
+        name="production",
+        display_name="Production",
+        description=None,
+        is_active=True,
+    )
+
+    with patch(
+        "kitaru._config._projects.current_project",
+        return_value=project,
+    ) as mock_current:
+        payload = kitaru_projects_current()
+
+    mock_current.assert_called_once_with()
+    assert payload["name"] == "production"
+    assert payload["is_active"] is True
+
+
+def test_projects_show_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-stage-id",
+        name="staging",
+        display_name=None,
+        description=None,
+        is_active=False,
+    )
+
+    with patch(
+        "kitaru._config._projects.get_project",
+        return_value=project,
+    ) as mock_get:
+        payload = kitaru_projects_show("staging")
+
+    mock_get.assert_called_once_with("staging")
+    assert payload["id"] == "project-stage-id"
+    assert payload["is_active"] is False
+
+
+def test_projects_use_delegates_to_shared_helpers() -> None:
+    project = ProjectInfo(
+        id="project-prod-id",
+        name="production",
+        display_name=None,
+        description=None,
+        is_active=True,
+    )
+
+    with patch(
+        "kitaru._config._projects.use_project",
+        return_value=project,
+    ) as mock_use:
+        payload = kitaru_projects_use("production")
+
+    mock_use.assert_called_once_with("production")
+    assert payload["name"] == "production"
+    assert payload["is_active"] is True
+
+
+def test_projects_use_preserves_pro_cloud_feature_error() -> None:
+    """MCP project use should preserve the shared Pro/Cloud guard error."""
+    with (
+        patch(
+            "kitaru._config._projects.use_project",
+            side_effect=KitaruFeatureNotAvailableError(
+                "Kitaru project use requires a ZenML Pro/Cloud server."
+            ),
+        ),
+        pytest.raises(KitaruFeatureNotAvailableError, match="Pro/Cloud"),
+    ):
+        kitaru_projects_use("staging")
+
+
 def test_manage_stack_create_returns_structured_result() -> None:
     """MCP manage_stack(create) should reuse the CLI-style serialized payload."""
     with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
         mock_create_stack.return_value = SimpleNamespace(
             stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
             previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+            components_created=(
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+                "dev (sandbox)",
+            ),
             stack_type="local",
             service_connectors_created=(),
             resources=None,
@@ -1230,13 +1998,18 @@ def test_manage_stack_create_returns_structured_result() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
     assert payload == {
         "id": "stack-dev-id",
         "name": "dev",
         "is_active": True,
         "previous_active_stack": "default",
-        "components_created": ["dev (orchestrator)", "dev (artifact_store)"],
+        "components_created": [
+            "dev (orchestrator)",
+            "dev (artifact_store)",
+            "dev (sandbox)",
+        ],
         "stack_type": "local",
     }
 
@@ -1247,6 +2020,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
     with (
@@ -1259,7 +2033,11 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         mock_create_stack.return_value = SimpleNamespace(
             stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
             previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+            components_created=(
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+                "dev (sandbox)",
+            ),
             stack_type="local",
             service_connectors_created=(),
             resources=None,
@@ -1275,6 +2053,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         force=False,
         stack_type="local",
         artifact_store=None,
+        sandbox=None,
         container_registry=None,
         cluster=None,
         region=None,
@@ -1293,6 +2072,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         activate=True,
         stack_type=StackType.LOCAL,
         remote_spec=None,
+        sandbox_flavor="local",
     )
 
 
@@ -1357,6 +2137,7 @@ def test_manage_stack_delete_delegates_request_building_to_shared_interface() ->
         force=True,
         stack_type="local",
         artifact_store=None,
+        sandbox=None,
         container_registry=None,
         cluster=None,
         region=None,
@@ -1474,6 +2255,361 @@ def test_manage_stack_create_kubernetes_dispatches_structured_spec(
     }
 
 
+def test_manage_stack_create_modal_dispatches_structured_spec() -> None:
+    """MCP Modal create should build a shared serialized stack result."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "prod-modal (orchestrator)",
+                "prod-modal (artifact_store)",
+                "prod-modal (container_registry)",
+                "prod-modal-image-builder (image_builder)",
+                "prod-modal (sandbox)",
+            ),
+            stack_type="modal",
+            service_connectors_created=(),
+            resources={
+                "provider": "gcp",
+                "artifact_store": "gs://my-bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+                "sandbox": "modal",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            activate=False,
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/repo",
+            sandbox="modal",
+            async_mode=True,
+            extra={
+                "orchestrator": {
+                    "token_id": "ak-test",
+                    "token_secret": "as-test",
+                    "synchronous": False,
+                },
+                "sandbox": {"timeout": 1800},
+            },
+        )
+
+    mock_create_stack.assert_called_once()
+    assert mock_create_stack.call_args.args == ("prod-modal",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.MODAL
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "modal"
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+        "region": None,
+        "subscription_id": None,
+        "credentials": None,
+        "verify": True,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "token_id": "ak-test",
+            "token_secret": "as-test",
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {},
+        "sandbox": {"timeout": 1800},
+    }
+    assert payload == {
+        "id": "stack-modal-id",
+        "name": "prod-modal",
+        "is_active": False,
+        "previous_active_stack": None,
+        "components_created": [
+            "prod-modal (orchestrator)",
+            "prod-modal (artifact_store)",
+            "prod-modal (container_registry)",
+            "prod-modal-image-builder (image_builder)",
+            "prod-modal (sandbox)",
+        ],
+        "stack_type": "modal",
+        "resources": {
+            "provider": "gcp",
+            "artifact_store": "gs://my-bucket/kitaru",
+            "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+            "sandbox": "modal",
+        },
+    }
+
+
+def test_manage_stack_create_modal_requires_storage_and_registry() -> None:
+    """Modal MCP create should reject missing required inputs early."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match=r'`stack_type="modal"` requires:'),
+    ):
+        manage_stack("create", "prod-modal", stack_type="modal")
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_accepts_aws_cloud_credentials() -> None:
+    """MCP Modal create should pass AWS cloud credentials separately from tokens."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "prod-modal (orchestrator)",
+                "prod-modal (artifact_store)",
+                "prod-modal (container_registry)",
+                "prod-modal-image-builder (image_builder)",
+            ),
+            stack_type="modal",
+            service_connectors_created=("prod-modal-aws",),
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://my-bucket/kitaru",
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
+                ),
+                "region": "eu-west-1",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            region="eu-west-1",
+            credentials="aws-profile:ml-team",
+            verify=False,
+            extra={
+                "orchestrator": {
+                    "token_id": "ak-test",
+                    "token_secret": "as-test",
+                }
+            },
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://my-bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        "region": "eu-west-1",
+        "subscription_id": None,
+        "credentials": "aws-profile:ml-team",
+        "verify": False,
+    }
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.orchestrator == {
+        "token_id": "ak-test",
+        "token_secret": "as-test",
+    }
+    assert payload["components_created"] == [
+        "prod-modal (orchestrator)",
+        "prod-modal (artifact_store)",
+        "prod-modal (container_registry)",
+        "prod-modal-image-builder (image_builder)",
+    ]
+    assert payload["service_connectors_created"] == ["prod-modal-aws"]
+
+
+def test_manage_stack_create_modal_rejects_aws_credentials_without_region() -> None:
+    """AWS-backed Modal connector requests need region; Modal placement stays extra."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="AWS-backed Modal cloud credentials"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            credentials="aws-profile:ml-team",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -> None:
+    """MCP Modal verify=False should not request a cloud connector by itself."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="only applies when Kitaru is creating"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            verify=False,
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_rejects_mismatched_connectorless_resources() -> None:
+    """MCP Modal create should reject mixed providers without connector inputs."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="same cloud provider"),
+    ):
+        manage_stack(
+            "create",
+            "prod-modal",
+            stack_type="modal",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_modal_accepts_gcp_cloud_credentials() -> None:
+    """MCP Modal create should pass GCP connector inputs through."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="gcp-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=("gcp-modal-gcp",),
+            resources={},
+        )
+
+        manage_stack(
+            "create",
+            "gcp-modal",
+            stack_type="modal",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/repo",
+            region="us-central1",
+            credentials="gcp-service-account:/tmp/key.json",
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/repo",
+        "region": "us-central1",
+        "subscription_id": None,
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": True,
+    }
+
+
+def test_manage_stack_create_modal_accepts_azure_cloud_credentials() -> None:
+    """MCP Modal create should pass Azure connector inputs through."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="azure-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=("azure-modal-azure",),
+            resources={},
+        )
+
+        manage_stack(
+            "create",
+            "azure-modal",
+            stack_type="modal",
+            artifact_store="az://container/kitaru",
+            container_registry="demo.azurecr.io/kitaru",
+            subscription_id="00000000-0000-0000-0000-000000000123",
+            credentials="azure-access-token:token-123",
+            verify=False,
+        )
+
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.model_dump(mode="json") == {
+        "artifact_store": "az://container/kitaru",
+        "container_registry": "demo.azurecr.io/kitaru",
+        "region": None,
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "credentials": "azure-access-token:token-123",
+        "verify": False,
+    }
+
+
+def test_manage_stack_create_kubernetes_passes_explicit_sandbox() -> None:
+    """MCP callers should be able to attach an explicit sandbox to remote stacks."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-k8s-id", name="k8s-dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "k8s-dev (orchestrator)",
+                "k8s-dev (artifact_store)",
+                "k8s-dev (container_registry)",
+                "k8s-dev (sandbox)",
+            ),
+            stack_type="kubernetes",
+            service_connectors_created=(),
+            resources={"sandbox": "local"},
+        )
+
+        payload = manage_stack(
+            "create",
+            "k8s-dev",
+            stack_type="kubernetes",
+            artifact_store="s3://my-bucket/kitaru",
+            container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            cluster="cluster-1",
+            region="eu-west-1",
+            sandbox="local",
+        )
+
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
+    assert payload["resources"] == {"sandbox": "local"}
+
+
+def test_manage_stack_create_remote_rejects_sandbox_extra_without_sandbox() -> None:
+    """MCP sandbox overrides require a sandbox on remote stacks."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError) as exc_info,
+    ):
+        manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/my-repo",
+            region="us-central1",
+            extra={"sandbox": {"forward_env": False}},
+        )
+
+    message = str(exc_info.value)
+    assert "sandbox" in message
+    assert "extra" in message
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_delete_rejects_sandbox_option() -> None:
+    """Sandbox selection is only valid for create actions."""
+    with (
+        patch("kitaru._config._stacks._delete_stack_operation") as mock_delete_stack,
+        pytest.raises(ValueError, match="`sandbox`"),
+    ):
+        manage_stack("delete", "dev", sandbox="local")
+
+    mock_delete_stack.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "missing_field",
     ["artifact_store", "container_registry", "cluster", "region"],
@@ -1502,8 +2638,13 @@ def test_manage_stack_create_kubernetes_requires_required_fields(
 
 _REMOTE_STACK_TYPE_ERROR = (
     'Remote stack options require `stack_type="kubernetes"`, '
-    '`stack_type="vertex"`, `stack_type="sagemaker"`, or '
-    '`stack_type="azureml"`'
+    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
+    '`stack_type="azureml"`, or `stack_type="modal"`'
+)
+_CLOUD_CONNECTOR_STACK_TYPE_ERROR = (
+    'Remote stack options require `stack_type="kubernetes"`, '
+    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
+    '`stack_type="azureml"`, or `stack_type="modal"`'
 )
 
 
@@ -1523,13 +2664,13 @@ _REMOTE_STACK_TYPE_ERROR = (
             {"cluster": "cluster-1"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `cluster`',
         ),
-        ({"region": "eu-west-1"}, _REMOTE_STACK_TYPE_ERROR),
+        ({"region": "eu-west-1"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
         (
             {"namespace": "ml-team"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `namespace`',
         ),
-        ({"credentials": "implicit"}, _REMOTE_STACK_TYPE_ERROR),
-        ({"verify": False}, _REMOTE_STACK_TYPE_ERROR),
+        ({"credentials": "implicit"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
+        ({"verify": False}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
     ],
 )
 def test_manage_stack_create_local_rejects_kubernetes_only_options(
@@ -1630,6 +2771,7 @@ def test_manage_stack_create_vertex_passes_extra_and_async_overrides() -> None:
         },
         "artifact_store": {},
         "container_registry": {"default_repository": "team-ml"},
+        "sandbox": {},
     }
 
 
@@ -1641,8 +2783,8 @@ def test_manage_stack_create_async_mode_rejected_for_local() -> None:
             ValueError,
             match=(
                 r"`async_mode` requires `stack_type=\"kubernetes\"`, "
-                r"`stack_type=\"vertex\"`, `stack_type=\"sagemaker\"`, or "
-                r"`stack_type=\"azureml\"`\."
+                r"`stack_type=\"vertex\"`, `stack_type=\"sagemaker\"`, "
+                r"`stack_type=\"azureml\"`, or `stack_type=\"modal\"`\."
             ),
         ),
     ):
@@ -2058,7 +3200,8 @@ def test_manage_stack_create_local_rejects_azureml_only_options() -> None:
         pytest.raises(
             ValueError,
             match=(
-                'AzureML-only options require `stack_type="azureml"`: `subscription_id`'
+                'Stack-specific options require `stack_type="azureml"` or '
+                '`stack_type="modal"`: `subscription_id`'
             ),
         ),
     ):

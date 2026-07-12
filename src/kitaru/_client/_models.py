@@ -2,16 +2,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from kitaru._llm_usage import (
+    LLM_USAGE_SUMMARY_METADATA_KEY,
+    parse_usage_summary,
+    strip_usage_record_bookkeeping,
+    usage_records_from_metadata,
+    usage_reuse_classification,
+)
 from kitaru.config import FrozenExecutionSpec
-from kitaru.errors import FailureOrigin
+from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
+    from kitaru.replay import ReplaySubmission
+
+
+def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
+    """Return the stable identity used to avoid duplicate usage records."""
+    record_id = record.get("record_id")
+    event_id = record.get("event_id")
+    if record_id is None and event_id is None:
+        return None
+    return (
+        str(record_id) if record_id is not None else None,
+        str(event_id) if event_id is not None else None,
+    )
 
 
 class ExecutionStatus(StrEnum):
@@ -36,6 +57,226 @@ class ExecutionStatus(StrEnum):
     def is_successful(self) -> bool:
         """Whether the execution finished successfully."""
         return self is ExecutionStatus.COMPLETED
+
+
+class ExecutionStatisticsDimension(StrEnum):
+    """Public dimensions that execution statistics can group by."""
+
+    STATUS = "status"
+    FLOW = "flow"
+    STACK = "stack"
+    TAG = "tag"
+    TIME = "time"
+    METADATA = "metadata"
+
+
+class ExecutionStatisticsTimeGranularity(StrEnum):
+    """Supported time bucket sizes for execution statistics."""
+
+    HOUR = "hour"
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
+class ExecutionStatisticsMetricSource(StrEnum):
+    """Numeric value sources that execution statistics can aggregate."""
+
+    DURATION = "duration"
+    STEP_COUNT = "step_count"
+    CACHED_STEP_COUNT = "cached_step_count"
+    OUTPUT_ARTIFACT_COUNT = "output_artifact_count"
+    METADATA = "metadata"
+
+
+class ExecutionStatisticsMetricAggregation(StrEnum):
+    """Supported aggregation operators for execution statistics metrics."""
+
+    AVG = "avg"
+    SUM = "sum"
+    MIN = "min"
+    MAX = "max"
+
+
+@dataclass(frozen=True)
+class ExecutionStatisticsGrouping:
+    """One public grouping dimension for execution statistics.
+
+    Simple dimensions such as ``status`` and ``tag`` only need ``dimension``.
+    Time groupings must provide ``time_granularity``. Metadata groupings must
+    provide ``metadata_key``. ``name`` optionally overrides the output key.
+    """
+
+    dimension: ExecutionStatisticsDimension | str
+    name: str | None = None
+    time_granularity: ExecutionStatisticsTimeGranularity | str | None = None
+    metadata_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize enum inputs and validate dimension-specific fields."""
+        try:
+            dimension = ExecutionStatisticsDimension(
+                str(self.dimension).strip().lower()
+            )
+        except ValueError as exc:
+            expected = ", ".join(item.value for item in ExecutionStatisticsDimension)
+            raise KitaruUsageError(
+                f"Unsupported execution statistics dimension {self.dimension!r}. "
+                f"Expected one of: {expected}."
+            ) from exc
+
+        name = self.name
+        if name is not None:
+            name = name.strip()
+            if not name:
+                raise KitaruUsageError(
+                    "Execution statistics grouping name cannot be empty."
+                )
+
+        time_granularity: ExecutionStatisticsTimeGranularity | None = None
+        if self.time_granularity is not None:
+            try:
+                time_granularity = ExecutionStatisticsTimeGranularity(
+                    str(self.time_granularity).strip().lower()
+                )
+            except ValueError as exc:
+                expected = ", ".join(
+                    item.value for item in ExecutionStatisticsTimeGranularity
+                )
+                raise KitaruUsageError(
+                    "Unsupported execution statistics time granularity "
+                    f"{self.time_granularity!r}. Expected one of: {expected}."
+                ) from exc
+
+        metadata_key = self.metadata_key
+        if metadata_key is not None:
+            metadata_key = metadata_key.strip()
+            if not metadata_key:
+                raise KitaruUsageError("Metadata grouping key cannot be empty.")
+
+        if dimension is ExecutionStatisticsDimension.TIME:
+            if time_granularity is None:
+                raise KitaruUsageError(
+                    "Time statistics groupings require time_granularity."
+                )
+            if metadata_key is not None:
+                raise KitaruUsageError(
+                    "Time statistics groupings cannot use metadata_key."
+                )
+            default_name = time_granularity.value
+        elif dimension is ExecutionStatisticsDimension.METADATA:
+            if metadata_key is None:
+                raise KitaruUsageError(
+                    "Metadata statistics groupings require metadata_key."
+                )
+            if time_granularity is not None:
+                raise KitaruUsageError(
+                    "Metadata statistics groupings cannot use time_granularity."
+                )
+            default_name = metadata_key
+        else:
+            if time_granularity is not None:
+                raise KitaruUsageError(
+                    f"{dimension.value!r} statistics groupings cannot use "
+                    "time_granularity."
+                )
+            if metadata_key is not None:
+                raise KitaruUsageError(
+                    f"{dimension.value!r} statistics groupings cannot use metadata_key."
+                )
+            default_name = {
+                ExecutionStatisticsDimension.STATUS: "status",
+                ExecutionStatisticsDimension.FLOW: "flow_id",
+                ExecutionStatisticsDimension.STACK: "stack_id",
+                ExecutionStatisticsDimension.TAG: "tag",
+            }[dimension]
+
+        object.__setattr__(self, "dimension", dimension)
+        object.__setattr__(self, "name", name or default_name)
+        object.__setattr__(self, "time_granularity", time_granularity)
+        object.__setattr__(self, "metadata_key", metadata_key)
+
+
+@dataclass(frozen=True)
+class ExecutionStatisticsMetric:
+    """One numeric metric to compute for each execution-statistics group.
+
+    ``name`` is the output key under each group's ``metrics`` mapping. Simple
+    metrics aggregate built-in execution values such as duration or step
+    counts. Metadata metrics aggregate one top-level numeric execution metadata
+    key.
+    """
+
+    name: str
+    source: ExecutionStatisticsMetricSource | str
+    aggregation: ExecutionStatisticsMetricAggregation | str
+    metadata_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize enum inputs and validate source-specific fields."""
+        name = self.name.strip() if isinstance(self.name, str) else self.name
+        if not isinstance(name, str) or not name:
+            raise KitaruUsageError("Execution statistics metric name cannot be empty.")
+
+        try:
+            source = ExecutionStatisticsMetricSource(str(self.source).strip().lower())
+        except ValueError as exc:
+            expected = ", ".join(item.value for item in ExecutionStatisticsMetricSource)
+            raise KitaruUsageError(
+                f"Unsupported execution statistics metric source {self.source!r}. "
+                f"Expected one of: {expected}."
+            ) from exc
+
+        try:
+            aggregation = ExecutionStatisticsMetricAggregation(
+                str(self.aggregation).strip().lower()
+            )
+        except ValueError as exc:
+            expected = ", ".join(
+                item.value for item in ExecutionStatisticsMetricAggregation
+            )
+            raise KitaruUsageError(
+                "Unsupported execution statistics metric aggregation "
+                f"{self.aggregation!r}. Expected one of: {expected}."
+            ) from exc
+
+        metadata_key = self.metadata_key
+        if metadata_key is not None:
+            metadata_key = metadata_key.strip()
+            if not metadata_key:
+                raise KitaruUsageError("Metadata metric key cannot be empty.")
+
+        if source is ExecutionStatisticsMetricSource.METADATA:
+            if metadata_key is None:
+                raise KitaruUsageError(
+                    "Metadata statistics metrics require metadata_key."
+                )
+        elif metadata_key is not None:
+            raise KitaruUsageError(
+                f"{source.value!r} statistics metrics cannot use metadata_key."
+            )
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "aggregation", aggregation)
+        object.__setattr__(self, "metadata_key", metadata_key)
+
+
+@dataclass(frozen=True)
+class ExecutionStatisticsGroup:
+    """One aggregate execution-statistics row."""
+
+    keys: dict[str, str | int | float | bool | None]
+    execution_count: int
+    metrics: dict[str, float | None] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ExecutionStatistics:
+    """Grouped execution statistics with counts and optional numeric metrics."""
+
+    groups: list[ExecutionStatisticsGroup]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -161,6 +402,25 @@ class CheckpointAttempt:
     ended_at: datetime | None
     metadata: dict[str, Any]
     failure: FailureInfo | None
+    _raw_status: str | None = field(default=None, repr=False, compare=False)
+    _replay_reused: bool = field(default=False, repr=False, compare=False)
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records persisted on this attempt."""
+        reused, reused_cache_status = usage_reuse_classification(
+            replay_reused=self._replay_reused,
+            checkpoint_status=self._raw_status or self.status,
+        )
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in usage_records_from_metadata(
+                self.metadata,
+                source_attempt_id=self.attempt_id,
+                reused=reused,
+                reused_cache_status=reused_cache_status,
+            )
+        ]
 
 
 @dataclass(frozen=True)
@@ -202,6 +462,24 @@ class CheckpointCall:
     attempts: list[CheckpointAttempt]
     artifacts: list[ArtifactRef]
     checkpoint_type: str | None = None
+    checkpoint_origin: Literal["user", "adapter"] = "user"
+    adapter: str | None = None
+    adapter_checkpoint_kind: str | None = None
+    replay_input_slots: list[str] = field(default_factory=list)
+    replay_output_slots: list[str] = field(default_factory=list)
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records persisted on this checkpoint."""
+        records: list[dict[str, Any]] = []
+        for attempt in self.attempts:
+            records.extend(attempt.llm_usage_records)
+        if records:
+            return [strip_usage_record_bookkeeping(record) for record in records]
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in usage_records_from_metadata(self.metadata)
+        ]
 
 
 @dataclass(frozen=True)
@@ -224,6 +502,40 @@ class Execution:
     checkpoints: list[CheckpointCall]
     artifacts: list[ArtifactRef]
     _client: KitaruClient = field(repr=False, compare=False)
+    project_id: str | None = None
+    project_name: str | None = None
+
+    @property
+    def llm_usage_summary(self) -> dict[str, Any] | None:
+        """Execution-level LLM usage summary, when terminal aggregation ran."""
+        return parse_usage_summary(self.metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical LLM usage records from execution and checkpoint metadata."""
+        checkpoint_records: list[dict[str, Any]] = []
+        checkpoint_identities: set[tuple[str | None, str | None]] = set()
+        for checkpoint in self.checkpoints:
+            checkpoint_records.extend(checkpoint.llm_usage_records)
+        for record in checkpoint_records:
+            identity = _record_identity(record)
+            if identity is not None:
+                checkpoint_identities.add(identity)
+
+        run_records = usage_records_from_metadata(
+            self.metadata,
+            source_attempt_id=f"run:{self.exec_id}",
+        )
+        unique_run_records = [
+            record
+            for record in run_records
+            if (identity := _record_identity(record)) is None
+            or identity not in checkpoint_identities
+        ]
+        return [
+            strip_usage_record_bookkeeping(record)
+            for record in [*unique_run_records, *checkpoint_records]
+        ]
 
     def refresh(self) -> Execution:
         """Fetch the latest execution state."""
@@ -244,16 +556,26 @@ class Execution:
     def replay(
         self,
         *,
-        from_: str,
-        overrides: dict[str, Any] | None = None,
-        **flow_inputs: Any,
-    ) -> Execution:
-        """Replay this execution from a prior checkpoint boundary."""
+        at: str,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+    ) -> ReplaySubmission:
+        """Replay this execution from a checkpoint cut point."""
         return self._client.executions.replay(
             self.exec_id,
-            from_=from_,
-            overrides=overrides,
-            **flow_inputs,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag=tag,
+            wait=wait,
+            on_error=on_error,
         )
 
     def list_checkpoints(self) -> list[CheckpointCall]:
@@ -275,6 +597,14 @@ __all__ = [
     "Deployment",
     "Execution",
     "ExecutionEvent",
+    "ExecutionStatistics",
+    "ExecutionStatisticsDimension",
+    "ExecutionStatisticsGroup",
+    "ExecutionStatisticsGrouping",
+    "ExecutionStatisticsMetric",
+    "ExecutionStatisticsMetricAggregation",
+    "ExecutionStatisticsMetricSource",
+    "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
     "LogEntry",

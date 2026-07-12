@@ -5,28 +5,44 @@ icon: floppy-disk
 
 # Checkpoints
 
-A **checkpoint** is a unit of work inside a flow whose output is automatically
-persisted. It's also the **contract between the runner and the
+A **checkpoint** is a unit of work inside a flow whose inputs and output are
+recorded durably. Checkpoints are the recorded boundaries that make two things
+possible: **resume** a failed run from where it stopped, and **faithfully replay**
+a real run so you can change one thing and trust the diff. In ZenML terms, a
+checkpoint is like a step; a Kitaru flow is a dynamic pipeline of them.
+
+A checkpoint is also the **contract between the runner and the
 [execution target](how-it-works.md)**: the runner owns durable control flow
 (order, retry, replay, resume, wait), the execution target (inline, isolated
-container, sandbox, external tool) does the work, and the checkpoint is what they
-agree on.
-
-That separation is why a checkpoint failure is never just a crash — it's
-persisted context the runner, agent loop, or a human can retry, replay, or feed
-back into the flow. See [How It Works](how-it-works.md) for the full model.
+container, sandbox, external tool) does the work, and the checkpoint is the
+recorded boundary they agree on. That is why a checkpoint failure is never just a
+crash — it is persisted context the runner, an agent loop, or a human can retry,
+replay, or feed back into the flow. See [How it works](how-it-works.md) for the
+full model.
 
 ## Checkpoints are replay boundaries
 
-Every checkpoint is a boundary the runner remembers. On the first run, checkpoint
-outputs are computed and stored. On replay, completed checkpoints return their
-persisted outputs — execution only re-enters the first incomplete one.
+Every checkpoint is a boundary the runner remembers. On the first run, each
+checkpoint's inputs and output are computed and stored. This recording is what
+makes replay faithful: when you replay an execution, completed checkpoints return
+their persisted outputs and execution only re-enters the first checkpoint
+affected by your change. Everything you didn't touch reproduces exactly, so a
+rerun with no change is a faithful baseline and any difference you see is your
+change — not replay noise.
 
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/checkpoint-replay.png" alt="On replay, completed checkpoints return cached outputs and execution re-enters the first incomplete checkpoint."><figcaption></figcaption></figure>
 
-You can also **override** a cached checkpoint's output during replay — useful
-when you want to correct a single step's result and let the rest of the flow
-continue. See [Replay and overrides](../guides/replay-and-overrides.md).
+This is the foundation of the **run, replay, improve** loop: because checkpoints
+record the real run, you can replay it with one input changed (a different model
+or prompt via `flow.replay(exec_id, at="<checkpoint>", flow_overrides={...})`)
+and diff the two runs. See [Replay and overrides](../guides/replay-and-overrides.md).
+
+{% hint style="info" %}
+Replay now has three override levels. `flow_overrides` changes top-level flow
+inputs. `checkpoint_overrides` targets every recorded call with a checkpoint
+name. `invocation_overrides` targets one recorded checkpoint, tool, or model
+call by invocation ID or call ID.
+{% endhint %}
 
 ## Defining a checkpoint
 
@@ -158,6 +174,47 @@ If the active orchestrator does not support isolated steps, the runtime is
 silently downgraded to inline with a warning. Local stacks always run inline.
 {% endhint %}
 
+### Running a command in the active sandbox
+
+If your active stack has a sandbox component, checkpoint code can ask Kitaru to
+run one command inside that sandbox:
+
+```python
+from kitaru import checkpoint, flow, run_sandbox_command
+
+@checkpoint
+def inspect_python() -> str:
+    result = run_sandbox_command(
+        ["python", "-c", "import sys; print(sys.version)"],
+        max_chars=20_000,
+    )
+    if result.exit_code != 0:
+        raise RuntimeError(result.stderr)
+    return result.stdout
+
+@flow
+def sandbox_probe() -> str:
+    return inspect_python()
+```
+
+The helper creates a fresh sandbox session, runs the command, collects stdout and
+stderr, then cleans up the session. Non-zero exit codes do **not** raise by
+themselves. The story is: the command runs, the process exits with `2`, Kitaru
+still returns the captured output, and your code decides whether `2` means
+"expected tool result" or "stop the flow".
+
+`SandboxCommandResult` includes:
+
+- `stdout`, `stderr`, and `exit_code`
+- `stdout_truncated` and `stderr_truncated`, so you can tell when output hit the
+  `max_chars` limit
+- `cleanup_succeeded` and `cleanup_error`, so providers that cannot destroy a
+  session can still return the command result while telling you cleanup was only
+  partially completed
+
+This is a direct SDK helper. Agent adapters do not automatically route their tool
+calls through it unless that adapter documents such behavior.
+
 When retries are enabled, Kitaru records each failed attempt before the final
 checkpoint outcome. You can inspect this history through
 `KitaruClient().executions.get(exec_id).checkpoints[*].attempts`.
@@ -189,8 +246,9 @@ For retrying the **entire flow** (not just a single checkpoint), see the
 
 When a flow fails, you don't need to re-run everything from scratch. Use
 [replay](../guides/replay-and-overrides.md) to re-execute from the point of
-failure — checkpoints that already succeeded return their recorded results, and
-execution picks up at the first incomplete checkpoint.
+failure: checkpoints that already succeeded return their recorded results, and
+execution picks up at the first incomplete checkpoint. This is the same machinery
+as faithful replay above — resume is replay with no input change.
 
 ## Return values
 

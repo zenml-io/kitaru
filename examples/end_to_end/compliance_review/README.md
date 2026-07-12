@@ -44,7 +44,7 @@ Each stage's `run_workflow()` defaults to `cache=False`. That means every invoca
 
 ### Running against a remote stack
 
-The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing.
+The local default stack works out of the box. ZenML supplies optional dependencies for remote stack components, so install that stack's ZenML integration in the same environment after syncing.
 
 A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_API_KEY`. The safest path is to expose that credential at step runtime from a centralized `anthropic` secret:
 
@@ -77,7 +77,7 @@ Four domain checkpoints (HR, IT security, vendor contracts, insurance) run seque
 Each domain is its own checkpoint, so a failure in `check_insurance` or `synthesize_report` doesn't roll back the three domain audits that already completed. Pick up exactly where you left off:
 
 ```bash
-kitaru executions replay <exec-id> --from check_insurance
+kitaru executions replay <exec-id> --at check_insurance
 ```
 
 Everything before that checkpoint returns its cached `ClaudeAgentResult`; everything at or after re-runs. For a 5-turn audit that costs a few cents per turn, this is the difference between a cheap retry and a full restart.

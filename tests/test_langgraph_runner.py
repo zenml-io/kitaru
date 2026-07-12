@@ -48,7 +48,7 @@ class CountState(TypedDict):
     count: int
 
 
-def _count_graph():
+def _count_graph(*, with_checkpointer: bool = True):
     builder = StateGraph(cast(Any, CountState))
 
     def add_one(state: CountState) -> CountState:
@@ -57,6 +57,8 @@ def _count_graph():
     builder.add_node("add_one", add_one)
     builder.add_edge(START, "add_one")
     builder.add_edge("add_one", END)
+    if not with_checkpointer:
+        return builder.compile()
     return builder.compile(checkpointer=InMemorySaver())
 
 
@@ -64,9 +66,7 @@ def test_invoke_runs_deterministic_local_graph_with_thread_id() -> None:
     graph = _count_graph()
     runner = KitaruGraphRunner(graph, name="counter")
 
-    result = runner.invoke(
-        LangGraphRunRequest.start({"count": 1}, thread_id="counter-thread")
-    )
+    result = runner.invoke({"count": 1}, thread_id="counter-thread")
 
     assert result.status == "completed"
     assert result.output == {"count": 2}
@@ -75,6 +75,19 @@ def test_invoke_runs_deterministic_local_graph_with_thread_id() -> None:
     assert result.state_summary is not None
     assert result.state_summary.values is None
     assert any("InMemorySaver" in warning for warning in result.warnings)
+
+
+def test_invoke_runs_graph_without_langgraph_checkpointer() -> None:
+    graph = _count_graph(with_checkpointer=False)
+    runner = KitaruGraphRunner(graph, name="counter")
+
+    result = runner.invoke(
+        LangGraphRunRequest.start({"count": 1}, thread_id="counter-no-checkpointer")
+    )
+
+    assert result.status == "completed"
+    assert result.output == {"count": 2}
+    assert any("No LangGraph checkpointer" in warning for warning in result.warnings)
 
 
 def test_full_state_values_are_opt_in() -> None:
@@ -103,9 +116,7 @@ def test_invoke_inside_flow_creates_one_outer_graph_call_checkpoint(
 
     @flow
     def langgraph_flow(count: int, thread_id: str) -> int:
-        result = runner.invoke(
-            LangGraphRunRequest.start({"count": count}, thread_id=thread_id)
-        )
+        result = runner.invoke({"count": count}, thread_id=thread_id)
         output = cast(dict[str, Any], result.output)
         return cast(int, output["count"])
 
@@ -121,9 +132,7 @@ def test_ainvoke_runs_when_graph_supports_async() -> None:
     runner = KitaruGraphRunner(_count_graph(), name="counter")
 
     async def run() -> LangGraphRunResult:
-        return await runner.ainvoke(
-            LangGraphRunRequest.start({"count": 2}, thread_id="async-thread")
-        )
+        return await runner.ainvoke({"count": 2}, thread_id="async-thread")
 
     result = asyncio.run(run())
 

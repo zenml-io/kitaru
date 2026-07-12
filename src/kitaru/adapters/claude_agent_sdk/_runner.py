@@ -7,6 +7,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, cast
 
+from kitaru._llm_usage import coerce_cost_usd
 from kitaru.errors import KitaruUsageError
 
 from ._serialization import to_json_safe
@@ -141,7 +142,9 @@ async def _run_claude_invocation(
         transcript_path=transcript_path,
         transcript_payload=transcript_payload,
         usage=normalize_usage(getattr(final_message, "usage", None)),
-        cost_usd=_float_or_none(getattr(final_message, "total_cost_usd", None)),
+        cost_usd=_cost_usd_or_none(
+            getattr(final_message, "total_cost_usd", None), warnings
+        ),
         model_usage=normalize_usage(getattr(final_message, "model_usage", None)),
         stop_reason=_string_or_none(getattr(final_message, "stop_reason", None)),
         subtype=_string_or_none(getattr(final_message, "subtype", None)),
@@ -259,6 +262,18 @@ def _string_or_none(value: Any) -> str | None:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _cost_usd_or_none(value: Any, warnings: list[str]) -> float | None:
+    if value is None:
+        return None
+    cost = coerce_cost_usd(value)
+    if cost is None:
+        warnings.append(
+            "Claude Agent SDK returned an invalid total_cost_usd; falling back "
+            "to the configured cost calculator or genai-prices."
+        )
+    return cost
 
 
 def _float_or_none(value: Any) -> float | None:

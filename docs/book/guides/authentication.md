@@ -5,8 +5,8 @@ icon: key
 
 # Authentication
 
-Kitaru has two different server-auth concepts that fit together like a
-front-door key and a temporary visitor badge:
+To run flows, replay executions, and call the API from CI or a container, your
+non-human callers need credentials. Kitaru has two server-auth concepts:
 
 1. **Service-account API keys** are the long-lived automation credentials you
    create for CI, scripts, containers, and other non-human callers.
@@ -36,12 +36,10 @@ Concretely:
    exchanges the active API-key-backed connection for a short-lived bearer
    token.
 
-That final bearer token is useful for curl snippets, but it is not the
-long-lived secret you store in CI.
-
-In automation, `KITARU_AUTH_TOKEN` is usually set to the long-lived
-service-account API key; `kitaru auth token` exchanges that active connection
-for a short-lived bearer token when a raw HTTP call needs one.
+In automation, `KITARU_AUTH_TOKEN` holds the long-lived service-account API key;
+`kitaru auth token` exchanges that active connection for a short-lived bearer
+token when a raw HTTP call needs one. The bearer token is useful for curl
+snippets, but it is not the long-lived secret you store in CI.
 
 ## Create a service account and API key
 
@@ -82,7 +80,8 @@ export KITARU_AUTH_TOKEN=kat_...
 export KITARU_PROJECT=production
 ```
 
-Or persist the same connection locally:
+Or persist the same connection locally and select the project for later Kitaru
+commands:
 
 ```bash
 kitaru login https://kitaru.example.com \
@@ -90,10 +89,20 @@ kitaru login https://kitaru.example.com \
   --project production
 ```
 
+After that login, normal CLI and SDK calls use `production` unless a higher
+priority source such as `KITARU_PROJECT` overrides it. You can inspect or change
+the persisted project with:
+
+```bash
+kitaru project current
+kitaru project use staging
+```
+
 `KITARU_PROJECT` is required for project-scoped operations such as running,
-listing, replaying, or invoking executions. Auth-management commands are
-server-level, so they can run with just a server URL and auth token when you are
-creating or rotating credentials.
+listing, replaying, or invoking executions when the remote connection itself
+comes from environment variables. Auth-management commands are server-level, so
+they can run with just a server URL and auth token when you are creating or
+rotating credentials.
 
 ## Get a short-lived bearer token
 
@@ -152,4 +161,6 @@ print(api_key.key)  # one-time value: store it now
 
 Use `KitaruClient.for_auth_management()` for server-level credential
 administration. Use normal `KitaruClient()` for project-scoped execution,
-artifact, deployment, and execution operations.
+artifact, deployment, and execution operations. If you need to list or select
+projects before constructing a project-scoped client, use
+`KitaruClient.for_project_management()` as described in [Projects](projects.md).

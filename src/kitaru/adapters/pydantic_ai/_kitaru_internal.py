@@ -5,6 +5,7 @@ try:
         _get_current_execution_id as get_current_execution_id,
         _is_inside_checkpoint as is_inside_checkpoint,
         _is_inside_flow as is_inside_flow,
+        _next_repeated_checkpoint_name as next_repeated_checkpoint_name,
         _suspend_checkpoint_scope as suspend_checkpoint_scope,
     )
 except ImportError as error:
@@ -12,7 +13,8 @@ except ImportError as error:
         'Unsupported Kitaru version for `pydantic_ai.durable_exec.kitaru`: '
         'install a Kitaru release that exposes the `kitaru.runtime` helpers '
         '(`_get_current_checkpoint`, `_get_current_checkpoint_name`, `_get_current_execution_id`, '
-        '`_is_inside_checkpoint`, `_is_inside_flow`, `_suspend_checkpoint_scope`).'
+        '`_is_inside_checkpoint`, `_is_inside_flow`, `_next_repeated_checkpoint_name`, '
+        '`_suspend_checkpoint_scope`).'
     ) from error
 
 
@@ -22,5 +24,6 @@ __all__ = [
     'get_current_execution_id',
     'is_inside_checkpoint',
     'is_inside_flow',
+    'next_repeated_checkpoint_name',
     'suspend_checkpoint_scope',
 ]

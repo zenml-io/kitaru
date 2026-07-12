@@ -22,6 +22,8 @@ from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     resolve_deployment_exclusive,
 )
+from kitaru._client._statistics import validate_statistics_max_groups
+from kitaru._config import _projects as project_ops
 from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
@@ -35,6 +37,7 @@ from kitaru._local_server import (
     stop_registered_local_server,
 )
 from kitaru.analytics import AnalyticsEvent, set_source, track
+from kitaru.errors import KitaruUsageError
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -115,6 +118,35 @@ def kitaru_executions_list(
         ]
 
     return run_with_mcp_error_boundary(_list_executions)
+
+
+@tracked_mcp_tool
+def kitaru_executions_statistics(
+    group_by: list[str] | None = None,
+    metrics: list[str | dict[str, Any]] | None = None,
+    flow: str | None = None,
+    status: str | None = None,
+    stack: str | None = None,
+    tags: list[str] | None = None,
+    max_groups: int = 1000,
+) -> dict[str, Any]:
+    """Return grouped execution statistics with optional numeric metrics."""
+
+    def _statistics() -> dict[str, Any]:
+        validate_statistics_max_groups(max_groups)
+        client = client_api.KitaruClient()
+        statistics = client.executions.statistics(
+            group_by=group_by or [],
+            metrics=metrics or [],
+            flow=flow,
+            status=status,
+            stack=stack,
+            tags=tags,
+            max_groups=max_groups,
+        )
+        return inspection.serialize_execution_statistics(statistics)
+
+    return run_with_mcp_error_boundary(_statistics)
 
 
 @tracked_mcp_tool
@@ -376,6 +408,16 @@ def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
 
 
 @tracked_mcp_tool
+def kitaru_executions_abort_wait(exec_id: str, wait: str) -> dict[str, Any]:
+    """Abort one pending wait without cancelling its execution."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.abort_wait(exec_id, wait=wait)
+        )
+    )
+
+
+@tracked_mcp_tool
 def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, Any]:
     """Provide input to a waiting execution and return updated details."""
 
@@ -395,6 +437,16 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
 
 
 @tracked_mcp_tool
+def kitaru_executions_resume(exec_id: str) -> dict[str, Any]:
+    """Resume one execution after its pending waits are resolved."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.resume(exec_id)
+        )
+    )
+
+
+@tracked_mcp_tool
 def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
     """Retry one failed execution and return updated details."""
     return run_with_mcp_error_boundary(
@@ -406,32 +458,116 @@ def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
 
 @tracked_mcp_tool
 def kitaru_executions_replay(
-    exec_id: str,
-    from_: str,
-    overrides: dict[str, Any] | None = None,
-    flow_inputs: dict[str, Any] | None = None,
+    exec_ids: list[str],
+    at: str,
+    flow_overrides: dict[str, Any] | None = None,
+    checkpoint_overrides: dict[str, Any] | None = None,
+    invocation_overrides: dict[str, Any] | None = None,
+    skip: list[str] | None = None,
+    tag: str | None = None,
+    wait: bool | None = None,
+    on_error: Literal["fail", "collect"] | None = None,
 ) -> dict[str, Any]:
-    """Replay an execution and return structured replay details."""
+    """Replay explicit executions and return the replay submission JSON."""
 
     def _replay_execution() -> dict[str, Any]:
-        replay_inputs = execution_interface.ensure_inputs_object(
-            flow_inputs,
-            input_label="`flow_inputs`",
+        submission = client_api.KitaruClient().executions.replay(
+            exec_ids,
+            at=at,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            tag=tag,
+            wait=wait,
+            on_error=on_error,
         )
-        execution = client_api.KitaruClient().executions.replay(
-            exec_id,
-            from_=from_,
-            overrides=overrides,
-            **replay_inputs,
-        )
-
-        return {
-            "available": True,
-            "operation": "replay",
-            "execution": inspection.serialize_execution(execution),
-        }
+        return submission.to_json()
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_executions_cohort(
+    flow: str,
+    at: str,
+    deployment: str | None = None,
+    deployment_version: int | None = None,
+    order_by: str = "-started_at",
+    limit: int = 50,
+    since: str | None = None,
+    until: str | None = None,
+    max_scan: int = 500,
+    include_failed: bool = False,
+) -> dict[str, Any]:
+    """Resolve a cohort of original executions for batch replay."""
+
+    def _resolve_cohort() -> dict[str, Any]:
+        status_filter: str | list[str] = (
+            ["completed", "failed"] if include_failed else "completed"
+        )
+        result = (
+            client_api.KitaruClient()
+            .executions.cohort(
+                flow=flow,
+                at=at,
+                deployment=deployment,
+                deployment_version=deployment_version,
+                order_by=order_by,
+                limit=limit,
+                since=since,
+                until=until,
+                status=status_filter,
+            )
+            .resolve(max_scan=max_scan)
+        )
+        return {
+            "available": True,
+            "operation": "cohort",
+            "cohort": result.to_json(),
+        }
+
+    return run_with_mcp_error_boundary(_resolve_cohort)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff(
+    original: str,
+    executions: list[str] | None = None,
+) -> dict[str, Any]:
+    """Compare an original execution against replay executions."""
+
+    def _diff() -> dict[str, Any]:
+        from kitaru.diff import diff, serialize_execution_diff
+
+        compared = executions or ()
+        result = diff(original, *compared)
+        return {
+            "available": True,
+            "operation": "diff",
+            "diff": serialize_execution_diff(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff)
+
+
+@tracked_mcp_tool
+def kitaru_executions_diff_matrix(
+    exec_ids: list[str],
+) -> dict[str, Any]:
+    """Diff many original executions against their auto-discovered replays."""
+
+    def _diff_matrix() -> dict[str, Any]:
+        from kitaru.diff import diff_matrix, serialize_diff_matrix
+
+        result = diff_matrix(exec_ids)
+        return {
+            "available": True,
+            "operation": "diff_matrix",
+            "diff_matrix": serialize_diff_matrix(result),
+        }
+
+    return run_with_mcp_error_boundary(_diff_matrix)
 
 
 @tracked_mcp_tool
@@ -446,6 +582,27 @@ def kitaru_secrets_create(
             secrets_api.create_secret(name, values, private=private)
         )
     )
+
+
+@tracked_mcp_tool
+def kitaru_secrets_list(
+    page: int = 1,
+    size: int = 20,
+) -> list[dict[str, Any]]:
+    """List paginated secret metadata without raw values."""
+
+    def _list_secrets() -> list[dict[str, Any]]:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise KitaruUsageError("`page` must be an integer >= 1.")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+            raise KitaruUsageError("`size` must be an integer >= 1.")
+
+        return [
+            inspection.serialize_secret_summary(summary)
+            for summary in secrets_api.list_secrets()[(page - 1) * size : page * size]
+        ]
+
+    return run_with_mcp_error_boundary(_list_secrets)
 
 
 @tracked_mcp_tool
@@ -530,6 +687,41 @@ def kitaru_status() -> dict[str, Any]:
 
 
 @tracked_mcp_tool
+def kitaru_projects_list() -> list[dict[str, Any]]:
+    """List Kitaru projects visible to the current user."""
+    return run_with_mcp_error_boundary(
+        lambda: [
+            inspection.serialize_project(project)
+            for project in project_ops.list_projects()
+        ]
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_current() -> dict[str, Any]:
+    """Return the active Kitaru project."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.current_project())
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_show(name_or_id: str) -> dict[str, Any]:
+    """Show a Kitaru project by name or ID."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.get_project(name_or_id))
+    )
+
+
+@tracked_mcp_tool
+def kitaru_projects_use(name_or_id: str) -> dict[str, Any]:
+    """Use a Kitaru project on ZenML Pro/Cloud as the active default."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_project(project_ops.use_project(name_or_id))
+    )
+
+
+@tracked_mcp_tool
 def kitaru_stacks_list() -> list[dict[str, Any]]:
     """List available stacks from the active connection context."""
     return run_with_mcp_error_boundary(
@@ -549,6 +741,7 @@ def manage_stack(
     force: bool = False,
     stack_type: str = "local",
     artifact_store: str | None = None,
+    sandbox: str | None = None,
     container_registry: str | None = None,
     cluster: str | None = None,
     region: str | None = None,
@@ -562,8 +755,14 @@ def manage_stack(
     async_mode: bool = False,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local, Kubernetes-backed, Vertex AI, SageMaker,
-    or AzureML stack. `async_mode` is the MCP equivalent of CLI `--async`."""
+    """Create or delete a local, Kubernetes, Vertex AI, SageMaker, AzureML,
+    or Modal stack.
+
+    For remote stacks, `sandbox` attaches a sandbox only when provided. Use
+    `sandbox="modal"` to attach a Modal sandbox component to a Modal stack.
+    Local stacks default to `local`. `async_mode` is the MCP equivalent of CLI
+    `--async`.
+    """
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(
@@ -574,6 +773,7 @@ def manage_stack(
             force=force,
             stack_type=stack_type,
             artifact_store=artifact_store,
+            sandbox=sandbox,
             container_registry=container_registry,
             cluster=cluster,
             region=region,

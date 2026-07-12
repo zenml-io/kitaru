@@ -5,12 +5,20 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from importlib import metadata
-from typing import Any, cast
+from typing import Any, Literal, cast, overload
 
+from kitaru._llm_usage import (
+    add_optional_token_count,
+    build_usage_record,
+    calculated_or_genai_cost_metadata,
+    log_usage_record,
+    token_usage_from_mapping,
+)
 from kitaru.adapters._result_identity import canonicalize_result_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
 
+from ._constants import LANGGRAPH_CONFIG_CHECKPOINTER_KEY
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import (
     LangGraphCallCheckpointPolicy,
@@ -59,6 +67,61 @@ def langgraph_version() -> str:
         return metadata.version("langgraph")
     except metadata.PackageNotFoundError:
         return "unknown"
+
+
+class _UnsetType:
+    """Private sentinel for omitted convenience-start keyword arguments."""
+
+
+_UNSET = _UnsetType()
+_FRESH_START_KWARG_NAMES = (
+    "thread_id",
+    "checkpoint_id",
+    "checkpoint_ns",
+    "context",
+    "configurable",
+    "config",
+    "durability",
+    "metadata",
+)
+_LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX = "kitaru.adapters.langgraph._types"
+
+
+def _is_aliased_run_request(value: Any) -> bool:
+    value_type = type(value)
+    if value_type.__name__ != "LangGraphRunRequest":
+        return False
+    if value_type.__qualname__ != "LangGraphRunRequest":
+        return False
+    module_path = value_type.__module__.removeprefix("src.")
+    if module_path != _LANGGRAPH_RUN_REQUEST_MODULE_SUFFIX:
+        return False
+    model_fields = getattr(value_type, "model_fields", None)
+    return isinstance(model_fields, Mapping) and set(model_fields) == set(
+        LangGraphRunRequest.model_fields
+    )
+
+
+def _canonicalize_run_request(value: Any) -> LangGraphRunRequest | None:
+    """Return aliased LangGraph run requests with local class identity.
+
+    ZenML can materialize the same source file through both ``kitaru...`` and
+    ``src.kitaru...`` module names. When that happens, the request has the same
+    Pydantic fields but a different class object, so an exact ``isinstance``
+    check misses it.
+    """
+    if isinstance(value, LangGraphRunRequest):
+        return value
+    if not _is_aliased_run_request(value):
+        return None
+
+    model_dump = getattr(value, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    payload = model_dump(mode="python", exclude_unset=True)
+    if not isinstance(payload, Mapping):
+        return None
+    return LangGraphRunRequest.model_validate(payload)
 
 
 class KitaruGraphRunner:
@@ -112,6 +175,7 @@ class KitaruGraphRunner:
         self._config_factory = config_factory
         self._context_factory = context_factory
         self._cost_calculator = cost_calculator
+        self._checkpointer_saver_value = self._resolve_checkpointer_saver()
         self._checkpointer_label_value = self._resolve_checkpointer_label()
         self._store_label_value = self._resolve_store_label()
         self._graph_identity_value = self._build_graph_identity()
@@ -155,12 +219,56 @@ class KitaruGraphRunner:
     def call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
         return self._call_checkpoint_policy
 
-    def invoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
+    @overload
+    def invoke(self, request: LangGraphRunRequest) -> LangGraphRunResult: ...
+
+    @overload
+    def invoke(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LangGraphRunResult: ...
+
+    def invoke(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+    ) -> LangGraphRunResult:
         """Invoke the wrapped graph synchronously."""
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="invoke")
 
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
+
         def _body() -> LangGraphRunResult:
-            return self._invoke_graph_sync(request)
+            return self._invoke_graph_sync(request, config=config)
 
         if self._checkpoint_strategy == "calls":
             result = _body()
@@ -174,15 +282,59 @@ class KitaruGraphRunner:
         else:
             result = _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("invoke", result, request=request)
+        self._track_result("invoke", result, request=request, config=config)
         return result
 
-    async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult:
+    @overload
+    async def ainvoke(self, request: LangGraphRunRequest) -> LangGraphRunResult: ...
+
+    @overload
+    async def ainvoke(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LangGraphRunResult: ...
+
+    async def ainvoke(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+    ) -> LangGraphRunResult:
         """Invoke the wrapped graph asynchronously when the graph supports it."""
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="ainvoke")
 
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
+
         async def _body() -> LangGraphRunResult:
-            return await self._invoke_graph_async(request)
+            return await self._invoke_graph_async(request, config=config)
 
         if self._checkpoint_strategy == "calls":
             result = await _body()
@@ -196,27 +348,74 @@ class KitaruGraphRunner:
         else:
             result = await _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("ainvoke", result, request=request)
+        self._track_result("ainvoke", result, request=request, config=config)
         return result
 
+    @overload
     def stream(
         self,
         request: LangGraphRunRequest,
         *,
         stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
         subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    @overload
+    def stream(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    def stream(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph synchronously and forward best-effort live stream events."""
         self._require_streaming_graph_call()
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="stream")
         options = resolve_stream_options(
             stream_mode,
             policy=self._stream_policy,
             subgraphs=subgraphs,
         )
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
 
         def _body() -> LangGraphRunResult:
-            return self._stream_graph_sync(request, options=options)
+            return self._stream_graph_sync(request, config=config, options=options)
 
         if is_inside_flow() and not is_inside_checkpoint():
             result = run_sync_in_checkpoint(
@@ -235,27 +434,76 @@ class KitaruGraphRunner:
         else:
             result = _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("stream", result, request=request)
+        self._track_result("stream", result, request=request, config=config)
         return result
 
+    @overload
     async def astream(
         self,
         request: LangGraphRunRequest,
         *,
         stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
         subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    @overload
+    async def astream(
+        self,
+        request: Any,
+        *,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        checkpoint_ns: str | None = None,
+        context: Any | None = None,
+        configurable: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        durability: Literal["sync", "async", "exit"] | None = None,
+        metadata: dict[str, Any] | None = None,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
+    ) -> LangGraphRunResult: ...
+
+    async def astream(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType = _UNSET,
+        checkpoint_id: str | None | _UnsetType = _UNSET,
+        checkpoint_ns: str | None | _UnsetType = _UNSET,
+        context: Any | None | _UnsetType = _UNSET,
+        configurable: dict[str, Any] | None | _UnsetType = _UNSET,
+        config: dict[str, Any] | None | _UnsetType = _UNSET,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType = _UNSET,
+        metadata: dict[str, Any] | None | _UnsetType = _UNSET,
+        stream_mode: LangGraphStreamMode | Sequence[LangGraphStreamMode] | None = None,
+        subgraphs: bool = False,
     ) -> LangGraphRunResult:
         """Run the graph asynchronously and forward best-effort live stream events."""
         self._require_streaming_graph_call()
+        request = self._coerce_run_request(
+            request,
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            context=context,
+            configurable=configurable,
+            config=config,
+            durability=durability,
+            metadata=metadata,
+        )
         self._validate_request(request, required_method="astream")
         options = resolve_stream_options(
             stream_mode,
             policy=self._stream_policy,
             subgraphs=subgraphs,
         )
+        config = self._prepared_config(request)
+        self._validate_checkpointer_requirement(config)
 
         async def _body() -> LangGraphRunResult:
-            return await self._stream_graph_async(request, options=options)
+            return await self._stream_graph_async(
+                request, config=config, options=options
+            )
 
         if is_inside_flow() and not is_inside_checkpoint():
             result = await run_async_in_checkpoint(
@@ -274,19 +522,76 @@ class KitaruGraphRunner:
         else:
             result = await _body()
         result = canonicalize_result_model(result, LangGraphRunResult)
-        self._track_result("astream", result, request=request)
+        self._track_result("astream", result, request=request, config=config)
         return result
 
-    def _invoke_graph_sync(self, request: LangGraphRunRequest) -> LangGraphRunResult:
-        config = self._prepared_config(request)
+    def _coerce_run_request(
+        self,
+        request: LangGraphRunRequest | Any,
+        *,
+        thread_id: str | None | _UnsetType,
+        checkpoint_id: str | None | _UnsetType,
+        checkpoint_ns: str | None | _UnsetType,
+        context: Any | None | _UnsetType,
+        configurable: dict[str, Any] | None | _UnsetType,
+        config: dict[str, Any] | None | _UnsetType,
+        durability: Literal["sync", "async", "exit"] | None | _UnsetType,
+        metadata: dict[str, Any] | None | _UnsetType,
+    ) -> LangGraphRunRequest:
+        supplied = {
+            "thread_id": thread_id,
+            "checkpoint_id": checkpoint_id,
+            "checkpoint_ns": checkpoint_ns,
+            "context": context,
+            "configurable": configurable,
+            "config": config,
+            "durability": durability,
+            "metadata": metadata,
+        }
+        prebuilt_request = _canonicalize_run_request(request)
+        if prebuilt_request is not None:
+            explicit_names = [
+                name
+                for name in _FRESH_START_KWARG_NAMES
+                if supplied[name] is not _UNSET
+            ]
+            if explicit_names:
+                arguments = ", ".join(f"`{name}`" for name in explicit_names)
+                raise KitaruUsageError(
+                    "Fresh-run keyword arguments cannot be combined with a "
+                    f"prebuilt LangGraphRunRequest: {arguments}. Put those "
+                    "values on `LangGraphRunRequest.start(...)` or pass raw "
+                    "graph input with `thread_id=...`."
+                )
+            return prebuilt_request
+
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise KitaruUsageError(
+                "Raw LangGraph runner input requires a stable non-empty "
+                "`thread_id`. Use `runner.invoke(input, thread_id=...)` for "
+                "fresh runs, or pass a prebuilt `LangGraphRunRequest` for "
+                "advanced and resume flows."
+            )
+
+        start_kwargs: dict[str, Any] = {"thread_id": thread_id}
+        for name in _FRESH_START_KWARG_NAMES:
+            if name == "thread_id" or supplied[name] is _UNSET:
+                continue
+            start_kwargs[name] = supplied[name]
+        return LangGraphRunRequest.start(request, **start_kwargs)
+
+    def _invoke_graph_sync(
+        self, request: LangGraphRunRequest, *, config: dict[str, Any]
+    ) -> LangGraphRunResult:
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name="invoke",
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
 
         with tracker_scope(
             self._name,
@@ -330,7 +635,7 @@ class KitaruGraphRunner:
             return result
 
     async def _invoke_graph_async(
-        self, request: LangGraphRunRequest
+        self, request: LangGraphRunRequest, *, config: dict[str, Any]
     ) -> LangGraphRunResult:
         ainvoke = getattr(self._graph, "ainvoke", None)
         if not callable(ainvoke):
@@ -339,15 +644,15 @@ class KitaruGraphRunner:
                 "`invoke(...)` or wrap a graph that supports async invocation."
             )
 
-        config = self._prepared_config(request)
         context = self._prepared_context(request)
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name="ainvoke",
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
 
         with tracker_scope(
             self._name,
@@ -394,18 +699,19 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: dict[str, Any],
         options: LangGraphStreamOptions,
     ) -> LangGraphRunResult:
-        config = self._prepared_config(request)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
+            config=config,
             context=context,
             method_name="stream",
             options=options,
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
         publisher, stats = self._new_stream_publisher(request, options)
 
         with tracker_scope(self._name) as tracker:
@@ -461,6 +767,7 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: dict[str, Any],
         options: LangGraphStreamOptions,
     ) -> LangGraphRunResult:
         astream = getattr(self._graph, "astream", None)
@@ -470,16 +777,16 @@ class KitaruGraphRunner:
                 "`stream(...)` or wrap a graph that supports async streaming."
             )
 
-        config = self._prepared_config(request)
         context = self._prepared_context(request)
         kwargs = self._graph_stream_kwargs(
             request,
+            config=config,
             context=context,
             method_name="astream",
             options=options,
         )
         input_or_command = request.input if request.kind == "start" else request.command
-        warnings = self._checkpointer_warnings()
+        warnings = self._checkpointer_warnings(config=config)
         publisher, stats = self._new_stream_publisher(request, options)
 
         with tracker_scope(self._name) as tracker:
@@ -693,12 +1000,41 @@ class KitaruGraphRunner:
         else:
             tracker.record("graph_call_completed")
 
-        usage = self._usage_from_output(output) if self._capture.save_usage else None
-        estimated_cost = (
-            self._cost_calculator(usage)
-            if self._cost_calculator is not None and usage is not None
-            else None
+        usage = (
+            self._usage_from_model_events(tracker) if self._capture.save_usage else None
         )
+        if usage is None and self._capture.save_usage:
+            usage = self._usage_from_output(output)
+        usage_payload = usage.model_dump(mode="json") if usage is not None else None
+        cost_metadata = calculated_or_genai_cost_metadata(
+            calculator=self._cost_calculator,
+            calculator_usage=usage,
+            genai_provider=usage.provider_name if usage is not None else None,
+            genai_model=usage.model_name if usage is not None else None,
+            genai_usage=usage_payload,
+            warnings=warnings,
+            adapter_name="LangGraph",
+            calculator_source_label="langgraph.cost_calculator",
+        )
+        if self._capture.save_usage:
+            usage_record = build_usage_record(
+                adapter="langgraph",
+                surface="graph_call",
+                call_name=self._name,
+                event_id=tracker.run_label,
+                record_id=tracker.run_label,
+                usage=usage_payload,
+                model=usage.model_name if usage is not None else None,
+                estimated_cost_usd=cost_metadata.estimated_cost_usd,
+                cost_source=cost_metadata.cost_source,
+                cost_source_label=cost_metadata.cost_source_label,
+                pricing_version=cost_metadata.pricing_version,
+                status=status,
+                billing_effect="incurred" if status == "completed" else "unknown",
+                cache_status="executed",
+                warnings=warnings,
+            )
+            log_usage_record(usage_record)
         result = LangGraphRunResult(
             status=status,
             output=None if status == "interrupted" else output,
@@ -721,7 +1057,7 @@ class KitaruGraphRunner:
                 else None
             ),
             usage=usage,
-            estimated_cost_usd=estimated_cost,
+            estimated_cost_usd=cost_metadata.estimated_cost_usd,
             warnings=warnings,
         )
         return result
@@ -904,14 +1240,28 @@ class KitaruGraphRunner:
     def _resolved_durability(self, request: LangGraphRunRequest) -> str:
         return request.durability or self._durability.mode
 
+    def _forwarded_durability(
+        self,
+        request: LangGraphRunRequest,
+        *,
+        config: Mapping[str, Any] | None = None,
+    ) -> str | None:
+        if not self._has_effective_checkpointer_saver(config):
+            return None
+        return self._resolved_durability(request)
+
     def _graph_call_kwargs(
         self,
         request: LangGraphRunRequest,
         *,
+        config: Mapping[str, Any],
         context: Any | None,
         method_name: str,
     ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"durability": self._resolved_durability(request)}
+        kwargs: dict[str, Any] = {}
+        forwarded_durability = self._forwarded_durability(request, config=config)
+        if forwarded_durability is not None:
+            kwargs["durability"] = forwarded_durability
         if context is not None:
             kwargs["context"] = context
         return self._filter_kwargs_for_graph_method(method_name, kwargs)
@@ -920,12 +1270,14 @@ class KitaruGraphRunner:
         self,
         request: LangGraphRunRequest,
         *,
+        config: Mapping[str, Any],
         context: Any | None,
         method_name: str,
         options: LangGraphStreamOptions,
     ) -> dict[str, Any]:
         kwargs = self._graph_call_kwargs(
             request,
+            config=config,
             context=context,
             method_name=method_name,
         )
@@ -1056,10 +1408,15 @@ class KitaruGraphRunner:
             raise KitaruUsageError(
                 f"Wrapped LangGraph object does not expose `{required_method}(...)`."
             )
-        if self._durability.require_checkpointer and self._checkpointer_label() is None:
+
+    def _validate_checkpointer_requirement(self, config: Mapping[str, Any]) -> None:
+        if (
+            self._durability.require_checkpointer
+            and not self._has_effective_checkpointer_saver(config)
+        ):
             raise KitaruUsageError(
                 "LangGraph durability policy requires a graph checkpointer, but "
-                "none was detected on the wrapped graph."
+                "none was detected on the wrapped graph or prepared config."
             )
 
     def _effective_call_checkpoint_policy(self) -> LangGraphCallCheckpointPolicy:
@@ -1145,10 +1502,49 @@ class KitaruGraphRunner:
         return self._checkpointer_label_value
 
     def _resolve_checkpointer_label(self) -> str | None:
-        checkpointer = getattr(self._graph, "checkpointer", None)
+        checkpointer = self._checkpointer_saver_value
         if checkpointer is None:
             return None
         return _type_label(checkpointer)
+
+    def _has_checkpointer_saver(self) -> bool:
+        return self._checkpointer_saver_value is not None
+
+    def _config_checkpointer_saver(
+        self, config: Mapping[str, Any] | None
+    ) -> Any | None:
+        configurable = (
+            _mapping_get(config, "configurable") if config is not None else None
+        )
+        checkpointer = _mapping_get(configurable, LANGGRAPH_CONFIG_CHECKPOINTER_KEY)
+        if checkpointer is None or isinstance(checkpointer, bool):
+            return None
+        return checkpointer
+
+    def _has_effective_checkpointer_saver(
+        self, config: Mapping[str, Any] | None = None
+    ) -> bool:
+        return (
+            self._has_checkpointer_saver()
+            or self._config_checkpointer_saver(config) is not None
+        )
+
+    def _effective_checkpointer_label(
+        self, config: Mapping[str, Any] | None = None
+    ) -> str | None:
+        graph_label = self._checkpointer_label()
+        if graph_label is not None:
+            return graph_label
+        config_checkpointer = self._config_checkpointer_saver(config)
+        if config_checkpointer is None:
+            return None
+        return _type_label(config_checkpointer)
+
+    def _resolve_checkpointer_saver(self) -> Any | None:
+        checkpointer = getattr(self._graph, "checkpointer", None)
+        if checkpointer is None or isinstance(checkpointer, bool):
+            return None
+        return checkpointer
 
     def _store_label(self) -> str | None:
         return self._store_label_value
@@ -1159,9 +1555,11 @@ class KitaruGraphRunner:
             return None
         return _type_label(store)
 
-    def _checkpointer_warnings(self) -> list[str]:
+    def _checkpointer_warnings(
+        self, *, config: Mapping[str, Any] | None = None
+    ) -> list[str]:
         warnings: list[str] = []
-        checkpointer_label = self._checkpointer_label()
+        checkpointer_label = self._effective_checkpointer_label(config)
         if checkpointer_label is None:
             if self._durability.warn_without_checkpointer:
                 warnings.append(
@@ -1410,9 +1808,10 @@ class KitaruGraphRunner:
             "graph_name": self._name,
             "thread_id": request.thread_id,
             "thread_id_present": bool(request.thread_id),
-            "checkpointer_type": self._checkpointer_label(),
+            "checkpointer_type": self._effective_checkpointer_label(config),
             "store_type": self._store_label(),
             "durability": self._resolved_durability(request),
+            "forwarded_durability": self._forwarded_durability(request, config=config),
             "capture": self._capture_summary,
             "config": redact_config(config) if self._capture.save_config else None,
             "context": redact_config(context) if self._capture.save_context else None,
@@ -1450,7 +1849,8 @@ class KitaruGraphRunner:
         return {
             "kind": request.kind,
             "durability": self._resolved_durability(request),
-            "has_checkpointer": self._checkpointer_label() is not None,
+            "forwarded_durability": self._forwarded_durability(request, config=config),
+            "has_checkpointer": self._has_effective_checkpointer_saver(config),
             "has_store": self._store_label() is not None,
             "thread_id_present": bool(request.thread_id),
             "configurable_keys": _safe_key_labels(
@@ -1463,6 +1863,7 @@ class KitaruGraphRunner:
         method: str,
         *,
         request: LangGraphRunRequest,
+        config: Mapping[str, Any],
         status: str,
         captured_state: bool,
     ) -> dict[str, object]:
@@ -1470,7 +1871,8 @@ class KitaruGraphRunner:
             "method": method,
             "status": status,
             "durability": self._resolved_durability(request),
-            "has_checkpointer": self._checkpointer_label() is not None,
+            "forwarded_durability": self._forwarded_durability(request, config=config),
+            "has_checkpointer": self._has_effective_checkpointer_saver(config),
             "has_store": self._store_label() is not None,
             "captured_state": captured_state,
         }
@@ -1481,10 +1883,12 @@ class KitaruGraphRunner:
         result: LangGraphRunResult,
         *,
         request: LangGraphRunRequest,
+        config: Mapping[str, Any],
     ) -> None:
         metadata = self._analytics_metadata(
             method,
             request=request,
+            config=config,
             status=result.status,
             captured_state=result.state_summary is not None,
         )
@@ -1495,27 +1899,46 @@ class KitaruGraphRunner:
             metadata,
         )
 
-    def _usage_from_output(self, output: Any) -> LangGraphUsageSummary | None:
-        usage = _find_usage(output, max_depth=6)
-        if usage is None:
-            return None
-        usage_json = to_json_safe(usage)
-        if not isinstance(usage_json, dict):
-            return LangGraphUsageSummary(raw={"value": usage_json})
-        return LangGraphUsageSummary(
-            input_tokens=_int_or_none(
-                usage_json.get("input_tokens")
-                or usage_json.get("prompt_tokens")
-                or usage_json.get("input_token_count")
-            ),
-            output_tokens=_int_or_none(
-                usage_json.get("output_tokens")
-                or usage_json.get("completion_tokens")
-                or usage_json.get("output_token_count")
-            ),
-            total_tokens=_int_or_none(usage_json.get("total_tokens")),
-            raw=usage_json,
+    def _usage_from_model_events(
+        self,
+        tracker: EventTracker,
+    ) -> LangGraphUsageSummary | None:
+        usages: list[Any] = []
+        model_names: set[str] = set()
+        provider_names: set[str] = set()
+        seen_event_ids: set[str] = set()
+        for event in tracker.events:
+            if event.kind != "model_call" or event.status != "completed":
+                continue
+            if event.event_id in seen_event_ids:
+                continue
+            seen_event_ids.add(event.event_id)
+            usage = event.metadata.get("usage")
+            if usage is None:
+                continue
+            usages.append(usage)
+            if event.model_name:
+                model_names.add(event.model_name)
+            metadata_model_name = event.metadata.get("model_name")
+            if isinstance(metadata_model_name, str) and metadata_model_name:
+                model_names.add(metadata_model_name)
+            for provider_key in (
+                "model_provider",
+                "ls_provider",
+                "provider_name",
+                "provider",
+            ):
+                metadata_provider = event.metadata.get(provider_key)
+                if isinstance(metadata_provider, str) and metadata_provider.strip():
+                    provider_names.add(metadata_provider)
+        return _usage_summary_from_payloads(
+            usages,
+            model_names=model_names,
+            provider_names=provider_names,
         )
+
+    def _usage_from_output(self, output: Any) -> LangGraphUsageSummary | None:
+        return _usage_summary_from_payloads(_find_usages(output, max_depth=6))
 
     def _output_has_interrupt(self, output: Any) -> bool:
         return _mapping_get(output, "__interrupt__") is not None
@@ -1666,6 +2089,54 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+_USAGE_TOKEN_KEYS = frozenset(
+    {
+        "input_tokens",
+        "prompt_tokens",
+        "request_tokens",
+        "tokens_input",
+        "input_token_count",
+        "output_tokens",
+        "completion_tokens",
+        "response_tokens",
+        "tokens_output",
+        "output_token_count",
+        "total_tokens",
+        "tokens_total",
+        "total_token_count",
+    }
+)
+_USAGE_CONTAINER_KEYS = ("usage", "token_usage", "usage_metadata")
+
+
+def _looks_like_usage(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            key in value and _int_or_none(value[key]) is not None
+            for key in _USAGE_TOKEN_KEYS
+        )
+    return any(
+        _int_or_none(getattr(value, key, None)) is not None for key in _USAGE_TOKEN_KEYS
+    )
+
+
+def _remember_usage_traversal_object(value: Any, seen: set[int]) -> bool:
+    """Return whether this traversal should inspect ``value``.
+
+    The usage collector walks object graphs where the same message or usage
+    mapping can be reachable through multiple output branches. Remembering
+    visited container/custom objects for the full walk prevents double-counting
+    without treating repeated scalar values as cycles.
+    """
+    if value is None or isinstance(value, str | bytes | int | float | bool):
+        return True
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    return True
+
+
 def _len_or_count(value: Any) -> int:
     try:
         return len(value)
@@ -1711,23 +2182,123 @@ def _type_label(value: Any) -> str:
     return f"{value_type.__module__}.{value_type.__qualname__}"
 
 
-def _find_usage(value: Any, *, max_depth: int, _depth: int = 0) -> Any | None:
-    if value is None or _depth > max_depth:
+_USAGE_RAW_SAMPLE_LIMIT = 5
+
+
+def _usage_summary_from_payloads(
+    payloads: Sequence[Any],
+    *,
+    model_names: set[str] | None = None,
+    provider_names: set[str] | None = None,
+) -> LangGraphUsageSummary | None:
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    raw_samples: list[dict[str, Any]] = []
+    payload_count = 0
+
+    for payload in payloads:
+        if not _looks_like_usage(payload):
+            continue
+        usage_json = to_json_safe(payload)
+        if not isinstance(usage_json, dict):
+            usage_json = {"value": usage_json}
+        token_usage = token_usage_from_mapping(usage_json)
+        input_tokens = add_optional_token_count(
+            input_tokens, token_usage["input_tokens"]
+        )
+        output_tokens = add_optional_token_count(
+            output_tokens, token_usage["output_tokens"]
+        )
+        total_tokens = add_optional_token_count(
+            total_tokens, token_usage["total_tokens"]
+        )
+        payload_count += 1
+        if len(raw_samples) < _USAGE_RAW_SAMPLE_LIMIT:
+            raw_samples.append(usage_json)
+
+    if payload_count == 0:
         return None
+
+    raw: dict[str, Any]
+    if payload_count == 1:
+        raw = raw_samples[0]
+    else:
+        raw = {
+            "payload_count": payload_count,
+            "sample_count": len(raw_samples),
+            "sample_limit": _USAGE_RAW_SAMPLE_LIMIT,
+            "truncated": payload_count > len(raw_samples),
+            "samples": raw_samples,
+        }
+    model_name = None
+    if model_names is not None and len(model_names) == 1:
+        model_name = next(iter(model_names))
+    provider_name = None
+    if provider_names is not None and len(provider_names) == 1:
+        provider_name = next(iter(provider_names))
+    return LangGraphUsageSummary(
+        model_name=model_name,
+        provider_name=provider_name,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        raw=raw,
+    )
+
+
+def _find_usages(
+    value: Any,
+    *,
+    max_depth: int,
+    _depth: int = 0,
+    _seen: set[int] | None = None,
+) -> list[Any]:
+    if value is None or _depth > max_depth:
+        return []
+
+    seen = _seen if _seen is not None else set()
+    if not _remember_usage_traversal_object(value, seen):
+        return []
+    if _looks_like_usage(value):
+        return [value]
+
     if isinstance(value, Mapping):
-        for key in ("usage", "token_usage", "usage_metadata"):
-            if key in value:
-                return value[key]
+        for key in _USAGE_CONTAINER_KEYS:
+            usage = value.get(key)
+            if _looks_like_usage(usage):
+                if _remember_usage_traversal_object(usage, seen):
+                    return [usage]
+                return []
+        usages: list[Any] = []
         for nested in value.values():
-            found = _find_usage(nested, max_depth=max_depth, _depth=_depth + 1)
-            if found is not None:
-                return found
+            usages.extend(
+                _find_usages(
+                    nested,
+                    max_depth=max_depth,
+                    _depth=_depth + 1,
+                    _seen=seen,
+                )
+            )
+        return usages
+
     if isinstance(value, list | tuple):
+        usages = []
         for item in value:
-            found = _find_usage(item, max_depth=max_depth, _depth=_depth + 1)
-            if found is not None:
-                return found
-    usage = getattr(value, "usage_metadata", None) or getattr(value, "usage", None)
-    if usage is not None:
-        return usage
-    return None
+            usages.extend(
+                _find_usages(
+                    item,
+                    max_depth=max_depth,
+                    _depth=_depth + 1,
+                    _seen=seen,
+                )
+            )
+        return usages
+
+    for key in ("usage_metadata", "usage"):
+        usage = getattr(value, key, None)
+        if _looks_like_usage(usage):
+            if _remember_usage_traversal_object(usage, seen):
+                return [usage]
+            return []
+    return []

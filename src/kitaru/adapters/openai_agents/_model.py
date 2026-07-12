@@ -246,7 +246,10 @@ class KitaruOpenAIModel(Model):
             )
             raise
 
-        usage = normalize_usage(getattr(response, "usage", None))
+        usage = normalize_usage(
+            getattr(response, "usage", None),
+            model_name=self._known_model_name(),
+        )
         metadata: dict[str, object] = {
             "response_id": getattr(response, "response_id", None),
         }
@@ -283,12 +286,20 @@ class KitaruOpenAIModel(Model):
             return
         tracker.reserve_tool_call_order(_trackable_tool_call_ids(response, tools))
 
+    def _known_model_name(self) -> str | None:
+        if isinstance(self._requested_model_name, str) and self._requested_model_name:
+            return self._requested_model_name
+        for attr_name in ("model_name", "model"):
+            exposed_name = getattr(self._wrapped, attr_name, None)
+            if isinstance(exposed_name, str) and exposed_name:
+                return exposed_name
+        return None
+
     def _model_cache_identity(self) -> dict[str, Any]:
         wrapped_type = type(self._wrapped)
-        exposed_name = getattr(self._wrapped, "model_name", None)
         return {
             "requested_model_name": self._requested_model_name,
-            "model_name": exposed_name if isinstance(exposed_name, str) else None,
+            "model_name": self._known_model_name(),
             "python_type": f"{wrapped_type.__module__}.{wrapped_type.__qualname__}",
         }
 

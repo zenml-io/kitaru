@@ -5,9 +5,9 @@ icon: microsoft
 
 # Azure (AzureML)
 
-An AzureML stack runs each Kitaru execution as a managed AzureML job and stores checkpoint outputs in Azure storage.
+An AzureML stack runs each Kitaru execution as a managed AzureML job and stores checkpoint outputs in Azure storage. Use it when your team wants Azure-managed job execution and a durable artifact store so runs are reproducible and replayable later.
 
-Use this page when your team wants Azure-managed job execution. If you want the broader stack model first, start with [Stacks](README.md).
+Kitaru flows run on the same stacks as ZenML pipelines, so the checkpoints recorded here are what `flow.replay(...)` reads back from. If you want the broader stack model first, start with [Stacks](README.md).
 
 ## Prerequisites
 

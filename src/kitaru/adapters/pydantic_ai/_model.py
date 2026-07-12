@@ -7,6 +7,7 @@ the ``type='llm_call'`` checkpoint convention so dashboards group native and ada
 LLM calls uniformly.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
@@ -26,19 +27,28 @@ from pydantic_ai.messages import (
     ModelResponse,
     ModelResponseStreamEvent,
 )
-from pydantic_ai.models import ModelRequestParameters, StreamedResponse
+from pydantic_ai.models import ModelRequestParameters, StreamedResponse, infer_model
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
+from kitaru.replay_context import resolve_model_override
+
 from ._constants import (
+    ADAPTER_CHECKPOINT_KIND_MODEL_REQUEST,
     ARTIFACT_ROLE_PROMPT,
     ARTIFACT_ROLE_RESPONSE,
     ARTIFACT_ROLE_STREAM_TRANSCRIPT,
     ARTIFACT_SLOT_MESSAGES,
     ARTIFACT_SLOT_OUTPUT,
 )
-from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._kitaru_internal import (
+    get_current_checkpoint,
+    get_current_checkpoint_name,
+    is_inside_checkpoint,
+    is_inside_flow,
+    next_repeated_checkpoint_name,
+)
 from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
@@ -55,6 +65,7 @@ from ._utils import (
     checkpoint_input_value,
     get_adapter_checkpoint_artifact_refs,
     run_async_in_checkpoint,
+    with_adapter_checkpoint_metadata,
     with_default_type,
 )
 
@@ -74,6 +85,32 @@ _INHERITED_MESSAGE_CONVERSATION_IDS: ContextVar[frozenset[str]] = ContextVar(
     "kitaru_pydantic_ai_inherited_message_conversation_ids",
     default=frozenset(),
 )
+
+
+@dataclass
+class _LiveStreamSuppressionScope:
+    model_id: int
+    owner_task_id: int | None
+    claim_first_stream_task: bool = False
+
+
+# The global stream suppression context remains for explicit low-level nested
+# stream suppression. These shared model scopes suppress same-model live
+# lifecycle publishes only for the task that owns the mirrored handler stream.
+_SUPPRESSED_LIVE_STREAM_SCOPES: ContextVar[
+    tuple[_LiveStreamSuppressionScope, ...]
+] = ContextVar(
+    "kitaru_pydantic_ai_suppressed_live_stream_scopes",
+    default=(),
+)
+
+
+def _current_task_id() -> int | None:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        return None
+    return id(task) if task is not None else None
 
 
 def _message_conversation_ids(
@@ -408,6 +445,46 @@ class KitaruModel(WrapperModel):
     def _should_track(self) -> bool:
         return self._capture.emit_child_events and is_inside_checkpoint()
 
+    @contextmanager
+    def suppress_live_stream_events(
+        self, *, claim_first_stream_task: bool = False
+    ) -> Iterator[None]:
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        task_id = None if claim_first_stream_task else _current_task_id()
+        token = _SUPPRESSED_LIVE_STREAM_SCOPES.set(
+            (
+                *scopes,
+                _LiveStreamSuppressionScope(
+                    id(self), task_id, claim_first_stream_task
+                ),
+            )
+        )
+        try:
+            yield
+        finally:
+            _SUPPRESSED_LIVE_STREAM_SCOPES.reset(token)
+
+    def _live_stream_events_suppressed(self) -> bool:
+        if model_stream_live_events_suppressed():
+            return True
+
+        model_id = id(self)
+        current_task_id = _current_task_id()
+        scopes = _SUPPRESSED_LIVE_STREAM_SCOPES.get()
+        for scope in scopes:
+            if scope.model_id != model_id:
+                continue
+            if scope.owner_task_id == current_task_id:
+                return True
+            if (
+                scope.claim_first_stream_task
+                and scope.owner_task_id is None
+                and current_task_id is not None
+            ):
+                scope.owner_task_id = current_task_id
+                return True
+        return False
+
     def _reserve_tool_call_order(
         self,
         *,
@@ -454,8 +531,11 @@ class KitaruModel(WrapperModel):
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,
+            provider_name=getattr(response, "provider_name", None),
             usage=response.usage,
             checkpoint_name=checkpoint_name,
+            billing_effect="reused_not_incurred",
+            cache_status="checkpoint_cache_hit",
         )
         self._reserve_tool_call_order(
             tracker=tracker,
@@ -464,6 +544,31 @@ class KitaruModel(WrapperModel):
             response=response,
             model_request_parameters=model_request_parameters,
         )
+
+    def _replay_model_override_name(self, checkpoint_name: str) -> str | None:
+        checkpoint = get_current_checkpoint()
+        return resolve_model_override(
+            checkpoint_name,
+            get_current_checkpoint_name(),
+            getattr(checkpoint, "checkpoint_id", None),
+        )
+
+    async def _request_with_model(
+        self,
+        request_model: Any | None,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        if request_model is None:
+            return await super().request(
+                messages, model_settings, model_request_parameters
+            )
+
+        async with request_model:
+            return await request_model.request(
+                messages, model_settings, model_request_parameters
+            )
 
     async def request(
         self,
@@ -490,36 +595,49 @@ class KitaruModel(WrapperModel):
             if self._capture.save_responses:
                 output_artifacts[ARTIFACT_ROLE_RESPONSE] = ARTIFACT_SLOT_OUTPUT
 
+            checkpoint_base_name = f"{self._agent_name}_model_request"
+            checkpoint_name = next_repeated_checkpoint_name(checkpoint_base_name)
+            replay_model_override = self._replay_model_override_name(checkpoint_name)
+
             # `_in_checkpoint` closes over live `messages` / `self`; safe only for
             # inline runtime. `run_async_in_checkpoint` rejects `runtime='isolated'`
             # to stop these references from hitting a pickling boundary.
             async def _in_checkpoint() -> ModelResponse:
                 nonlocal body_executed
                 body_executed = True
+                request_model = (
+                    infer_model(replay_model_override) if replay_model_override else None
+                )
                 with adapter_checkpoint_artifact_refs(
                     input_artifacts=input_artifacts,
                     output_artifacts=output_artifacts,
                 ):
                     return await self._tracked_request(
-                        messages, model_settings, model_request_parameters
+                        messages,
+                        model_settings,
+                        model_request_parameters,
+                        request_model=request_model,
                     )
 
             cache_key = None
             if self._checkpoint_config.get("cache") is not False:
-                cache_key = checkpoint_cache_key(
-                    {
-                        ARTIFACT_SLOT_MESSAGES: _messages_for_cache(
-                            serialized_messages
-                        ),
-                        "explicit_run_conversation_id": _EXPLICIT_RUN_CONVERSATION_ID.get(),
-                        "model_settings": model_settings,
-                        "model_request_parameters": model_request_parameters,
-                    }
-                )
+                cache_key_payload: dict[str, Any] = {
+                    ARTIFACT_SLOT_MESSAGES: _messages_for_cache(serialized_messages),
+                    "explicit_run_conversation_id": _EXPLICIT_RUN_CONVERSATION_ID.get(),
+                    "model_settings": model_settings,
+                    "model_request_parameters": model_request_parameters,
+                }
+                if replay_model_override:
+                    cache_key_payload["replay_model_override"] = replay_model_override
+                cache_key = checkpoint_cache_key(cache_key_payload)
             started_at = time.perf_counter()
-            checkpoint_name = f"{self._agent_name}_model_request"
             response = await run_async_in_checkpoint(
-                config=with_default_type(self._checkpoint_config, "llm_call"),
+                config=with_adapter_checkpoint_metadata(
+                    with_default_type(self._checkpoint_config, "llm_call"),
+                    kind=ADAPTER_CHECKPOINT_KIND_MODEL_REQUEST,
+                    input_slots=[],
+                    output_slots=[ARTIFACT_SLOT_OUTPUT],
+                ),
                 step_name=checkpoint_name,
                 body=_in_checkpoint,
                 cache_key=cache_key,
@@ -542,10 +660,13 @@ class KitaruModel(WrapperModel):
         messages: list[ModelMessage],
         model_settings: ModelSettings | None,
         model_request_parameters: ModelRequestParameters,
+        *,
+        request_model: Any | None = None,
     ) -> ModelResponse:
         tracker = get_current_tracker()
         if tracker is None or not self._should_track():
-            return await super().request(
+            return await self._request_with_model(
+                request_model,
                 messages, model_settings, model_request_parameters
             )
 
@@ -574,7 +695,8 @@ class KitaruModel(WrapperModel):
 
         started_at = time.perf_counter()
         try:
-            response = await super().request(
+            response = await self._request_with_model(
+                request_model,
                 messages, model_settings, model_request_parameters
             )
         except Exception as error:
@@ -613,6 +735,7 @@ class KitaruModel(WrapperModel):
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,
+            provider_name=getattr(response, "provider_name", None),
             usage=response.usage,
         )
         self._reserve_tool_call_order(
@@ -666,7 +789,7 @@ class KitaruModel(WrapperModel):
             include_content=save_transcripts,
             enabled=(
                 self._capture.emit_child_events
-                and not model_stream_live_events_suppressed()
+                and not self._live_stream_events_suppressed()
             ),
         )
 
@@ -746,6 +869,7 @@ class KitaruModel(WrapperModel):
                 duration_ms=duration_ms,
                 artifacts=artifacts,
                 model_name=response.model_name,
+                provider_name=getattr(response, "provider_name", None),
                 usage=response.usage,
                 stream_event_count=stream_event_count,
             )
