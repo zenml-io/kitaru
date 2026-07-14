@@ -7,25 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `FlowHandle.wait(timeout=...)` can now stop waiting after a positive, finite number of seconds without changing the remote execution. It raises the new typed `KitaruTimeoutError` with the execution ID, configured and elapsed timeout, and last observed status. (#523)
+- New `kitaru.list_secrets()` SDK function and matching `kitaru_secrets_list` MCP tool return secret names and metadata only, never secret values, so an agent can discover which secrets exist without being able to read them. (#527)
+- New `kitaru_executions_resume` and `kitaru_executions_abort_wait` MCP tools bring the MCP surface in line with the SDK and CLI, letting an agent resume a paused execution or abort a pending `kitaru.wait()` without shelling out. (#521)
+
+### Changed
+- `kitaru executions get` now shows every checkpoint call's current ID and status in human-readable output. Failed executions also include a copyable replay command using the first eligible failed call ID. (#538)
+
 ### Fixed
 - Cohort diff replay discovery now scans each flow once using ZenML's native replay linkage and reuses successful artifact hashes across rows, avoiding repeated flow scans and duplicate successful artifact loads; unrelated executions consume the 10,000-execution scan bound, and a warning appears only when older executions remain. (#525)
+- Checkpoint execution diffs now calculate token and cost changes from canonical LLM usage records, including explicit zero usage, reused work, and unavailable provider-call cost. (#518)
+- Retried checkpoint invocations are now exposed as one checkpoint call with attempt history ordered by retry version. (#530)
 - Missing stack integration dependencies now fail before deploy, run, or replay with a concise Kitaru explanation followed by ZenML's exact integration and whole-stack installation guidance. (#506)
 - Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
 
 ## [0.20.2] - 2026-07-10
 
 ### Added
-- `FlowHandle.wait(timeout=...)` can now stop waiting after a positive, finite number of seconds without changing the remote execution. It raises the new typed `KitaruTimeoutError` with the execution ID, configured and elapsed timeout, and last observed status. (#523)
 - LLM cost and token usage is now attributed per checkpoint, not just per execution. When a flow reaches a terminal state, Kitaru publishes flat `kitaru_llm_*_v1` metadata on each checkpoint that made model calls, so SDK, CLI, MCP, and dashboard clients can see which checkpoint incurred which cost. Per-checkpoint values sum exactly to the execution-level totals, and the execution-level `llm_usage_summary_v1` payload is unchanged. (#528)
 - Cached, skipped, and replay-reused checkpoints report their token counts under the `reused_*` fields with zero incurred and zero display cost, so a replayed run shows what the work would have cost without billing it again. Retried checkpoints keep a separate record per attempt, so a retry that really called the provider twice is counted twice. (#528)
 
 ### Changed
-- `kitaru executions get` now shows every checkpoint call's current ID and status in human-readable output. Failed executions also include a copyable replay command using the first eligible failed call ID. (#538)
 - Terminal cost metadata writes are best-effort: a failed write is debug-logged, the remaining checkpoint writes are still attempted, and incomplete persistence is reported so aggregation can be retried. A metadata write failure never fails the flow run. (#528)
-
-### Fixed
-- Checkpoint execution diffs now calculate token and cost changes from canonical LLM usage records, including explicit zero usage, reused work, and unavailable provider-call cost. (#518)
-- Retried checkpoint invocations are now exposed as one checkpoint call with attempt history ordered by retry version. (#530)
 
 ### Infrastructure
 - The release workflow's GitHub Release asset reconcile step now skips signature and attestation assets, which are regenerated per dispatch and previously caused recovery re-dispatches to hard-fail on a non-reproducible asset mismatch. (#513)
