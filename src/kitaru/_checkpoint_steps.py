@@ -20,9 +20,9 @@ def visible_checkpoint_step_for_lineage(
     """Return the checkpoint step run exposed by ZenML's run DAG.
 
     Args:
-        attempts: Step-run attempts for one checkpoint lineage, sorted by
-            ascending creation time. The attempt fetcher that calls this helper
-            requests ``sort_by="asc:created"`` from ZenML before grouping steps.
+        attempts: All available step-run attempts for one exact run-local
+            checkpoint name, merged from available sources and sorted by
+            ascending ZenML retry version.
 
     Returns:
         The newest non-retried attempt, or the newest attempt when every attempt

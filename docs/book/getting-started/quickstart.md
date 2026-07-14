@@ -21,6 +21,23 @@ kitaru init
 
 This creates a `.kitaru/` directory that marks your project root.
 
+The example calls an OpenAI model, so install Kitaru with the OpenAI
+provider package:
+
+{% tabs %}
+{% tab title="uv (recommended)" %}
+```bash
+uv add "kitaru[openai]"
+```
+{% endtab %}
+
+{% tab title="pip" %}
+```bash
+pip install "kitaru[openai]"
+```
+{% endtab %}
+{% endtabs %}
+
 `kitaru.llm()` reads its provider key and default model from the environment:
 
 ```bash
@@ -214,6 +231,9 @@ def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
 
 `research_agent.run(...)` now executes on that stack. Agents run on the same
 stacks, server, and dashboard as ZenML pipelines.
+
+ZenML supplies optional stack-integration dependencies; install them in the
+Python environment that submits the flow, not in its remote execution image.
 
 This example lists `kitaru[pydantic-ai,openai]` explicitly because setting
 `base_image` means you control the image contents — Kitaru auto-adds plain

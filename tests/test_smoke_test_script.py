@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -39,6 +40,17 @@ def _run_smoke_script(
             text=True,
             timeout=30,
         )
+
+
+def test_gemini_model_smoke_allows_for_variable_thinking_latency() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+    match = re.search(
+        r'gemini_interactions_adapter\.py --mode model" \\\n\s+timed (\d+)',
+        script,
+    )
+
+    assert match is not None
+    assert int(match.group(1)) == 180
 
 
 def test_smoke_script_has_valid_bash_syntax() -> None:

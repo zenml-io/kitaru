@@ -26,7 +26,124 @@ updates:
     reviewers: [strickvl]
     labels: [dependencies]
     groups:
+      # Grouped by blast radius, not by semver magnitude. What decides how a
+      # bump PR must be tested is *where a failure would surface*, and a PR can
+      # only have one testing story. Batching packages whose failures surface in
+      # different places produces a PR that inherits the strictest verification
+      # requirement while offering the weakest reviewability, so nothing moves.
+      #
+      # A CATCH-ALL GROUP MEANS "EVERYTHING", NOT "THE LEFTOVERS". Dependabot's
+      # specificity rules do not rescue you here, and getting this wrong
+      # duplicates packages across PRs rather than failing loudly.
+      #
+      # `dependency_belongs_to_more_specific_group?` opens with
+      # `return false unless patterns&.any?`
+      # (updater/lib/dependabot/updater/pattern_specificity_calculator.rb), so a
+      # group with no `patterns` is never asked whether something else claims a
+      # dependency. It short-circuits and keeps every one it matches. The
+      # specificity score only ever strips a dependency out of a group that HAS
+      # patterns.
+      #
+      # So `exclude-patterns` below is not an optimization. It is the ONLY thing
+      # that removes a dependency from this catch-all. It must therefore list
+      # every pattern claimed by every group above it. Add a pattern up there
+      # and forget to exclude it down here, and that package ships in TWO PRs.
+      #
+      # Verified the hard way: an earlier revision excluded only the wildcard
+      # families and trusted exact names to win on specificity. Dependabot
+      # promptly opened #553 containing `openai`, `anthropic`, `mcp`,
+      # `google-genai`, `ruff` and `ty` -- all of which were already in their own
+      # group PRs. See dependabot/dependabot-core#14902 and #13665.
+
+      # Failures surface in CI and nowhere else, so a green pipeline is the
+      # complete verification. Safe to merge on green.
+      dev-tooling:
+        patterns:
+          - ruff
+          - ty
+          - yamlfix
+          - pip-audit
+          - python-dotenv
+          - pytest
+          - pytest-randomly
+          - pytest-clarity
+          - pytest-xdist
+          - pytest*
+          - griffe
+          - griffe-typingdoc
+          - griffe*
+        update-types:
+          - minor
+          - patch
+
+      # Failures surface in a user's runtime, and our tests mock these SDKs, so
+      # CI is structurally blind to them. Needs live provider runs before merge.
+      # See `tests/_gemini_fake_sdk.py` for the sharpest example: it substitutes
+      # a fake module tree, so the Gemini adapter's contract against the real
+      # SDK is never exercised.
+      adapters-and-llm-sdks:
+        patterns:
+          - openai
+          - openai-agents
+          - anthropic
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - genai-prices
+          - mcp
+          - pydantic-ai-slim
+          - pydantic-ai*
+          - langchain
+          - langchain-openai
+          - langchain-anthropic
+          - langchain*
+          - langgraph
+          - langgraph*
+        update-types:
+          - minor
+          - patch
+
+      # The runtime Kitaru is built on. Bumps here move the floor under
+      # everything else, so they get their own PR rather than being buried in a
+      # multi-package diff.
+      zenml:
+        patterns:
+          - zenml
+        update-types:
+          - minor
+          - patch
+
+      # Everything else: cyclopts, pydantic, rich, modal, typing-extensions.
+      #
+      # `exclude-patterns` MUST mirror every pattern from the three groups above.
+      # This group has no `patterns`, so Dependabot never asks whether another
+      # group claims a dependency (see the note at the top of `groups:`) and it
+      # will happily re-ship anything not listed here in a second PR. Keep this
+      # list in sync when you edit a group above.
       minor-and-patch:
+        exclude-patterns:
+          # mirrors dev-tooling
+          - ruff
+          - ty
+          - yamlfix
+          - pip-audit
+          - python-dotenv
+          - pytest*
+          - griffe*
+          # mirrors adapters-and-llm-sdks
+          - openai
+          - openai-agents
+          - anthropic
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - genai-prices
+          - mcp
+          - pydantic-ai*
+          - langchain*
+          - langgraph*
+          # mirrors zenml
+          - zenml
         update-types:
           - minor
           - patch
@@ -54,10 +171,27 @@ updates:
     reviewers: [strickvl]
     labels: [dependencies]
     groups:
+      # The fumadocs packages must move in lockstep (fumadocs-core, -mdx, -ui
+      # and -python are a coupled family), which is what this group is for.
       fumadocs:
         patterns:
           - "fumadocs-*"
+      # `exclude-patterns` is what makes the group above actually work. Without
+      # it the group only ever fires for MAJOR bumps, and every minor/patch
+      # fumadocs bump is silently stolen by this catch-all.
+      #
+      # The reason is the same specificity trap documented in the `uv` block:
+      # the contest only runs between groups eligible for that update type. A
+      # major is not eligible for `minor-and-patch`, so `fumadocs` runs
+      # unopposed and wins. A minor/patch IS eligible, and then `fumadocs-*`
+      # (a wildcard, scoring ~94) loses to this pattern-less catch-all (500) and
+      # the packages are stripped out of the group they were written for.
+      #
+      # That is why #555 is titled "minor-and-patch" while containing nothing
+      # but fumadocs packages. See dependabot/dependabot-core#14902.
       minor-and-patch:
+        exclude-patterns:
+          - "fumadocs-*"
         update-types:
           - minor
           - patch

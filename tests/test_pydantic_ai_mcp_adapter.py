@@ -25,10 +25,10 @@ def _import_mcp_stdio() -> Any:
     import kitaru.adapters.pydantic_ai  # noqa: F401
 
     try:
-        from pydantic_ai.mcp import MCPServerStdio
+        from pydantic_ai.mcp import MCPServerStdio  # ty: ignore[deprecated]
     except ImportError as exc:  # pragma: no cover - failure message is the test value
         pytest.fail(f"pydantic_ai.mcp import failed: {exc}")
-    return MCPServerStdio
+    return MCPServerStdio  # ty: ignore[deprecated]
 
 
 def test_pydantic_ai_mcp_import_smoke() -> None:
