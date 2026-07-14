@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-07-14
+
 ### Added
 - `FlowHandle.wait(timeout=...)` can now stop waiting after a positive, finite number of seconds without changing the remote execution. It raises the new typed `KitaruTimeoutError` with the execution ID, configured and elapsed timeout, and last observed status. (#523)
 - New `kitaru.list_secrets()` SDK function and matching `kitaru_secrets_list` MCP tool return secret names and metadata only, never secret values, so an agent can discover which secrets exist without being able to read them. (#527)
