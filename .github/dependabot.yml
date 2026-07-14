@@ -26,6 +26,63 @@ updates:
     reviewers: [strickvl]
     labels: [dependencies]
     groups:
+      # Grouped by blast radius, not by semver magnitude. What decides how a
+      # bump PR must be tested is *where a failure would surface*, and a PR can
+      # only have one testing story. Batching packages whose failures surface in
+      # different places produces a PR that inherits the strictest verification
+      # requirement while offering the weakest reviewability, so nothing moves.
+      #
+      # Dependabot assigns each dependency to the FIRST group it matches, so the
+      # catch-all must stay last.
+
+      # Failures surface in CI and nowhere else, so a green pipeline is the
+      # complete verification. Safe to merge on green.
+      dev-tooling:
+        patterns:
+          - ruff
+          - ty
+          - yamlfix
+          - pytest*
+          - pip-audit
+          - griffe*
+          - python-dotenv
+        update-types:
+          - minor
+          - patch
+
+      # Failures surface in a user's runtime, and our tests mock these SDKs, so
+      # CI is structurally blind to them. Needs live provider runs before merge.
+      # See `tests/_gemini_fake_sdk.py` for the sharpest example: it substitutes
+      # a fake module tree, so the Gemini adapter's contract against the real
+      # SDK is never exercised.
+      adapters-and-llm-sdks:
+        patterns:
+          - openai
+          - openai-agents
+          - anthropic
+          - pydantic-ai*
+          - langchain*
+          - langgraph*
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - genai-prices
+          - mcp
+        update-types:
+          - minor
+          - patch
+
+      # The runtime Kitaru is built on. Bumps here move the floor under
+      # everything else, so they get their own PR rather than being buried in a
+      # multi-package diff.
+      zenml:
+        patterns:
+          - zenml
+        update-types:
+          - minor
+          - patch
+
+      # Everything else: cyclopts, pydantic, rich, modal, typing-extensions.
       minor-and-patch:
         update-types:
           - minor
