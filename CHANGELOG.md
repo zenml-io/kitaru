@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Cached, skipped, and replay-reused checkpoints report their token counts under the `reused_*` fields with zero incurred and zero display cost, so a replayed run shows what the work would have cost without billing it again. Retried checkpoints keep a separate record per attempt, so a retry that really called the provider twice is counted twice. (#528)
 
 ### Changed
+- `kitaru executions get` now shows every checkpoint call's current ID and status in human-readable output. Failed executions also include a copyable replay command using the first eligible failed call ID. (#538)
 - Terminal cost metadata writes are best-effort: a failed write is debug-logged, the remaining checkpoint writes are still attempted, and incomplete persistence is reported so aggregation can be retried. A metadata write failure never fails the flow run. (#528)
 
 ### Infrastructure
