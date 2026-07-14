@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal cost metadata writes are best-effort: a failed write is debug-logged, the remaining checkpoint writes are still attempted, and incomplete persistence is reported so aggregation can be retried. A metadata write failure never fails the flow run. (#528)
 
 ### Fixed
+- Checkpoint execution diffs now calculate token and cost changes from canonical LLM usage records, including explicit zero usage, reused work, and unavailable provider-call cost. (#518)
 - Retried checkpoint invocations are now exposed as one checkpoint call with attempt history ordered by retry version. (#530)
 
 ### Infrastructure

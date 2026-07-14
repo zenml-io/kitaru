@@ -22,11 +22,13 @@ from kitaru._llm_usage import (
     LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
     LLM_USAGE_METADATA_KEY,
     LLM_USAGE_SUMMARY_METADATA_KEY,
+    LLMBillingEffect,
     _normalize_provider_id,
     _provider_model_ref,
     _usage_has_genai_pricing_tokens,
     add_optional_token_count,
     aggregate_usage_records,
+    aggregate_usage_records_with_cost_completeness,
     build_usage_record,
     calculated_or_genai_cost_metadata,
     estimate_genai_prices_cost,
@@ -613,6 +615,8 @@ def test_aggregate_prefers_actual_cost_for_display() -> None:
     assert summary["actual_cost_usd"] == 0.25
     assert summary["estimated_cost_usd"] == 0.04
     assert summary["display_cost_usd"] == 0.29
+    assert summary["records_without_cost_count"] == 0
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_aggregate_preserves_explicit_zero_total_tokens() -> None:
@@ -654,6 +658,31 @@ def test_reused_records_do_not_add_incurred_cost_or_tokens() -> None:
     assert summary["reused_total_tokens"] == 120
     assert summary["incurred_total_tokens"] == 0
     assert summary["display_cost_usd"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("billing_effect", "expected_missing_cost_count"),
+    [("reused_not_incurred", 0), ("unknown", 1)],
+)
+def test_unpriced_records_track_internal_cost_completeness(
+    billing_effect: LLMBillingEffect,
+    expected_missing_cost_count: int,
+) -> None:
+    record = build_usage_record(
+        adapter="pydantic_ai",
+        surface="model_call",
+        input_tokens=10,
+        output_tokens=5,
+        billing_effect=billing_effect,
+    )
+
+    summary, has_unpriced_non_reused_record = (
+        aggregate_usage_records_with_cost_completeness([record])
+    )
+
+    assert summary["records_without_cost_count"] == 1
+    assert has_unpriced_non_reused_record is bool(expected_missing_cost_count)
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_retry_attempts_with_same_record_id_are_counted_separately() -> None:
@@ -823,6 +852,7 @@ def test_gemini_token_only_record_aggregates_without_cost() -> None:
     assert summary["estimated_cost_usd"] == 0.0
     assert summary["display_cost_usd"] == 0.0
     assert summary["records_without_cost_count"] == 1
+    assert "non_reused_records_without_cost_count" not in summary
     assert summary["adapters"] == ["gemini_interactions"]
     assert summary["models"] == ["gemini-test"]
 
@@ -844,6 +874,7 @@ def test_invalid_cost_values_are_omitted(invalid_cost: object) -> None:
     summary = aggregate_usage_records([record])
     assert summary["display_cost_usd"] == 0.0
     assert summary["records_without_cost_count"] == 1
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_zero_cost_values_are_preserved() -> None:
@@ -856,6 +887,11 @@ def test_zero_cost_values_are_preserved() -> None:
 
     assert record["cost"]["actual_cost_usd"] == 0.0
     assert record["cost"]["estimated_cost_usd"] == 0.0
+
+    summary = aggregate_usage_records([record])
+    assert summary["display_cost_usd"] == 0.0
+    assert summary["records_without_cost_count"] == 0
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_malformed_records_are_ignored_during_parsing() -> None:

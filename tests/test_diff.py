@@ -5,18 +5,31 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from importlib import import_module
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from kitaru._client._models import (
     ArtifactRef,
+    CheckpointAttempt,
     CheckpointCall,
     Execution,
     ExecutionStatus,
 )
+from kitaru._llm_usage import (
+    LLM_USAGE_METADATA_KEY,
+    LLMBillingEffect,
+    build_usage_record,
+)
 from kitaru._ui_urls import UiUrlContext
-from kitaru.diff import diff, serialize_execution_diff
+from kitaru.diff import (
+    ExecutionDiff,
+    diff,
+    serialize_checkpoint_diff,
+    serialize_execution_diff,
+)
+from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 _diff_module = import_module("kitaru.diff")
 
@@ -36,6 +49,7 @@ def _checkpoint(
     name: str,
     original_call_id: str | None = None,
     artifact_ids: list[str] | None = None,
+    attempts: list[CheckpointAttempt] | None = None,
 ) -> CheckpointCall:
     started = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     ended = datetime(2026, 3, 9, 10, 1, tzinfo=UTC)
@@ -49,7 +63,7 @@ def _checkpoint(
         original_call_id=original_call_id,
         parent_call_ids=[],
         failure=None,
-        attempts=[],
+        attempts=attempts or [],
         artifacts=[
             ArtifactRef(
                 artifact_id=artifact_id,
@@ -64,6 +78,221 @@ def _checkpoint(
         ],
         checkpoint_type="tool_call",
     )
+
+
+def _usage_record(
+    *,
+    record_id: str | None = None,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    total_tokens: int = 15,
+    actual_cost_usd: float | None = None,
+    estimated_cost_usd: float | None = None,
+    billing_effect: LLMBillingEffect = "incurred",
+) -> dict[str, Any]:
+    return build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id=record_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        actual_cost_usd=actual_cost_usd,
+        estimated_cost_usd=estimated_cost_usd,
+        billing_effect=billing_effect,
+    )
+
+
+@pytest.mark.parametrize(
+    ("original_record", "replay_record", "expected_tokens", "expected_cost"),
+    [
+        (
+            _usage_record(actual_cost_usd=0.1),
+            _usage_record(
+                input_tokens=20,
+                output_tokens=8,
+                total_tokens=28,
+                actual_cost_usd=0.4,
+            ),
+            {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13},
+            0.3,
+        ),
+        (
+            _usage_record(
+                input_tokens=20,
+                output_tokens=8,
+                total_tokens=28,
+                actual_cost_usd=0.4,
+            ),
+            _usage_record(actual_cost_usd=0.1),
+            {"prompt_tokens": -10, "completion_tokens": -3, "total_tokens": -13},
+            -0.3,
+        ),
+        (
+            _usage_record(actual_cost_usd=0.1),
+            _usage_record(actual_cost_usd=0.1),
+            {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            0.0,
+        ),
+    ],
+)
+def test_checkpoint_diff_uses_canonical_records_for_signed_usage_deltas(
+    original_record: dict[str, Any],
+    replay_record: dict[str, Any],
+    expected_tokens: dict[str, int],
+    expected_cost: float,
+) -> None:
+    result = checkpoint_diff_from_usage_records(
+        original_records=[original_record],
+        replay_records=[replay_record],
+    )
+
+    assert result.token_delta == expected_tokens
+    assert result.cost_delta_usd == expected_cost
+
+
+@pytest.mark.parametrize(
+    ("original_present", "expected_sign"),
+    [(True, -1), (False, 1)],
+)
+def test_checkpoint_diff_counts_usage_on_checkpoint_present_on_only_one_side(
+    original_present: bool,
+    expected_sign: int,
+) -> None:
+    record = _usage_record(actual_cost_usd=0.25)
+    result = checkpoint_diff_from_usage_records(
+        original_records=[record] if original_present else None,
+        replay_records=None if original_present else [record],
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": expected_sign * 10,
+        "completion_tokens": expected_sign * 5,
+        "total_tokens": expected_sign * 15,
+    }
+    assert result.cost_delta_usd == expected_sign * 0.25
+
+
+def test_checkpoint_diff_distinguishes_no_usage_from_zero_valued_usage() -> None:
+    no_usage = checkpoint_diff_from_usage_records()
+    zero_usage = checkpoint_diff_from_usage_records(
+        replay_records=[
+            _usage_record(
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                actual_cost_usd=0.0,
+            )
+        ]
+    )
+
+    assert no_usage.token_delta is None
+    assert no_usage.cost_delta_usd == 0.0
+    assert zero_usage.token_delta == {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert zero_usage.cost_delta_usd == 0.0
+
+
+@pytest.mark.parametrize(
+    ("record", "expected_cost"),
+    [
+        (
+            _usage_record(actual_cost_usd=0.2, estimated_cost_usd=0.9),
+            0.2,
+        ),
+        (_usage_record(estimated_cost_usd=0.3), 0.3),
+        (_usage_record(actual_cost_usd=0.0), 0.0),
+        (_usage_record(), None),
+        (_usage_record(billing_effect="reused_not_incurred"), 0.0),
+        (_usage_record(billing_effect="unknown"), None),
+    ],
+)
+def test_checkpoint_diff_applies_canonical_cost_policy(
+    record: dict[str, Any],
+    expected_cost: float | None,
+) -> None:
+    result = checkpoint_diff_from_usage_records(replay_records=[record])
+
+    assert result.cost_delta_usd == expected_cost
+    assert result.token_delta == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+
+
+def test_checkpoint_diff_deduplicates_within_attempt_not_across_retries() -> None:
+    first = _usage_record(
+        record_id="same-call",
+        input_tokens=7,
+        output_tokens=4,
+        total_tokens=11,
+        actual_cost_usd=0.1,
+    )
+    second = _usage_record(
+        record_id="same-call",
+        input_tokens=8,
+        output_tokens=5,
+        total_tokens=13,
+        actual_cost_usd=0.2,
+    )
+    attempts = [
+        CheckpointAttempt(
+            attempt_id="attempt-1",
+            status=ExecutionStatus.COMPLETED,
+            started_at=None,
+            ended_at=None,
+            metadata={LLM_USAGE_METADATA_KEY: [first, first]},
+            failure=None,
+        ),
+        CheckpointAttempt(
+            attempt_id="attempt-2",
+            status=ExecutionStatus.COMPLETED,
+            started_at=None,
+            ended_at=None,
+            metadata={LLM_USAGE_METADATA_KEY: [second]},
+            failure=None,
+        ),
+    ]
+
+    result = _diff_module._compare_checkpoints(
+        original_cp=None,
+        replay_cp=_checkpoint(
+            call_id="cp-replay",
+            name="model_call",
+            attempts=attempts,
+        ),
+        client=MagicMock(),
+        artifact_hash_cache={},
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": 15,
+        "completion_tokens": 9,
+        "total_tokens": 24,
+    }
+    assert result.cost_delta_usd == 0.3
+
+
+def test_diff_serializers_include_cost_numbers_and_null() -> None:
+    priced = checkpoint_diff_from_usage_records(
+        replay_records=[_usage_record(actual_cost_usd=0.25)]
+    )
+    unpriced = checkpoint_diff_from_usage_records(replay_records=[_usage_record()])
+    execution = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[("kr-replay", [priced, unpriced])],
+    )
+
+    serialized_checkpoints = serialize_execution_diff(execution)["compared"][0][
+        "checkpoints"
+    ]
+    assert serialize_checkpoint_diff(priced)["cost_delta_usd"] == 0.25
+    assert serialized_checkpoints[0]["cost_delta_usd"] == 0.25
+    assert serialized_checkpoints[1]["cost_delta_usd"] is None
 
 
 def _execution(
