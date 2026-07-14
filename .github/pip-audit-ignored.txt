@@ -24,11 +24,19 @@
 # Tracked upstream: https://github.com/zenml-io/zenml/issues/5077
 PYSEC-2026-2132  # click 8.2.1 -> 8.3.3 (CVE-2026-7246, `click.edit()` injection)
 
-# --- Waiting on a lockfile refresh, not on upstream. -----------------------
-# zenml has since relaxed the `pyjwt` pin that used to block this (it now
-# requires `pyjwt[crypto]>=2.13.0`), so `mcp` is free to move. Our lock simply
-# still resolves 1.19.0. Delete this entry once a bump past 1.23.0 lands.
-CVE-2025-66416  # mcp 1.19 -> 1.23 (no longer upstream-blocked; lock is stale)
+# --- Blocked by our own cap in the shipped `kitaru[mcp]` extra. ------------
+# `pyproject.toml` declares `mcp>=1.19.0,<1.20.0`, so this is not merely a
+# stale lock: every `pip install kitaru[mcp]` resolves to a vulnerable 1.19.x,
+# and no version of the extra gets a user to the 1.23.0 fix.
+#
+# The cap was correct when written (`mcp>=1.20` needs `pyjwt>=2.10.1`, and
+# zenml used to hard-pin `pyjwt==2.7.*`), but that reason is gone: zenml now
+# requires `pyjwt[crypto]>=2.13.0`. Only our ceiling remains. Widening it
+# changes a published extra and needs the MCP server re-verified against the
+# newer SDK, so it is tracked separately rather than bundled into a bump.
+# Delete this entry once that lands.
+# Tracked: https://github.com/zenml-io/kitaru/issues/546
+CVE-2025-66416  # mcp 1.19 -> 1.23; blocked by our `mcp<1.20.0` pin, not upstream
 
 # --- Blocked by the fastapi pin in zenml's [server] extra. -----------------
 # zenml pins `fastapi>=0.120.1,<0.121.0`, and fastapi 0.120.x in turn requires
