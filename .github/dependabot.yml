@@ -32,8 +32,23 @@ updates:
       # different places produces a PR that inherits the strictest verification
       # requirement while offering the weakest reviewability, so nothing moves.
       #
-      # Dependabot assigns each dependency to the FIRST group it matches, so the
-      # catch-all must stay last.
+      # ORDER DOES NOT DECIDE THE WINNER. Dependabot scores every candidate
+      # group and takes the highest, it does not take the first match
+      # (updater/lib/dependabot/updater/pattern_specificity_calculator.rb):
+      #
+      #   exact name .................... 1000
+      #   no patterns (a catch-all) ...... 500
+      #   wildcard ....................... 100 - 10*wildcards + max(len-5, 0)
+      #   universal '*' .................... 1
+      #
+      # So a wildcard like `langchain*` scores 95 and LOSES to the bare
+      # `minor-and-patch` catch-all at 500, which silently drags the dependency
+      # back into the mixed PR. Exact names score 1000 and win, so both are
+      # listed: the exact name pins today's packages, the wildcard catches
+      # future family members. `exclude-patterns` on the catch-all is what makes
+      # the wildcards viable at all, since an excluded dependency scores the
+      # catch-all at 0. Removing those excludes silently un-splits the groups.
+      # See dependabot/dependabot-core#14902.
 
       # Failures surface in CI and nowhere else, so a green pipeline is the
       # complete verification. Safe to merge on green.
@@ -42,10 +57,16 @@ updates:
           - ruff
           - ty
           - yamlfix
-          - pytest*
           - pip-audit
-          - griffe*
           - python-dotenv
+          - pytest
+          - pytest-randomly
+          - pytest-clarity
+          - pytest-xdist
+          - pytest*
+          - griffe
+          - griffe-typingdoc
+          - griffe*
         update-types:
           - minor
           - patch
@@ -60,14 +81,19 @@ updates:
           - openai
           - openai-agents
           - anthropic
-          - pydantic-ai*
-          - langchain*
-          - langgraph*
           - claude-agent-sdk
           - google-genai
           - google-adk
           - genai-prices
           - mcp
+          - pydantic-ai-slim
+          - pydantic-ai*
+          - langchain
+          - langchain-openai
+          - langchain-anthropic
+          - langchain*
+          - langgraph
+          - langgraph*
         update-types:
           - minor
           - patch
@@ -83,7 +109,18 @@ updates:
           - patch
 
       # Everything else: cyclopts, pydantic, rich, modal, typing-extensions.
+      #
+      # The excludes are load-bearing, not decorative. Without them this group
+      # scores 500 against the wildcard groups' ~95 and reabsorbs every
+      # `langchain-*` / `pytest-*` / `griffe-*` / `pydantic-ai-*` package,
+      # quietly undoing the split above.
       minor-and-patch:
+        exclude-patterns:
+          - pytest*
+          - griffe*
+          - pydantic-ai*
+          - langchain*
+          - langgraph*
         update-types:
           - minor
           - patch
