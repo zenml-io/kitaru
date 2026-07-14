@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from kitaru._llm_usage import (
     LLM_USAGE_SUMMARY_METADATA_KEY,
     aggregate_usage_records,
+    aggregate_usage_records_with_cost_completeness,
     parse_usage_summary,
     strip_usage_record_bookkeeping,
     usage_records_from_metadata,
@@ -492,6 +493,14 @@ class CheckpointCall:
     def aggregated_llm_usage_summary(self) -> dict[str, Any]:
         """Aggregate usage while retaining retry-attempt identities."""
         return aggregate_usage_records(self._llm_usage_records_with_bookkeeping())
+
+    def aggregated_llm_usage_with_cost_completeness(
+        self,
+    ) -> tuple[dict[str, Any], bool]:
+        """Aggregate usage and retain internal cost-completeness state."""
+        return aggregate_usage_records_with_cost_completeness(
+            self._llm_usage_records_with_bookkeeping()
+        )
 
 
 @dataclass(frozen=True)

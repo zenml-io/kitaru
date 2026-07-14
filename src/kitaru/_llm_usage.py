@@ -1093,7 +1093,6 @@ def empty_usage_summary() -> dict[str, Any]:
         "estimated_cost_usd": 0.0,
         "display_cost_usd": 0.0,
         "records_without_cost_count": 0,
-        "non_reused_records_without_cost_count": 0,
         "adapters": [],
         "models": [],
         "cost_policy": (
@@ -1105,8 +1104,10 @@ def empty_usage_summary() -> dict[str, Any]:
     }
 
 
-def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Aggregate canonical records into an execution-level summary.
+def aggregate_usage_records_with_cost_completeness(
+    records: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    """Aggregate records and report whether any incurred cost is unavailable.
 
     Duplicate records are skipped only when they came from the same source
     attempt and have the same record identity. The same logical record ID on a
@@ -1114,6 +1115,7 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
     made a second provider call.
     """
     summary = empty_usage_summary()
+    has_unpriced_non_reused_record = False
     adapters: set[str] = set()
     models: set[str] = set()
     warnings: list[str] = []
@@ -1174,7 +1176,7 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
         if actual_cost is None and estimated_cost is None:
             summary["records_without_cost_count"] += 1
             if not is_reused:
-                summary["non_reused_records_without_cost_count"] += 1
+                has_unpriced_non_reused_record = True
 
         adapter = record.get("adapter")
         if isinstance(adapter, str):
@@ -1192,6 +1194,12 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
     summary["adapters"] = sorted(adapters)
     summary["models"] = sorted(models)
     summary["warnings"] = warnings
+    return summary, has_unpriced_non_reused_record
+
+
+def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate canonical records into an execution-level summary."""
+    summary, _ = aggregate_usage_records_with_cost_completeness(records)
     return summary
 
 

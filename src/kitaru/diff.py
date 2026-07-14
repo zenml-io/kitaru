@@ -213,10 +213,12 @@ def _checkpoint_duration_ms(checkpoint: CheckpointCall) -> float | None:
     return (checkpoint.ended_at - checkpoint.started_at).total_seconds() * 1000
 
 
-def _checkpoint_usage_summary(checkpoint: CheckpointCall | None) -> dict[str, Any]:
+def _checkpoint_usage_summary(
+    checkpoint: CheckpointCall | None,
+) -> tuple[dict[str, Any], bool]:
     if checkpoint is None:
-        return aggregate_usage_records(())
-    return checkpoint.aggregated_llm_usage_summary
+        return aggregate_usage_records(()), False
+    return checkpoint.aggregated_llm_usage_with_cost_completeness()
 
 
 def _artifact_content_hash(artifact_id: str, client: KitaruClient) -> str | None:
@@ -291,8 +293,8 @@ def _compare_checkpoints(
     if original_duration is not None and replay_duration is not None:
         duration_delta = replay_duration - original_duration
 
-    original_usage = _checkpoint_usage_summary(original_cp)
-    replay_usage = _checkpoint_usage_summary(replay_cp)
+    original_usage, original_has_unpriced_cost = _checkpoint_usage_summary(original_cp)
+    replay_usage, replay_has_unpriced_cost = _checkpoint_usage_summary(replay_cp)
     token_delta: dict[str, int] | None = None
     if original_usage["usage_record_count"] or replay_usage["usage_record_count"]:
         token_keys = {
@@ -306,10 +308,7 @@ def _compare_checkpoints(
         }
 
     cost_delta: float | None = None
-    if not (
-        original_usage["non_reused_records_without_cost_count"]
-        or replay_usage["non_reused_records_without_cost_count"]
-    ):
+    if not (original_has_unpriced_cost or replay_has_unpriced_cost):
         cost_delta = round_cost_usd(
             replay_usage["display_cost_usd"] - original_usage["display_cost_usd"]
         )
