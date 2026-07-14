@@ -232,6 +232,9 @@ def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
 `research_agent.run(...)` now executes on that stack. Agents run on the same
 stacks, server, and dashboard as ZenML pipelines.
 
+ZenML supplies optional stack-integration dependencies; install them in the
+Python environment that submits the flow, not in its remote execution image.
+
 This example lists `kitaru[pydantic-ai,openai]` explicitly because setting
 `base_image` means you control the image contents — Kitaru auto-adds plain
 `kitaru` but does not guess optional extras such as the PydanticAI/OpenAI

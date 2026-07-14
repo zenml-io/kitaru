@@ -16,6 +16,9 @@ These examples use your current Kitaru connection context. If you want them to
 run against a deployed Kitaru server, connect first with `kitaru login
 <server>` and verify with `kitaru status`.
 
+ZenML supplies optional integration dependencies for remote stacks; if Kitaru
+reports one missing, follow the ZenML commands in the error.
+
 For the full catalog, see [../../README.md](../../README.md).
 
 ## Examples

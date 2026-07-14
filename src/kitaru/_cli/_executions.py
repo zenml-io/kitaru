@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from kitaru._client._statistics import (
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import (
+    CheckpointCall,
     Execution,
     ExecutionStatistics,
     ExecutionStatus,
@@ -44,10 +46,11 @@ from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    SnapshotSection,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
-    _emit_snapshot,
+    _emit_snapshot_sections,
     _emit_table,
     _exit_with_error,
     _format_table_timestamp,
@@ -60,6 +63,8 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
+
+_SAFE_REPLAY_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def _print_diff_warnings(payload: Mapping[str, Any]) -> None:
@@ -229,22 +234,56 @@ def _status_label(status: ExecutionStatus | str) -> str:
 
 
 def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
-    """Render a compact checkpoint status summary string."""
+    """Render the legacy compact checkpoint summary."""
     if not checkpoints:
         return "none"
 
-    entries: list[str] = []
-    for checkpoint in checkpoints[:max_items]:
-        name = str(getattr(checkpoint, "name", "unknown"))
-        raw_status = getattr(checkpoint, "status", "unknown")
-        status = _status_label(raw_status)
-        entries.append(f"{name} ({status})")
-
+    entries = [
+        f"{getattr(checkpoint, 'name', 'unknown')} "
+        f"({_status_label(getattr(checkpoint, 'status', 'unknown'))})"
+        for checkpoint in checkpoints[:max_items]
+    ]
     remaining = len(checkpoints) - len(entries)
     if remaining > 0:
         entries.append(f"... (+{remaining} more)")
-
     return ", ".join(entries)
+
+
+def _checkpoint_rows(checkpoints: list[CheckpointCall]) -> list[tuple[str, str]]:
+    """Build one display row for each checkpoint call."""
+    if not checkpoints:
+        return [("Calls", "none")]
+
+    rows: list[tuple[str, str]] = []
+    for checkpoint in checkpoints:
+        call_id = checkpoint.call_id.strip()
+        label = f"Call ID {call_id or 'not available'}"
+        value = f"{checkpoint.name} ({checkpoint.status.value})"
+        original_call_id = checkpoint.original_call_id
+        if original_call_id:
+            value += (
+                f"; original call ID: {original_call_id} "
+                "(may identify a call in the source execution; "
+                "not a --at selector for this execution)"
+            )
+        rows.append((label, value))
+    return rows
+
+
+def _replay_command(execution: Execution) -> str | None:
+    """Return a replay command for the first eligible failed checkpoint."""
+    if execution.status != ExecutionStatus.FAILED:
+        return None
+    if _SAFE_REPLAY_IDENTIFIER.fullmatch(execution.exec_id) is None:
+        return None
+
+    for checkpoint in execution.checkpoints:
+        if checkpoint.status != ExecutionStatus.FAILED:
+            continue
+        call_id = checkpoint.call_id
+        if _SAFE_REPLAY_IDENTIFIER.fullmatch(call_id) is not None:
+            return f"kitaru executions replay {execution.exec_id} --at {call_id}"
+    return None
 
 
 def _display_int(value: Any) -> int | None:
@@ -318,7 +357,6 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Pending wait", pending_wait_name),
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
-        ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
         ("LLM usage", _format_llm_usage_summary(execution.llm_usage_summary)),
     ]
 
@@ -666,7 +704,21 @@ def get_(
         _emit_json_item(command, serialize_execution(execution), output=output_format)
         return
 
-    _emit_snapshot("Kitaru execution", _execution_rows(execution))
+    sections = [
+        SnapshotSection(title=None, rows=_execution_rows(execution)),
+        SnapshotSection(
+            title="Checkpoints", rows=_checkpoint_rows(execution.checkpoints)
+        ),
+    ]
+    replay_command = _replay_command(execution)
+    if replay_command is not None:
+        sections.append(
+            SnapshotSection(
+                title="Replay into a new execution",
+                rows=[("Command", replay_command)],
+            )
+        )
+    _emit_snapshot_sections("Kitaru execution", sections)
 
 
 @executions_app.command

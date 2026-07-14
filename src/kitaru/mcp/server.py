@@ -37,6 +37,7 @@ from kitaru._local_server import (
     stop_registered_local_server,
 )
 from kitaru.analytics import AnalyticsEvent, set_source, track
+from kitaru.errors import KitaruUsageError
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -407,6 +408,16 @@ def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
 
 
 @tracked_mcp_tool
+def kitaru_executions_abort_wait(exec_id: str, wait: str) -> dict[str, Any]:
+    """Abort one pending wait without cancelling its execution."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.abort_wait(exec_id, wait=wait)
+        )
+    )
+
+
+@tracked_mcp_tool
 def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, Any]:
     """Provide input to a waiting execution and return updated details."""
 
@@ -423,6 +434,16 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
         return inspection.serialize_execution(updated_execution)
 
     return run_with_mcp_error_boundary(_provide_input)
+
+
+@tracked_mcp_tool
+def kitaru_executions_resume(exec_id: str) -> dict[str, Any]:
+    """Resume one execution after its pending waits are resolved."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.resume(exec_id)
+        )
+    )
 
 
 @tracked_mcp_tool
@@ -561,6 +582,27 @@ def kitaru_secrets_create(
             secrets_api.create_secret(name, values, private=private)
         )
     )
+
+
+@tracked_mcp_tool
+def kitaru_secrets_list(
+    page: int = 1,
+    size: int = 20,
+) -> list[dict[str, Any]]:
+    """List paginated secret metadata without raw values."""
+
+    def _list_secrets() -> list[dict[str, Any]]:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise KitaruUsageError("`page` must be an integer >= 1.")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+            raise KitaruUsageError("`size` must be an integer >= 1.")
+
+        return [
+            inspection.serialize_secret_summary(summary)
+            for summary in secrets_api.list_secrets()[(page - 1) * size : page * size]
+        ]
+
+    return run_with_mcp_error_boundary(_list_secrets)
 
 
 @tracked_mcp_tool

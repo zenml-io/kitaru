@@ -8,8 +8,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock, Mock, call, patch
+from typing import Any, cast
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from zenml.constants import ENV_ZENML_ACTIVE_STACK_ID
@@ -28,6 +28,7 @@ from kitaru.cli import (
     ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     _build_runtime_snapshot,
+    _checkpoint_summary,
     _describe_local_server,
     _format_table_timestamp,
     _logout_current_connection,
@@ -35,6 +36,8 @@ from kitaru.cli import (
     app,
 )
 from kitaru.client import (
+    CheckpointCall,
+    Execution,
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatus,
@@ -56,13 +59,16 @@ from kitaru.config import (
     VertexStackSpec,
 )
 from kitaru.errors import (
+    KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruFeatureNotAvailableError,
     KitaruStackNotRemoteExecutableUsageError,
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.inspection import serialize_execution
 from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
+from kitaru.secrets import SecretSummary
 
 
 class _BrokenGlobalConfig:
@@ -111,7 +117,7 @@ def _execution_stub(
     pending_wait: SimpleNamespace | None = None,
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
-    checkpoints: list[SimpleNamespace] | None = None,
+    checkpoints: list[CheckpointCall] | None = None,
     llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
@@ -133,6 +139,35 @@ def _execution_stub(
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
         llm_usage_records=[],
+    )
+
+
+def _checkpoint_stub(
+    *,
+    call_id: str,
+    name: str,
+    status: ExecutionStatus,
+    original_call_id: str | None = None,
+) -> CheckpointCall:
+    """Build a complete checkpoint-call-shaped object for CLI tests."""
+    return CheckpointCall(
+        call_id=call_id,
+        name=name,
+        checkpoint_type=None,
+        checkpoint_origin="user",
+        adapter=None,
+        adapter_checkpoint_kind=None,
+        replay_input_slots=[],
+        replay_output_slots=[],
+        status=status,
+        started_at=None,
+        ended_at=None,
+        metadata={},
+        original_call_id=original_call_id,
+        parent_call_ids=[],
+        failure=None,
+        attempts=[],
+        artifacts=[],
     )
 
 
@@ -2352,10 +2387,51 @@ def test_flow_tag_and_untag_call_public_apis(
     assert json.loads(capsys.readouterr().out)["command"] == "flow.untag"
 
 
-def test_executions_get_renders_execution_details(
+def test_checkpoint_summary_remains_available_from_compatibility_facade() -> None:
+    """The legacy private import remains available for integrations."""
+    checkpoints = [
+        SimpleNamespace(name=f"step-{index}", status=ExecutionStatus.COMPLETED)
+        for index in range(5)
+    ]
+
+    assert _checkpoint_summary(checkpoints) == (
+        "step-0 (completed), step-1 (completed), step-2 (completed), "
+        "step-3 (completed), ... (+1 more)"
+    )
+
+
+def test_executions_get_renders_all_checkpoint_call_ids(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions get` should render a detailed execution snapshot."""
+    """Execution details should show every checkpoint call without truncation."""
+    checkpoints = [
+        _checkpoint_stub(
+            call_id="call-research-1",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-1",
+            name="write",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-research-2",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-review-1",
+            name="review",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-2",
+            name="write",
+            status=ExecutionStatus.FAILED,
+            original_call_id="call-write-1",
+        ),
+    ]
     execution = _execution_stub(
         exec_id="kr-123",
         flow_name="content_pipeline",
@@ -2364,10 +2440,7 @@ def test_executions_get_renders_execution_details(
             name="approve_draft",
             question="Ship this draft?",
         ),
-        checkpoints=[
-            SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
-            SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
-        ],
+        checkpoints=checkpoints,
         llm_usage_summary={
             "usage_record_count": 2,
             "incurred_usage_record_count": 1,
@@ -2396,8 +2469,251 @@ def test_executions_get_renders_execution_details(
     assert "Status: waiting" in output
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
-    assert "Checkpoints: research (completed), write (running)" in output
+    assert "Checkpoints" in output
+    for checkpoint in checkpoints:
+        assert f"Call ID {checkpoint.call_id}: {checkpoint.name}" in output
+        assert f"({checkpoint.status.value})" in output
+    assert output.count("research (completed)") == 2
+    assert (
+        "Call ID call-write-2: write (failed); original call ID: call-write-1 "
+        "(may identify a call in the source execution; "
+        "not a --at selector for this execution)"
+    ) in output
+    assert "(+1 more)" not in output
     assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_checkpoint_ids_in_rich_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Interactive output should contain the same checkpoint details."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-research-2",
+                name="research",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-research-1",
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_interactive", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Checkpoints" in output
+    assert "Call ID call-research-1" in output
+    assert "research (completed)" in output
+    assert "Call ID call-research-2" in output
+    assert "research (failed)" in output
+    assert "original call ID:" in output
+    assert "call-research-1 (may identify a call in the source execution;" in output
+    assert "not a --at" in output
+    assert "selector for this execution)" in output
+    assert "Replay into a new execution" in output
+    assert "Command:" in output
+    assert "kitaru executions replay kr-123 --at call-research-2" in output
+
+
+@pytest.mark.parametrize(
+    ("exec_id", "call_id"),
+    [
+        ("kr execution", "call-write-2"),
+        ("kr-123", "call 'write'"),
+        ("kr-123", 'call-"write"'),
+        ("kr-123", "call-write;$HOME"),
+    ],
+)
+def test_executions_get_omits_replay_command_for_unsafe_identifiers(
+    capsys: pytest.CaptureFixture[str],
+    exec_id: str,
+    call_id: str,
+) -> None:
+    """Replay guidance should require cross-shell-safe identifiers."""
+    execution = _execution_stub(
+        exec_id=exec_id,
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id=call_id,
+                name="write",
+                status=ExecutionStatus.FAILED,
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", exec_id])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    assert f"Call ID {call_id}: write (failed)" in output
+
+
+def test_executions_get_suggests_first_failed_checkpoint_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed execution should suggest its first eligible failed call ID."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+            ),
+            _checkpoint_stub(
+                call_id="call-publish-3",
+                name="publish",
+                status=ExecutionStatus.FAILED,
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" in output
+    assert "Command: kitaru executions replay kr-123 --at call-write-2" in output
+    assert "--at call-publish-3" not in output
+
+
+@pytest.mark.parametrize(
+    ("execution_status", "checkpoints"),
+    [
+        (
+            ExecutionStatus.COMPLETED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+        (ExecutionStatus.FAILED, []),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.COMPLETED,
+                )
+            ],
+        ),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="  ",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+    ],
+)
+def test_executions_get_omits_ineligible_replay_command(
+    capsys: pytest.CaptureFixture[str],
+    execution_status: ExecutionStatus,
+    checkpoints: list[CheckpointCall],
+) -> None:
+    """Replay guidance should appear only when its call ID is usable."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=execution_status,
+        checkpoints=checkpoints,
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    if not checkpoints:
+        assert "Calls: none" in output
+    elif not checkpoints[0].call_id.strip():
+        assert "Call ID not available: write (failed)" in output
+
+
+def test_executions_get_json_contract_is_unchanged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text-only checkpoint guidance must not enter the JSON envelope."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-write-1",
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.get",
+        "item": serialize_execution(cast(Execution, execution)),
+    }
 
 
 def test_executions_get_renders_malformed_llm_usage_summary_honestly(
@@ -3300,17 +3616,13 @@ def test_secrets_list_past_end_does_not_claim_none_found(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Paging past the end of a non-empty secret list must not say 'none found'."""
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_a, secret_b],
-        total_pages=1,
-        max_size=2,
-    )
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=False, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+    ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "9", "--size", "1"])
@@ -5631,32 +5943,23 @@ def test_secrets_show_displays_values_when_requested(
     assert "Value (OPENAI_API_KEY): sk-123" in output
 
 
-def test_secrets_list_renders_all_pages_sorted(
+def test_secrets_list_renders_shared_order(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should merge all pages and sort by secret name."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = [
-        SimpleNamespace(items=[secret_z], total_pages=2, max_size=1),
-        SimpleNamespace(items=[secret_a], total_pages=2, max_size=1),
+    """`kitaru secrets list` should render the SDK's deterministic order."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
     ]
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=secrets) as mock_list_secrets,
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])
 
     assert exc_info.value.code == 0
-    calls = fake_client.list_secrets.call_args_list
-    assert len(calls) == 2
-    backend_scan_size = calls[0].kwargs["size"]
-    assert calls == [
-        call(page=1, size=backend_scan_size),
-        call(page=2, size=backend_scan_size),
-    ]
+    mock_list_secrets.assert_called_once_with()
     output = capsys.readouterr().out
     assert "Kitaru secrets" in output
     assert "alpha: secret-a (private)" in output
@@ -5666,61 +5969,53 @@ def test_secrets_list_renders_all_pages_sorted(
     )
 
 
-def test_secrets_list_uses_stable_backend_page_size(
+def test_secrets_list_json_contains_metadata_without_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Backend scan pagination should not switch sizes after the first page."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    observed_sizes: list[int] = []
-
-    def list_secrets(*, page: int, size: int | None = None) -> SimpleNamespace:
-        if size is None:
-            raise AssertionError("backend scan calls must pass an explicit size")
-        observed_sizes.append(size)
-        if page == 1:
-            return SimpleNamespace(
-                items=[secret_z],
-                total_pages=2,
-                max_size=size + 100,
-            )
-        if page == 2 and size == observed_sizes[0]:
-            return SimpleNamespace(items=[secret_a], total_pages=2, max_size=size + 100)
-        return SimpleNamespace(items=[], total_pages=2, max_size=size + 100)
-
-    fake_client = Mock()
-    fake_client.list_secrets.side_effect = list_secrets
-
-    with (
-        patch("kitaru.cli.Client", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["secrets", "list"])
-
-    assert exc_info.value.code == 0
-    assert len(observed_sizes) == 2
-    assert observed_sizes[0] == observed_sizes[1]
-    output = capsys.readouterr().out
-    assert "alpha: secret-a (private)" in output
-    assert "zeta: secret-z (public)" in output
-
-
-def test_secrets_list_paginates_after_sorting(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`secrets list` should slice after deterministic name/id ordering."""
-    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
-    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
-    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
-    fake_client = Mock()
-    fake_client.list_secrets.return_value = SimpleNamespace(
-        items=[secret_z, secret_b, secret_a],
-        total_pages=1,
-        max_size=3,
+    """JSON list output should include key names but never secret values."""
+    secret = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        keys=["OPENAI_API_KEY"],
+        has_missing_values=False,
     )
 
     with (
-        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru.secrets.list_secrets", return_value=[secret]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "secrets.list",
+        "items": [
+            {
+                "id": "secret-id",
+                "name": "openai-creds",
+                "visibility": "private",
+                "keys": ["OPENAI_API_KEY"],
+                "has_missing_values": False,
+            }
+        ],
+        "count": 1,
+    }
+
+
+def test_secrets_list_paginates_after_shared_ordering(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI should slice the complete list after the SDK has ordered it."""
+    secrets = [
+        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
+        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
+        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+    ]
+
+    with (
+        patch("kitaru.secrets.list_secrets", return_value=secrets),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list", "--page", "1", "--size", "2"])
@@ -5733,12 +6028,15 @@ def test_secrets_list_paginates_after_sorting(
     assert "Page 1 (size 2, showing 2 of 3)" in output
 
 
-def test_secrets_list_surfaces_client_errors(
+def test_secrets_list_surfaces_sdk_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets list` should surface backend errors as CLI errors."""
+    """`kitaru secrets list` should surface SDK errors as CLI errors."""
     with (
-        patch("kitaru.cli.Client", side_effect=RuntimeError("offline")),
+        patch(
+            "kitaru.secrets.list_secrets",
+            side_effect=KitaruBackendError("Failed to list secrets: offline"),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["secrets", "list"])

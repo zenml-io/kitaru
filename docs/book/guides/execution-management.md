@@ -56,6 +56,29 @@ Execution details include:
 - artifacts
 - frozen execution spec (when available)
 
+The text form of `kitaru executions get` shows every public checkpoint call:
+
+```text
+Kitaru execution
+  Execution ID: kr-a8f3c2
+  Flow: content_pipeline
+  Status: failed
+
+Checkpoints
+  Call ID call-research-1: research (completed)
+  Call ID call-write-2: write (failed); original call ID: call-write-1 (may identify a call in the source execution; not a --at selector for this execution)
+
+Replay into a new execution
+  Command: kitaru executions replay kr-a8f3c2 --at call-write-2
+```
+
+Use the current call ID after `Call ID` with `kitaru executions replay --at`.
+This identifies one specific call when a checkpoint name appears more than once.
+An `original call ID` records replay history. It may identify the corresponding
+call in the source execution, but it is not a valid `--at` selector for the
+execution currently displayed. For scripts, use `--output json` rather than
+parsing the human-readable layout.
+
 ## List and query executions
 
 ```python
@@ -407,6 +430,15 @@ changed (a different model or prompt) lets you diff the two and attribute the
 difference to your change. Retry, by contrast, resumes the **same** failed
 execution in place.
 
+For a failed execution, `kitaru executions get` prints a replay command only
+when both the execution ID and a failed checkpoint's current call ID use a
+portable format: they must start with a letter or number and contain only
+letters, numbers, `.`, `_`, or `-`. This keeps the displayed command safe to
+copy as written. If several failed calls qualify, the command uses the first one
+in the order returned by Kitaru. The command is omitted for other execution
+states, when there are no failed checkpoint calls, or when either ID does not
+use this format.
+
 ```python
 # Replay into a new execution from a checkpoint boundary.
 # Override flow inputs (e.g. topic) and prior checkpoint outputs.
@@ -529,13 +561,22 @@ Then use tool calls like:
 - `kitaru_executions_list(status="waiting")`
 - `kitaru_executions_statistics(group_by=["status"])`
 - `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
+- `kitaru_executions_abort_wait(exec_id=..., wait=...)`
+- `kitaru_executions_resume(exec_id=...)`
 - `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`
 
-If the execution does not continue automatically after wait input is resolved
-(e.g. the original runner already exited), use the CLI or SDK `resume(...)` call.
-MCP does not currently expose a separate resume tool.
+Use the pending-wait name or ID shown by the execution, or already known by the
+workflow. Resolve that wait with `kitaru_executions_input` or explicitly abort
+it with `kitaru_executions_abort_wait`, then inspect the returned execution's
+`status` and singular `pending_wait`. If `pending_wait` is absent but the
+execution does not continue, call `kitaru_executions_resume` (for example,
+because the original runner exited).
+
+Aborting a wait resolves only that selected wait; it does not cancel the whole
+execution. The input and abort-wait tools do not call resume themselves, though
+an existing runner may continue after the wait is resolved.
 
 See the full setup guide at [MCP Server](../agent-native/mcp-server.md).
 
