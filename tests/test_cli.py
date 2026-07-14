@@ -4605,6 +4605,55 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     }
 
 
+def test_executions_diff_json_serializes_checkpoint_usage_deltas(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = object()
+    serialized = {
+        "compared": [
+            {
+                "checkpoints": [
+                    {
+                        "token_delta": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                        "cost_delta_usd": 0.25,
+                    }
+                ]
+            }
+        ]
+    }
+
+    with (
+        patch("kitaru.diff.diff", return_value=result) as mock_diff,
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value=serialized,
+        ) as mock_serialize,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "diff",
+                "kr-original",
+                "kr-replay",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_diff.assert_called_once_with("kr-original", "kr-replay")
+    mock_serialize.assert_called_once_with(result)
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.diff",
+        "item": serialized,
+    }
+
+
 def test_executions_diff_cohort_is_not_registered(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

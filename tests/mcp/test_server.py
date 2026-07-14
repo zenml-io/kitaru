@@ -50,6 +50,7 @@ from kitaru.mcp.server import (
     kitaru_deployments_untag,
     kitaru_executions_abort_wait,
     kitaru_executions_cancel,
+    kitaru_executions_diff,
     kitaru_executions_diff_matrix,
     kitaru_executions_get,
     kitaru_executions_input,
@@ -97,6 +98,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_executions_resume,
     kitaru_executions_retry,
     kitaru_executions_replay,
+    kitaru_executions_diff,
     kitaru_executions_diff_matrix,
     kitaru_secrets_create,
     kitaru_secrets_list,
@@ -1326,6 +1328,43 @@ def test_executions_diff_matrix_returns_renamed_payload() -> None:
         "diff_matrix": {"rows": [{"original_exec_id": "kr-a"}]},
     }
     assert "cohort" not in payload
+
+
+def test_executions_diff_serializes_checkpoint_usage_deltas() -> None:
+    result = object()
+    serialized = {
+        "compared": [
+            {
+                "checkpoints": [
+                    {
+                        "token_delta": {
+                            "prompt_tokens": -4,
+                            "completion_tokens": -2,
+                            "total_tokens": -6,
+                        },
+                        "cost_delta_usd": None,
+                    }
+                ]
+            }
+        ]
+    }
+
+    with (
+        patch("kitaru.diff.diff", return_value=result) as mock_diff,
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value=serialized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_diff("kr-original", ["kr-replay"])
+
+    mock_diff.assert_called_once_with("kr-original", "kr-replay")
+    mock_serialize.assert_called_once_with(result)
+    assert payload == {
+        "available": True,
+        "operation": "diff",
+        "diff": serialized,
+    }
 
 
 def test_execution_mutation_tools_return_serialized_execution(
