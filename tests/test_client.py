@@ -2851,6 +2851,41 @@ def test_replay_scan_discovers_native_replays_without_metadata() -> None:
     assert kwargs["hydrate"] is False
 
 
+def test_replay_scan_does_not_map_or_hydrate_matching_runs() -> None:
+    replay = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    replay.original_run = SimpleNamespace(id="original-a")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._map_execution") as map_execution,
+    ):
+        client_cls.return_value.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(replay)],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        links, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=1,
+        )
+
+    assert [(link.exec_id, link.original_exec_id) for link in links] == [
+        (str(replay.id), "original-a")
+    ]
+    assert truncated is False
+    map_execution.assert_not_called()
+
+
 def test_replay_scan_skips_unrelated_waiting_and_running_runs() -> None:
     native_match = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,

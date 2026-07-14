@@ -456,7 +456,7 @@ class _CountingExecutions:
         original_exec_ids: Sequence[str],
         expected_flow_name: str | None,
         limit: int,
-    ) -> tuple[list[Execution], bool]:
+    ) -> tuple[list[Any], bool]:
         self._counters.execution_list_calls += 1
         return self._api._list_replays_for_originals(
             original_exec_ids=original_exec_ids,

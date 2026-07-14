@@ -234,6 +234,14 @@ class _ReplayImportDependencyError(KitaruRuntimeError):
     """Replay source import failed because one of its dependencies is missing."""
 
 
+@dataclass(frozen=True)
+class _ReplayLink:
+    """Lightweight native linkage discovered from an unhydrated run row."""
+
+    exec_id: str
+    original_exec_id: str
+
+
 # The direct imports above preserve `kitaru.client.*` patch targets; this tuple
 # simply keeps intentionally re-exported private names alive for linting.
 _CLIENT_FACADE_LINT_ANCHOR = (
@@ -1910,13 +1918,13 @@ class _ExecutionsAPI:
         original_exec_ids: Sequence[str],
         expected_flow_name: str | None,
         limit: int,
-    ) -> tuple[builtins.list[Execution], bool]:
+    ) -> tuple[builtins.list[_ReplayLink], bool]:
         """List replay executions linked to any requested original.
 
         Scans up to ``limit`` lightweight executions for one flow in backend
         order. ``expected_flow_name=None`` selects only executions whose flow
         name is unavailable; it does not disable flow filtering. Returns
-        matching native replays and whether older executions in the scan remain.
+        matching native replay links and whether older executions in the scan remain.
         """
         normalized_ids = _validate_non_empty_string_list(
             original_exec_ids,
@@ -1939,7 +1947,7 @@ class _ExecutionsAPI:
             )
 
         original_ids = set(normalized_ids)
-        results: builtins.list[Execution] = []
+        results: builtins.list[_ReplayLink] = []
         runs = depaginate_stream(
             self._client_ref._client().list_pipeline_runs,
             sort_by="desc:created",
@@ -1966,10 +1974,9 @@ class _ExecutionsAPI:
                 continue
 
             results.append(
-                _map_execution(
-                    run=run,
-                    client=self._client_ref,
-                    include_details=False,
+                _ReplayLink(
+                    exec_id=str(run.id),
+                    original_exec_id=raw_original_id,
                 )
             )
 
