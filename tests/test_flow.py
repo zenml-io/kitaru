@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import traceback
 from collections import namedtuple
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
@@ -45,6 +46,7 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStackIntegrationDependencyError,
     KitaruStateError,
+    KitaruTimeoutError,
     KitaruUsageError,
     KitaruUserCodeError,
     build_recovery_command,
@@ -72,6 +74,7 @@ from kitaru.flow import (
     _inject_model_registry_env,
     _is_flow_result_candidate_step,
     _is_multiple_terminal_steps_output_error,
+    _preflight_active_stack_implementation_hydration,
     _suspend_flow_return_coercion,
     _temporary_active_project,
     _temporary_active_stack,
@@ -114,6 +117,23 @@ def _empty_registry_payload() -> str:
     return ModelRegistryConfig().model_dump_json(exclude_none=True)
 
 
+_MISSING_STACK_DEPENDENCY_GUIDANCE = (
+    "Install the missing integration with `zenml integration install s3`.\n"
+    "Export stack requirements with `zenml stack export-requirements 'prod' "
+    "-o stack-requirements.txt`."
+)
+_MISSING_STACK_DEPENDENCY_INTRO = (
+    "Cannot submit this Kitaru flow because this Python environment could not "
+    "load the active stack's integration dependencies.\n\n"
+    "ZenML supplies these dependencies. Install the missing integration or the "
+    "active stack requirements, then retry."
+)
+_MISSING_STACK_DEPENDENCY_MESSAGE = (
+    f"{_MISSING_STACK_DEPENDENCY_INTRO}\n\n"
+    f"ZenML guidance:\n\n{_MISSING_STACK_DEPENDENCY_GUIDANCE}"
+)
+
+
 class _ClientWithMissingStackDependency:
     def __init__(self, *, old_stack_id: object, stack_name: str = "prod") -> None:
         self.old_stack_model = SimpleNamespace(id=old_stack_id, name="old")
@@ -133,13 +153,27 @@ class _ClientWithMissingStackDependency:
     def active_stack(self) -> object:
         if self.active_stack_model is not self.selected_stack_model:
             raise AssertionError("active stack must be selected before hydration")
-        raise ImportError(
-            "Install the missing integration with "
-            "`zenml integration install s3`.\n"
-            "Export stack requirements with "
-            "`zenml stack export-requirements 'prod' "
-            "-o stack-requirements.txt`."
-        )
+        raise ImportError(_MISSING_STACK_DEPENDENCY_GUIDANCE)
+
+
+def _assert_missing_stack_dependency_error(
+    exception: KitaruStackIntegrationDependencyError,
+    *,
+    expected_outer_frame: str,
+) -> None:
+    assert str(exception) == _MISSING_STACK_DEPENDENCY_MESSAGE
+    assert "zenml integration install s3" in str(exception)
+    assert "zenml stack export-requirements" in str(exception)
+    assert exception.__cause__ is None
+    assert isinstance(exception.__context__, ImportError)
+    assert str(exception.__context__) == _MISSING_STACK_DEPENDENCY_GUIDANCE
+    assert exception.__suppress_context__ is True
+    assert exception.__traceback__ is not None
+    frame_names = [
+        frame.name for frame in traceback.extract_tb(exception.__traceback__)
+    ]
+    assert "_preflight_active_stack_implementation_hydration" in frame_names
+    assert expected_outer_frame in frame_names
 
 
 class _EnvPoisonedActiveStackClient:
@@ -1245,13 +1279,11 @@ def test_deploy_translates_active_stack_hydration_import_error_before_prepare() 
         wrapped = flow(lambda x: x)
         wrapped.deploy(1, stack="prod")
 
-    message = str(exc_info.value)
-    assert "Cannot submit this Kitaru flow" in message
-    assert "stack integration dependency appears to be missing" in message
-    assert "zenml integration install s3" in message
-    assert "zenml stack export-requirements" in message
-    assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    _assert_missing_stack_dependency_error(
+        exc_info.value,
+        expected_outer_frame="deploy",
+    )
+    base_pipeline.with_options.assert_not_called()
     configured_pipeline.prepare.assert_not_called()
     configured_pipeline._create_snapshot.assert_not_called()
     deployments_api.create.assert_not_called()
@@ -1265,6 +1297,25 @@ def test_deploy_translates_active_stack_hydration_import_error_before_prepare() 
         call("prod"),
         call(old_stack_id),
     ]
+
+
+def test_preflight_omits_empty_zenml_guidance() -> None:
+    class _ClientWithEmptyMissingDependencyMessage:
+        @property
+        def active_stack(self) -> object:
+            raise ImportError
+
+    with pytest.raises(KitaruStackIntegrationDependencyError) as exc_info:
+        _preflight_active_stack_implementation_hydration(
+            client_factory=_ClientWithEmptyMissingDependencyMessage
+        )
+
+    assert str(exc_info.value) == _MISSING_STACK_DEPENDENCY_INTRO
+    assert "ZenML guidance:" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert isinstance(exc_info.value.__context__, ImportError)
+    assert exc_info.value.__suppress_context__ is True
+    assert exc_info.value.__traceback__ is not None
 
 
 def test_flow_deploy_rewords_input_defaults_error() -> None:
@@ -3939,25 +3990,8 @@ def test_run_translates_active_stack_hydration_import_error() -> None:
     base_pipeline.with_options.return_value = configured_pipeline
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
-    class _ClientWithMissingStackDependency:
-        def __init__(self) -> None:
-            self.active_stack_model = SimpleNamespace(id=old_stack_id)
-            self.activate_stack = MagicMock()
-
-        @property
-        def active_stack(self) -> object:
-            raise ImportError(
-                "Install the missing integration with "
-                "`zenml integration install s3`.\n"
-                "Export stack requirements with "
-                "`zenml stack export-requirements 'prod' "
-                "-o stack-requirements.txt`."
-            )
-
     old_stack_id = uuid4()
-    client_mock = _ClientWithMissingStackDependency()
-    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
-    client_mock.activate_stack = MagicMock()
+    client_mock = _ClientWithMissingStackDependency(old_stack_id=old_stack_id)
 
     with (
         patch("kitaru.flow.pipeline", return_value=zenml_decorator),
@@ -3974,13 +4008,11 @@ def test_run_translates_active_stack_hydration_import_error() -> None:
         wrapped = flow(lambda: None)
         wrapped.run(stack="prod")
 
-    message = str(exc_info.value)
-    assert "Cannot submit this Kitaru flow" in message
-    assert "stack integration dependency appears to be missing" in message
-    assert "zenml integration install s3" in message
-    assert "zenml stack export-requirements" in message
-    assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    _assert_missing_stack_dependency_error(
+        exc_info.value,
+        expected_outer_frame="_submit",
+    )
+    base_pipeline.with_options.assert_not_called()
     configured_pipeline.assert_not_called()
     persist_mock.assert_not_called()
     assert client_mock.activate_stack.call_args_list == [
@@ -4290,13 +4322,11 @@ def test_replay_translates_active_stack_hydration_import_error_before_replay() -
         wrapped = flow(lambda topic: topic)
         wrapped.replay(str(source_run.id), at="write", stack="prod", wait=False)
 
-    message = str(exc_info.value)
-    assert "Cannot submit this Kitaru flow" in message
-    assert "stack integration dependency appears to be missing" in message
-    assert "zenml integration install s3" in message
-    assert "zenml stack export-requirements" in message
-    assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    _assert_missing_stack_dependency_error(
+        exc_info.value,
+        expected_outer_frame="_replay_one_handle",
+    )
+    base_pipeline.with_options.assert_not_called()
     configured_pipeline.replay.assert_not_called()
     persist_mock.assert_not_called()
     track_mock.assert_not_called()
@@ -4993,12 +5023,200 @@ def test_flow_handle_wait_polls_until_complete() -> None:
     handle = FlowHandle(_as_pipeline_run(initial))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic") as monotonic_mock,
         patch("kitaru.flow.time.sleep") as sleep_mock,
     ):
         result = handle.wait()
 
     assert result == 42
+    monotonic_mock.assert_not_called()
     sleep_mock.assert_called_once_with(1)
+
+
+@pytest.mark.parametrize("timeout", [2, 2.0])
+def test_flow_handle_wait_accepts_and_normalizes_positive_timeout(
+    timeout: float,
+) -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=timeout)
+
+    assert exc_info.value.timeout_seconds == 2.0
+    sleep_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [
+        0,
+        -1,
+        True,
+        False,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        "2",
+        object(),
+    ],
+)
+def test_flow_handle_wait_rejects_invalid_timeout_before_side_effects(
+    timeout: object,
+) -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_constructor = MagicMock()
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", client_constructor),
+        patch("kitaru.flow.time.monotonic") as monotonic_mock,
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(
+            KitaruUsageError,
+            match="timeout must be a positive, finite number",
+        ),
+    ):
+        handle.wait(timeout=cast(Any, timeout))
+
+    client_constructor.assert_not_called()
+    monotonic_mock.assert_not_called()
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_reports_context_without_mutating_execution() -> None:
+    run_id = uuid4()
+    running = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=2)
+
+    error = exc_info.value
+    assert isinstance(error, KitaruStateError)
+    assert isinstance(error, TimeoutError)
+    assert error.exec_id == str(run_id)
+    assert error.timeout_seconds == 2.0
+    assert error.elapsed_seconds == 2.0
+    assert error.last_status == KitaruExecutionStatus.RUNNING
+    assert str(run_id) in str(error)
+    assert "configured timeout: 2.0 seconds" in str(error)
+    assert "after 2.0 seconds" in str(error)
+    assert "last status: running" in str(error)
+    assert "remote execution was not changed" in str(error)
+    assert client_mock.method_calls == [
+        call.get_pipeline_run(
+            run_id,
+            allow_name_prefix_match=False,
+            project=None,
+        )
+    ]
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_raises_without_polling_after_final_sleep() -> None:
+    run_id = uuid4()
+    running = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.time.monotonic",
+            side_effect=[10.0, 10.75, 11.0],
+        ),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruTimeoutError) as exc_info,
+    ):
+        handle.wait(timeout=1.0)
+
+    assert exc_info.value.elapsed_seconds == 1.0
+    sleep_mock.assert_called_once_with(pytest.approx(0.25))
+    client_mock.get_pipeline_run.assert_called_once_with(
+        run_id,
+        allow_name_prefix_match=False,
+        project=None,
+    )
+
+
+def test_flow_handle_wait_completed_refresh_wins_at_deadline() -> None:
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", side_effect=[10.0, 12.0]) as monotonic_mock,
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+    ):
+        result = handle.wait(timeout=2)
+
+    assert result == 42
+    monotonic_mock.assert_called_once_with()
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_preserves_unsuccessful_execution_error() -> None:
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        traceback="Traceback\nValueError: bad input",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        patch("kitaru.flow.track"),
+        pytest.raises(KitaruUserCodeError) as exc_info,
+    ):
+        handle.wait(timeout=5)
+
+    assert f"kitaru executions retry {run_id}" in str(exc_info.value)
+    sleep_mock.assert_not_called()
+
+
+def test_flow_handle_wait_timeout_preserves_backend_error() -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.side_effect = RuntimeError("backend unavailable")
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+        pytest.raises(KitaruBackendError, match="backend unavailable"),
+    ):
+        handle.wait(timeout=5)
+
+    sleep_mock.assert_not_called()
 
 
 def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
@@ -5016,10 +5234,11 @@ def test_flow_handle_wait_raises_when_execution_is_waiting_for_input() -> None:
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message
@@ -5048,10 +5267,11 @@ def test_flow_handle_wait_paused_without_pending_waits_guides_resume() -> None:
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message
@@ -5073,10 +5293,11 @@ def test_flow_handle_wait_pending_wait_lookup_failure_gives_cautious_guidance() 
     handle = FlowHandle(_as_pipeline_run(waiting))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.monotonic", return_value=10.0),
         patch("kitaru.flow.time.sleep") as sleep_mock,
         pytest.raises(KitaruStateError) as exc_info,
     ):
-        handle.wait()
+        handle.wait(timeout=5)
 
     message = str(exc_info.value)
     assert str(run_id) in message

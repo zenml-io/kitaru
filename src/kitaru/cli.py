@@ -173,7 +173,6 @@ from kitaru._cli._projects import (
 )
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
-    _list_accessible_secrets,
     _parse_secret_assignments,
     _secret_list_rows,
     _secret_show_rows,
@@ -439,7 +438,6 @@ __all__ = [
     "_info_rows",
     "_is_input_interactive",
     "_is_interactive",
-    "_list_accessible_secrets",
     "_list_stack_entries",
     "_load_stack_create_file",
     "_log_entry_dedup_key",

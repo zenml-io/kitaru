@@ -1987,18 +1987,18 @@ def test_deployment_facade_methods_forward_to_client_api() -> None:
         assert deployment.remove_tag("canary") is deployment
         deployment.delete()
 
-    client.deployments.tag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.tag.assert_called_once_with(
         flow="research_flow",
         version=2,
         tag="stable",
         exclusive=True,
     )
-    client.deployments.untag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.untag.assert_called_once_with(
         flow="research_flow",
         version=2,
         tag="canary",
     )
-    client.deployments.delete.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.delete.assert_called_once_with(
         flow="research_flow",
         version=2,
     )

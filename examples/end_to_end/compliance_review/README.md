@@ -44,7 +44,7 @@ Each stage's `run_workflow()` defaults to `cache=False`. That means every invoca
 
 ### Running against a remote stack
 
-The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing.
+The local default stack works out of the box. ZenML supplies optional dependencies for remote stack components, so install that stack's ZenML integration in the same environment after syncing.
 
 A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_API_KEY`. The safest path is to expose that credential at step runtime from a centralized `anthropic` secret:
 

@@ -60,9 +60,14 @@ CheckpointKey = tuple[str | None, str | None, str | None, int]
 
 
 class _CheckpointLike(Protocol):
-    execution_id: str | None
-    checkpoint_id: str | None
-    name: str
+    # Read-only members: implementors are frozen dataclasses, and a bare
+    # annotation here would demand a settable attribute.
+    @property
+    def execution_id(self) -> str | None: ...
+    @property
+    def checkpoint_id(self) -> str | None: ...
+    @property
+    def name(self) -> str: ...
 
 
 @dataclass

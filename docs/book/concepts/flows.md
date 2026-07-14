@@ -54,13 +54,15 @@ Use `.run()` to start an execution:
 handle = my_agent.run(url="https://example.com")
 print(handle.exec_id)   # unique execution identifier
 # ... do other work ...
-result = handle.wait()   # block until finished
+result = handle.wait(timeout=30)  # wait for at most 30 seconds locally
 ```
 
 `.run()` submits the execution and immediately returns a `FlowHandle`. The flow
 runs in the background while your code continues. Call `handle.wait()` when you
 need the result: it waits for the execution to finish, then returns the persisted
-run output from the flow's `return` statement.
+run output from the flow's `return` statement. Pass `timeout=` to limit how long
+your local Python process waits. Omitting it, or passing `None`, waits
+indefinitely.
 
 For a synchronous one-liner, chain `.wait()`:
 
@@ -135,7 +137,7 @@ execution:
 |---|---|
 | `handle.exec_id` | The unique execution identifier (a string you can store or log) |
 | `handle.status` | Current execution status (refreshed on each access) |
-| `handle.wait()` | Block until the execution finishes, then return the persisted run output |
+| `handle.wait(timeout=None)` | Wait for completion and return the persisted run output. If the optional local timeout expires first, raise `KitaruTimeoutError`. |
 | `handle.get()` | Return the persisted run output immediately if finished, otherwise raise an error |
 
 {% hint style="info" %}
@@ -144,6 +146,28 @@ execution:
 that explicitly return a value, both methods return the saved run output. For
 flows that do not return a value, inspect the persisted artifacts instead.
 {% endhint %}
+
+### Limiting how long your code waits
+
+Pass a positive number of seconds when your caller cannot wait indefinitely:
+
+```python
+import kitaru
+
+handle = my_agent.run(url="https://example.com")
+
+try:
+    result = handle.wait(timeout=30)
+except kitaru.KitaruTimeoutError as exc:
+    print(exc.exec_id, exc.timeout_seconds, exc.elapsed_seconds, exc.last_status)
+    # The execution is still running remotely. Wait again when you are ready.
+    result = handle.wait()
+```
+
+The timeout stops only this call to `wait()`. It does not cancel, pause, retry,
+or otherwise change the remote execution, and the same handle remains usable.
+`KitaruTimeoutError` reports the execution ID, configured timeout, elapsed
+time, and last observed status through the four attributes shown above.
 
 ### How errors surface
 

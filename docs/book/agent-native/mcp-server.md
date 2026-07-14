@@ -134,7 +134,9 @@ Execution tools:
 - `get_execution_logs`
 - `kitaru_executions_run`
 - `kitaru_executions_cancel`
+- `kitaru_executions_abort_wait`
 - `kitaru_executions_input`
+- `kitaru_executions_resume`
 - `kitaru_executions_retry`
 - `kitaru_executions_replay`
 - `kitaru_executions_cohort`
@@ -159,10 +161,19 @@ Artifact tools:
 Secret tools:
 
 - `kitaru_secrets_create`
+- `kitaru_secrets_list`
 
-`kitaru_secrets_create` returns metadata only: secret ID, name, visibility, key
-names, and missing-value status. The MCP server intentionally does not expose a
-secret delete tool; use the CLI or Python SDK for deletion.
+`kitaru_secrets_list` accepts `page` and `size` (defaults: `1` and `20`) and
+returns only metadata for each secret: `id`, `name`, `visibility`, `keys`, and
+`has_missing_values`. It never returns secret values. Pages beyond the available
+results return `[]`.
+
+When listing secrets, `keys` and `has_missing_values` may be unpopulated because
+the backend does not include key names in list responses. These fields are
+meaningful in `kitaru_secrets_create` responses and the CLI `secrets show` path.
+
+`kitaru_secrets_create` also returns metadata only. The MCP server intentionally
+does not expose `kitaru_secrets_delete`; use the CLI or Python SDK for deletion.
 
 Project tools:
 
@@ -468,9 +479,15 @@ serverless routing, and auth context, see [Deployments](../concepts/deployments.
 
 1. Call `kitaru_executions_statistics(group_by=["status"])` to get the execution health overview
 2. Call `kitaru_executions_list(status="waiting")` if the overview shows waiting executions
-3. Ask the user to confirm an action for a pending wait
-4. Call `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`; CLI auto-detects)
-5. Re-check state via `kitaru_executions_get(exec_id)`
+3. Use the pending-wait name or ID shown by the execution, or already known by the workflow
+4. Ask the user whether to provide input or explicitly abort that wait
+5. Call `kitaru_executions_input(exec_id=..., wait=..., value=...)` or `kitaru_executions_abort_wait(exec_id=..., wait=...)` (MCP requires explicit `wait`; CLI auto-detects)
+6. Inspect the returned execution's `status` and singular `pending_wait`
+7. If `pending_wait` is absent but the execution does not continue, call `kitaru_executions_resume(exec_id=...)` (for example, because the original runner exited)
+
+Aborting a wait resolves only that selected wait; it does not cancel the whole
+execution. The input and abort-wait tools do not call resume themselves, though
+an existing runner may continue after the wait is resolved.
 
 To provision or clean up a local stack, use `manage_stack(action="create", name="local-dev")`
 or `manage_stack(action="delete", name="local-dev", force=True)`.
@@ -521,6 +538,8 @@ For diffs, use:
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.
 
-MCP currently exposes `kitaru_executions_input` but not a separate resume tool.
-If your backend requires an explicit resume step after input resolution, use the
-CLI or SDK `resume(...)` surface.
+After resolving the wait with `kitaru_executions_input` or
+`kitaru_executions_abort_wait`, inspect the returned execution. If
+`pending_wait` is absent but the execution does not continue, call
+`kitaru_executions_resume` (for example, because the original runner exited).
+The input and abort-wait tools do not call resume themselves.
