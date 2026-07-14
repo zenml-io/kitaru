@@ -32,23 +32,28 @@ updates:
       # different places produces a PR that inherits the strictest verification
       # requirement while offering the weakest reviewability, so nothing moves.
       #
-      # ORDER DOES NOT DECIDE THE WINNER. Dependabot scores every candidate
-      # group and takes the highest, it does not take the first match
-      # (updater/lib/dependabot/updater/pattern_specificity_calculator.rb):
+      # A CATCH-ALL GROUP MEANS "EVERYTHING", NOT "THE LEFTOVERS". Dependabot's
+      # specificity rules do not rescue you here, and getting this wrong
+      # duplicates packages across PRs rather than failing loudly.
       #
-      #   exact name .................... 1000
-      #   no patterns (a catch-all) ...... 500
-      #   wildcard ....................... 100 - 10*wildcards + max(len-5, 0)
-      #   universal '*' .................... 1
+      # `dependency_belongs_to_more_specific_group?` opens with
+      # `return false unless patterns&.any?`
+      # (updater/lib/dependabot/updater/pattern_specificity_calculator.rb), so a
+      # group with no `patterns` is never asked whether something else claims a
+      # dependency. It short-circuits and keeps every one it matches. The
+      # specificity score only ever strips a dependency out of a group that HAS
+      # patterns.
       #
-      # So a wildcard like `langchain*` scores 95 and LOSES to the bare
-      # `minor-and-patch` catch-all at 500, which silently drags the dependency
-      # back into the mixed PR. Exact names score 1000 and win, so both are
-      # listed: the exact name pins today's packages, the wildcard catches
-      # future family members. `exclude-patterns` on the catch-all is what makes
-      # the wildcards viable at all, since an excluded dependency scores the
-      # catch-all at 0. Removing those excludes silently un-splits the groups.
-      # See dependabot/dependabot-core#14902.
+      # So `exclude-patterns` below is not an optimization. It is the ONLY thing
+      # that removes a dependency from this catch-all. It must therefore list
+      # every pattern claimed by every group above it. Add a pattern up there
+      # and forget to exclude it down here, and that package ships in TWO PRs.
+      #
+      # Verified the hard way: an earlier revision excluded only the wildcard
+      # families and trusted exact names to win on specificity. Dependabot
+      # promptly opened #553 containing `openai`, `anthropic`, `mcp`,
+      # `google-genai`, `ruff` and `ty` -- all of which were already in their own
+      # group PRs. See dependabot/dependabot-core#14902 and #13665.
 
       # Failures surface in CI and nowhere else, so a green pipeline is the
       # complete verification. Safe to merge on green.
@@ -110,17 +115,35 @@ updates:
 
       # Everything else: cyclopts, pydantic, rich, modal, typing-extensions.
       #
-      # The excludes are load-bearing, not decorative. Without them this group
-      # scores 500 against the wildcard groups' ~95 and reabsorbs every
-      # `langchain-*` / `pytest-*` / `griffe-*` / `pydantic-ai-*` package,
-      # quietly undoing the split above.
+      # `exclude-patterns` MUST mirror every pattern from the three groups above.
+      # This group has no `patterns`, so Dependabot never asks whether another
+      # group claims a dependency (see the note at the top of `groups:`) and it
+      # will happily re-ship anything not listed here in a second PR. Keep this
+      # list in sync when you edit a group above.
       minor-and-patch:
         exclude-patterns:
+          # mirrors dev-tooling
+          - ruff
+          - ty
+          - yamlfix
+          - pip-audit
+          - python-dotenv
           - pytest*
           - griffe*
+          # mirrors adapters-and-llm-sdks
+          - openai
+          - openai-agents
+          - anthropic
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - genai-prices
+          - mcp
           - pydantic-ai*
           - langchain*
           - langgraph*
+          # mirrors zenml
+          - zenml
         update-types:
           - minor
           - patch
