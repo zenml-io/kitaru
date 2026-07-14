@@ -56,6 +56,29 @@ Execution details include:
 - artifacts
 - frozen execution spec (when available)
 
+The text form of `kitaru executions get` shows every public checkpoint call:
+
+```text
+Kitaru execution
+  Execution ID: kr-a8f3c2
+  Flow: content_pipeline
+  Status: failed
+
+Checkpoints
+  Call ID call-research-1: research (completed)
+  Call ID call-write-2: write (failed); original call ID: call-write-1 (may identify a call in the source execution; not a --at selector for this execution)
+
+Replay into a new execution
+  Command: kitaru executions replay kr-a8f3c2 --at call-write-2
+```
+
+Use the current call ID after `Call ID` with `kitaru executions replay --at`.
+This identifies one specific call when a checkpoint name appears more than once.
+An `original call ID` records replay history. It may identify the corresponding
+call in the source execution, but it is not a valid `--at` selector for the
+execution currently displayed. For scripts, use `--output json` rather than
+parsing the human-readable layout.
+
 ## List and query executions
 
 ```python
@@ -406,6 +429,15 @@ Replaying with no overrides reproduces the baseline; replaying with one thing
 changed (a different model or prompt) lets you diff the two and attribute the
 difference to your change. Retry, by contrast, resumes the **same** failed
 execution in place.
+
+For a failed execution, `kitaru executions get` prints a replay command only
+when both the execution ID and a failed checkpoint's current call ID use a
+portable format: they must start with a letter or number and contain only
+letters, numbers, `.`, `_`, or `-`. This keeps the displayed command safe to
+copy as written. If several failed calls qualify, the command uses the first one
+in the order returned by Kitaru. The command is omitted for other execution
+states, when there are no failed checkpoint calls, or when either ID does not
+use this format.
 
 ```python
 # Replay into a new execution from a checkpoint boundary.
