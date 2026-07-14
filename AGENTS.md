@@ -4,6 +4,22 @@ Kitaru is a mixed Python + docs repo. It produces the Python SDK package and
 the SDK/CLI reference docs app. The public marketing site and `kitaru.ai`
 runtime live in the sibling `zenml-io-v2` repository, not here.
 
+## Kitaru and ZenML
+
+Kitaru builds on ZenML rather than replacing its data model or backend APIs.
+Before adding Kitaru-specific state, lineage, filtering, persistence, or other
+infrastructure, check whether ZenML already provides the required behavior or
+whether a focused ZenML change would solve it for both projects. Prefer ZenML's
+authoritative models and relationships over parallel Kitaru metadata or
+compatibility machinery; otherwise the two implementations can disagree and
+working ZenML behavior can silently disappear from Kitaru.
+
+Some features deliberately remain in Kitaru—for example, cost tracking when we
+do not want to add that contract to the ZenML API. Make that choice explicitly,
+not merely because a Kitaru-only implementation is immediately convenient. If
+the boundary is unclear, check with Michael Schuster (`@schustmi`) on the ZenML
+team before designing a substantial new mechanism.
+
 ## Project Map
 
 - `src/kitaru/`: Python SDK package (`src` layout)

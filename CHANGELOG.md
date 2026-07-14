@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Cohort diff replay discovery now scans each flow once using ZenML's native replay linkage and reuses successful artifact hashes across rows, avoiding repeated flow scans and duplicate successful artifact loads; unrelated executions consume the 10,000-execution scan bound, and a warning appears only when older executions remain. (#525)
 - Missing stack integration dependencies now fail before deploy, run, or replay with a concise Kitaru explanation followed by ZenML's exact integration and whole-stack installation guidance. (#506)
 - Document the `openai`, `anthropic`, and `llm` provider extras on the installation page, and add the `kitaru[openai]` install step before the quickstart's first LLM call so a base-package user does not crash on the first `kitaru.llm()` invocation. (#522)
 

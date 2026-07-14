@@ -59,11 +59,32 @@ from ._helpers import (
     _is_interactive,
     _paginate_items,
     _print_success,
+    _print_warning,
     _resolve_output_format,
     _validate_pagination,
 )
 
 _SAFE_REPLAY_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _print_diff_warnings(payload: Mapping[str, Any]) -> None:
+    """Print each unique warning carried by a diff result."""
+    warnings: list[str] = []
+    raw_warnings = payload.get("warnings", [])
+    if isinstance(raw_warnings, list):
+        warnings.extend(item for item in raw_warnings if isinstance(item, str))
+
+    rows = payload.get("rows", [])
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            row_warnings = row.get("warnings", [])
+            if isinstance(row_warnings, list):
+                warnings.extend(item for item in row_warnings if isinstance(item, str))
+
+    for warning in dict.fromkeys(warnings):
+        _print_warning(f"Warning: {warning}")
 
 
 def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
@@ -1688,6 +1709,7 @@ def diff_(
         _emit_json_item(command, payload, output=output_format)
         return
 
+    _print_diff_warnings(payload)
     compared_count = len(payload.get("compared", []))
     _print_success(
         f"Diff for {original}",
@@ -1726,6 +1748,7 @@ def diff_matrix_(
         _emit_json_item(command, payload, output=output_format)
         return
 
+    _print_diff_warnings(payload)
     row_count = len(payload.get("rows", []))
     _print_success(
         "Diff matrix complete",

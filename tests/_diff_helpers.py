@@ -55,4 +55,5 @@ def checkpoint_diff_from_usage_records(
         original_cp=original,
         replay_cp=replay,
         client=MagicMock(),
+        artifact_hash_cache={},
     )
