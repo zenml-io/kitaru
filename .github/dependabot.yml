@@ -171,10 +171,27 @@ updates:
     reviewers: [strickvl]
     labels: [dependencies]
     groups:
+      # The fumadocs packages must move in lockstep (fumadocs-core, -mdx, -ui
+      # and -python are a coupled family), which is what this group is for.
       fumadocs:
         patterns:
           - "fumadocs-*"
+      # `exclude-patterns` is what makes the group above actually work. Without
+      # it the group only ever fires for MAJOR bumps, and every minor/patch
+      # fumadocs bump is silently stolen by this catch-all.
+      #
+      # The reason is the same specificity trap documented in the `uv` block:
+      # the contest only runs between groups eligible for that update type. A
+      # major is not eligible for `minor-and-patch`, so `fumadocs` runs
+      # unopposed and wins. A minor/patch IS eligible, and then `fumadocs-*`
+      # (a wildcard, scoring ~94) loses to this pattern-less catch-all (500) and
+      # the packages are stripped out of the group they were written for.
+      #
+      # That is why #555 is titled "minor-and-patch" while containing nothing
+      # but fumadocs packages. See dependabot/dependabot-core#14902.
       minor-and-patch:
+        exclude-patterns:
+          - "fumadocs-*"
         update-types:
           - minor
           - patch
