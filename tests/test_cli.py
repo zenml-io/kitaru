@@ -4293,6 +4293,49 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     }
 
 
+def test_executions_diff_text_prints_discovery_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text diff output should disclose potentially omitted older replays."""
+    warning = "Replay discovery reached its scan limit."
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value={"compared": [], "urls": [], "warnings": [warning]},
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-a"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert f"Warning: {warning}" in captured.err
+    assert "Compared against 0 replay execution(s)." in captured.out
+
+
+def test_executions_diff_matrix_text_deduplicates_discovery_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A shared flow-level warning should be printed once for a matrix."""
+    warning = "Replay discovery reached its scan limit."
+    rows = [
+        {"original_exec_id": exec_id, "warnings": [warning]}
+        for exec_id in ("kr-a", "kr-b")
+    ]
+    with (
+        patch("kitaru.diff.diff_cohort", return_value=object()),
+        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": rows}),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff-matrix", "kr-a", "kr-b"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err.count(f"Warning: {warning}") == 1
+    assert "Compared 2 original execution(s)." in captured.out
+
+
 def test_executions_diff_cohort_is_not_registered(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

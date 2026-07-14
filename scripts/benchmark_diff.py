@@ -466,7 +466,13 @@ class _CountingExecutions:
 
 
 @contextmanager
-def _count_backend_pages(client: KitaruClient, counters: Counters) -> Any:
+def _count_backend_pages(
+    client: KitaruClient,
+    counters: Counters,
+    *,
+    relevant_exec_ids: set[str],
+    unrelated_candidate_rows: list[int],
+) -> Any:
     zenml_client = client._client()
     original = zenml_client.list_pipeline_runs
 
@@ -474,6 +480,9 @@ def _count_backend_pages(client: KitaruClient, counters: Counters) -> Any:
         counters.backend_pages_read += 1
         result = original(*args, **kwargs)
         counters.candidate_rows_read += len(result.items)
+        unrelated_candidate_rows[0] += sum(
+            str(item.id) not in relevant_exec_ids for item in result.items
+        )
         return result
 
     with patch.object(zenml_client, "list_pipeline_runs", side_effect=counted):
@@ -491,10 +500,22 @@ def _measure_local(
     counters = Counters()
     client = KitaruClient()
     counting_client = _CountingClient(client, counters)
+    unrelated_candidate_rows = [0]
+    relevant_exec_ids = set(original_ids)
+    relevant_exec_ids.update(
+        replay_exec_id
+        for original_replay_ids in replay_ids.values()
+        for replay_exec_id in original_replay_ids
+    )
 
     def operation() -> Any:
         with (
-            _count_backend_pages(client, counters),
+            _count_backend_pages(
+                client,
+                counters,
+                relevant_exec_ids=relevant_exec_ids,
+                unrelated_candidate_rows=unrelated_candidate_rows,
+            ),
             patch("kitaru.diff.KitaruClient", return_value=counting_client),
         ):
             if explicit_ids:
@@ -507,7 +528,7 @@ def _measure_local(
         if explicit_ids
         else sum(len(ids) for ids in replay_ids.values())
     )
-    return _measure(
+    measurement = _measure(
         scenario=scenario,
         mode="local",
         originals=len(original_ids),
@@ -518,6 +539,8 @@ def _measure_local(
         counters=counters,
         operation=operation,
     )
+    measurement.unrelated = unrelated_candidate_rows[0]
+    return measurement
 
 
 def local_benchmarks(*, scale: str) -> list[Measurement]:
