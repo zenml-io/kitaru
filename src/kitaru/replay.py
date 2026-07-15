@@ -322,18 +322,32 @@ def replay_output_overrides_metadata(
         ("checkpoint", document.checkpoint_overrides),
         ("invocation", document.invocation_overrides),
     )
+    configured_overrides: list[tuple[_ReplaySelectorKind, str, tuple[str, ...]]] = []
+    effective_owner: dict[str, tuple[_ReplaySelectorKind, str]] = {}
     for selector_kind, overrides in override_groups:
         for selector, override in overrides.items():
             if "output" not in override:
                 continue
-            entry = AppliedOutputOverride(
-                selector_kind=selector_kind,
-                selector=selector,
-                matched_invocation_ids=document.matched_invocation_ids(
-                    selector_kind, selector
-                ),
+            matched_invocation_ids = document.matched_invocation_ids(
+                selector_kind, selector
             )
-            entries.append(entry.to_json())
+            configured_overrides.append(
+                (selector_kind, selector, matched_invocation_ids)
+            )
+            for invocation_id in matched_invocation_ids:
+                effective_owner[invocation_id] = (selector_kind, selector)
+
+    for selector_kind, selector, matched_invocation_ids in configured_overrides:
+        entry = AppliedOutputOverride(
+            selector_kind=selector_kind,
+            selector=selector,
+            matched_invocation_ids=tuple(
+                invocation_id
+                for invocation_id in matched_invocation_ids
+                if effective_owner[invocation_id] == (selector_kind, selector)
+            ),
+        )
+        entries.append(entry.to_json())
     return {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: entries}
 
 

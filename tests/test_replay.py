@@ -1241,7 +1241,7 @@ def test_code_override_rejects_non_tool_checkpoint() -> None:
         )
 
 
-def test_replay_output_override_metadata_is_value_free_and_fans_out() -> None:
+def test_replay_output_override_metadata_is_value_free_and_effective() -> None:
     replacement_value = "secret replacement value"
     document = ReplayPlanDocument(
         checkpoint_overrides={
@@ -1265,7 +1265,7 @@ def test_replay_output_override_metadata_is_value_free_and_fans_out() -> None:
             {
                 "selector_kind": "checkpoint",
                 "selector": "lookup",
-                "matched_invocation_ids": ["lookup_1", "lookup_2"],
+                "matched_invocation_ids": ["lookup_1"],
                 "field": "output",
             },
             {
