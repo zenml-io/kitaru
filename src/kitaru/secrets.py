@@ -46,14 +46,26 @@ class Secret(BaseModel):
 class SecretSummary(BaseModel):
     """Metadata-only view of a stored secret.
 
-    This model is safe to return from write/delete operations because it lists
-    key names but never includes raw secret values.
+    This model never includes raw secret values. ``keys`` is authoritative only
+    when ``keys_known`` is true, including when it is an empty list. When
+    ``keys_known`` is false, the backend did not provide key metadata, so
+    ``keys=[]`` and ``has_missing_values=False`` do not describe the stored
+    values.
+
+    Attributes:
+        name: Secret name.
+        id: Backend secret ID, normalized to a string.
+        private: Whether the backend marks the secret as private.
+        keys: Sorted secret key names when ``keys_known`` is true.
+        keys_known: Whether ``keys`` and ``has_missing_values`` are authoritative.
+        has_missing_values: Whether any known key lacks a readable value.
     """
 
     name: str
     id: str
     private: bool
     keys: list[str]
+    keys_known: bool = True
     has_missing_values: bool = False
 
     model_config = ConfigDict(frozen=True)
@@ -200,7 +212,9 @@ def _secret_from_response(secret_response: Any) -> Secret:
     )
 
 
-def _secret_summary_from_response(secret_response: Any) -> SecretSummary:
+def _secret_summary_from_response(
+    secret_response: Any, *, keys_known: bool
+) -> SecretSummary:
     """Convert a backend secret response into safe metadata."""
     name, secret_id = _extract_backend_name_and_id(secret_response)
 
@@ -208,8 +222,13 @@ def _secret_summary_from_response(secret_response: Any) -> SecretSummary:
         name=name,
         id=secret_id,
         private=bool(getattr(secret_response, "private", False)),
-        keys=_secret_keys_from_response(secret_response),
-        has_missing_values=bool(getattr(secret_response, "has_missing_values", False)),
+        keys=_secret_keys_from_response(secret_response) if keys_known else [],
+        keys_known=keys_known,
+        has_missing_values=(
+            bool(getattr(secret_response, "has_missing_values", False))
+            if keys_known
+            else False
+        ),
     )
 
 
@@ -237,18 +256,23 @@ def list_secrets() -> list[SecretSummary]:
     """
     try:
         client = _ZenMLClient()
-        first_page = client.list_secrets(page=1, size=_SECRETS_BACKEND_SCAN_SIZE)
+        first_page = client.list_secrets(
+            page=1,
+            size=_SECRETS_BACKEND_SCAN_SIZE,
+            hydrate=False,
+        )
         summaries = [
-            _secret_summary_from_response(secret_response)
+            _secret_summary_from_response(secret_response, keys_known=False)
             for secret_response in first_page.items
         ]
 
         for page_number in range(2, first_page.total_pages + 1):
             summaries.extend(
-                _secret_summary_from_response(secret_response)
+                _secret_summary_from_response(secret_response, keys_known=False)
                 for secret_response in client.list_secrets(
                     page=page_number,
                     size=_SECRETS_BACKEND_SCAN_SIZE,
+                    hydrate=False,
                 ).items
             )
 
@@ -306,7 +330,7 @@ def create_secret(
             f"Failed to create secret `{normalized_name}`: {exc}"
         ) from exc
 
-    summary = _secret_summary_from_response(secret_response)
+    summary = _secret_summary_from_response(secret_response, keys_known=True)
     track(
         AnalyticsEvent.SECRET_UPSERTED,
         {"operation": "created", "key_count": len(normalized_values)},
@@ -325,7 +349,7 @@ def delete_secret(name_or_id: str) -> SecretSummary:
         ) from exc
 
     secret_response = _get_secret_response_exact(normalized_name_or_id, client=client)
-    summary = _secret_summary_from_response(secret_response)
+    summary = _secret_summary_from_response(secret_response, keys_known=True)
 
     try:
         client.delete_secret(name_id_or_prefix=summary.id)

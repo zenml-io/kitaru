@@ -3,6 +3,7 @@
 from zenml.client import Client as ZenMLClient
 
 from kitaru import KitaruClient, checkpoint, flow
+from kitaru._llm_usage import build_usage_record, log_usage_record_best_effort
 
 
 def test_real_zenml_retry_maps_to_one_checkpoint_call(
@@ -13,6 +14,14 @@ def test_real_zenml_retry_maps_to_one_checkpoint_call(
     @checkpoint(retries=1, runtime="inline", cache=False)
     def research() -> str:
         calls["count"] += 1
+        log_usage_record_best_effort(
+            build_usage_record(
+                adapter="kitaru.llm",
+                surface="direct_llm",
+                record_id="research-call",
+                total_tokens=calls["count"],
+            )
+        )
         if calls["count"] == 1:
             raise RuntimeError("fail once")
         return "ok"
@@ -87,4 +96,15 @@ def test_real_zenml_retry_maps_to_one_checkpoint_call(
         "failed",
         "completed",
     ]
+    assert [
+        attempt.llm_usage_records[0]["checkpoint_id"]
+        for attempt in checkpoint_call.attempts
+    ] == [str(step.id) for step in raw_attempts]
+    assert [
+        attempt.llm_usage_records[0]["checkpoint_name"]
+        for attempt in checkpoint_call.attempts
+    ] == [checkpoint_call.name, checkpoint_call.name]
+    assert [
+        record["checkpoint_id"] for record in checkpoint_call.llm_usage_records
+    ] == [str(step.id) for step in raw_attempts]
     assert checkpoint_call.failure is None
