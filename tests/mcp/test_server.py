@@ -1330,6 +1330,14 @@ def test_executions_diff_matrix_returns_renamed_payload() -> None:
     assert "cohort" not in payload
 
 
+def test_executions_diff_matrix_preserves_blank_selector_error() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="Execution ID at position 2 must not be blank",
+    ):
+        kitaru_executions_diff_matrix(["kr-original", "   "])
+
+
 def test_executions_diff_serializes_checkpoint_usage_deltas() -> None:
     result = object()
     serialized = {

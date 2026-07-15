@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
+- Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
 
 ## [0.21.0] - 2026-07-14
 
