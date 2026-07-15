@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Imported Langfuse input and output artifacts now include JSON visualizations, so their stored payloads can be inspected in the dashboard.
 - Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.
 - Live LLM integration runs now retain tested SHA, workflow run ID, and run-attempt provenance for release evidence.
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)

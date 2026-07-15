@@ -658,7 +658,7 @@ def _save_observation_artifact(
         name=f"{step_name}::{role}",
         artifact_type=ArtifactType.DATA,
         tags=[_IMPORT_TAG],
-        include_visualizations=False,
+        include_visualizations=True,
         user_metadata={
             "kitaru_artifact_type": role,
             _SOURCE_TRACE_KEY: trace.source.trace_id,

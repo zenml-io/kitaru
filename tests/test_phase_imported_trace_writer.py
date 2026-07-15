@@ -70,9 +70,12 @@ def test_persists_trace_as_visible_execution_without_running_source_code(
         "input",
         "output",
     }
-    assert next(
+    generation_input = next(
         artifact for artifact in generation.artifacts if artifact.direction == "input"
-    ).load() == [{"role": "user", "content": "synthetic"}]
+    )
+    assert generation_input.load() == [{"role": "user", "content": "synthetic"}]
+    artifact_version = Client().get_artifact_version(generation_input.artifact_id)
+    assert artifact_version.visualizations
     assert tool.status.value == "failed"
     assert tool.failure is not None
     assert tool.failure.message == "Synthetic error"
