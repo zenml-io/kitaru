@@ -17,6 +17,7 @@ from kitaru._ui_urls import (
 )
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruUsageError
+from kitaru.replay import AppliedOutputOverride, parse_replay_output_overrides_metadata
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
 _AUTO_DISCOVERY_SCAN_LIMIT = 10_000
@@ -52,6 +53,9 @@ class ExecutionDiff:
     compared: list[tuple[str, list[CheckpointDiff]]] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    applied_output_overrides: dict[str, list[AppliedOutputOverride] | None] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -401,6 +405,14 @@ def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
     }
 
 
+def _serialize_applied_output_overrides(
+    overrides: list[AppliedOutputOverride] | None,
+) -> list[dict[str, Any]] | None:
+    if overrides is None:
+        return None
+    return [override.to_json() for override in overrides]
+
+
 def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
     return {
         "original_exec_id": item.original_exec_id,
@@ -411,6 +423,9 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
                     serialize_checkpoint_diff(checkpoint)
                     for checkpoint in checkpoint_diffs
                 ],
+                "applied_output_overrides": _serialize_applied_output_overrides(
+                    item.applied_output_overrides.get(replay_exec_id)
+                ),
             }
             for replay_exec_id, checkpoint_diffs in item.compared
         ],
@@ -474,7 +489,17 @@ def _compare_loaded_executions(
     ui_context: UiUrlContext | None,
 ) -> ExecutionDiff:
     compared: list[tuple[str, list[CheckpointDiff]]] = []
+    applied_output_overrides: dict[str, list[AppliedOutputOverride] | None] = {}
     for replay_execution in replay_executions:
+        replay_exec_id = replay_execution.exec_id
+        replay_metadata = (
+            replay_execution.metadata
+            if isinstance(replay_execution.metadata, Mapping)
+            else {}
+        )
+        applied_output_overrides[replay_exec_id] = (
+            parse_replay_output_overrides_metadata(replay_metadata)
+        )
         pairs = _align_checkpoints(original_execution, replay_execution)
         checkpoint_diffs = [
             _compare_checkpoints(
@@ -507,6 +532,7 @@ def _compare_loaded_executions(
         compared=compared,
         urls=compare_urls,
         warnings=list(warnings),
+        applied_output_overrides=applied_output_overrides,
     )
 
 

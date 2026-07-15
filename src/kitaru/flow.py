@@ -2241,6 +2241,7 @@ class _FlowDefinition:
                 submission_id=replay_submission_id or new_replay_submission_id(),
                 tag=replay_tag,
                 steps_to_skip=replay_plan.steps_to_skip,
+                replay_plan=replay_plan.document,
             )
 
         _emit_kitaru_execution_url(replayed_run)
