@@ -43,6 +43,10 @@ collision-resistant flow name from that label and reports it in every preview
 and write result. The label does not need to correspond to executable Python
 code.
 
+Every preview and write also reports the current Kitaru project, selected stack
+name and ID, storage type, and whether that storage is local or remotely
+accessible.
+
 {% hint style="danger" %}
 An actual import persists full input and output payloads in your configured
 Kitaru storage. These values can contain prompts, customer data, tool
@@ -64,6 +68,30 @@ kitaru import langfuse langfuse-observations.jsonl \
 The preview reads and normalizes the export, checks each selected trace against
 the current Kitaru project, and reports what a write would do. It does not
 create executions or store payloads.
+
+### Choose the storage stack before importing
+
+Use `--stack` to select the stack that stores observation payloads and is
+recorded on each synthetic execution:
+
+```bash
+kitaru import langfuse langfuse-observations.jsonl \
+  --source-project-id <langfuse-project-id> \
+  --agent-name support-agent \
+  --stack production-cloud
+```
+
+The selector accepts an exact stack name or ID. If you omit it, Kitaru uses the
+active stack and prints a warning so that the choice is visible before you add
+`--write`. Selecting a stack for an import does not change your active stack.
+
+{% hint style="warning" %}
+When Kitaru is connected to a shared server but the selected stack uses local
+storage, execution metadata is sent to the server while payloads remain on the
+machine running the import. The shared UI may show the execution but be unable
+to load its inputs and outputs. Use remotely accessible storage when imported
+payloads need to be available in a shared UI.
+{% endhint %}
 
 Use JSON output for automation:
 
@@ -137,6 +165,7 @@ preview = client.imports.langfuse(
     export,
     source_project_id="<langfuse-project-id>",
     agent_name="support-agent",
+    stack="production-cloud",
     trace_ids=["trace-a", "trace-b"],
 )
 print(preview.counts)
@@ -146,6 +175,7 @@ result = client.imports.langfuse(
     export,
     source_project_id="<langfuse-project-id>",
     agent_name="support-agent",
+    stack="production-cloud",
     trace_ids=["trace-a", "trace-b"],
     dry_run=False,
     confirm_data_storage=True,
@@ -184,7 +214,7 @@ time, then retry the import.
 | `created` | A new synthetic execution was stored. |
 | `resumed` | An interrupted import was completed. |
 | `unchanged` | The same source identity and content already has a finished import. Nothing was rewritten. |
-| `conflict` | The source identity already exists with different content or a different agent name. The outcome includes the existing execution ID and a specific next action. |
+| `conflict` | The source identity already exists with different content, a different agent name, or a different stack. The outcome includes the existing execution ID and a specific next action. |
 | `rejected` | The trace or request violates an import safety rule. |
 | `failed` | A backend operation failed for that trace. |
 
@@ -198,6 +228,12 @@ the SDK or JSON result. If only the agent name differs, retry with the original
 agent name to reuse the import. Changing the grouping label or replacing source
 content requires deleting the existing execution first; Kitaru does not
 silently relabel or overwrite imported history.
+
+The selected stack is also immutable for an existing import. Re-running the
+same source identity with another stack reports a conflict because changing a
+stack does not move existing payload bytes. Remove the existing synthetic
+execution and its artifacts before importing that source identity into another
+stack.
 
 The CLI exits non-zero if any selected trace is `conflict`, `rejected`, or
 `failed`, after printing all per-trace outcomes. This lets an automation keep

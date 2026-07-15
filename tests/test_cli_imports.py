@@ -29,6 +29,14 @@ def _result(
         dry_run=dry_run,
         source_project_id="source-project",
         agent_name="support-agent",
+        project_name="default",
+        project_id="project-id",
+        stack_name="cloud-stack",
+        stack_id="stack-id",
+        stack_was_explicit=True,
+        artifact_store_type="s3",
+        artifact_store_is_local=False,
+        artifact_store_is_remotely_accessible=True,
         total_trace_count=3,
         selected_trace_count=1,
         outcomes=(
@@ -65,6 +73,8 @@ def test_langfuse_import_defaults_to_read_only_preview(
                 "source-project",
                 "--agent-name",
                 "support-agent",
+                "--stack",
+                "cloud-stack",
                 "--trace-id",
                 "trace-two",
                 "--trace-id",
@@ -82,6 +92,7 @@ def test_langfuse_import_defaults_to_read_only_preview(
         Path("export.jsonl"),
         source_project_id="source-project",
         agent_name="support-agent",
+        stack="cloud-stack",
         trace_ids=["trace-two", "trace-one"],
         limit=1,
         dry_run=True,
@@ -151,7 +162,9 @@ def test_langfuse_import_confirmation_requires_write(
     assert "requires `--write`" in capsys.readouterr().err
 
 
-def test_langfuse_import_write_forwards_explicit_consent() -> None:
+def test_langfuse_import_write_forwards_explicit_consent(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     fake_client = Mock()
     fake_client.imports.langfuse.return_value = _result(
         dry_run=False,
@@ -181,6 +194,7 @@ def test_langfuse_import_write_forwards_explicit_consent() -> None:
         Path("export.jsonl"),
         source_project_id="source-project",
         agent_name="support-agent",
+        stack=None,
         trace_ids=None,
         limit=None,
         dry_run=False,
@@ -188,6 +202,7 @@ def test_langfuse_import_write_forwards_explicit_consent() -> None:
         allow_fragmented=False,
         max_workers=1,
     )
+    assert "No --stack was specified" in capsys.readouterr().err
 
 
 def test_langfuse_import_json_emits_one_structured_result(
@@ -222,6 +237,17 @@ def test_langfuse_import_json_emits_one_structured_result(
         "imported_support-agent__langfuse_v4_"
     )
     assert payload["item"]["counts"] == {"would_create": 1}
+    assert payload["item"]["project"] == {"id": "project-id", "name": "default"}
+    assert payload["item"]["stack"] == {
+        "id": "stack-id",
+        "name": "cloud-stack",
+        "explicitly_selected": True,
+    }
+    assert payload["item"]["artifact_store"] == {
+        "type": "s3",
+        "is_local": False,
+        "is_remotely_accessible": True,
+    }
     assert payload["item"]["outcomes"] == [
         {
             "trace_id": "trace-one",

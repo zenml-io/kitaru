@@ -63,6 +63,7 @@ _SOURCE_PROVIDER_KEY = "kitaru_import_source_provider_v1"
 _SOURCE_PROJECT_KEY = "kitaru_import_source_project_id_v1"
 _SOURCE_TRACE_KEY = "kitaru_import_source_trace_id_v1"
 _AGENT_NAME_KEY = "kitaru_import_agent_name_v1"
+_STACK_ID_KEY = "kitaru_import_stack_id_v1"
 _IMPORT_STATUS_KEY = "kitaru_import_status_v1"
 
 
@@ -108,10 +109,12 @@ def plan_imported_trace(
     *,
     agent_name: str,
     client: Client | None = None,
+    stack_id: UUID | None = None,
 ) -> ImportedTracePlan:
     """Determine what persistence would do without modifying backend state."""
     normalized_agent_name = _validate_import(trace, agent_name=agent_name)
     zenml_client = client or Client()
+    selected_stack_id = stack_id or zenml_client.active_stack_model.id
     identity_digest = _source_identity_digest(trace)
     existing_run = _find_run(
         client=zenml_client,
@@ -124,6 +127,7 @@ def plan_imported_trace(
         existing_run,
         trace=trace,
         agent_name=normalized_agent_name,
+        stack_id=selected_stack_id,
     )
     if existing_run.status.is_finished:
         return ImportedTracePlan.UNCHANGED
@@ -140,20 +144,35 @@ def persist_imported_trace(
     *,
     agent_name: str,
     client: Client | None = None,
+    stack_id: UUID | None = None,
+    artifact_store: Any | None = None,
 ) -> ImportedExecutionResult:
     """Persist one normalized trace as a synthetic ZenML pipeline run.
 
-    No user flow, model, tool, or provider code is executed. The active ZenML
-    stack is used only to persist artifacts and associate the synthetic run
-    with a stack for normal UI rendering.
+    No user flow, model, tool, or provider code is executed. The selected ZenML
+    stack's artifact store is used to persist artifacts, and
+    the synthetic execution snapshot is associated with the same stack.
     """
     normalized_agent_name = _validate_import(trace, agent_name=agent_name)
 
     zenml_client = client or Client()
+    if (stack_id is None) != (artifact_store is None):
+        raise ImportedTracePersistenceError(
+            "stack_id and artifact_store must be provided together so imported "
+            "payloads and the execution snapshot cannot target different stacks."
+        )
+    selected_stack_id = stack_id or zenml_client.active_stack_model.id
+    selected_artifact_store = artifact_store
+    if selected_artifact_store is None:
+        selected_artifact_store = zenml_client.active_stack.artifact_store
     project_id = zenml_client.active_project.id
     identity_digest = _source_identity_digest(trace)
     run_name = _run_name(trace, identity_digest=identity_digest)
-    import_environment = _import_environment(trace, agent_name=normalized_agent_name)
+    import_environment = _import_environment(
+        trace,
+        agent_name=normalized_agent_name,
+        stack_id=selected_stack_id,
+    )
     existing_run = _find_run(
         client=zenml_client,
         project_id=project_id,
@@ -164,6 +183,7 @@ def persist_imported_trace(
             existing_run,
             trace=trace,
             agent_name=normalized_agent_name,
+            stack_id=selected_stack_id,
         )
         if existing_run.status.is_finished:
             if existing_run.run_metadata.get(_IMPORT_STATUS_KEY) != "complete":
@@ -172,6 +192,7 @@ def persist_imported_trace(
                     run_id=existing_run.id,
                     trace=trace,
                     agent_name=normalized_agent_name,
+                    stack_id=selected_stack_id,
                     status="complete",
                 )
             return ImportedExecutionResult(
@@ -226,6 +247,7 @@ def persist_imported_trace(
             pipeline_name=pipeline.name,
             trace=trace,
             step_config_by_observation=step_config_by_observation,
+            stack_id=selected_stack_id,
         )
         run_request = PipelineRunRequest(
             project=project_id,
@@ -244,6 +266,7 @@ def persist_imported_trace(
                 run,
                 trace=trace,
                 agent_name=normalized_agent_name,
+                stack_id=selected_stack_id,
             )
     else:
         run = existing_run
@@ -254,6 +277,7 @@ def persist_imported_trace(
         run_id=run.id,
         trace=trace,
         agent_name=normalized_agent_name,
+        stack_id=selected_stack_id,
         status="importing",
     )
     existing_steps = _steps_by_name(zenml_client, run_id=run.id)
@@ -282,6 +306,7 @@ def persist_imported_trace(
             observation=observation,
             step_name=step_name,
             role="input",
+            artifact_store=selected_artifact_store,
         )
         output_artifact = _save_observation_artifact(
             observation.output,
@@ -289,6 +314,7 @@ def persist_imported_trace(
             observation=observation,
             step_name=step_name,
             role="output",
+            artifact_store=selected_artifact_store,
         )
         parent_ids = []
         if observation.parent_id in step_ids_by_observation:
@@ -370,6 +396,7 @@ def persist_imported_trace(
         run_id=run.id,
         trace=trace,
         agent_name=normalized_agent_name,
+        stack_id=selected_stack_id,
         status="complete",
     )
     return ImportedExecutionResult(
@@ -434,8 +461,8 @@ def _get_or_create_snapshot(
     pipeline_name: str,
     trace: ImportedTrace,
     step_config_by_observation: dict[str, Step],
+    stack_id: UUID,
 ) -> PipelineSnapshotResponse:
-    stack_id = client.active_stack_model.id
     snapshot_identity = hashlib.sha256(
         "\0".join(
             (
@@ -498,10 +525,14 @@ def _find_run(
 
 
 def _validate_existing_run(
-    run: PipelineRunResponse, *, trace: ImportedTrace, agent_name: str
+    run: PipelineRunResponse,
+    *,
+    trace: ImportedTrace,
+    agent_name: str,
+    stack_id: UUID,
 ) -> None:
     environment = run.orchestrator_environment
-    expected = _import_environment(trace, agent_name=agent_name)
+    expected = _import_environment(trace, agent_name=agent_name, stack_id=stack_id)
     identity_keys = (
         _SOURCE_PROVIDER_KEY,
         _SOURCE_PROJECT_KEY,
@@ -514,6 +545,19 @@ def _validate_existing_run(
             resolution=(
                 "Verify the source project ID and trace ID. If this is a "
                 "different source trace, import it with its actual source identity."
+            ),
+        )
+    existing_stack_id = _existing_run_stack_id(run)
+    if existing_stack_id != str(stack_id):
+        raise ImportedTraceConflictError(
+            f"Trace {trace.source.trace_id!r} was already imported using stack "
+            f"{existing_stack_id!r}, not {str(stack_id)!r}.",
+            existing_execution_id=str(run.id),
+            resolution=(
+                "Kitaru cannot move existing artifact bytes by re-importing. "
+                f"Keep execution {str(run.id)!r}, or remove that synthetic "
+                "execution and its artifacts before importing the trace into the "
+                "new stack."
             ),
         )
     if environment.get(_SOURCE_DIGEST_KEY) != trace.content_digest:
@@ -607,6 +651,7 @@ def _save_observation_artifact(
     observation: ImportedObservation,
     step_name: str,
     role: str,
+    artifact_store: Any,
 ) -> ArtifactVersionResponse:
     return save_artifact(
         data=value,
@@ -621,6 +666,7 @@ def _save_observation_artifact(
         },
         save_type=ArtifactSaveType.MANUAL,
         has_custom_name=False,
+        artifact_store=artifact_store,
     )
 
 
@@ -744,11 +790,12 @@ def _write_run_metadata(
     run_id: UUID,
     trace: ImportedTrace,
     agent_name: str,
+    stack_id: UUID,
     status: str,
 ) -> None:
     client.create_run_metadata(
         metadata={
-            **_import_environment(trace, agent_name=agent_name),
+            **_import_environment(trace, agent_name=agent_name, stack_id=stack_id),
             _IMPORT_STATUS_KEY: status,
             "kitaru_import_integrity_v1": trace.integrity.value,
             "kitaru_import_missing_parent_ids_v1": trace.missing_parent_ids,
@@ -773,7 +820,9 @@ def _write_step_metadata(
     )
 
 
-def _import_environment(trace: ImportedTrace, *, agent_name: str) -> dict[str, Any]:
+def _import_environment(
+    trace: ImportedTrace, *, agent_name: str, stack_id: UUID
+) -> dict[str, Any]:
     return {
         "kitaru_synthetic_import": True,
         "kitaru_import_schema_version": _IMPORT_SCHEMA_VERSION,
@@ -782,7 +831,17 @@ def _import_environment(trace: ImportedTrace, *, agent_name: str) -> dict[str, A
         _SOURCE_TRACE_KEY: trace.source.trace_id,
         _SOURCE_DIGEST_KEY: trace.content_digest,
         _AGENT_NAME_KEY: agent_name,
+        _STACK_ID_KEY: str(stack_id),
     }
+
+
+def _existing_run_stack_id(run: PipelineRunResponse) -> str | None:
+    environment_stack_id = run.orchestrator_environment.get(_STACK_ID_KEY)
+    if environment_stack_id is not None:
+        return str(environment_stack_id)
+    snapshot = run.snapshot
+    stack = getattr(snapshot, "stack", None)
+    return str(getattr(stack, "id", stack)) if stack is not None else None
 
 
 def _source_identity_digest(trace: ImportedTrace) -> str:

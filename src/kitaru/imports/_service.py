@@ -6,8 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from zenml.client import Client
+from zenml.enums import StackComponentType
+from zenml.stack import StackComponent
 
 from kitaru.errors import KitaruUsageError
 from kitaru.imports._langfuse import read_langfuse_jsonl
@@ -27,7 +30,7 @@ from kitaru.imports._writer import (
 
 STORAGE_WARNING = (
     "Writing imported traces stores their full input and output payloads in the "
-    "active Kitaru storage backend. Confirm retention and access controls "
+    "selected stack's artifact store. Confirm retention and access controls "
     "before proceeding."
 )
 
@@ -66,6 +69,14 @@ class LangfuseImportResult:
     dry_run: bool
     source_project_id: str
     agent_name: str
+    project_name: str
+    project_id: str
+    stack_name: str
+    stack_id: str
+    stack_was_explicit: bool
+    artifact_store_type: str
+    artifact_store_is_local: bool
+    artifact_store_is_remotely_accessible: bool
     total_trace_count: int
     selected_trace_count: int
     outcomes: tuple[TraceImportOutcome, ...]
@@ -94,6 +105,7 @@ def import_langfuse_jsonl(
     confirm_data_storage: bool = False,
     allow_fragmented: bool = False,
     max_workers: int = 1,
+    stack: str | None = None,
     client: Client | None = None,
 ) -> LangfuseImportResult:
     """Plan or persist selected Langfuse traces as synthetic executions."""
@@ -124,6 +136,7 @@ def import_langfuse_jsonl(
         limit=limit,
     )
     zenml_client = client or Client()
+    target = _resolve_import_target(zenml_client, stack=stack)
 
     def process(trace: ImportedTrace) -> TraceImportOutcome:
         if trace.integrity is TraceIntegrity.INVALID:
@@ -144,6 +157,7 @@ def import_langfuse_jsonl(
                     trace,
                     agent_name=normalized_agent_name,
                     client=zenml_client,
+                    stack_id=target.stack_id,
                 )
                 status = {
                     ImportedTracePlan.CREATE.value: ImportOutcomeStatus.WOULD_CREATE,
@@ -156,6 +170,8 @@ def import_langfuse_jsonl(
                 trace,
                 agent_name=normalized_agent_name,
                 client=zenml_client,
+                stack_id=target.stack_id,
+                artifact_store=target.artifact_store,
             )
             status = ImportOutcomeStatus.UNCHANGED
             if persisted.created:
@@ -190,10 +206,99 @@ def import_langfuse_jsonl(
         dry_run=dry_run,
         source_project_id=normalized_project_id,
         agent_name=normalized_agent_name,
+        project_name=target.project_name,
+        project_id=str(target.project_id),
+        stack_name=target.stack_name,
+        stack_id=str(target.stack_id),
+        stack_was_explicit=target.stack_was_explicit,
+        artifact_store_type=target.artifact_store_type,
+        artifact_store_is_local=target.artifact_store_is_local,
+        artifact_store_is_remotely_accessible=(not target.artifact_store_is_local),
         total_trace_count=total_trace_count,
         selected_trace_count=len(selected),
         outcomes=outcomes,
+        storage_warning=_storage_warning(target),
     )
+
+
+@dataclass(frozen=True)
+class _ImportTarget:
+    project_name: str
+    project_id: Any
+    stack_name: str
+    stack_id: Any
+    stack_was_explicit: bool
+    artifact_store_type: str
+    artifact_store_is_local: bool
+    remote_metadata_store: bool
+    artifact_store: Any
+
+
+def _resolve_import_target(client: Client, *, stack: str | None) -> _ImportTarget:
+    project = client.active_project
+    normalized_stack = stack.strip() if stack is not None else None
+    if stack is not None and not normalized_stack:
+        raise KitaruUsageError("stack must be a non-empty name or ID.")
+    if normalized_stack is None:
+        stack_model = client.active_stack_model
+    else:
+        try:
+            stack_model = client.get_stack(
+                normalized_stack,
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruUsageError(
+                f"Could not resolve stack {normalized_stack!r}: {exc}"
+            ) from exc
+
+    components = stack_model.components.get(StackComponentType.ARTIFACT_STORE, [])
+    if len(components) != 1:
+        raise KitaruUsageError(
+            f"Stack {stack_model.name!r} must contain exactly one artifact store."
+        )
+    artifact_store_component = components[0]
+    artifact_store = _load_artifact_store(artifact_store_component)
+    is_local = bool(artifact_store.config.is_local)
+    return _ImportTarget(
+        project_name=str(project.name),
+        project_id=project.id,
+        stack_name=str(stack_model.name),
+        stack_id=stack_model.id,
+        stack_was_explicit=normalized_stack is not None,
+        artifact_store_type=str(artifact_store_component.flavor_name),
+        artifact_store_is_local=is_local,
+        remote_metadata_store=not client.zen_store.is_local_store(),
+        artifact_store=artifact_store,
+    )
+
+
+def _load_artifact_store(component: Any) -> Any:
+    try:
+        return StackComponent.from_model(component)
+    except Exception as exc:
+        raise KitaruUsageError(
+            f"Could not load artifact store {component.name!r} "
+            f"({component.flavor_name}): {exc}"
+        ) from exc
+
+
+def _storage_warning(target: _ImportTarget) -> str:
+    warnings = [STORAGE_WARNING]
+    if not target.stack_was_explicit:
+        warnings.append(
+            f"No stack was specified, so Kitaru will use the active stack "
+            f"{target.stack_name!r} ({target.stack_id}). Pass --stack on the CLI "
+            "or stack= in the SDK to select one explicitly before importing."
+        )
+    if target.remote_metadata_store and target.artifact_store_is_local:
+        warnings.append(
+            "The execution metadata will be stored on the remote server, but the "
+            "artifact payloads will remain on this machine because the selected "
+            "artifact store is local. The shared UI may be unable to load them."
+        )
+    return " ".join(warnings)
 
 
 def _outcome(

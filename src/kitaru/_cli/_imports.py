@@ -22,6 +22,7 @@ from ._helpers import (
     _emit_json_item,
     _emit_snapshot,
     _emit_table,
+    _emit_warning,
     _exit_with_error,
     _resolve_output_format,
 )
@@ -51,6 +52,17 @@ def _serialize_result(result: LangfuseImportResult) -> dict[str, Any]:
         "dry_run": result.dry_run,
         "source_project_id": result.source_project_id,
         "agent_name": result.agent_name,
+        "project": {"name": result.project_name, "id": result.project_id},
+        "stack": {
+            "name": result.stack_name,
+            "id": result.stack_id,
+            "explicitly_selected": result.stack_was_explicit,
+        },
+        "artifact_store": {
+            "type": result.artifact_store_type,
+            "is_local": result.artifact_store_is_local,
+            "is_remotely_accessible": (result.artifact_store_is_remotely_accessible),
+        },
         "flow_name": result.flow_name,
         "total_trace_count": result.total_trace_count,
         "selected_trace_count": result.selected_trace_count,
@@ -72,6 +84,16 @@ def _render_result(result: LangfuseImportResult) -> None:
             ("Mode", mode),
             ("Source project", result.source_project_id),
             ("Agent", result.agent_name),
+            ("Project", f"{result.project_name} ({result.project_id})"),
+            ("Stack", f"{result.stack_name} ({result.stack_id})"),
+            ("Stack selection", "explicit" if result.stack_was_explicit else "active"),
+            ("Storage type", result.artifact_store_type),
+            (
+                "Storage access",
+                "local only"
+                if result.artifact_store_is_local
+                else "remotely accessible",
+            ),
             ("Flow", result.flow_name),
             ("Available traces", str(result.total_trace_count)),
             ("Selected traces", str(result.selected_trace_count)),
@@ -125,6 +147,13 @@ def langfuse(
             "name is reported in the result."
         ),
     ],
+    stack: Annotated[
+        str | None,
+        Parameter(
+            help="Kitaru stack name or ID used for payload storage and the "
+            "synthetic execution snapshot. Defaults to the active stack."
+        ),
+    ] = None,
     trace_id: Annotated[
         list[str] | None,
         Parameter(
@@ -171,6 +200,15 @@ def langfuse(
             "`--confirm-data-storage` requires `--write`.",
             output=output_format,
         )
+    if write and stack is None:
+        _emit_warning(
+            "No --stack was specified. This import will use the active stack.",
+            output=output_format,
+            detail=(
+                "Run a preview first to inspect the active stack and storage "
+                "accessibility, or pass --stack <name-or-id>."
+            ),
+        )
 
     def _import_traces() -> LangfuseImportResult:
         client = cli_dependencies().kitaru_client()
@@ -178,6 +216,7 @@ def langfuse(
             path,
             source_project_id=source_project_id,
             agent_name=agent_name,
+            stack=stack,
             trace_ids=trace_id,
             limit=limit,
             dry_run=not write,

@@ -166,6 +166,19 @@ def test_exact_reimport_is_a_noop(primed_zenml: None) -> None:
     assert len(execution.checkpoints) == len(trace.observations)
 
 
+def test_explicit_stack_requires_its_artifact_store(primed_zenml: None) -> None:
+    del primed_zenml
+
+    with pytest.raises(
+        ImportedTracePersistenceError, match="must be provided together"
+    ):
+        persist_imported_trace(
+            _trace(),
+            agent_name="support-agent",
+            stack_id=Client().active_stack_model.id,
+        )
+
+
 def test_changed_source_content_conflicts(primed_zenml: None) -> None:
     del primed_zenml
     trace = _trace()

@@ -1,15 +1,21 @@
 """Focused unit tests for imported execution persistence helpers."""
 
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 from uuid import UUID
+
+import pytest
 
 from kitaru._llm_usage import CalculatedCostMetadata
 from kitaru.imports import normalize_langfuse_observations
 from kitaru.imports._writer import (
+    ImportedTraceConflictError,
     _get_or_create_snapshot,
+    _import_environment,
     _step_metadata,
     _steps_by_name,
+    _validate_existing_run,
 )
 
 
@@ -219,7 +225,7 @@ def test_model_and_latency_without_usage_are_preserved() -> None:
     assert record["latency_ms"] == 250
 
 
-def test_import_snapshot_identity_includes_active_stack() -> None:
+def test_import_snapshot_identity_includes_selected_stack() -> None:
     client = MagicMock()
     client.list_snapshots.return_value = SimpleNamespace(items=[])
     client.zen_store.create_snapshot.side_effect = lambda request: request
@@ -239,7 +245,6 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
         project_id="project-1",
     )[0]
 
-    client.active_stack_model.id = first_stack
     first = _get_or_create_snapshot(
         client=client,
         project_id=UUID(int=3),
@@ -247,8 +252,8 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
         pipeline_name="imported-agent",
         trace=trace,
         step_config_by_observation={},
+        stack_id=first_stack,
     )
-    client.active_stack_model.id = second_stack
     second = _get_or_create_snapshot(
         client=client,
         project_id=UUID(int=3),
@@ -256,9 +261,84 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
         pipeline_name="imported-agent",
         trace=trace,
         step_config_by_observation={},
+        stack_id=second_stack,
     )
 
     assert first.name != second.name
     assert first.pipeline_version_hash != second.pipeline_version_hash
     assert first.stack == first_stack
     assert second.stack == second_stack
+
+
+def test_existing_import_cannot_silently_change_stacks() -> None:
+    first_stack = UUID(int=1)
+    second_stack = UUID(int=2)
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "span-1",
+                "traceId": "trace-1",
+                "type": "SPAN",
+                "name": "span",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:01Z",
+            }
+        ],
+        project_id="project-1",
+    )[0]
+    run = SimpleNamespace(
+        id=UUID(int=3),
+        orchestrator_environment=_import_environment(
+            trace,
+            agent_name="support-agent",
+            stack_id=first_stack,
+        ),
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=first_stack)),
+    )
+
+    with pytest.raises(
+        ImportedTraceConflictError, match="already imported using stack"
+    ) as exc_info:
+        _validate_existing_run(
+            cast(Any, run),
+            trace=trace,
+            agent_name="support-agent",
+            stack_id=second_stack,
+        )
+
+    assert "cannot move existing artifact bytes" in (exc_info.value.resolution or "")
+
+
+def test_legacy_import_reads_stack_from_snapshot() -> None:
+    stack_id = UUID(int=1)
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "span-1",
+                "traceId": "trace-1",
+                "type": "SPAN",
+                "name": "span",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:01Z",
+            }
+        ],
+        project_id="project-1",
+    )[0]
+    environment = _import_environment(
+        trace,
+        agent_name="support-agent",
+        stack_id=stack_id,
+    )
+    environment.pop("kitaru_import_stack_id_v1")
+    run = SimpleNamespace(
+        id=UUID(int=2),
+        orchestrator_environment=environment,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=stack_id)),
+    )
+
+    _validate_existing_run(
+        cast(Any, run),
+        trace=trace,
+        agent_name="support-agent",
+        stack_id=stack_id,
+    )
