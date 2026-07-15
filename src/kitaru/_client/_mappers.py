@@ -293,6 +293,7 @@ def _map_checkpoint_attempt(
         ended_at=step.end_time,
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
+        _checkpoint_name=checkpoint_name,
         _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
         _replay_reused=(
             replay_skipped_steps is not None

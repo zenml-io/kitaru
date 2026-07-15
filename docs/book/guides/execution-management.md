@@ -250,8 +250,14 @@ adapters, Kitaru records canonical `llm_usage_v1` metadata on the checkpoint
 that made or reused the provider work. One usage record usually means one
 provider interaction or one adapter-level graph/agent invocation, depending on
 which adapter produced it. When the execution finishes, Kitaru reads those
-checkpoint records and writes two execution-level views. `FlowHandle.wait()` and
-`FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written:
+checkpoint records and writes two execution-level views. Checkpoint-owned records
+expose the physical attempt ID as `checkpoint_id` and the normalized checkpoint
+name as `checkpoint_name` when the producer did not set those fields itself.
+This keeps retry attempts distinct. Records written only at execution level stay
+unattributed unless their producer supplied checkpoint identity.
+
+`FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for
+older executions or executions where the finish-time summary was not written:
 
 - `llm_usage_summary_v1` is the inspection view. `kitaru executions get` and the
   Python client parse it into `execution.llm_usage_summary`. It tells you what
@@ -276,6 +282,19 @@ Cost fields are intentionally split:
   Adapter-level user calculators also write this field.
 - `display_cost_usd` uses actual cost for a record when present, otherwise
   estimated cost. Treat it as observability, not as a billing invoice.
+
+Aggregation follows the `non_reused_is_incurred_v1` policy recorded in each
+summary's `cost_policy` field. Every usage record counts as incurred unless its
+`billing_effect` is explicitly `reused_not_incurred`. An `unknown` record
+therefore contributes to workload and incurred counts and tokens. Its price
+contributes to display cost when available, and a missing price makes incurred
+cost incomplete. Mock mode keeps `billing_effect="unknown"` because it does not
+claim that a provider call occurred, but summaries still apply this conservative
+rule.
+
+Kitaru does not eagerly rewrite all stored summaries after this policy changes.
+A summary with any other policy marker is treated as stale and is refreshed when
+Kitaru next performs its normal execution aggregation.
 
 Automatic `genai-prices` cost estimates are on by default. After the provider
 or adapter call succeeds, Kitaru sends the known provider, model name, and token

@@ -25,7 +25,15 @@ _AUTO_DISCOVERY_SCAN_LIMIT = 10_000
 
 @dataclass(frozen=True)
 class CheckpointDiff:
-    """Per-checkpoint comparison between an original and replay execution."""
+    """Per-checkpoint comparison between an original and replay execution.
+
+    ``token_delta`` is replay minus original workload tokens and includes model
+    work reused by the replay. It is ``None`` only when neither checkpoint has
+    canonical usage records. ``cost_delta_usd`` is replay minus original
+    incurred display cost, so explicitly reused work contributes zero. It is
+    ``None`` when either checkpoint has unpriced work that is not explicitly
+    reused.
+    """
 
     name: str
     original_call_id: str | None
@@ -381,6 +389,7 @@ def _resolve_compare_flow_version(execution: Execution) -> str:
 
 
 def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
+    """Serialize replay-minus-original workload and incurred-cost deltas."""
     return {
         "name": item.name,
         "original_call_id": item.original_call_id,

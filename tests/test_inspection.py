@@ -20,6 +20,7 @@ from kitaru._checkpoint_metadata import (
     adapter_checkpoint_metadata,
 )
 from kitaru._client._mappers import _map_checkpoint_call
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -77,6 +78,7 @@ from kitaru.inspection import (
     to_jsonable,
     uses_stale_local_server_url,
 )
+from kitaru.secrets import SecretSummary
 
 
 @dataclass(frozen=True)
@@ -148,14 +150,27 @@ def _sample_artifact(name: str = "research_context") -> ArtifactRef:
     )
 
 
+def _sample_llm_usage_record() -> dict[str, Any]:
+    return build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="research-call",
+        total_tokens=12,
+    )
+
+
 def _sample_checkpoint_attempt() -> CheckpointAttempt:
     return CheckpointAttempt(
         attempt_id="attempt-1",
         status=ExecutionStatus.FAILED,
         started_at=datetime(2026, 3, 14, 10, 0, tzinfo=UTC),
         ended_at=datetime(2026, 3, 14, 10, 5, tzinfo=UTC),
-        metadata={"retry": 1},
+        metadata={
+            "retry": 1,
+            LLM_USAGE_METADATA_KEY: {"research-call": _sample_llm_usage_record()},
+        },
         failure=_sample_failure(),
+        _checkpoint_name="research",
     )
 
 
@@ -549,14 +564,23 @@ def test_serialize_checkpoint_attempt_contract() -> None:
         "status": "failed",
         "started_at": "2026-03-14T10:00:00+00:00",
         "ended_at": "2026-03-14T10:05:00+00:00",
-        "metadata": {"retry": 1},
+        "metadata": {
+            "retry": 1,
+            LLM_USAGE_METADATA_KEY: {"research-call": _sample_llm_usage_record()},
+        },
         "failure": {
             "message": "Checkpoint failed",
             "exception_type": "ValueError",
             "traceback": "Traceback...\nValueError: boom",
             "origin": "user_code",
         },
-        "llm_usage_records": [],
+        "llm_usage_records": [
+            {
+                **_sample_llm_usage_record(),
+                "checkpoint_id": "attempt-1",
+                "checkpoint_name": "research",
+            }
+        ],
     }
 
 
@@ -590,14 +614,25 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "status": "failed",
                 "started_at": "2026-03-14T10:00:00+00:00",
                 "ended_at": "2026-03-14T10:05:00+00:00",
-                "metadata": {"retry": 1},
+                "metadata": {
+                    "retry": 1,
+                    LLM_USAGE_METADATA_KEY: {
+                        "research-call": _sample_llm_usage_record()
+                    },
+                },
                 "failure": {
                     "message": "Checkpoint failed",
                     "exception_type": "ValueError",
                     "traceback": "Traceback...\nValueError: boom",
                     "origin": "user_code",
                 },
-                "llm_usage_records": [],
+                "llm_usage_records": [
+                    {
+                        **_sample_llm_usage_record(),
+                        "checkpoint_id": "attempt-1",
+                        "checkpoint_name": "research",
+                    }
+                ],
             }
         ],
         "artifacts": [
@@ -610,7 +645,13 @@ def test_serialize_checkpoint_call_contract() -> None:
                 "metadata": {"source": "notes"},
             }
         ],
-        "llm_usage_records": [],
+        "llm_usage_records": [
+            {
+                **_sample_llm_usage_record(),
+                "checkpoint_id": "attempt-1",
+                "checkpoint_name": "research",
+            }
+        ],
     }
 
 
@@ -741,6 +782,8 @@ def test_serialize_execution_contract() -> None:
     assert payload["original_exec_id"] == "kr-100"
     assert payload["checkpoints"][0]["name"] == "research"
     assert payload["checkpoints"][0]["checkpoint_type"] == "tool_call"
+    assert payload["llm_usage_records"][0]["checkpoint_id"] == "attempt-1"
+    assert payload["llm_usage_records"][0]["checkpoint_name"] == "research"
     assert payload["artifacts"][0]["name"] == "final_summary"
     assert payload["pending_wait"]["wait_id"] == "wait-1"
 
@@ -1601,7 +1644,27 @@ def test_serialize_secret_summary_contract() -> None:
     assert payload["name"] == "openai-credentials"
     assert payload["visibility"] == "public"
     assert payload["keys"] == ["API_KEY", "REGION"]
+    assert payload["keys_known"] is True
     assert payload["has_missing_values"] is True
+
+
+def test_serialize_secret_summary_preserves_unknown_keys() -> None:
+    secret = SecretSummary(
+        name="provider-creds",
+        id="secret-id",
+        private=False,
+        keys=[],
+        keys_known=False,
+    )
+
+    assert serialize_secret_summary(secret) == {
+        "id": "secret-id",
+        "name": "provider-creds",
+        "visibility": "public",
+        "keys": [],
+        "keys_known": False,
+        "has_missing_values": False,
+    }
 
 
 def test_serialize_secret_detail_contract() -> None:

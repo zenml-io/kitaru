@@ -523,16 +523,34 @@ Checkpoint token and cost deltas in JSON output are always calculated as
 ```
 
 The token object always uses the keys `prompt_tokens`, `completion_tokens`, and
-`total_tokens`. A negative value means the replay used fewer tokens than the
-original; a positive value means it used more. A recorded model call with zero
-tokens produces a three-key object containing zeroes, while `token_delta: null`
-means neither checkpoint has a model usage record.
+`total_tokens`. It measures workload, including model work reused by the replay.
+A negative value means the replay workload used fewer tokens than the original;
+a positive value means it used more. A recorded model call with zero tokens
+produces a three-key object containing zeroes, while `token_delta: null` means
+neither checkpoint has a model usage record.
 
-The cost follows the same subtraction rule. `cost_delta_usd: null` means at
-least one model call that was not explicitly reused has neither usable actual
-cost nor a usable estimate, so Kitaru cannot calculate a trustworthy
-difference. Reused checkpoint work contributes zero cost because the provider
-call was not made again.
+The cost follows the same subtraction rule but measures incurred display cost.
+`cost_delta_usd: null` means at least one model call that was not explicitly
+reused has neither usable actual cost nor a usable estimate, so Kitaru cannot
+calculate a trustworthy difference. Reused checkpoint work contributes zero
+cost because the provider call was not made again.
+
+For example, a replay that fully reuses the original model work can keep the
+same workload while avoiding all provider spend:
+
+```json
+{
+  "token_delta": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  },
+  "cost_delta_usd": -0.0025
+}
+```
+
+The zero token delta says the recorded workload is unchanged. The negative cost
+delta says the replay avoided the original $0.0025 of provider spend.
 
 `ExecutionDiff.urls` links to the Kitaru UI compare view — one URL listing the original and every compared replay, whether discovered automatically or passed explicitly:
 

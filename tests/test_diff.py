@@ -155,6 +155,26 @@ def test_checkpoint_diff_uses_canonical_records_for_signed_usage_deltas(
     assert result.cost_delta_usd == expected_cost
 
 
+def test_fully_reused_replay_keeps_workload_tokens_and_avoids_cost() -> None:
+    original = _usage_record(actual_cost_usd=0.25)
+    replay = _usage_record(
+        actual_cost_usd=0.25,
+        billing_effect="reused_not_incurred",
+    )
+
+    result = checkpoint_diff_from_usage_records(
+        original_records=[original],
+        replay_records=[replay],
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert result.cost_delta_usd == -0.25
+
+
 @pytest.mark.parametrize(
     ("original_present", "expected_sign"),
     [(True, -1), (False, 1)],
@@ -211,6 +231,7 @@ def test_checkpoint_diff_distinguishes_no_usage_from_zero_valued_usage() -> None
         (_usage_record(actual_cost_usd=0.0), 0.0),
         (_usage_record(), None),
         (_usage_record(billing_effect="reused_not_incurred"), 0.0),
+        (_usage_record(estimated_cost_usd=0.35, billing_effect="unknown"), 0.35),
         (_usage_record(billing_effect="unknown"), None),
     ],
 )
