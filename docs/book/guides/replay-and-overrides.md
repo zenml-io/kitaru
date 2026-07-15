@@ -436,7 +436,7 @@ execution_diff = kitaru.diff("kr-original")
 execution_diff = kitaru.diff("kr-original", "kr-replay-a", "kr-replay-b")
 ```
 
-When replay executions are omitted, `kitaru.diff` discovers all runs whose `original_exec_id` matches the source.
+When replay executions are omitted, `kitaru.diff` discovers all runs whose `original_exec_id` matches the source. Explicit comparisons accept only recorded direct replays of the requested original. Kitaru rejects blank execution IDs and executions with missing or conflicting replay lineage instead of comparing unrelated runs. Repeated selectors, including different aliases for the same replay, are compared once in first-occurrence order.
 
 Diff many originals against their auto-discovered replays:
 

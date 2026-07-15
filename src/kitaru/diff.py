@@ -16,6 +16,7 @@ from kitaru._ui_urls import (
     resolve_ui_url_context,
 )
 from kitaru.client import KitaruClient
+from kitaru.errors import KitaruUsageError
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
 _AUTO_DISCOVERY_SCAN_LIMIT = 10_000
@@ -454,19 +455,17 @@ def _discover_replays(
     return replay_ids_by_original, warnings
 
 
-def _compare_execution(
+def _compare_loaded_executions(
     *,
     client: KitaruClient,
     original_execution: Execution,
-    replay_exec_ids: Sequence[str],
+    replay_executions: Sequence[Execution],
     warnings: Sequence[str],
     artifact_hash_cache: dict[str, str],
     ui_context: UiUrlContext | None,
 ) -> ExecutionDiff:
-    """Compare one loaded original against explicit replay execution IDs."""
     compared: list[tuple[str, list[CheckpointDiff]]] = []
-    for replay_exec_id in replay_exec_ids:
-        replay_execution = client.executions.get(replay_exec_id)
+    for replay_execution in replay_executions:
         pairs = _align_checkpoints(original_execution, replay_execution)
         checkpoint_diffs = [
             _compare_checkpoints(
@@ -477,9 +476,10 @@ def _compare_execution(
             )
             for original_cp, replay_cp in pairs
         ]
-        compared.append((replay_exec_id, checkpoint_diffs))
+        compared.append((replay_execution.exec_id, checkpoint_diffs))
 
     original_exec_id = original_execution.exec_id
+    replay_exec_ids = [execution.exec_id for execution in replay_executions]
     if replay_exec_ids:
         multi_url = build_compare_url_for_executions(
             server_url=None,
@@ -501,6 +501,52 @@ def _compare_execution(
     )
 
 
+def _normalize_execution_selector(selector: str, *, label: str) -> str:
+    normalized = selector.strip()
+    if not normalized:
+        raise KitaruUsageError(f"{label} must not be blank.")
+    return normalized
+
+
+def _resolve_explicit_replays(
+    client: KitaruClient,
+    *,
+    original_execution: Execution,
+    replay_selectors: Sequence[str],
+) -> list[Execution]:
+    original_exec_id = original_execution.exec_id
+    seen_selectors: set[str] = set()
+    seen_exec_ids: set[str] = set()
+    replay_executions: list[Execution] = []
+
+    for selector in replay_selectors:
+        if selector in seen_selectors:
+            continue
+        seen_selectors.add(selector)
+
+        replay_execution = client.executions.get(selector)
+        replay_original_exec_id = replay_execution.original_exec_id
+        if replay_original_exec_id is None:
+            raise KitaruUsageError(
+                f"Replay execution '{selector}' resolves to "
+                f"'{replay_execution.exec_id}', which has no recorded direct "
+                f"replay lineage to original execution '{original_exec_id}'."
+            )
+        if replay_original_exec_id != original_exec_id:
+            raise KitaruUsageError(
+                f"Replay execution '{selector}' resolves to "
+                f"'{replay_execution.exec_id}', whose recorded direct original "
+                f"is '{replay_original_exec_id}', not '{original_exec_id}'."
+            )
+
+        if replay_execution.exec_id in seen_exec_ids:
+            continue
+        seen_exec_ids.add(replay_execution.exec_id)
+        replay_executions.append(replay_execution)
+
+    return replay_executions
+
+
 def diff(
     original: str,
     *executions: str,
@@ -512,6 +558,18 @@ def diff(
     """
     from kitaru.analytics import AnalyticsEvent, track
 
+    normalized_original = _normalize_execution_selector(
+        original,
+        label="Original execution ID",
+    )
+    normalized_replays = [
+        _normalize_execution_selector(
+            selector,
+            label=f"Replay execution ID at position {index}",
+        )
+        for index, selector in enumerate(executions, start=1)
+    ]
+
     track(
         AnalyticsEvent.DIFF_REQUESTED,
         {
@@ -520,24 +578,40 @@ def diff(
         },
     )
     client = KitaruClient()
-    artifact_hash_cache: dict[str, str] = {}
-    ui_context = _client_ui_url_context(client)
-    original_execution = client.executions.get(original)
-    if executions:
-        replay_exec_ids = list(executions)
-        warnings: list[str] = []
-    else:
-        replay_ids_by_original, warnings = _discover_replays(
-            client,
-            flow_name=original_execution.flow_name,
-            original_exec_ids=[original_execution.exec_id],
-        )
-        replay_exec_ids = replay_ids_by_original[original_execution.exec_id]
+    original_execution = client.executions.get(normalized_original)
 
-    return _compare_execution(
+    if normalized_replays:
+        replay_executions = _resolve_explicit_replays(
+            client,
+            original_execution=original_execution,
+            replay_selectors=normalized_replays,
+        )
+        artifact_hash_cache: dict[str, str] = {}
+        ui_context = _client_ui_url_context(client)
+        return _compare_loaded_executions(
+            client=client,
+            original_execution=original_execution,
+            replay_executions=replay_executions,
+            warnings=[],
+            artifact_hash_cache=artifact_hash_cache,
+            ui_context=ui_context,
+        )
+
+    replay_ids_by_original, warnings = _discover_replays(
+        client,
+        flow_name=original_execution.flow_name,
+        original_exec_ids=[original_execution.exec_id],
+    )
+    artifact_hash_cache = {}
+    ui_context = _client_ui_url_context(client)
+    replay_executions = [
+        client.executions.get(replay_exec_id)
+        for replay_exec_id in replay_ids_by_original[original_execution.exec_id]
+    ]
+    return _compare_loaded_executions(
         client=client,
         original_execution=original_execution,
-        replay_exec_ids=replay_exec_ids,
+        replay_executions=replay_executions,
         warnings=warnings,
         artifact_hash_cache=artifact_hash_cache,
         ui_context=ui_context,
@@ -592,10 +666,14 @@ def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
 
     diffs_by_id: dict[str, ExecutionDiff] = {}
     for exec_id, original_execution in originals_by_id.items():
-        diffs_by_id[exec_id] = _compare_execution(
+        replay_executions = [
+            client.executions.get(replay_exec_id)
+            for replay_exec_id in replay_ids_by_original[exec_id]
+        ]
+        diffs_by_id[exec_id] = _compare_loaded_executions(
             client=client,
             original_execution=original_execution,
-            replay_exec_ids=replay_ids_by_original[exec_id],
+            replay_executions=replay_executions,
             warnings=warnings_by_flow[original_execution.flow_name],
             artifact_hash_cache=artifact_hash_cache,
             ui_context=ui_context,

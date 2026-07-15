@@ -29,6 +29,7 @@ from kitaru.diff import (
     serialize_checkpoint_diff,
     serialize_execution_diff,
 )
+from kitaru.errors import KitaruUsageError
 from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 _diff_module = import_module("kitaru.diff")
@@ -449,8 +450,202 @@ def test_diff_uses_loaded_original_id_and_resolves_ui_context_once() -> None:
         result = diff("kr-requested-alias", "kr-replay")
 
     assert result.original_exec_id == "kr-canonical"
+    assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-requested-alias"),
+        call("kr-replay"),
+    ]
     ui_context_mock.assert_called_once_with(fake_client)
     fake_client.executions._list_replays_for_originals.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("original", "replays", "expected_message"),
+    [
+        ("", (), "Original execution ID must not be blank."),
+        (" \t ", (), "Original execution ID must not be blank."),
+        (
+            "kr-original",
+            ("",),
+            "Replay execution ID at position 1 must not be blank.",
+        ),
+        (
+            "kr-original",
+            ("kr-replay", " \t "),
+            "Replay execution ID at position 2 must not be blank.",
+        ),
+    ],
+)
+def test_diff_rejects_blank_selectors_before_client_construction(
+    original: str,
+    replays: tuple[str, ...],
+    expected_message: str,
+) -> None:
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff(original, *replays)
+
+    assert str(exc_info.value) == expected_message
+    client_constructor.assert_not_called()
+
+
+def test_diff_strips_surrounding_whitespace_before_lookup() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("  original-alias  ", "\treplay-alias\n")
+
+    assert result.original_exec_id == "kr-original"
+    assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
+    assert fake_client.executions.get.call_args_list == [
+        call("original-alias"),
+        call("replay-alias"),
+    ]
+
+
+def test_diff_rejects_same_flow_replay_linked_to_another_original() -> None:
+    original = _execution("kr-original", flow_id="flow-shared", checkpoints=[])
+    unrelated_replay = _execution(
+        "kr-unrelated-replay",
+        original_exec_id="kr-another-original",
+        flow_id="flow-shared",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, unrelated_replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff("kr-original", "kr-unrelated-replay")
+
+    assert str(exc_info.value) == (
+        "Replay execution 'kr-unrelated-replay' resolves to "
+        "'kr-unrelated-replay', whose recorded direct original is "
+        "'kr-another-original', not 'kr-original'."
+    )
+    align_checkpoints.assert_not_called()
+
+
+def test_diff_rejects_replay_without_recorded_lineage() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    unlinked_execution = _execution("kr-unlinked", checkpoints=[])
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, unlinked_execution]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff("kr-original", "kr-unlinked")
+
+    assert str(exc_info.value) == (
+        "Replay execution 'kr-unlinked' resolves to 'kr-unlinked', which has no "
+        "recorded direct replay lineage to original execution 'kr-original'."
+    )
+    align_checkpoints.assert_not_called()
+
+
+def test_diff_stably_deduplicates_selectors_and_canonical_replay_ids() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original,
+        replay_a,
+        replay_a,
+        replay_b,
+    ]
+    ui_context = UiUrlContext(
+        base_url="https://demo.kitaru.zenml.io",
+        route_kind="legacy",
+        source="connection_config",
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=ui_context),
+    ):
+        result = diff(
+            " kr-original-alias ",
+            " replay-a ",
+            "replay-a",
+            " latest-replay-a ",
+            "latest-replay-a",
+            " replay-b ",
+        )
+
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-original-alias"),
+        call("replay-a"),
+        call("latest-replay-a"),
+        call("replay-b"),
+    ]
+    assert [replay_id for replay_id, _ in result.compared] == [
+        "kr-replay-a",
+        "kr-replay-b",
+    ]
+    assert result.urls == [
+        "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
+        "?executions=kr-original,kr-replay-a,kr-replay-b"
+    ]
+
+
+def test_diff_validates_all_explicit_replays_before_checkpoint_comparison() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    valid_replay = _execution(
+        "kr-valid-replay",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    invalid_replay = _execution(
+        "kr-invalid-replay",
+        original_exec_id="kr-another-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, valid_replay, invalid_replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        patch("kitaru.diff._client_ui_url_context") as ui_context_mock,
+        pytest.raises(KitaruUsageError),
+    ):
+        diff("kr-original", "kr-valid-replay", "kr-invalid-replay")
+
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-original"),
+        call("kr-valid-replay"),
+        call("kr-invalid-replay"),
+    ]
+    align_checkpoints.assert_not_called()
+    ui_context_mock.assert_not_called()
+    fake_client._get_artifact_version.assert_not_called()
 
 
 def test_diff_cohort_uses_canonical_ids_for_aliases_and_duplicates() -> None:
