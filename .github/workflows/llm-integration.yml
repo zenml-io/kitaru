@@ -72,6 +72,7 @@ jobs:
       providers: ${{ steps.plan.outputs.providers }}
     steps:
       - name: Checkout trusted workflow ref
+        id: checkout_workflow
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
@@ -163,6 +164,7 @@ jobs:
           )
           reject_ref "Requested SHA '$requested_ref' is not reachable from develop, release/*, or v* tags."
       - name: Checkout Kitaru ref under test
+        id: checkout_tested_ref
         if: ${{ steps.trust.outputs.trusted == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -170,6 +172,7 @@ jobs:
           path: kitaru
           persist-credentials: false
       - name: Install uv
+        id: setup_uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: '3.12'
@@ -255,12 +258,6 @@ jobs:
             printf 'tested_ref=%s\n' "$TESTED_REF"
             printf 'tested_sha=%s\n' "$tested_sha"
           } >> "$GITHUB_OUTPUT"
-          {
-            printf 'tested_ref=%s\n' "$TESTED_REF"
-            printf 'tested_sha=%s\n' "$tested_sha"
-            printf 'workflow_ref=%s\n' "$GITHUB_REF_NAME"
-            printf 'workflow_sha=%s\n' "$GITHUB_SHA"
-          } > ../llm-integration-results/metadata.env
       - name: Preflight selected live secrets
         id: secret_preflight
         shell: bash
@@ -484,6 +481,77 @@ jobs:
             exit 0
           fi
           echo "status=passed" > ../llm-integration-results/research-bot.status
+      - name: Record artifact provenance
+        id: provenance
+        if: always()
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+          REQUESTED_REF: ${{ steps.trust.outputs.requested_ref }}
+          TESTED_REF: ${{ steps.identity.outputs.tested_ref }}
+          TESTED_SHA: ${{ steps.identity.outputs.tested_sha }}
+          SUITE: ${{ steps.plan.outputs.suite }}
+          PROVIDERS: ${{ steps.plan.outputs.providers }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          results_dir = Path("llm-integration-results")
+          results_dir.mkdir(parents=True, exist_ok=True)
+          recorded_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+          def optional(name: str) -> str | None:
+              return os.environ.get(name) or None
+          providers = optional("PROVIDERS")
+          provenance = {
+              "schema_version": 1,
+              "repository": os.environ["REPOSITORY"],
+              "workflow_name": os.environ["WORKFLOW_NAME"],
+              "workflow_ref": os.environ["WORKFLOW_REF"],
+              "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "event_name": os.environ["EVENT_NAME"],
+              "run_id": os.environ["RUN_ID"],
+              "run_attempt": os.environ["RUN_ATTEMPT"],
+              "run_url": os.environ["RUN_URL"],
+              "identity_recorded_at_utc": recorded_at,
+              "requested_ref": optional("REQUESTED_REF"),
+              "tested_ref": optional("TESTED_REF"),
+              "tested_sha": optional("TESTED_SHA"),
+              "suite": optional("SUITE"),
+              "providers": providers.split(",") if providers else None,
+          }
+          (results_dir / "llm-integration.provenance.json").write_text(
+              json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          metadata = {
+              "tested_ref": os.environ.get("TESTED_REF", ""),
+              "tested_sha": os.environ.get("TESTED_SHA", ""),
+              "workflow_ref": os.environ["WORKFLOW_REF"],
+              "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "event_name": os.environ["EVENT_NAME"],
+              "run_id": os.environ["RUN_ID"],
+              "run_attempt": os.environ["RUN_ATTEMPT"],
+              "run_url": os.environ["RUN_URL"],
+              "identity_recorded_at_utc": recorded_at,
+          }
+          (results_dir / "metadata.env").write_text(
+              "".join(f"{key}={value}\n" for key, value in metadata.items()),
+              encoding="utf-8",
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"identity_recorded_at_utc={recorded_at}\n")
+          PY
       - name: Summarize live-provider results
         id: summarize
         if: always()
@@ -491,6 +559,11 @@ jobs:
         env:
           TESTED_REF: ${{ steps.identity.outputs.tested_ref }}
           TESTED_SHA: ${{ steps.identity.outputs.tested_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          IDENTITY_RECORDED_AT_UTC: ${{ steps.provenance.outputs.identity_recorded_at_utc }}
           SUITE: ${{ steps.plan.outputs.suite }}
           PROVIDERS: ${{ steps.plan.outputs.providers }}
           MARKER_EXPR: ${{ steps.plan.outputs.marker_expr }}
@@ -499,8 +572,13 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
           WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_CHECKOUT_OUTCOME: ${{ steps.checkout_workflow.outcome }}
+          TRUST_OUTCOME: ${{ steps.trust.outcome }}
+          TESTED_CHECKOUT_OUTCOME: ${{ steps.checkout_tested_ref.outcome }}
+          SETUP_UV_OUTCOME: ${{ steps.setup_uv.outcome }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           INSTALL_OUTCOME: ${{ steps.install_dependencies.outcome }}
+          PROVENANCE_OUTCOME: ${{ steps.provenance.outcome }}
           INIT_OUTCOME: ${{ steps.init_project.outcome }}
           IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
           SECRET_PREFLIGHT_OUTCOME: ${{ steps.secret_preflight.outcome }}
@@ -512,6 +590,18 @@ jobs:
           summary_file="$results_dir/llm-integration.summary.md"
           discord_file="$results_dir/llm-integration.discord.md"
           : > "$failures_file"
+          if [ "${WORKFLOW_CHECKOUT_OUTCOME:-success}" = "failure" ]; then
+            echo "Trusted workflow ref checkout failed." >> "$failures_file"
+          fi
+          if [ "${TRUST_OUTCOME:-success}" = "failure" ]; then
+            echo "Requested Kitaru ref trust check failed." >> "$failures_file"
+          fi
+          if [ "${TESTED_CHECKOUT_OUTCOME:-success}" = "failure" ]; then
+            echo "Kitaru ref under test checkout failed." >> "$failures_file"
+          fi
+          if [ "${SETUP_UV_OUTCOME:-success}" = "failure" ]; then
+            echo "uv setup failed." >> "$failures_file"
+          fi
           if [ "${PLAN_OUTCOME:-success}" = "failure" ]; then
             echo "Live test plan resolution failed." >> "$failures_file"
           fi
@@ -526,6 +616,9 @@ jobs:
           fi
           if [ "${SECRET_PREFLIGHT_OUTCOME:-success}" = "failure" ]; then
             echo "Live secret preflight failed before writing its result file." >> "$failures_file"
+          fi
+          if [ "${PROVENANCE_OUTCOME:-success}" = "failure" ]; then
+            echo "Artifact provenance recording failed." >> "$failures_file"
           fi
           if [ -f "$results_dir/secret-preflight.failure" ]; then
             cat "$results_dir/secret-preflight.failure" >> "$failures_file"
@@ -575,6 +668,12 @@ jobs:
             echo "|---|---|"
             echo "| Tested ref | \`$TESTED_REF\` |"
             echo "| Tested SHA | \`$TESTED_SHA\` |"
+            echo "| Workflow SHA | \`$WORKFLOW_SHA\` |"
+            echo "| Event | \`$EVENT_NAME\` |"
+            echo "| Run ID | \`$RUN_ID\` |"
+            echo "| Run attempt | \`$RUN_ATTEMPT\` |"
+            echo "| Run URL | $RUN_URL |"
+            echo "| Identity recorded at (UTC) | \`$IDENTITY_RECORDED_AT_UTC\` |"
             echo "| Suite | \`$SUITE\` |"
             echo "| Providers | \`${PROVIDERS:-none}\` |"
             echo "| Pytest marker | \`$MARKER_EXPR\` |"
