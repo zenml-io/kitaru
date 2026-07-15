@@ -23,6 +23,7 @@ from kitaru._client._statistics import (
     LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
     normalize_execution_statistics_metrics,
 )
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     ActiveConfigSelectionProvenance,
@@ -148,6 +149,7 @@ def _checkpoint_stub(
     name: str,
     status: ExecutionStatus,
     original_call_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> CheckpointCall:
     """Build a complete checkpoint-call-shaped object for CLI tests."""
     return CheckpointCall(
@@ -162,7 +164,7 @@ def _checkpoint_stub(
         status=status,
         started_at=None,
         ended_at=None,
-        metadata={},
+        metadata=metadata or {},
         original_call_id=original_call_id,
         parent_call_ids=[],
         failure=None,
@@ -2687,6 +2689,12 @@ def test_executions_get_json_contract_is_unchanged(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Text-only checkpoint guidance must not enter the JSON envelope."""
+    usage_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="write-call",
+        total_tokens=8,
+    )
     execution = _execution_stub(
         exec_id="kr-123",
         flow_name="content_pipeline",
@@ -2697,6 +2705,7 @@ def test_executions_get_json_contract_is_unchanged(
                 name="write",
                 status=ExecutionStatus.FAILED,
                 original_call_id="call-write-1",
+                metadata={LLM_USAGE_METADATA_KEY: {"write-call": usage_record}},
             )
         ],
     )
@@ -2710,10 +2719,14 @@ def test_executions_get_json_contract_is_unchanged(
         app(["executions", "get", "kr-123", "--output", "json"])
 
     assert exc_info.value.code == 0
-    assert json.loads(capsys.readouterr().out) == {
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
         "command": "executions.get",
         "item": serialize_execution(cast(Execution, execution)),
     }
+    checkpoint_record = payload["item"]["checkpoints"][0]["llm_usage_records"][0]
+    assert checkpoint_record["checkpoint_id"] == "call-write-2"
+    assert checkpoint_record["checkpoint_name"] == "write"
 
 
 def test_executions_get_renders_malformed_llm_usage_summary_honestly(
@@ -5934,6 +5947,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
     assert payload["item"]["visibility"] == "public"
+    assert payload["item"]["keys_known"] is True
 
 
 def test_secrets_show_hides_values_by_default(
@@ -5997,8 +6011,12 @@ def test_secrets_list_renders_shared_order(
 ) -> None:
     """`kitaru secrets list` should render the SDK's deterministic order."""
     secrets = [
-        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
-        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+        SecretSummary(
+            name="alpha", id="secret-a", private=True, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="zeta", id="secret-z", private=False, keys=[], keys_known=False
+        ),
     ]
 
     with (
@@ -6021,12 +6039,13 @@ def test_secrets_list_renders_shared_order(
 def test_secrets_list_json_contains_metadata_without_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """JSON list output should include key names but never secret values."""
+    """JSON list output should identify unavailable keys without values."""
     secret = SecretSummary(
         name="openai-creds",
         id="secret-id",
         private=True,
-        keys=["OPENAI_API_KEY"],
+        keys=[],
+        keys_known=False,
         has_missing_values=False,
     )
 
@@ -6045,7 +6064,8 @@ def test_secrets_list_json_contains_metadata_without_values(
                 "id": "secret-id",
                 "name": "openai-creds",
                 "visibility": "private",
-                "keys": ["OPENAI_API_KEY"],
+                "keys": [],
+                "keys_known": False,
                 "has_missing_values": False,
             }
         ],
@@ -6058,9 +6078,15 @@ def test_secrets_list_paginates_after_shared_ordering(
 ) -> None:
     """The CLI should slice the complete list after the SDK has ordered it."""
     secrets = [
-        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
-        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
-        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+        SecretSummary(
+            name="alpha", id="secret-a", private=True, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="beta", id="secret-b", private=False, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="zeta", id="secret-z", private=False, keys=[], keys_known=False
+        ),
     ]
 
     with (

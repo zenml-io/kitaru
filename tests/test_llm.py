@@ -14,7 +14,10 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+from kitaru._llm_usage import (
+    LLM_USAGE_METADATA_KEY,
+    aggregate_usage_records_with_cost_completeness,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import (
     ResolvedModelSelection,
@@ -1472,9 +1475,17 @@ def test_llm_mock_response_skips_provider_sdk(
     assert output == "mocked answer"
     mock_openai.assert_not_called()
     mock_anthropic.assert_not_called()
-    # Artifacts and metadata should still be persisted
+    # Artifacts and metadata should still be persisted.
     mock_save.assert_called()
     mock_log.assert_called_once()
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["billing_effect"] == "unknown"
+    summary, has_unpriced_incurred_record = (
+        aggregate_usage_records_with_cost_completeness([usage_record])
+    )
+    assert summary["incurred_usage_record_count"] == 1
+    assert summary["incurred_total_tokens"] == 0
+    assert has_unpriced_incurred_record is True
 
 
 def test_llm_mock_response_works_with_unsupported_provider(
