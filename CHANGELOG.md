@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
+
 ### Fixed
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
