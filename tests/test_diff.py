@@ -648,6 +648,31 @@ def test_diff_validates_all_explicit_replays_before_checkpoint_comparison() -> N
     fake_client._get_artifact_version.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("selectors", "blank_position"),
+    [
+        ([""], 1),
+        (["kr-original", "   "], 2),
+    ],
+)
+def test_diff_cohort_rejects_blank_selectors_before_loading_client(
+    selectors: list[str],
+    blank_position: int,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(
+            KitaruUsageError,
+            match=f"Execution ID at position {blank_position} must not be blank",
+        ),
+    ):
+        diff_cohort(selectors)
+
+    client_constructor.assert_not_called()
+
+
 def test_diff_cohort_uses_canonical_ids_for_aliases_and_duplicates() -> None:
     from kitaru.diff import diff_cohort
 

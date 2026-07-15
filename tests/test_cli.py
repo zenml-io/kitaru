@@ -4605,6 +4605,37 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     }
 
 
+def test_executions_diff_matrix_rejects_blank_selector_with_structured_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "diff-matrix",
+                "kr-original",
+                "   ",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    client_constructor.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "command": "executions.diff_matrix",
+        "error": {
+            "message": "Execution ID at position 2 must not be blank.",
+            "type": "KitaruUsageError",
+        },
+    }
+
+
 def test_executions_diff_rejects_blank_replay_with_structured_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

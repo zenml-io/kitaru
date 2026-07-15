@@ -622,7 +622,13 @@ def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
     from kitaru.analytics import AnalyticsEvent, track
     from kitaru.cohort import coerce_exec_ids
 
-    resolved_ids = coerce_exec_ids(exec_ids)
+    resolved_ids = [
+        _normalize_execution_selector(
+            selector,
+            label=f"Execution ID at position {index}",
+        )
+        for index, selector in enumerate(coerce_exec_ids(exec_ids), start=1)
+    ]
     track(
         AnalyticsEvent.DIFF_REQUESTED,
         {
