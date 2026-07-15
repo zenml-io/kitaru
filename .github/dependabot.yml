@@ -76,6 +76,15 @@ updates:
           - minor
           - patch
 
+      # Pricing-data updates affect cost estimates rather than provider runtime
+      # behavior, so review and ship them independently from adapter SDK bumps.
+      genai-prices:
+        patterns:
+          - genai-prices
+        update-types:
+          - minor
+          - patch
+
       # Failures surface in a user's runtime, and our tests mock these SDKs, so
       # CI is structurally blind to them. Needs live provider runs before merge.
       # See `tests/_gemini_fake_sdk.py` for the sharpest example: it substitutes
@@ -89,7 +98,6 @@ updates:
           - claude-agent-sdk
           - google-genai
           - google-adk
-          - genai-prices
           - mcp
           - pydantic-ai-slim
           - pydantic-ai*
@@ -115,7 +123,7 @@ updates:
 
       # Everything else: cyclopts, pydantic, rich, modal, typing-extensions.
       #
-      # `exclude-patterns` MUST mirror every pattern from the three groups above.
+      # `exclude-patterns` MUST mirror every pattern from the four groups above.
       # This group has no `patterns`, so Dependabot never asks whether another
       # group claims a dependency (see the note at the top of `groups:`) and it
       # will happily re-ship anything not listed here in a second PR. Keep this
@@ -137,11 +145,12 @@ updates:
           - claude-agent-sdk
           - google-genai
           - google-adk
-          - genai-prices
           - mcp
           - pydantic-ai*
           - langchain*
           - langgraph*
+          # mirrors genai-prices
+          - genai-prices
           # mirrors zenml
           - zenml
         update-types:

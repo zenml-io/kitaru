@@ -914,15 +914,15 @@ wheels = [
 
 [[package]]
 name = "genai-prices"
-version = "0.0.66"
+version = "0.0.71"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx2" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/7c/c50fc8d18b283e9b56ff625d45dbe9577c676e1d16636c1011967182d813/genai_prices-0.0.66.tar.gz", hash = "sha256:f087dfe56da28a4c3933dcf846cf2b7111ba733cef674c0cbc66de80212bcd6b", size = 71130, upload-time = "2026-06-09T21:51:14.561Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/e4/5072862613fba039da2b7c981a8649c6c6bbcb2863bd8bc81617c09ce5ee/genai_prices-0.0.71.tar.gz", hash = "sha256:de4db34ec38404f9ef383cb1ab29e204d16ccf27071af0b16d5747ee7affe36b", size = 82105, upload-time = "2026-07-10T00:38:30.491Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/87/1a36166f91906e47f430f6d4150ec6bfc0001032a363e49fc389021c0609/genai_prices-0.0.66-py3-none-any.whl", hash = "sha256:86b83f107c1cf04bb449a120cd8d4439ceb6843660d9128cde560eb511686d7b", size = 73745, upload-time = "2026-06-09T21:51:13.523Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/98/c06c1318f6834a26268a2d4280e4183f60c5ea92152aea841feff29826ff/genai_prices-0.0.71-py3-none-any.whl", hash = "sha256:1d13111563af2b1ce43ccfacf77b7ac3216ad704c644408a56e11b181fe0d128", size = 84586, upload-time = "2026-07-10T00:38:29.252Z" },
 ]
 
 [[package]]
@@ -1598,7 +1598,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0,<1" },
     { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.58,<0.2" },
     { name = "cyclopts", specifier = ">=3.0" },
-    { name = "genai-prices", specifier = ">=0.0.66,<0.1" },
+    { name = "genai-prices", specifier = ">=0.0.71,<0.1" },
     { name = "google-adk", marker = "extra == 'google-adk'", specifier = ">=2.3.0,<3" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=2.8.0,<3" },
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
