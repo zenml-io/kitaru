@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Langfuse observations JSONL exports can now be normalized and stored as inspectable synthetic Kitaru executions through `KitaruClient.imports.langfuse(...)` or `kitaru import langfuse`. Imports preview by default, require explicit consent before storing full inputs and outputs, preserve dynamic observation graphs and usage metadata, reject fragmented traces unless explicitly allowed, and are idempotent by source identity and content.
+
 ### Fixed
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)

@@ -7,6 +7,12 @@ icon: rotate-left
 
 Replay re-executes a real, recorded run from a checkpoint to produce a **new execution** — the same run, with the changes you specify. This is what makes Kitaru more than tracing: because every model call and tool call was recorded as a durable checkpoint, you can reproduce a run faithfully, fork it with one input changed, and attribute the difference to your change rather than to replay noise.
 
+{% hint style="info" %}
+This guide applies to executable Kitaru-native recordings. Executions created
+from a Langfuse JSONL export are currently inspectable historical records, not
+executable flow snapshots. See [Import Langfuse Traces](import-langfuse-traces.md).
+{% endhint %}
+
 The practical promise is simple: you keep the work that already succeeded, then rerun only the part you want to test or recover. If a flow researched a customer, called three tools, then failed while writing the final answer, replay can reuse the recorded research and tool results instead of paying for them again.
 
 The core loop is three steps:
