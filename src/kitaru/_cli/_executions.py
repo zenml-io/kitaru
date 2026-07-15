@@ -160,10 +160,20 @@ def _checkpoint_diff_table_rows(checkpoints: object) -> list[list[str]]:
     for checkpoint in checkpoints:
         if not isinstance(checkpoint, Mapping):
             continue
+        original_call_id = checkpoint.get("original_call_id")
+        replay_call_id = checkpoint.get("replay_call_id")
+        if original_call_id is None and replay_call_id is not None:
+            status = "added"
+        elif original_call_id is not None and replay_call_id is None:
+            status = "removed"
+        elif checkpoint.get("status_match") is True:
+            status = "same"
+        else:
+            status = "changed"
         rows.append(
             [
                 str(checkpoint.get("name") or "unknown"),
-                "same" if checkpoint.get("status_match") is True else "changed",
+                status,
                 _format_signed_delta(
                     checkpoint.get("duration_delta_ms"),
                     unit=" ms",

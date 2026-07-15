@@ -4614,6 +4614,8 @@ def _serialized_execution_diff_for_cli() -> dict[str, Any]:
                 "checkpoints": [
                     {
                         "name": "generate",
+                        "original_call_id": "call-generate-original",
+                        "replay_call_id": "call-generate-replay",
                         "status_match": True,
                         "duration_delta_ms": 12.5,
                         "token_delta": {
@@ -4630,6 +4632,8 @@ def _serialized_execution_diff_for_cli() -> dict[str, Any]:
                     },
                     {
                         "name": "unpriced",
+                        "original_call_id": "call-unpriced-original",
+                        "replay_call_id": "call-unpriced-replay",
                         "status_match": False,
                         "duration_delta_ms": None,
                         "token_delta": None,
@@ -4643,6 +4647,8 @@ def _serialized_execution_diff_for_cli() -> dict[str, Any]:
                 "checkpoints": [
                     {
                         "name": "evaluate",
+                        "original_call_id": "call-evaluate-original",
+                        "replay_call_id": "call-evaluate-replay",
                         "status_match": True,
                         "duration_delta_ms": -8.0,
                         "token_delta": {
@@ -4680,7 +4686,8 @@ def test_executions_diff_text_renders_checkpoint_tables(
 
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    output = " ".join(captured.out.split())
+    raw_output = captured.out
+    output = " ".join(raw_output.split())
     assert "Compared against 2 replay execution(s)." in output
     assert "Replay kr-replay-a checkpoints" in output
     assert "Replay kr-replay-b checkpoints" in output
@@ -4691,20 +4698,19 @@ def test_executions_diff_text_renders_checkpoint_tables(
     assert "evaluate same -8.0 ms" in output
     assert "-0.0017 USD" in output
     if interactive:
-        for value in (
-            "input=+10",
-            "output=-5",
-            "total=+5",
-            "model=changed",
-            "output=unchanged",
-            "report=unavailable",
-            "input=+0",
-            "output=+0",
-            "total=+0",
-            "output=changed",
-        ):
-            assert value in output
-        assert "…" not in output
+        lines = raw_output.splitlines()
+        generate_line = next(i for i, line in enumerate(lines) if "input=+10" in line)
+        assert "model=changed" in lines[generate_line]
+        assert "output=-5" in lines[generate_line + 1]
+        assert "output=unchanged" in lines[generate_line + 1]
+        assert "total=+5" in lines[generate_line + 2]
+        assert "report=unavailable" in lines[generate_line + 2]
+
+        evaluate_line = next(i for i, line in enumerate(lines) if "input=+0" in line)
+        assert "output=changed" in lines[evaluate_line]
+        assert "output=+0" in lines[evaluate_line + 1]
+        assert "total=+0" in lines[evaluate_line + 2]
+        assert "…" not in raw_output
     else:
         assert "input=+10, output=-5, total=+5" in output
         artifact_states = "model=changed, output=unchanged, report=unavailable"
@@ -4758,6 +4764,36 @@ def test_executions_diff_text_renders_real_serialized_diff_safely(
                         cost_delta_usd=float("inf"),
                         artifact_hashes={},
                     ),
+                    CheckpointDiff(
+                        name="added",
+                        original_call_id=None,
+                        replay_call_id="call-added",
+                        status_match=False,
+                        duration_delta_ms=None,
+                        token_delta=None,
+                        cost_delta_usd=None,
+                        artifact_hashes={},
+                    ),
+                    CheckpointDiff(
+                        name="removed",
+                        original_call_id="call-removed",
+                        replay_call_id=None,
+                        status_match=False,
+                        duration_delta_ms=None,
+                        token_delta=None,
+                        cost_delta_usd=None,
+                        artifact_hashes={},
+                    ),
+                    CheckpointDiff(
+                        name="unknown-ids",
+                        original_call_id=None,
+                        replay_call_id=None,
+                        status_match=True,
+                        duration_delta_ms=None,
+                        token_delta=None,
+                        cost_delta_usd=None,
+                        artifact_hashes={},
+                    ),
                 ],
             )
         ],
@@ -4774,6 +4810,9 @@ def test_executions_diff_text_renders_real_serialized_diff_safely(
     assert "[/red] same +0.01 ms n/a +0.01 USD [/blue]=changed" in output
     assert "negative-zero same +0.0 ms n/a +0.0 USD n/a" in output
     assert "non-finite same n/a n/a n/a n/a" in output
+    assert "added added n/a n/a n/a n/a" in output
+    assert "removed removed n/a n/a n/a n/a" in output
+    assert "unknown-ids same n/a n/a n/a n/a" in output
 
 
 def test_executions_diff_text_renders_empty_checkpoint_section(
