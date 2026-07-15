@@ -66,7 +66,7 @@ pydantic-ai = [
     "typing_extensions>=4.12",
 ]
 openai-agents = [
-    "openai-agents>=0.15.0,<0.18.0",
+    "openai-agents>=0.15.0,<0.19.0",
 ]
 langgraph = [
     "langchain>=1.0,<2",
@@ -81,7 +81,7 @@ langgraph-anthropic = [
     "langchain-anthropic>=1.0,<2",
 ]
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.58,<0.2",
+    "claude-agent-sdk>=0.1.58,<0.3",
 ]
 gemini = [
     "google-genai>=2.8.0,<3",
@@ -159,13 +159,13 @@ dev = [
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "pydantic-ai-slim>=1.102.0,<1.104.0",
-    "openai-agents>=0.15.0,<0.18.0",
+    "openai-agents>=0.15.0,<0.19.0",
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langgraph>=1.1,<2",
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
-    "claude-agent-sdk>=0.1.58,<0.2",
+    "claude-agent-sdk>=0.1.58,<0.3",
     "google-genai>=2.8.0,<3",
     "pip-audit>=2.9.0",
     "python-dotenv>=1.0,<2",
