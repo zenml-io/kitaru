@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
 
 ## [0.21.0] - 2026-07-14

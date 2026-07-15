@@ -1688,7 +1688,14 @@ def diff_(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Compare an original execution against replay executions."""
+    """Compare an original execution against replay executions.
+
+    Token deltas are replay minus original workload tokens, including reused
+    model work. Cost deltas are replay minus original incurred display cost,
+    where explicitly reused work contributes zero. Token deltas are null only
+    when neither side has canonical usage; cost deltas are null when either side
+    has unpriced work that is not explicitly reused.
+    """
     from kitaru.diff import diff, serialize_execution_diff
 
     command = "executions.diff"
@@ -1727,7 +1734,13 @@ def diff_matrix_(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Diff many original executions against their auto-discovered replays."""
+    """Diff originals against replays using workload-token and incurred-cost bases.
+
+    Deltas are replay minus original. Tokens include reused model work; cost
+    excludes explicitly reused work. Token deltas are null only when neither
+    side has canonical usage, while cost deltas are null when either side has
+    unpriced work that is not explicitly reused.
+    """
     from kitaru.diff import diff_cohort, serialize_cohort_diff
 
     command = "executions.diff_matrix"

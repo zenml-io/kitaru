@@ -1849,6 +1849,9 @@ run_test "kitaru secrets set smoke secret" \
 run_test "SDK get_secret()" \
     env SMOKE_SECRET_NAME="$SMOKE_SECRET_NAME" \
     $UV_RUN python -c 'import os; from kitaru import get_secret; s = get_secret(os.environ["SMOKE_SECRET_NAME"]); assert s.get("SMOKE_TOKEN") == "smoke-value"'
+run_test "SDK list_secrets() key metadata contract" \
+    env SMOKE_SECRET_NAME="$SMOKE_SECRET_NAME" \
+    $UV_RUN python -c 'import os; from kitaru import list_secrets; matches = [s for s in list_secrets() if s.name == os.environ["SMOKE_SECRET_NAME"]]; assert len(matches) == 1; s = matches[0]; assert s.keys == []; assert s.keys_known is False; assert s.has_missing_values is False; assert "smoke-value" not in s.model_dump_json()'
 run_test "kitaru secrets delete smoke secret" \
     $UV_RUN kitaru secrets delete "$SMOKE_SECRET_NAME"
 
