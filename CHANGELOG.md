@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.
+- Live LLM integration runs now retain tested SHA, workflow run ID, and run-attempt provenance for release evidence.
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
 

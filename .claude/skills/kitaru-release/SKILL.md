@@ -427,11 +427,12 @@ rm -rf /tmp/kitaru-llm-integration
 mkdir -p /tmp/kitaru-llm-integration
 gh run download <RUN_ID> -n llm-integration-results -D /tmp/kitaru-llm-integration
 cat /tmp/kitaru-llm-integration/llm-integration.summary.md
+cat /tmp/kitaru-llm-integration/llm-integration.provenance.json
 ```
 
-The summary must show the release ref or SHA you are about to release. The workflow run's own `headSha` is the trusted workflow ref, not necessarily the Kitaru ref under test, so do not rely on `headSha` alone. Use the artifact line `Tested SHA` as the identity anchor.
+Exact provider evidence is the tested SHA, workflow run ID, and run attempt recorded in `llm-integration.provenance.json`. The workflow run's own `headSha` is the trusted workflow ref, not necessarily the Kitaru ref under test, so do not rely on `headSha` alone.
 
-The live-provider workflow uses the GitHub Environment `live-provider-tests`. Configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` as secrets on that Environment, with `kitaru-admins` approval/restrictions. If the Environment has required reviewers, the live test job and Discord notification job can wait for approval before secrets are available.
+The `live-provider-tests` environment is restricted to `develop` and has no required reviewers, allowing scheduled and manual runs to proceed unattended. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` are repository secrets, not environment secrets. If correcting an environment that required approval, cancel stale waiting runs before removing the reviewer requirement, then rerun the canary after the policy change.
 
 If exact-ref evidence is needed and missing, trigger it manually from trusted workflow code while testing the release ref/SHA:
 
@@ -458,6 +459,8 @@ If it fails, inspect logs and stop:
 ```bash
 gh run view <RUN_ID> --log-failed
 ```
+
+Rerun the canary after any environment or approval-policy change. Never cause a paid provider failure solely to test notification delivery.
 
 Release evidence table to report to the user before Step 9:
 

@@ -1606,7 +1606,11 @@ def test_runner_raises_when_sdk_returns_no_result_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_inline_scope(monkeypatch)
-    _patch_direct_execution_persistence(monkeypatch)
+    saved: list[tuple[str, object]] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_event=lambda name, value, *, type: saved.append((name, value)),
+    )
     assistant_message = fake_sdk.__dict__["AssistantMessage"]
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [
         assistant_message("not final")
@@ -1618,6 +1622,15 @@ def test_runner_raises_when_sdk_returns_no_result_message(
 
     with pytest.raises(RuntimeError, match="did not return a final ResultMessage"):
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    event_log = next(value for name, value in saved if name.startswith("event_log__"))
+    run_summary = next(
+        value for name, value in saved if name.startswith("run_summary__")
+    )
+    event = cast(list[dict[str, Any]], event_log)[0]
+    summary = cast(dict[str, Any], run_summary)
+    assert "claude_result_diagnostic" not in event["metadata"]
+    assert "claude_result_diagnostic" not in summary["metadata"]
 
 
 def test_runner_raises_when_sdk_result_is_error(
@@ -1648,7 +1661,7 @@ def test_runner_raises_when_sdk_result_is_error(
     assert "permission denied" not in str(exc_info.value)
 
 
-def test_failed_result_diagnostic_is_safe_and_persisted(
+def test_failed_result_diagnostic_is_safe_sticky_and_persisted(
     claude_adapter: types.ModuleType,
     fake_sdk: types.ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1667,6 +1680,7 @@ def test_failed_result_diagnostic_is_safe_and_persisted(
     cast(list[object], fake_sdk.__dict__["messages"])[:] = [
         assistant_message("first", error="rate_limit"),
         assistant_message("second", error="billing_error"),
+        assistant_message("later without error"),
         assistant_message("ignored", error="not_allowlisted"),
         result_message(
             is_error=True,
