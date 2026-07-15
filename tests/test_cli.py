@@ -4605,6 +4605,199 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     }
 
 
+def _serialized_execution_diff_for_cli() -> dict[str, Any]:
+    """Return a diff payload covering every text-rendering state."""
+    return {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay-a",
+                "checkpoints": [
+                    {
+                        "name": "generate",
+                        "status_match": True,
+                        "duration_delta_ms": 12.5,
+                        "token_delta": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": -5,
+                            "total_tokens": 5,
+                        },
+                        "cost_delta_usd": 0.0,
+                        "artifact_hashes": {
+                            "report": {"original": None, "replay": "report-b"},
+                            "output": {"original": "same", "replay": "same"},
+                            "model": {"original": "model-a", "replay": "model-b"},
+                        },
+                    },
+                    {
+                        "name": "unpriced",
+                        "status_match": False,
+                        "duration_delta_ms": None,
+                        "token_delta": None,
+                        "cost_delta_usd": None,
+                        "artifact_hashes": {},
+                    },
+                ],
+            },
+            {
+                "replay_exec_id": "kr-replay-b",
+                "checkpoints": [
+                    {
+                        "name": "evaluate",
+                        "status_match": True,
+                        "duration_delta_ms": -8.0,
+                        "token_delta": {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                        },
+                        "cost_delta_usd": -0.0017,
+                        "artifact_hashes": {
+                            "output": {"original": "output-a", "replay": "output-b"}
+                        },
+                    }
+                ],
+            },
+        ],
+        "urls": ["https://kitaru.example/compare"],
+        "warnings": [],
+    }
+
+
+@pytest.mark.parametrize("interactive", [False, True], ids=["plain", "rich"])
+def test_executions_diff_text_renders_checkpoint_tables(
+    capsys: pytest.CaptureFixture[str],
+    interactive: bool,
+) -> None:
+    """Plain and rich output should expose the same checkpoint diff semantics."""
+    serialized = _serialized_execution_diff_for_cli()
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        patch("kitaru._cli._helpers._is_interactive", return_value=interactive),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    output = " ".join(captured.out.split())
+    assert "Compared against 2 replay execution(s)." in output
+    assert "Replay kr-replay-a checkpoints" in output
+    assert "Replay kr-replay-b checkpoints" in output
+    assert "Checkpoint Status Duration Tokens Cost Artifacts" in output
+    assert "generate same +12.5 ms" in output
+    assert "+0.0 USD" in output
+    assert "unpriced changed n/a n/a n/a n/a" in output
+    assert "evaluate same -8.0 ms" in output
+    assert "-0.0017 USD" in output
+    if interactive:
+        for value in (
+            "input=+10",
+            "output=-5",
+            "total=+5",
+            "model=changed",
+            "output=unchanged",
+            "report=unavailable",
+            "input=+0",
+            "output=+0",
+            "total=+0",
+            "output=changed",
+        ):
+            assert value in output
+        assert "…" not in output
+    else:
+        assert "input=+10, output=-5, total=+5" in output
+        artifact_states = "model=changed, output=unchanged, report=unavailable"
+        assert artifact_states in output
+        assert "input=+0, output=+0, total=+0" in output
+        assert "output=changed" in output
+    assert "ui: https://kitaru.example/compare" in output
+
+
+@pytest.mark.parametrize("interactive", [False, True], ids=["plain", "rich"])
+def test_executions_diff_text_renders_real_serialized_diff_safely(
+    capsys: pytest.CaptureFixture[str],
+    interactive: bool,
+) -> None:
+    """The presenter should safely render real serialized diff edge cases."""
+    from kitaru.diff import CheckpointDiff, ExecutionDiff
+
+    diff_result = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[
+            (
+                "kr-replay",
+                [
+                    CheckpointDiff(
+                        name="[/red]",
+                        original_call_id="call-a",
+                        replay_call_id="call-b",
+                        status_match=True,
+                        duration_delta_ms=0.03 - 0.02,
+                        token_delta=None,
+                        cost_delta_usd=0.03 - 0.02,
+                        artifact_hashes={"[/blue]": ("hash-a", "hash-b")},
+                    ),
+                    CheckpointDiff(
+                        name="negative-zero",
+                        original_call_id="call-c",
+                        replay_call_id="call-d",
+                        status_match=True,
+                        duration_delta_ms=-0.0,
+                        token_delta=None,
+                        cost_delta_usd=-0.0,
+                        artifact_hashes={},
+                    ),
+                    CheckpointDiff(
+                        name="non-finite",
+                        original_call_id="call-e",
+                        replay_call_id="call-f",
+                        status_match=True,
+                        duration_delta_ms=float("nan"),
+                        token_delta=None,
+                        cost_delta_usd=float("inf"),
+                        artifact_hashes={},
+                    ),
+                ],
+            )
+        ],
+    )
+    with (
+        patch("kitaru.diff.diff", return_value=diff_result),
+        patch("kitaru._cli._helpers._is_interactive", return_value=interactive),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original"])
+
+    assert exc_info.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    assert "[/red] same +0.01 ms n/a +0.01 USD [/blue]=changed" in output
+    assert "negative-zero same +0.0 ms n/a +0.0 USD n/a" in output
+    assert "non-finite same n/a n/a n/a n/a" in output
+
+
+def test_executions_diff_text_renders_empty_checkpoint_section(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A compared replay without checkpoint rows should retain an empty section."""
+    serialized = {
+        "compared": [{"replay_exec_id": "kr-empty", "checkpoints": []}],
+        "urls": [],
+        "warnings": [],
+    }
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay kr-empty checkpoints" in output
+    assert "checkpoints: none found" in output
+
+
 def test_executions_diff_text_prints_discovery_warning(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

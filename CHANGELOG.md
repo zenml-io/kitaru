@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `kitaru executions diff` now shows a checkpoint-level table for each replay in its default text output, including status, duration, token, cost, and artifact comparisons. (#520)
+
 ## [0.21.0] - 2026-07-14
 
 ### Added

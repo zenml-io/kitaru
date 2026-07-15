@@ -446,15 +446,42 @@ for row in matrix.rows:
     print(row.original_exec_id, row.urls)
 ```
 
-CLI:
+The default CLI output shows one checkpoint table for each replay:
+
+```bash
+kitaru executions diff kr-original kr-replay-a
+```
+
+```text
+Diff for kr-original
+Compared against 1 replay execution(s).
+Replay kr-replay-a checkpoints
+  Checkpoint   Status    Duration   Tokens                                 Cost       Artifacts
+  ----------   -------   --------   ------------------------------------   --------   ------------------------------------------------------
+  generate     same      +12.5 ms   input=+10, output=-5, total=+5         +0.0 USD   model=changed, output=unchanged, report=unavailable
+  publish      changed   n/a        n/a                                    n/a        n/a
+  ui: https://kitaru.example/compare
+```
+
+`Status` is `same` when the original and replay checkpoint statuses match, and
+`changed` otherwise. Artifact roles are sorted by name. Each role is
+`unchanged` when both hashes match, `changed` when both hashes exist but differ,
+or `unavailable` when either hash is missing. `n/a` means the optional metric or
+artifact comparison is not available.
+
+Duration, token, and cost signs are always **replay minus original**. A negative
+value means the replay used less time, fewer tokens, or less money; a positive
+value means it used more. Explicit zeroes remain visible.
+
+Use JSON output for automation or the diff matrix:
 
 ```bash
 kitaru executions diff kr-original kr-replay-a -o json
 kitaru executions diff-matrix kr-a kr-b kr-c -o json
 ```
 
-Checkpoint token and cost deltas in JSON output are always calculated as
-**replay minus original**. For example:
+Checkpoint token and cost deltas in JSON use the same subtraction rule. For
+example:
 
 ```json
 {

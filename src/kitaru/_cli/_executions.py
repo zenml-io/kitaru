@@ -87,6 +87,100 @@ def _print_diff_warnings(payload: Mapping[str, Any]) -> None:
         _print_warning(f"Warning: {warning}")
 
 
+def _format_signed_delta(
+    value: object,
+    *,
+    unit: str = "",
+    precision: int | None = None,
+) -> str:
+    """Format an optional replay-minus-original value for diff tables."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "n/a"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "n/a"
+    sign = "+" if value >= 0 else "-"
+    magnitude = abs(value)
+    if precision is None:
+        formatted = str(magnitude)
+    else:
+        formatted = f"{magnitude:.{precision}f}".rstrip("0").rstrip(".")
+        if "." not in formatted:
+            formatted += ".0"
+    return f"{sign}{formatted}{unit}"
+
+
+def _format_token_delta(token_delta: object) -> str:
+    """Format canonical token deltas in their fixed display order."""
+    if not isinstance(token_delta, Mapping):
+        return "n/a"
+
+    values = [
+        token_delta.get("prompt_tokens"),
+        token_delta.get("completion_tokens"),
+        token_delta.get("total_tokens"),
+    ]
+    if any(value is None for value in values):
+        return "n/a"
+
+    return ", ".join(
+        f"{label}={_format_signed_delta(value)}"
+        for label, value in zip(("input", "output", "total"), values, strict=True)
+    )
+
+
+def _format_artifact_states(artifact_hashes: object) -> str:
+    """Format role-sorted artifact comparisons without exposing hashes."""
+    if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+        return "n/a"
+
+    states: list[str] = []
+    for role in sorted(artifact_hashes):
+        hashes = artifact_hashes[role]
+        if not isinstance(hashes, Mapping):
+            state = "unavailable"
+        else:
+            original_hash = hashes.get("original")
+            replay_hash = hashes.get("replay")
+            if original_hash is None or replay_hash is None:
+                state = "unavailable"
+            elif original_hash == replay_hash:
+                state = "unchanged"
+            else:
+                state = "changed"
+        states.append(f"{role}={state}")
+    return ", ".join(states)
+
+
+def _checkpoint_diff_table_rows(checkpoints: object) -> list[list[str]]:
+    """Convert serialized checkpoint diffs into presentation-only table rows."""
+    if not isinstance(checkpoints, list):
+        return []
+
+    rows: list[list[str]] = []
+    for checkpoint in checkpoints:
+        if not isinstance(checkpoint, Mapping):
+            continue
+        rows.append(
+            [
+                str(checkpoint.get("name") or "unknown"),
+                "same" if checkpoint.get("status_match") is True else "changed",
+                _format_signed_delta(
+                    checkpoint.get("duration_delta_ms"),
+                    unit=" ms",
+                    precision=3,
+                ),
+                _format_token_delta(checkpoint.get("token_delta")),
+                _format_signed_delta(
+                    checkpoint.get("cost_delta_usd"),
+                    unit=" USD",
+                    precision=6,
+                ),
+                _format_artifact_states(checkpoint.get("artifact_hashes")),
+            ]
+        )
+    return rows
+
+
 def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
     """Parse a CLI JSON option value and surface user-friendly errors."""
     try:
@@ -1715,6 +1809,13 @@ def diff_(
         f"Diff for {original}",
         detail=f"Compared against {compared_count} replay execution(s).",
     )
+    for comparison in payload.get("compared", []):
+        _emit_table(
+            f"Replay {comparison['replay_exec_id']} checkpoints",
+            ["Checkpoint", "Status", "Duration", "Tokens", "Cost", "Artifacts"],
+            _checkpoint_diff_table_rows(comparison.get("checkpoints")),
+            rich_multiline_columns={"Tokens": 12, "Artifacts": 18},
+        )
     for url in payload.get("urls", []):
         print(f"  ui: {url}")
 

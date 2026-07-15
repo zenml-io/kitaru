@@ -221,16 +221,20 @@ In the dashboard executions list, filter by the `replay-overrides-demo` tag to f
 
 ## 5. Reading diffs for ship / no-ship
 
-Use compare view (primary) or export JSON for automation:
+Use the checkpoint-level CLI table for a quick terminal review, the dashboard
+compare view for deeper inspection, or exported JSON for automation:
 
 ```bash
+uv run kitaru executions diff <ORIGINAL_EXEC_ID> <REPLAY_EXEC_ID>
 uv run python demo.py diff-report <REPLAY_EXEC_ID>
 uv run python demo.py diff-matrix
 ```
 
-`diff-report` needs the replay child ID from the dashboard (compare tab or
-execution detail). Writes `reports/diff_report.json`. `diff-matrix` summarizes
-all originals against their tagged replay children → `reports/diff_matrix.json`.
+The CLI table shows status, duration, token, cost, and artifact changes for each
+checkpoint. `diff-report` needs the replay child ID from the dashboard (compare
+tab or execution detail) and writes `reports/diff_report.json`. `diff-matrix`
+summarizes all originals against their tagged replay children →
+`reports/diff_matrix.json`.
 
 **Ship if:** variant model/prompt keeps `risk_status` and `required_action` within
 policy for restricted account changes across the batch.
