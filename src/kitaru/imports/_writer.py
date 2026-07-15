@@ -3,6 +3,7 @@
 import hashlib
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -65,6 +66,14 @@ class ImportedTraceConflictError(ImportedTracePersistenceError):
     """Raised when a source trace identity already has different content."""
 
 
+class ImportedTracePlan(StrEnum):
+    """Read-only persistence plan for one imported trace."""
+
+    CREATE = "create"
+    RESUME = "resume"
+    UNCHANGED = "unchanged"
+
+
 @dataclass(frozen=True)
 class ImportedExecutionResult:
     """Result of persisting one normalized trace."""
@@ -73,6 +82,33 @@ class ImportedExecutionResult:
     created: bool
     resumed: bool
     observation_count: int
+
+
+def plan_imported_trace(
+    trace: ImportedTrace,
+    *,
+    agent_name: str,
+    client: Client | None = None,
+) -> ImportedTracePlan:
+    """Determine what persistence would do without modifying backend state."""
+    normalized_agent_name = _validate_import(trace, agent_name=agent_name)
+    zenml_client = client or Client()
+    identity_digest = _source_identity_digest(trace)
+    existing_run = _find_run(
+        client=zenml_client,
+        project_id=zenml_client.active_project.id,
+        run_name=_run_name(trace, identity_digest=identity_digest),
+    )
+    if existing_run is None:
+        return ImportedTracePlan.CREATE
+    _validate_existing_run(
+        existing_run,
+        trace=trace,
+        agent_name=normalized_agent_name,
+    )
+    if existing_run.status.is_finished:
+        return ImportedTracePlan.UNCHANGED
+    return ImportedTracePlan.RESUME
 
 
 def _imported_observation_placeholder() -> None:
@@ -92,15 +128,7 @@ def persist_imported_trace(
     stack is used only to persist artifacts and associate the synthetic run
     with a stack for normal UI rendering.
     """
-    if not trace.observations:
-        raise ImportedTracePersistenceError("Cannot persist an empty trace.")
-    if trace.integrity is TraceIntegrity.INVALID:
-        raise ImportedTracePersistenceError(
-            f"Cannot persist trace {trace.source.trace_id!r}: invalid graph."
-        )
-    normalized_agent_name = agent_name.strip()
-    if not normalized_agent_name:
-        raise ImportedTracePersistenceError("agent_name cannot be empty.")
+    normalized_agent_name = _validate_import(trace, agent_name=agent_name)
 
     zenml_client = client or Client()
     project_id = zenml_client.active_project.id
@@ -303,6 +331,19 @@ def persist_imported_trace(
         resumed=not created,
         observation_count=len(trace.observations),
     )
+
+
+def _validate_import(trace: ImportedTrace, *, agent_name: str) -> str:
+    if not trace.observations:
+        raise ImportedTracePersistenceError("Cannot persist an empty trace.")
+    if trace.integrity is TraceIntegrity.INVALID:
+        raise ImportedTracePersistenceError(
+            f"Cannot persist trace {trace.source.trace_id!r}: invalid graph."
+        )
+    normalized_agent_name = agent_name.strip()
+    if not normalized_agent_name:
+        raise ImportedTracePersistenceError("agent_name cannot be empty.")
+    return normalized_agent_name
 
 
 def _get_or_create_pipeline(

@@ -671,6 +671,7 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
     assert hasattr(client, "deployments")
+    assert hasattr(client, "imports")
     assert hasattr(client, "projects")
     assert hasattr(client, "auth")
     assert hasattr(client.auth, "service_accounts")
@@ -755,6 +756,12 @@ def test_project_management_client_blocks_project_scoped_apis_without_project() 
         client.artifacts.list("exec-1")
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
         client.deployments.list()
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        client.imports.langfuse(
+            "export.jsonl",
+            source_project_id="source-project",
+            agent_name="support-agent",
+        )
 
 
 def test_client_projects_current_resolves_name_env_without_zenml_uuid_env(

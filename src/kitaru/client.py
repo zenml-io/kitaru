@@ -59,6 +59,7 @@ from kitaru._client._events import (
     open_rest_sse_stream,
     watch_execution_events,
 )
+from kitaru._client._imports import ImportsAPI
 from kitaru._client._logs import (
     _coerce_log_level,
     _coerce_log_lineno,
@@ -3189,7 +3190,7 @@ class _ProjectsAPI:
 
 
 class KitaruClient:
-    """Client for Kitaru executions, artifacts, deployments, projects, and auth."""
+    """Client for executions, artifacts, deployments, imports, projects, and auth."""
 
     def __init__(
         self,
@@ -3240,10 +3241,12 @@ class KitaruClient:
             self.executions = unavailable
             self.artifacts = unavailable
             self.deployments = unavailable
+            self.imports = unavailable
         else:
             self.executions = _ExecutionsAPI(self)
             self.artifacts = _ArtifactsAPI(self)
             self.deployments = _DeploymentsAPI(self)
+            self.imports = ImportsAPI(self)
 
     @classmethod
     def for_auth_management(cls) -> KitaruClient:
