@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -18,14 +19,18 @@ from kitaru._checkpoint_metadata import (
 )
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import (
+    REPLAY_OUTPUT_OVERRIDES_METADATA_KEY,
     REPLAY_SKIPPED_STEPS_METADATA_KEY,
+    AppliedOutputOverride,
     ReplayPlanDocument,
     ReplayResultRow,
     ReplaySubmission,
     build_replay_plan,
+    parse_replay_output_overrides_metadata,
     parse_replay_skipped_steps_metadata,
     plan_requires_runtime_transport,
     replay_at_status,
+    replay_output_overrides_metadata,
     replay_skipped_steps_metadata,
     safe_persist_replay_submission_metadata,
 )
@@ -1236,6 +1241,107 @@ def test_code_override_rejects_non_tool_checkpoint() -> None:
         )
 
 
+def test_replay_output_override_metadata_is_value_free_and_effective() -> None:
+    replacement_value = "secret replacement value"
+    document = ReplayPlanDocument(
+        checkpoint_overrides={
+            "lookup": {"output": replacement_value},
+            "other": {"input": {"query": "not persisted"}},
+        },
+        invocation_overrides={
+            "lookup_2": {"output": {"private": replacement_value}},
+        },
+        matched_targets={
+            "checkpoint:lookup": ["lookup_1", "lookup_2"],
+            "checkpoint:other": ["other"],
+            "invocation:lookup_2": ["lookup_2"],
+        },
+    )
+
+    metadata = replay_output_overrides_metadata(document)
+
+    assert metadata == {
+        REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: [
+            {
+                "selector_kind": "checkpoint",
+                "selector": "lookup",
+                "matched_invocation_ids": ["lookup_1"],
+                "field": "output",
+            },
+            {
+                "selector_kind": "invocation",
+                "selector": "lookup_2",
+                "matched_invocation_ids": ["lookup_2"],
+                "field": "output",
+            },
+        ]
+    }
+    assert replacement_value not in str(metadata)
+
+
+def test_parse_replay_output_override_metadata_distinguishes_known_none() -> None:
+    assert parse_replay_output_overrides_metadata({}) is None
+    assert (
+        parse_replay_output_overrides_metadata(
+            {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: []}
+        )
+        == []
+    )
+    assert (
+        parse_replay_output_overrides_metadata(
+            {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: "[]"}
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        None,
+        "not json",
+        {},
+        [{"selector_kind": "checkpoint"}],
+        [
+            {
+                "selector_kind": "checkpoint",
+                "selector": "lookup",
+                "matched_invocation_ids": [3],
+                "field": "output",
+            }
+        ],
+    ],
+)
+def test_parse_replay_output_override_metadata_rejects_malformed_values(
+    raw_value: Any,
+) -> None:
+    assert (
+        parse_replay_output_overrides_metadata(
+            {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: raw_value}
+        )
+        is None
+    )
+
+
+def test_parse_replay_output_override_metadata_accepts_json_string() -> None:
+    raw_entry = {
+        "selector_kind": "invocation",
+        "selector": "lookup_2",
+        "matched_invocation_ids": ["lookup_2"],
+        "field": "output",
+    }
+
+    assert parse_replay_output_overrides_metadata(
+        {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: json.dumps([raw_entry])}
+    ) == [
+        AppliedOutputOverride(
+            selector_kind="invocation",
+            selector="lookup_2",
+            matched_invocation_ids=("lookup_2",),
+        )
+    ]
+
+
 def test_replay_skipped_steps_metadata_is_deterministic() -> None:
     assert replay_skipped_steps_metadata({"write", "fetch"}) == {
         REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch", "write"]
@@ -1303,6 +1409,68 @@ def test_replay_submission_metadata_uses_pipeline_run_update_for_tags(
     assert calls["run_id"] == "replay-a"
     assert isinstance(calls["run_update"], PipelineRunUpdate)
     assert calls["run_update"].add_tags == ["batch-eval"]
+
+
+@pytest.mark.parametrize("fail_optional_write", [False, True])
+def test_replay_submission_metadata_writes_override_evidence_separately(
+    monkeypatch: pytest.MonkeyPatch,
+    fail_optional_write: bool,
+) -> None:
+    logged: list[dict[str, Any]] = []
+
+    def fake_log_to_execution(_run_id: str, **metadata: Any) -> None:
+        logged.append(metadata)
+        if fail_optional_write and REPLAY_OUTPUT_OVERRIDES_METADATA_KEY in metadata:
+            raise RuntimeError("backend rejected new metadata")
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    safe_persist_replay_submission_metadata(
+        replay_exec_id="replay-a",
+        original_exec_id="orig-a",
+        submission_id="rs-test",
+        tag=None,
+        steps_to_skip={"fetch"},
+        replay_plan=ReplayPlanDocument(),
+    )
+
+    assert logged == [
+        {
+            "submission_id": "rs-test",
+            "original_exec_id": "orig-a",
+            REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"],
+        },
+        {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: []},
+    ]
+
+
+def test_replay_submission_metadata_does_not_retry_failed_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: list[dict[str, Any]] = []
+
+    def fake_log_to_execution(_run_id: str, **metadata: Any) -> None:
+        logged.append(metadata)
+        raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+
+    safe_persist_replay_submission_metadata(
+        replay_exec_id="replay-a",
+        original_exec_id="orig-a",
+        submission_id="rs-test",
+        tag=None,
+        steps_to_skip={"fetch"},
+        replay_plan=ReplayPlanDocument(),
+    )
+
+    assert logged == [
+        {
+            "submission_id": "rs-test",
+            "original_exec_id": "orig-a",
+            REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"],
+        }
+    ]
 
 
 def test_replay_submission_to_json_excludes_handles() -> None:

@@ -44,6 +44,13 @@ _PYDANTIC_AI_TURN_KIND = "turn"
 logger = logging.getLogger(__name__)
 
 REPLAY_SKIPPED_STEPS_METADATA_KEY = "kitaru_replay_skipped_steps_v1"
+REPLAY_OUTPUT_OVERRIDES_METADATA_KEY = "kitaru_replay_output_overrides_v1"
+_ReplaySelectorKind = Literal["checkpoint", "invocation"]
+
+
+def _matched_target_key(selector_kind: _ReplaySelectorKind, selector: str) -> str:
+    return f"{selector_kind}:{selector}"
+
 
 REPLAY_RESERVED_KWARGS = frozenset(
     {
@@ -73,6 +80,15 @@ class ReplayPlanDocument:
     skip: list[str] = field(default_factory=list)
     matched_targets: dict[str, list[str]] = field(default_factory=dict)
 
+    def matched_invocation_ids(
+        self,
+        selector_kind: _ReplaySelectorKind,
+        selector: str,
+    ) -> tuple[str, ...]:
+        return tuple(
+            self.matched_targets.get(_matched_target_key(selector_kind, selector), [])
+        )
+
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "flow_overrides": self.flow_overrides,
@@ -85,6 +101,23 @@ class ReplayPlanDocument:
                 key: list(value) for key, value in self.matched_targets.items()
             }
         return payload
+
+
+@dataclass(frozen=True)
+class AppliedOutputOverride:
+    """Value-free evidence that a replay output override was applied."""
+
+    selector_kind: _ReplaySelectorKind
+    selector: str
+    matched_invocation_ids: tuple[str, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "selector_kind": self.selector_kind,
+            "selector": self.selector,
+            "matched_invocation_ids": list(self.matched_invocation_ids),
+            "field": "output",
+        }
 
 
 @dataclass(frozen=True)
@@ -277,6 +310,92 @@ def _safe_apply_replay_tag(replay_exec_id: str, tag: str | None) -> None:
         )
 
 
+def replay_output_overrides_metadata(
+    document: ReplayPlanDocument,
+) -> dict[str, Any]:
+    """Project a resolved replay plan into value-free output override evidence."""
+    entries: list[dict[str, Any]] = []
+    override_groups: tuple[
+        tuple[_ReplaySelectorKind, Mapping[str, Mapping[str, Any]]],
+        ...,
+    ] = (
+        ("checkpoint", document.checkpoint_overrides),
+        ("invocation", document.invocation_overrides),
+    )
+    configured_overrides: list[tuple[_ReplaySelectorKind, str, tuple[str, ...]]] = []
+    effective_owner: dict[str, tuple[_ReplaySelectorKind, str]] = {}
+    for selector_kind, overrides in override_groups:
+        for selector, override in overrides.items():
+            if "output" not in override:
+                continue
+            matched_invocation_ids = document.matched_invocation_ids(
+                selector_kind, selector
+            )
+            configured_overrides.append(
+                (selector_kind, selector, matched_invocation_ids)
+            )
+            for invocation_id in matched_invocation_ids:
+                effective_owner[invocation_id] = (selector_kind, selector)
+
+    for selector_kind, selector, matched_invocation_ids in configured_overrides:
+        entry = AppliedOutputOverride(
+            selector_kind=selector_kind,
+            selector=selector,
+            matched_invocation_ids=tuple(
+                invocation_id
+                for invocation_id in matched_invocation_ids
+                if effective_owner[invocation_id] == (selector_kind, selector)
+            ),
+        )
+        entries.append(entry.to_json())
+    return {REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: entries}
+
+
+def parse_replay_output_overrides_metadata(
+    metadata: Mapping[str, Any],
+) -> list[AppliedOutputOverride] | None:
+    """Parse value-free replay output override evidence safely."""
+    if REPLAY_OUTPUT_OVERRIDES_METADATA_KEY not in metadata:
+        return None
+    raw_value = metadata[REPLAY_OUTPUT_OVERRIDES_METADATA_KEY]
+    if isinstance(raw_value, str):
+        try:
+            raw_value = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(raw_value, list):
+        return None
+
+    parsed: list[AppliedOutputOverride] = []
+    for raw_entry in raw_value:
+        if not isinstance(raw_entry, Mapping):
+            return None
+        selector_kind = raw_entry.get("selector_kind")
+        selector = raw_entry.get("selector")
+        matched_invocation_ids = raw_entry.get("matched_invocation_ids")
+        field_name = raw_entry.get("field")
+        if (
+            selector_kind not in ("checkpoint", "invocation")
+            or not isinstance(selector, str)
+            or not selector
+            or not isinstance(matched_invocation_ids, list)
+            or not all(
+                isinstance(invocation_id, str) and invocation_id
+                for invocation_id in matched_invocation_ids
+            )
+            or field_name != "output"
+        ):
+            return None
+        parsed.append(
+            AppliedOutputOverride(
+                selector_kind=selector_kind,
+                selector=selector,
+                matched_invocation_ids=tuple(matched_invocation_ids),
+            )
+        )
+    return parsed
+
+
 def replay_skipped_steps_metadata(steps_to_skip: Iterable[str]) -> dict[str, Any]:
     """Return deterministic replay skip metadata for an execution."""
     skipped_steps = sorted(
@@ -315,26 +434,45 @@ def safe_persist_replay_submission_metadata(
     submission_id: str,
     tag: str | None,
     steps_to_skip: Iterable[str] | None = None,
+    replay_plan: ReplayPlanDocument | None = None,
 ) -> None:
     """Best-effort replay correlation metadata and tag persistence."""
+    baseline_metadata: dict[str, Any] = {
+        "submission_id": submission_id,
+        "original_exec_id": original_exec_id,
+    }
+    if steps_to_skip is not None:
+        baseline_metadata.update(replay_skipped_steps_metadata(steps_to_skip))
+    if tag:
+        baseline_metadata["replay_tag"] = tag
+
+    baseline_persisted = False
     try:
         from kitaru.logging import log_to_execution
 
-        metadata: dict[str, Any] = {
-            "submission_id": submission_id,
-            "original_exec_id": original_exec_id,
-        }
-        if steps_to_skip is not None:
-            metadata.update(replay_skipped_steps_metadata(steps_to_skip))
-        if tag:
-            metadata["replay_tag"] = tag
-        log_to_execution(replay_exec_id, **metadata)
+        log_to_execution(replay_exec_id, **baseline_metadata)
+        baseline_persisted = True
     except Exception:
         logger.debug(
             "Failed to persist replay metadata for %s.",
             replay_exec_id,
             exc_info=True,
         )
+
+    # Keep the established metadata write independent from the optional
+    # versioned evidence. Neither request is retried after an ambiguous failure.
+    if baseline_persisted and replay_plan is not None:
+        try:
+            log_to_execution(
+                replay_exec_id,
+                **replay_output_overrides_metadata(replay_plan),
+            )
+        except Exception:
+            logger.debug(
+                "Failed to persist replay output override metadata for %s.",
+                replay_exec_id,
+                exc_info=True,
+            )
     _safe_apply_replay_tag(replay_exec_id, tag)
 
 
@@ -1068,7 +1206,7 @@ def _build_effective_overrides(
 
     for selector, entry in checkpoint_entries.items():
         matches = _resolve_checkpoint_scope_selector(selector, checkpoints)
-        matched_targets[f"checkpoint:{selector}"] = [
+        matched_targets[_matched_target_key("checkpoint", selector)] = [
             checkpoint.invocation_id for checkpoint in matches
         ]
         for checkpoint in matches:
@@ -1076,7 +1214,9 @@ def _build_effective_overrides(
 
     for selector, entry in invocation_entries.items():
         checkpoint = _resolve_checkpoint_selector(selector, checkpoints)
-        matched_targets[f"invocation:{selector}"] = [checkpoint.invocation_id]
+        matched_targets[_matched_target_key("invocation", selector)] = [
+            checkpoint.invocation_id
+        ]
         _put_target_override(effective, checkpoint, entry)
 
     for invocation_id, entry in effective.items():
@@ -1274,8 +1414,10 @@ def build_replay_plan(
 
 
 __all__ = [
+    "REPLAY_OUTPUT_OVERRIDES_METADATA_KEY",
     "REPLAY_RESERVED_KWARGS",
     "REPLAY_SKIPPED_STEPS_METADATA_KEY",
+    "AppliedOutputOverride",
     "ReplayFailureRow",
     "ReplayPlan",
     "ReplayPlanDocument",
@@ -1286,10 +1428,12 @@ __all__ = [
     "build_replay_plan",
     "build_replay_request_document",
     "new_replay_submission_id",
+    "parse_replay_output_overrides_metadata",
     "parse_replay_skipped_steps_metadata",
     "plan_requires_runtime_transport",
     "replay_at_skip_reason",
     "replay_at_status",
+    "replay_output_overrides_metadata",
     "replay_skipped_steps_metadata",
     "replay_step_invocation_id",
     "safe_compare_url_for_executions",
