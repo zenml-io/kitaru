@@ -1829,6 +1829,7 @@ class _ExecutionsAPI:
                         submission_id=submission_id,
                         tag=tag,
                         steps_to_skip=replay_plan.steps_to_skip,
+                        replay_plan=replay_plan.document,
                     )
                 row_status: Literal["submitted", "completed", "failed"] = "submitted"
                 if wait:

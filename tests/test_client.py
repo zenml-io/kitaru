@@ -6307,6 +6307,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         flow_name="sample_flow",
     )
     project_events: list[tuple[str, str | None]] = []
+    persisted_metadata: dict[str, Any] = {}
 
     @contextmanager
     def _project_context(project: str | None) -> Iterator[None]:
@@ -6320,7 +6321,8 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         assert project_events == [("enter", "production")]
         return _as_pipeline_run(replayed_run)
 
-    def _persist_submission(**_kwargs: Any) -> None:
+    def _persist_submission(**kwargs: Any) -> None:
+        persisted_metadata.update(kwargs)
         assert project_events == [
             ("enter", "production"),
             ("exit", "production"),
@@ -6373,6 +6375,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
     assert submission.results[0].replay_exec_id == str(replayed_run.id)
+    assert persisted_metadata["replay_plan"] == submission.plan
     replay_handle = submission.results[0].handle
     assert replay_handle is not None
     assert replay_handle._project == "production"

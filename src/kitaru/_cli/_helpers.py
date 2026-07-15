@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType
@@ -413,20 +413,15 @@ def _render_rich_table(
     title: str,
     columns: list[str],
     table_rows: list[list[str]],
-    multiline_columns: Mapping[str, int] | None = None,
 ) -> None:
     """Render a Rich table inside the standard Kitaru panel."""
-    multiline_widths = {
-        column.lower().strip(): min_width
-        for column, min_width in (multiline_columns or {}).items()
-    }
     rich_table = Table(
         box=box.SIMPLE_HEAD,
         show_header=True,
         header_style="bold",
         show_lines=False,
         pad_edge=False,
-        collapse_padding=bool(multiline_widths),
+        collapse_padding=False,
         expand=False,
         show_edge=False,
     )
@@ -436,23 +431,14 @@ def _render_rich_table(
         rich_table.add_column(
             col,
             no_wrap=normalized in {"id", "status"},
-            overflow=(
-                "fold"
-                if normalized in {"flow", "stack"} or normalized in multiline_widths
-                else "ellipsis"
-            ),
-            min_width=multiline_widths.get(normalized),
+            overflow="fold" if normalized in {"flow", "stack"} else "ellipsis",
         )
 
     for row in table_rows:
         rendered: list[str | Text] = []
         for i, cell in enumerate(row):
             style = _table_cell_style(columns[i], cell, column_index=i)
-            normalized = columns[i].lower().strip()
-            rendered_cell = (
-                cell.replace(", ", "\n") if normalized in multiline_widths else cell
-            )
-            rendered.append(Text(rendered_cell, style=style or ""))
+            rendered.append(Text(cell, style=style or ""))
         rich_table.add_row(*rendered)
 
     Console().print(
@@ -489,7 +475,6 @@ def _emit_table(
     columns: list[str],
     table_rows: list[list[str]],
     empty_message: str = "none found",
-    rich_multiline_columns: Mapping[str, int] | None = None,
 ) -> None:
     """Render aligned columnar output with headers (rich panel or plain text)."""
     if not table_rows:
@@ -497,12 +482,7 @@ def _emit_table(
         return
 
     if _is_interactive():
-        _render_rich_table(
-            title,
-            columns,
-            table_rows,
-            multiline_columns=rich_multiline_columns,
-        )
+        _render_rich_table(title, columns, table_rows)
     else:
         print(_render_plain_table(title, columns, table_rows))
 

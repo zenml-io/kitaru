@@ -230,8 +230,7 @@ uv run python demo.py diff-report <REPLAY_EXEC_ID>
 uv run python demo.py diff-matrix
 ```
 
-The CLI table shows status, duration, token, cost, and artifact changes for each
-checkpoint. `diff-report` needs the replay child ID from the dashboard (compare
+The CLI table shows each checkpoint result plus token and cost deltas. `diff-report` needs the replay child ID from the dashboard (compare
 tab or execution detail) and writes `reports/diff_report.json`. `diff-matrix`
 summarizes all originals against their tagged replay children →
 `reports/diff_matrix.json`.

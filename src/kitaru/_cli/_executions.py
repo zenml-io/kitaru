@@ -87,108 +87,123 @@ def _print_diff_warnings(payload: Mapping[str, Any]) -> None:
         _print_warning(f"Warning: {warning}")
 
 
-def _format_signed_delta(
-    value: object,
-    *,
-    unit: str = "",
-    precision: int | None = None,
-) -> str:
-    """Format an optional replay-minus-original value for diff tables."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+def _format_diff_delta(value: Any, *, decimal_places: int | None = None) -> str:
+    """Format one signed numeric delta for compact diff output."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return "n/a"
     if isinstance(value, float) and not math.isfinite(value):
         return "n/a"
-    sign = "+" if value >= 0 else "-"
-    magnitude = abs(value)
-    if precision is None:
-        formatted = str(magnitude)
-    else:
-        formatted = f"{magnitude:.{precision}f}".rstrip("0").rstrip(".")
-        if "." not in formatted:
-            formatted += ".0"
-    return f"{sign}{formatted}{unit}"
+    if decimal_places is None:
+        return f"{value:+d}" if isinstance(value, int) else "n/a"
+    return f"{value:+.{decimal_places}f}"
 
 
-def _format_token_delta(token_delta: object) -> str:
-    """Format canonical token deltas in their fixed display order."""
-    if not isinstance(token_delta, Mapping):
-        return "n/a"
+def _checkpoint_diff_status(checkpoint: Mapping[str, Any]) -> str:
+    """Return the compact result label for one checkpoint diff."""
+    original_present = checkpoint.get("original_call_id") is not None
+    replay_present = checkpoint.get("replay_call_id") is not None
+    if original_present and not replay_present:
+        return "original only"
+    if replay_present and not original_present:
+        return "replay only"
+    if checkpoint.get("status_match") is not True:
+        return "changed"
 
-    values = [
-        token_delta.get("prompt_tokens"),
-        token_delta.get("completion_tokens"),
-        token_delta.get("total_tokens"),
-    ]
-    if any(value is None for value in values):
-        return "n/a"
+    token_delta = checkpoint.get("token_delta")
+    if isinstance(token_delta, Mapping) and any(
+        isinstance(value, int | float) and not isinstance(value, bool) and value != 0
+        for value in token_delta.values()
+    ):
+        return "changed"
 
-    return ", ".join(
-        f"{label}={_format_signed_delta(value)}"
-        for label, value in zip(("input", "output", "total"), values, strict=True)
-    )
+    cost_delta = checkpoint.get("cost_delta_usd")
+    if (
+        isinstance(cost_delta, int | float)
+        and not isinstance(cost_delta, bool)
+        and cost_delta != 0
+    ):
+        return "changed"
 
-
-def _format_artifact_states(artifact_hashes: object) -> str:
-    """Format role-sorted artifact comparisons without exposing hashes."""
-    if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
-        return "n/a"
-
-    states: list[str] = []
-    for role in sorted(artifact_hashes):
-        hashes = artifact_hashes[role]
-        if not isinstance(hashes, Mapping):
-            state = "unavailable"
-        else:
-            original_hash = hashes.get("original")
-            replay_hash = hashes.get("replay")
-            if original_hash is None or replay_hash is None:
-                state = "unavailable"
-            elif original_hash == replay_hash:
-                state = "unchanged"
-            else:
-                state = "changed"
-        states.append(f"{role}={state}")
-    return ", ".join(states)
+    artifact_hashes = checkpoint.get("artifact_hashes")
+    if isinstance(artifact_hashes, Mapping) and any(
+        isinstance(hashes, Mapping) and hashes.get("original") != hashes.get("replay")
+        for hashes in artifact_hashes.values()
+    ):
+        return "changed"
+    return "match"
 
 
-def _checkpoint_diff_table_rows(checkpoints: object) -> list[list[str]]:
-    """Convert serialized checkpoint diffs into presentation-only table rows."""
-    if not isinstance(checkpoints, list):
-        return []
-
+def _checkpoint_diff_table(
+    payload: Mapping[str, Any],
+) -> tuple[list[list[str]], list[str]]:
+    """Build compact checkpoint rows and identify compared replays without rows."""
     rows: list[list[str]] = []
-    for checkpoint in checkpoints:
-        if not isinstance(checkpoint, Mapping):
+    empty_replay_ids: list[str] = []
+    compared = payload.get("compared", [])
+    if not isinstance(compared, list):
+        return rows, empty_replay_ids
+
+    for comparison in compared:
+        if not isinstance(comparison, Mapping):
             continue
-        original_call_id = checkpoint.get("original_call_id")
-        replay_call_id = checkpoint.get("replay_call_id")
-        if original_call_id is None and replay_call_id is not None:
-            status = "added"
-        elif original_call_id is not None and replay_call_id is None:
-            status = "removed"
-        elif checkpoint.get("status_match") is True:
-            status = "same"
-        else:
-            status = "changed"
-        rows.append(
-            [
-                str(checkpoint.get("name") or "unknown"),
-                status,
-                _format_signed_delta(
-                    checkpoint.get("duration_delta_ms"),
-                    unit=" ms",
-                    precision=3,
-                ),
-                _format_token_delta(checkpoint.get("token_delta")),
-                _format_signed_delta(
-                    checkpoint.get("cost_delta_usd"),
-                    unit=" USD",
-                    precision=6,
-                ),
-                _format_artifact_states(checkpoint.get("artifact_hashes")),
-            ]
-        )
-    return rows
+        replay_exec_id = str(comparison.get("replay_exec_id") or "unknown replay")
+        checkpoints = comparison.get("checkpoints", [])
+        if not isinstance(checkpoints, list) or not checkpoints:
+            empty_replay_ids.append(replay_exec_id)
+            continue
+        for checkpoint in checkpoints:
+            if not isinstance(checkpoint, Mapping):
+                continue
+            token_delta = checkpoint.get("token_delta")
+            token_mapping = token_delta if isinstance(token_delta, Mapping) else {}
+            rows.append(
+                [
+                    replay_exec_id,
+                    str(checkpoint.get("name") or "unknown checkpoint"),
+                    _checkpoint_diff_status(checkpoint),
+                    _format_diff_delta(token_mapping.get("prompt_tokens")),
+                    _format_diff_delta(token_mapping.get("completion_tokens")),
+                    _format_diff_delta(token_mapping.get("total_tokens")),
+                    _format_diff_delta(
+                        checkpoint.get("cost_delta_usd"), decimal_places=6
+                    ),
+                ]
+            )
+    return rows, empty_replay_ids
+
+
+def _print_applied_output_overrides(payload: Mapping[str, Any]) -> None:
+    """Print redacted output override evidence associated with each replay."""
+    compared = payload.get("compared", [])
+    if not isinstance(compared, list):
+        return
+
+    for comparison in compared:
+        if not isinstance(comparison, Mapping):
+            continue
+        replay_exec_id = str(comparison.get("replay_exec_id") or "unknown replay")
+        overrides = comparison.get("applied_output_overrides")
+        if overrides is None:
+            print(f"Applied output overrides: unavailable [{replay_exec_id}]")
+            continue
+        if not isinstance(overrides, list) or not overrides:
+            continue
+
+        print(f"Applied output overrides [{replay_exec_id}]:")
+        for override in overrides:
+            if not isinstance(override, Mapping):
+                continue
+            selector_kind = override.get("selector_kind")
+            kind_label = (
+                "checkpoint family" if selector_kind == "checkpoint" else "invocation"
+            )
+            selector = str(override.get("selector") or "unknown selector")
+            raw_ids = override.get("matched_invocation_ids", [])
+            matched_ids = (
+                [str(item) for item in raw_ids] if isinstance(raw_ids, list) else []
+            )
+            resolved = ", ".join(matched_ids) or "no resolved checkpoint IDs"
+            print(f"  {kind_label} '{selector}' -> {resolved}")
 
 
 def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
@@ -1826,13 +1841,24 @@ def diff_(
         f"Diff for {original}",
         detail=f"Compared against {compared_count} replay execution(s).",
     )
-    for comparison in payload.get("compared", []):
+    checkpoint_rows, empty_replay_ids = _checkpoint_diff_table(payload)
+    if checkpoint_rows:
         _emit_table(
-            f"Replay {comparison['replay_exec_id']} checkpoints",
-            ["Checkpoint", "Status", "Duration", "Tokens", "Cost", "Artifacts"],
-            _checkpoint_diff_table_rows(comparison.get("checkpoints")),
-            rich_multiline_columns={"Tokens": 12, "Artifacts": 18},
+            "Checkpoint differences",
+            [
+                "Replay",
+                "Checkpoint",
+                "Result",
+                "Input Δ",
+                "Output Δ",
+                "Total Δ",
+                "Cost Δ (USD)",
+            ],
+            checkpoint_rows,
         )
+    for replay_exec_id in empty_replay_ids:
+        print(f"No checkpoint rows for replay {replay_exec_id}.")
+    _print_applied_output_overrides(payload)
     for url in payload.get("urls", []):
         print(f"  ui: {url}")
 
