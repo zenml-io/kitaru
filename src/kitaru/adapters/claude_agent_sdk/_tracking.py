@@ -95,6 +95,7 @@ class EventTracker:
     _session_id: str | None = None
     _transcript_path: str | None = None
     _warnings: list[str] = field(default_factory=list)
+    _metadata: dict[str, Any] = field(default_factory=dict)
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
@@ -137,6 +138,7 @@ class EventTracker:
             self._session_id = session_id
             self._transcript_path = transcript_path
             self._warnings = list(warnings or [])
+            self._metadata = dict(metadata or {})
             event_id = f"{self.runner_name}_{self.run_label}_invocation_1"
             self._events = [
                 ClaudeAdapterEvent(
@@ -172,6 +174,7 @@ class EventTracker:
             "session_id": self._session_id,
             "transcript_path": self._transcript_path,
             "warnings": self._warnings,
+            "metadata": self._metadata,
             "error": (
                 error_from_exception(self._error).model_dump(mode="json")
                 if self._error is not None

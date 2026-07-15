@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Langfuse observations JSONL exports can now be normalized and stored as inspectable synthetic Kitaru executions through `KitaruClient.imports.langfuse(...)` or `kitaru import langfuse`. Imports preview by default, require explicit consent before storing full inputs and outputs, preserve dynamic observation graphs and usage metadata, reject fragmented traces unless explicitly allowed, and are idempotent by source identity and content.
+### Changed
+- The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.
+- Live LLM integration runs now retain tested SHA, workflow run ID, and run-attempt provenance for release evidence.
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)

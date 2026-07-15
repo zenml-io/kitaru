@@ -42,11 +42,13 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             model: str = "claude-sonnet",
             stop_reason: str = "end_turn",
             usage: object | None = None,
+            error: object | None = None,
         ) -> None:
             self.content = content or []
             self.model = model
             self.stop_reason = stop_reason
             self.usage = usage
+            self.error = error
 
     class UserMessage:
         def __init__(
@@ -94,16 +96,19 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             result: str = "final secret result text",
             structured_output: object | None = None,
             is_error: bool = False,
+            api_error_status: object | None = None,
+            subtype: object = "success",
         ) -> None:
             self.session_id = session_id
             self.result = result
             self.structured_output = structured_output
             self.is_error = is_error
+            self.api_error_status = api_error_status
             self.usage = {"input_tokens": 3, "output_tokens": 5}
             self.total_cost_usd = 0.04
             self.model_usage = {"claude-sonnet": {"input_tokens": 3}}
             self.stop_reason = "end_turn"
-            self.subtype = "success"
+            self.subtype = subtype
             self.num_turns = 1
             self.duration_ms = 12.5
             self.duration_api_ms = 10.0
@@ -602,31 +607,100 @@ def test_error_result_message_does_not_leak_result_to_live_payloads(
     published = _capture_published(monkeypatch)
     secret = "SECRET_RESULT_TEXT_SHOULD_NOT_LEAK"
     fake_sdk.__dict__["messages"][:] = [
-        fake_sdk.ResultMessage(is_error=True, result=secret)
+        fake_sdk.AssistantMessage(error="rate_limit"),
+        fake_sdk.ResultMessage(
+            is_error=True,
+            result=secret,
+            api_error_status=529,
+        ),
     ]
 
     with pytest.raises(RuntimeError) as exc_info:
         _run_stream_direct(claude_adapter, monkeypatch)
 
-    # Non-stream/durable callers still see the detailed raised error.
-    assert secret in str(exc_info.value)
+    assert secret not in str(exc_info.value)
 
     payloads = [payload for _, payload, _ in published]
     assert [kind for kind, _, _ in published] == [
         claude_adapter.CLAUDE_STREAM_STARTED,
         claude_adapter.CLAUDE_STREAM_EVENT,
+        claude_adapter.CLAUDE_STREAM_EVENT,
         claude_adapter.CLAUDE_STREAM_FAILED,
     ]
+    assert (
+        len(
+            [
+                kind
+                for kind, _, _ in published
+                if kind in claude_adapter.CLAUDE_STREAM_TERMINAL_EVENT_KINDS
+            ]
+        )
+        == 1
+    )
+    assert published[-1][2] is True
     assert secret not in repr(payloads)
+
+    assistant_payload = payloads[1]
+    result_payload = payloads[2]
+    assert assistant_payload["assistant_error"] == "rate_limit"
+    assert result_payload["api_error_status"] == 529
+    assert result_payload["subtype"] == "success"
+
     failed_payload = payloads[-1]
+    expected_diagnostic = {
+        "assistant_error": "rate_limit",
+        "api_error_status": 529,
+        "subtype": "success",
+    }
     assert failed_payload["category"] == "lifecycle"
     assert failed_payload["error_type"] == "ClaudeResultMessageError"
+    assert failed_payload["claude_result_diagnostic"] == expected_diagnostic
     assert failed_payload["message"] == (
-        "Claude Agent SDK returned an error ResultMessage; subtype='success'"
+        "Claude Agent SDK returned an error ResultMessage; "
+        "assistant_error='rate_limit'; api_error_status=529; subtype='success'"
     )
     assert failed_payload["display"] == (
         "Claude Agent SDK stream failed: Claude Agent SDK returned an error "
-        "ResultMessage; subtype='success'"
+        "ResultMessage; assistant_error='rate_limit'; api_error_status=529; "
+        "subtype='success'"
+    )
+
+
+def test_stream_diagnostics_reject_hostile_values(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+) -> None:
+    class HostileValue:
+        def __str__(self) -> str:
+            return "SECRET_HOSTILE_STREAM_VALUE"
+
+        def __repr__(self) -> str:
+            return "SECRET_HOSTILE_STREAM_VALUE"
+
+    class IntSubclass(int):
+        pass
+
+    streaming_module = importlib.import_module(
+        "kitaru.adapters.claude_agent_sdk._streaming"
+    )
+    publisher = streaming_module.ClaudeStreamPublisher(runner_name="claude")
+    assistant_payload = publisher.normalize_message(
+        fake_sdk.AssistantMessage(error=HostileValue())
+    )
+    result_payload = publisher.normalize_message(
+        fake_sdk.ResultMessage(
+            is_error=True,
+            result=HostileValue(),
+            api_error_status=IntSubclass(529),
+            subtype=HostileValue(),
+        )
+    )
+
+    assert "assistant_error" not in assistant_payload
+    assert "api_error_status" not in result_payload
+    assert "subtype" not in result_payload
+    assert "SECRET_HOSTILE_STREAM_VALUE" not in repr(
+        [assistant_payload, result_payload]
     )
 
 

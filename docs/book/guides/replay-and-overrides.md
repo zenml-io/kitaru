@@ -469,19 +469,25 @@ The default `executions diff` output shows one row per checkpoint for each compa
 Diff for kr-original
   Compared against 1 replay execution(s).
 Checkpoint differences
-  Replay        Checkpoint          Result    Input Δ   Output Δ   Total Δ   Cost Δ (USD)
-  ------------  ------------------  --------  --------  ---------  --------  ------------
-  kr-replay-a   research            match     +0        +0         +0        +0.000000
-  kr-replay-a   write_draft         changed   -120      +40        -80       -0.001700
+  Replay        Checkpoint    Result    Duration Δ (ms)   Input Δ   Output Δ   Total Δ   Cost Δ (USD)   Artifacts
+  -----------   -----------   -------   ---------------   -------   --------   -------   ------------   ----------------
+  kr-replay-a   research      match     -8.0              +0        +0         +0        +0.000000      output=unchanged
+  kr-replay-a   write_draft   changed   +412.5            -120      +40        -80       -0.001700      output=changed
 Applied output overrides [kr-replay-a]:
   checkpoint family 'research' -> research, research_2
 ```
 
 The table reports `changed` when checkpoint status, token usage, cost, or
 artifact hashes differ. It uses `original only` when a source checkpoint has no
-replay match and `replay only` when a new checkpoint appears only in the replay. `n/a` means the
-corresponding token or cost delta is unavailable. `executions diff-matrix` keeps
-its existing summary-only text output.
+replay match and `replay only` when a new checkpoint appears only in the replay.
+Duration, token, and cost deltas are always **replay minus original**: a
+negative value means the replay was faster, used fewer tokens, or cost less.
+The `Artifacts` column lists each saved artifact role sorted by name —
+`unchanged` when both content hashes match, `changed` when both exist but
+differ, and `unavailable` when either hash is missing. Artifact hashes and
+values themselves are never printed. `n/a` means the corresponding metric or
+artifact comparison is unavailable, which is distinct from an explicit zero
+delta. `executions diff-matrix` keeps its existing summary-only text output.
 
 Each replay entry in JSON has an additive `applied_output_overrides` field. It
 contains only the selector, selector kind, resolved checkpoint invocation IDs,

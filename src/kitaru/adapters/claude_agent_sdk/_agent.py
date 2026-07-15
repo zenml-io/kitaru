@@ -25,6 +25,7 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._policy import ClaudeCapturePolicy
 from ._runner import (
     ClaudeInvocationPayload,
+    ClaudeResultMessageError,
     claude_agent_sdk_version,
     run_claude_invocation,
     run_claude_invocation_streamed,
@@ -834,18 +835,21 @@ class KitaruClaudeRunner:
             else:
                 artifacts["options_manifest"] = artifact_name
         if self._capture.emit_events:
+            metadata: dict[str, Any] = {
+                "sdk_version": claude_agent_sdk_version(),
+                "request_kind": request.kind,
+                "capture_failures": [
+                    failure.as_metadata() for failure in capture_failures
+                ],
+            }
+            if isinstance(error, ClaudeResultMessageError):
+                metadata["claude_result_diagnostic"] = error.diagnostic.as_metadata()
             tracker.record_invocation(
                 status="failed",
                 duration_ms=duration_ms,
                 artifacts=artifacts,
                 warnings=warnings,
-                metadata={
-                    "sdk_version": claude_agent_sdk_version(),
-                    "request_kind": request.kind,
-                    "capture_failures": [
-                        failure.as_metadata() for failure in capture_failures
-                    ],
-                },
+                metadata=metadata,
                 error=error,
             )
 

@@ -150,7 +150,11 @@ Marketing site deployment is handled from `zenml-io-v2`.
 - `llm-integration.yml`: trusted weekly/manual live OpenAI/Anthropic provider
   checks. It has only `schedule` and `workflow_dispatch` triggers, runs paid
   tests outside PR CI, can target an exact ref/SHA, uploads logs/results only,
-  and sends compact Discord failure alerts via `DISCORD_WEBHOOK_SRE`.
+  and sends compact Discord failure alerts via `DISCORD_WEBHOOK_SRE`. Exact
+  validation evidence is the tested SHA plus run ID and attempt in
+  `llm-integration.provenance.json`. Run it again after environment-policy
+  changes. Before removing required reviewers, cancel stale waiting runs. Never
+  create a paid failure solely to test notifications.
 - `spellcheck.yml`: typo/spell checking on `develop` pushes and non-draft PRs.
 - `image-optimiser.yml`: PR-only compression for changed JPG/JPEG/PNG/WebP
   files in same-repo non-draft PRs.
