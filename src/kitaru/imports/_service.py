@@ -12,11 +12,15 @@ from zenml.client import Client
 from kitaru.errors import KitaruUsageError
 from kitaru.imports._langfuse import read_langfuse_jsonl
 from kitaru.imports._models import ImportedTrace, TraceIntegrity
-from kitaru.imports._normalization import normalize_langfuse_observations
+from kitaru.imports._normalization import (
+    normalize_langfuse_observations,
+    normalize_selected_langfuse_observations,
+)
 from kitaru.imports._writer import (
     ImportedTraceConflictError,
     ImportedTracePersistenceError,
     ImportedTracePlan,
+    imported_flow_name,
     persist_imported_trace,
     plan_imported_trace,
 )
@@ -66,6 +70,11 @@ class LangfuseImportResult:
     storage_warning: str = STORAGE_WARNING
 
     @property
+    def flow_name(self) -> str:
+        """Return the generated Kitaru flow name for imported executions."""
+        return imported_flow_name(provider="langfuse", agent_name=self.agent_name)
+
+    @property
     def counts(self) -> dict[str, int]:
         """Count outcomes by stable status value."""
         counts = Counter(outcome.status.value for outcome in self.outcomes)
@@ -96,9 +105,17 @@ def import_langfuse_jsonl(
         )
 
     requested_trace_ids = _validate_trace_ids(trace_ids)
-    traces = normalize_langfuse_observations(
-        read_langfuse_jsonl(path), project_id=normalized_project_id
-    )
+    if requested_trace_ids is None:
+        traces = normalize_langfuse_observations(
+            read_langfuse_jsonl(path), project_id=normalized_project_id
+        )
+        total_trace_count = len(traces)
+    else:
+        traces, total_trace_count = normalize_selected_langfuse_observations(
+            read_langfuse_jsonl(path),
+            project_id=normalized_project_id,
+            trace_ids=set(requested_trace_ids),
+        )
     selected = _select_traces(
         traces,
         trace_ids=requested_trace_ids,
@@ -165,7 +182,7 @@ def import_langfuse_jsonl(
         dry_run=dry_run,
         source_project_id=normalized_project_id,
         agent_name=normalized_agent_name,
-        total_trace_count=len(traces),
+        total_trace_count=total_trace_count,
         selected_trace_count=len(selected),
         outcomes=outcomes,
     )

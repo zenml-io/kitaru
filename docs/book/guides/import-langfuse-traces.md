@@ -32,8 +32,16 @@ For every selected trace, Kitaru stores:
 - compatible model, token-usage, latency, and USD cost information; and
 - an integrity classification describing gaps in the exported graph.
 
-The `agent_name` you provide groups the imported executions under one Kitaru
-flow name. It does not need to correspond to executable Python code.
+When Langfuse reports a USD cost, Kitaru records it as the historical actual
+cost. When cost is absent but the model and token counts are available, Kitaru
+can estimate cost with the currently installed `genai-prices` catalog. That
+fallback is labeled as an estimate, includes the catalog version, and may not
+match the price that applied when the trace originally ran.
+
+The `agent_name` you provide is a stable grouping label. Kitaru derives a
+collision-resistant flow name from that label and reports it in every preview
+and write result. The label does not need to correspond to executable Python
+code.
 
 {% hint style="danger" %}
 An actual import persists full input and output payloads in your configured
@@ -132,6 +140,7 @@ preview = client.imports.langfuse(
     trace_ids=["trace-a", "trace-b"],
 )
 print(preview.counts)
+print(preview.flow_name)
 
 result = client.imports.langfuse(
     export,
@@ -161,6 +170,11 @@ classifies each normalized trace before writing it:
 Allowing a fragmented trace does not repair or infer its missing relationships.
 It records the available components and their limitations.
 
+Kitaru also rejects a trace when any exported observation lacks a terminal
+source status. This prevents an unfinished observation from appearing as a
+successful checkpoint. Export the trace again after Langfuse records its end
+time, then retry the import.
+
 ## Interpret outcomes
 
 | Outcome | Meaning |
@@ -189,7 +203,7 @@ Use the normal execution interfaces after import:
 
 ```bash
 kitaru executions get <execution-id>
-kitaru executions list --flow support-agent
+kitaru executions list --flow <flow-name-reported-by-import>
 ```
 
 Or through Python:

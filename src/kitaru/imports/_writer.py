@@ -37,7 +37,12 @@ from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import source_utils
 
 from kitaru._checkpoint_metadata import adapter_checkpoint_metadata
-from kitaru._llm_usage import build_usage_record, usage_record_metadata
+from kitaru._llm_usage import (
+    CalculatedCostMetadata,
+    build_usage_record,
+    estimate_genai_prices_cost,
+    usage_record_metadata,
+)
 from kitaru.imports._models import (
     ImportedObservation,
     ImportedTrace,
@@ -220,12 +225,18 @@ def persist_imported_trace(
     }
     for observation in trace.observations:
         step_name = step_name_by_observation[observation.id]
+        metadata = _step_metadata(observation, step_name=step_name)
         existing_step = existing_steps.get(step_name)
         if existing_step is not None:
             step_ids_by_observation[observation.id] = existing_step.id
             output_artifacts = existing_step.outputs.get("output", [])
             if output_artifacts:
                 output_ids_by_observation[observation.id] = output_artifacts[0].id
+            _write_step_metadata(
+                client=zenml_client,
+                step_id=existing_step.id,
+                metadata=metadata,
+            )
             continue
 
         input_name = _input_name(observation)
@@ -250,7 +261,6 @@ def persist_imported_trace(
             assert parent_id is not None
             parent_ids.append(step_ids_by_observation[parent_id])
             upstream_names.append(step_name_by_observation[parent_id])
-        metadata = _step_metadata(observation, step_name=step_name)
         dynamic_config = _dynamic_step_config(
             step_name=step_name,
             upstream_names=upstream_names,
@@ -340,6 +350,14 @@ def _validate_import(trace: ImportedTrace, *, agent_name: str) -> str:
         raise ImportedTracePersistenceError(
             f"Cannot persist trace {trace.source.trace_id!r}: invalid graph."
         )
+    if any(
+        observation.status is ObservationStatus.UNKNOWN
+        for observation in trace.observations
+    ):
+        raise ImportedTracePersistenceError(
+            f"Cannot persist trace {trace.source.trace_id!r}: every observation "
+            "must have a terminal status in the source export."
+        )
     normalized_agent_name = agent_name.strip()
     if not normalized_agent_name:
         raise ImportedTracePersistenceError("agent_name cannot be empty.")
@@ -349,11 +367,7 @@ def _validate_import(trace: ImportedTrace, *, agent_name: str) -> str:
 def _get_or_create_pipeline(
     *, client: Client, project_id: UUID, provider: str, agent_name: str
 ) -> PipelineResponse:
-    identity = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()[:8]
-    name = (
-        f"imported_{_slug(agent_name, limit=80)}__{_slug(provider, limit=30)}_"
-        f"v{_IMPORT_SCHEMA_VERSION}_{identity}"
-    )
+    name = imported_flow_name(provider=provider, agent_name=agent_name)
     matches = client.list_pipelines(
         name=name, project=project_id, size=2, hydrate=True
     ).items
@@ -378,7 +392,9 @@ def _get_or_create_pipeline(
 def _get_or_create_snapshot(
     *, client: Client, project_id: UUID, pipeline_id: UUID, pipeline_name: str
 ) -> PipelineSnapshotResponse:
-    name = f"kitaru-import-schema-v{_IMPORT_SCHEMA_VERSION}"
+    stack_id = client.active_stack_model.id
+    stack_identity = hashlib.sha256(str(stack_id).encode("utf-8")).hexdigest()[:12]
+    name = f"kitaru-import-schema-v{_IMPORT_SCHEMA_VERSION}-{stack_identity}"
     matches = client.list_snapshots(
         name=name,
         pipeline=pipeline_id,
@@ -400,9 +416,11 @@ def _get_or_create_snapshot(
         step_configurations={},
         pipeline_spec=PipelineSpec(steps=[]),
         is_dynamic=True,
-        stack=client.active_stack_model.id,
+        stack=stack_id,
         pipeline=pipeline_id,
-        pipeline_version_hash=f"kitaru-import-v{_IMPORT_SCHEMA_VERSION}",
+        pipeline_version_hash=(
+            f"kitaru-import-v{_IMPORT_SCHEMA_VERSION}-{stack_identity}"
+        ),
         tags=[_IMPORT_TAG],
     )
     try:
@@ -452,14 +470,24 @@ def _validate_existing_run(
 
 
 def _steps_by_name(client: Client, *, run_id: UUID) -> dict[str, StepRunResponse]:
-    steps = client.list_run_steps(
-        pipeline_run_id=run_id,
-        project=client.active_project.id,
-        size=200,
-        hydrate=True,
-        exclude_retried=False,
-    ).items
-    return {step.name: step for step in steps}
+    steps_by_name: dict[str, StepRunResponse] = {}
+    page = 1
+    page_size = 200
+    while True:
+        steps = client.list_run_steps(
+            pipeline_run_id=run_id,
+            project=client.active_project.id,
+            sort_by="asc:created",
+            page=page,
+            size=page_size,
+            hydrate=True,
+            exclude_retried=False,
+        ).items
+        for step in steps:
+            steps_by_name[step.name] = step
+        if len(steps) < page_size:
+            return steps_by_name
+        page += 1
 
 
 def _dynamic_step_config(
@@ -532,9 +560,44 @@ def _step_metadata(
         "kitaru_import_source_status_v1": observation.status.value,
         "kitaru_import_source_name_v1": observation.name,
     }
-    if observation.usage is not None or observation.cost is not None:
-        usage = observation.usage
+    if observation.usage is not None:
+        metadata["kitaru_import_usage_v1"] = observation.usage.model_dump(mode="json")
+    if observation.cost is not None:
+        metadata["kitaru_import_cost_v1"] = observation.cost.model_dump(mode="json")
+    if observation.model is not None:
+        metadata["kitaru_import_model_v1"] = observation.model
+    if observation.latency_ms is not None:
+        metadata["kitaru_import_latency_ms_v1"] = observation.latency_ms
+
+    token_usage = _token_usage(observation)
+    if observation.kind is ObservationKind.LLM_CALL and (
+        token_usage is not None
+        or observation.cost is not None
+        or observation.model is not None
+        or observation.latency_ms is not None
+    ):
         cost = observation.cost
+        actual_cost_usd = (
+            cost.total
+            if cost is not None
+            and (cost.currency is None or cost.currency.upper() == "USD")
+            else None
+        )
+        warnings = ["Imported historical usage; no model call was executed."]
+        estimated_cost = CalculatedCostMetadata(None, "none", None)
+        if actual_cost_usd is None:
+            estimated_cost = estimate_genai_prices_cost(
+                provider=None,
+                model=observation.model,
+                usage=token_usage,
+                warnings=warnings,
+                adapter_name="Langfuse import",
+            )
+            if estimated_cost.estimated_cost_usd is not None:
+                warnings.append(
+                    "Estimated with the current genai-prices catalog; this may "
+                    "not match the historical price at execution time."
+                )
         record = build_usage_record(
             adapter="langfuse_import",
             surface="model_call",
@@ -542,17 +605,20 @@ def _step_metadata(
             event_id=observation.id,
             checkpoint_name=step_name,
             model=observation.model,
-            provider="langfuse",
-            input_tokens=_integer(usage.input if usage else None),
-            output_tokens=_integer(usage.output if usage else None),
-            total_tokens=_integer(usage.total if usage else None),
-            raw_usage=usage.details if usage else None,
-            actual_cost_usd=(
-                cost.total
-                if cost is not None and cost.currency in {None, "USD", "usd"}
-                else None
+            provider=None,
+            usage=token_usage,
+            raw_usage=(observation.usage.details if observation.usage else None),
+            actual_cost_usd=actual_cost_usd,
+            estimated_cost_usd=estimated_cost.estimated_cost_usd,
+            cost_source=(
+                None if actual_cost_usd is not None else estimated_cost.cost_source
             ),
-            cost_source_label="Langfuse imported provider cost",
+            cost_source_label=(
+                "Langfuse imported provider cost"
+                if actual_cost_usd is not None
+                else estimated_cost.cost_source_label
+            ),
+            pricing_version=estimated_cost.pricing_version,
             latency_ms=observation.latency_ms,
             status=(
                 "failed"
@@ -561,11 +627,35 @@ def _step_metadata(
             ),
             billing_effect="unknown",
             cache_status="unknown",
-            warnings=("Imported historical usage; no model call was executed.",),
+            warnings=warnings,
             record_id=observation.id,
         )
         metadata.update(usage_record_metadata(record))
     return metadata
+
+
+def _token_usage(observation: ImportedObservation) -> dict[str, Any] | None:
+    usage = observation.usage
+    if usage is None:
+        return None
+    if usage.unit is not None and usage.unit.strip().lower() not in {
+        "token",
+        "tokens",
+    }:
+        return None
+    values = (usage.input, usage.output, usage.total)
+    if any(value is not None and not _is_token_count(value) for value in values):
+        return None
+    return {
+        "input_tokens": usage.input,
+        "output_tokens": usage.output,
+        "total_tokens": usage.total,
+        "details": usage.details,
+    }
+
+
+def _is_token_count(value: int | float) -> bool:
+    return not isinstance(value, bool) and value >= 0 and float(value).is_integer()
 
 
 def _write_run_metadata(
@@ -620,6 +710,15 @@ def _source_identity_digest(trace: ImportedTrace) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
+def imported_flow_name(*, provider: str, agent_name: str) -> str:
+    """Return the deterministic flow name used for imported executions."""
+    identity = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()[:8]
+    return (
+        f"imported_{_slug(agent_name, limit=80)}__{_slug(provider, limit=30)}_"
+        f"v{_IMPORT_SCHEMA_VERSION}_{identity}"
+    )
+
+
 def _run_name(trace: ImportedTrace, *, identity_digest: str) -> str:
     return f"imported-{_slug(trace.source.trace_id, limit=100)}-{identity_digest}"
 
@@ -661,9 +760,3 @@ def _trace_failed(trace: ImportedTrace) -> bool:
         )
         for observation in trace.observations
     )
-
-
-def _integer(value: int | float | None) -> int | None:
-    if value is None:
-        return None
-    return int(value)

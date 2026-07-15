@@ -46,6 +46,7 @@ def test_dry_run_plans_without_persisting(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.selected_trace_count == 1
     assert result.outcomes[0].status is ImportOutcomeStatus.WOULD_CREATE
     assert result.outcomes[0].execution_id is None
+    assert result.flow_name.startswith("imported_support-agent__langfuse_v1_")
     assert "input and output payloads" in result.storage_warning
 
 
@@ -84,6 +85,34 @@ def test_fragmented_trace_is_rejected_by_default() -> None:
     assert "fragmented" in (result.outcomes[0].reason or "")
 
 
+def test_incomplete_trace_is_reported_as_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kitaru.imports._service.read_langfuse_jsonl",
+        lambda path: iter(
+            [
+                {
+                    "id": "unfinished",
+                    "traceId": "trace-incomplete",
+                    "type": "AGENT",
+                    "startTime": "2026-07-15T10:00:00Z",
+                }
+            ]
+        ),
+    )
+
+    result = import_langfuse_jsonl(
+        "unused.jsonl",
+        source_project_id="source-project",
+        agent_name="support-agent",
+        client=MagicMock(),
+    )
+
+    assert result.outcomes[0].status is ImportOutcomeStatus.REJECTED
+    assert "terminal status" in (result.outcomes[0].reason or "")
+
+
 def test_limit_applies_after_explicit_trace_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -102,6 +131,45 @@ def test_limit_applies_after_explicit_trace_order(
     )
 
     assert [outcome.trace_id for outcome in result.outcomes] == ["trace-root-omitted"]
+
+
+def test_exact_selection_ignores_invalid_unselected_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        {
+            "id": "good-observation",
+            "traceId": "trace-good",
+            "type": "SPAN",
+            "startTime": "2026-07-15T10:00:00Z",
+            "endTime": "2026-07-15T10:00:01Z",
+        },
+        {
+            "id": "bad-observation",
+            "traceId": "trace-bad",
+            "type": "UNSUPPORTED",
+            "startTime": "not-a-timestamp",
+        },
+    ]
+    monkeypatch.setattr(
+        "kitaru.imports._service.read_langfuse_jsonl", lambda path: iter(rows)
+    )
+    monkeypatch.setattr(
+        "kitaru.imports._service.plan_imported_trace",
+        lambda *args, **kwargs: "create",
+    )
+
+    result = import_langfuse_jsonl(
+        "unused.jsonl",
+        source_project_id="source-project",
+        agent_name="support-agent",
+        trace_ids=["trace-good"],
+        client=MagicMock(),
+    )
+
+    assert result.total_trace_count == 2
+    assert [outcome.trace_id for outcome in result.outcomes] == ["trace-good"]
+    assert result.outcomes[0].status is ImportOutcomeStatus.WOULD_CREATE
 
 
 def test_actual_import_collects_per_trace_outcomes(

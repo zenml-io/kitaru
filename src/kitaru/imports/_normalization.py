@@ -37,11 +37,39 @@ def normalize_langfuse_observations(
     rows: Iterable[Mapping[str, Any]], *, project_id: str
 ) -> list[ImportedTrace]:
     """Group and normalize Langfuse observation rows into trace graphs."""
-    grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    grouped: dict[str, list[tuple[int, Mapping[str, Any]]]] = defaultdict(list)
     for row_number, row in enumerate(rows, start=1):
         trace_id = _required_string(row, "traceId", "trace_id", row_number=row_number)
-        grouped[trace_id].append(row)
+        grouped[trace_id].append((row_number, row))
 
+    return _normalize_grouped_traces(grouped, project_id=project_id)
+
+
+def normalize_selected_langfuse_observations(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    project_id: str,
+    trace_ids: set[str],
+) -> tuple[list[ImportedTrace], int]:
+    """Normalize exact traces while counting all trace identities in an export."""
+    grouped: dict[str, list[tuple[int, Mapping[str, Any]]]] = defaultdict(list)
+    all_trace_ids: set[str] = set()
+    for row_number, row in enumerate(rows, start=1):
+        trace_id = _required_string(row, "traceId", "trace_id", row_number=row_number)
+        all_trace_ids.add(trace_id)
+        if trace_id in trace_ids:
+            grouped[trace_id].append((row_number, row))
+    return (
+        _normalize_grouped_traces(grouped, project_id=project_id),
+        len(all_trace_ids),
+    )
+
+
+def _normalize_grouped_traces(
+    grouped: Mapping[str, list[tuple[int, Mapping[str, Any]]]],
+    *,
+    project_id: str,
+) -> list[ImportedTrace]:
     traces = [
         _normalize_trace(trace_id, trace_rows, project_id=project_id)
         for trace_id, trace_rows in grouped.items()
@@ -56,10 +84,13 @@ def normalize_langfuse_observations(
 
 
 def _normalize_trace(
-    trace_id: str, rows: list[Mapping[str, Any]], *, project_id: str
+    trace_id: str,
+    rows: list[tuple[int, Mapping[str, Any]]],
+    *,
+    project_id: str,
 ) -> ImportedTrace:
     observations_by_id: dict[str, ImportedObservation] = {}
-    for row_number, row in enumerate(rows, start=1):
+    for row_number, row in rows:
         observation = _normalize_observation(row, row_number=row_number)
         existing = observations_by_id.get(observation.id)
         if existing is not None and existing != observation:
@@ -100,7 +131,7 @@ def _normalize_trace(
         for observation in ordered
         if observation.ended_at is not None
     ]
-    ended_at = max(ended_times) if ended_times else None
+    ended_at = max(ended_times) if len(ended_times) == len(ordered) else None
     source = TraceSource(provider="langfuse", project_id=project_id, trace_id=trace_id)
     trace_values: dict[str, Any] = {
         "source": source,
@@ -173,6 +204,8 @@ def _normalize_observation(
                     row,
                     "providedModelName",
                     "provided_model_name",
+                    "modelId",
+                    "model_id",
                     "model",
                     "internalModelId",
                     "internal_model_id",

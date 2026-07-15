@@ -151,3 +151,54 @@ def test_digest_is_stable_across_input_order() -> None:
     reverse = normalize_langfuse_observations(reversed(rows), project_id="project-1")[0]
 
     assert forward.content_digest == reverse.content_digest
+
+
+def test_incomplete_observation_keeps_trace_end_time_unknown() -> None:
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "ended",
+                "traceId": "trace-1",
+                "type": "SPAN",
+                "name": "ended",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:01:00Z",
+            },
+            {
+                "id": "unfinished",
+                "traceId": "trace-1",
+                "type": "SPAN",
+                "name": "unfinished",
+                "startTime": "2026-07-15T10:02:00Z",
+            },
+        ],
+        project_id="project-1",
+    )[0]
+
+    assert trace.ended_at is None
+    assert trace.observations[1].status is ObservationStatus.UNKNOWN
+
+
+def test_validation_error_uses_physical_export_row_number() -> None:
+    rows = [
+        {
+            "id": "trace-a-first",
+            "traceId": "trace-a",
+            "type": "SPAN",
+            "startTime": "2026-07-15T10:00:00Z",
+        },
+        {
+            "id": "trace-b-first",
+            "traceId": "trace-b",
+            "type": "SPAN",
+            "startTime": "2026-07-15T10:00:01Z",
+        },
+        {
+            "id": "trace-a-invalid",
+            "traceId": "trace-a",
+            "type": "SPAN",
+        },
+    ]
+
+    with pytest.raises(LangfuseImportError, match="row 3"):
+        normalize_langfuse_observations(rows, project_id="project-1")

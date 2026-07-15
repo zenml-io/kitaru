@@ -49,6 +49,7 @@ def _serialize_result(result: LangfuseImportResult) -> dict[str, Any]:
         "dry_run": result.dry_run,
         "source_project_id": result.source_project_id,
         "agent_name": result.agent_name,
+        "flow_name": result.flow_name,
         "total_trace_count": result.total_trace_count,
         "selected_trace_count": result.selected_trace_count,
         "counts": result.counts,
@@ -69,6 +70,7 @@ def _render_result(result: LangfuseImportResult) -> None:
             ("Mode", mode),
             ("Source project", result.source_project_id),
             ("Agent", result.agent_name),
+            ("Flow", result.flow_name),
             ("Available traces", str(result.total_trace_count)),
             ("Selected traces", str(result.selected_trace_count)),
             ("Outcomes", counts),
@@ -105,7 +107,10 @@ def langfuse(
     ],
     agent_name: Annotated[
         str,
-        Parameter(help="Kitaru flow name used to group imported executions."),
+        Parameter(
+            help="Grouping label for imported executions; the generated flow "
+            "name is reported in the result."
+        ),
     ],
     trace_id: Annotated[
         list[str] | None,

@@ -86,6 +86,7 @@ def test_langfuse_import_defaults_to_read_only_preview(
     output = capsys.readouterr().out
     assert "Langfuse trace import" in output
     assert "Preview" in output
+    assert "imported_support-agent__langfuse_v1_" in output
     assert "trace-one" in output
     assert "would_create" in output
 
@@ -211,6 +212,9 @@ def test_langfuse_import_json_emits_one_structured_result(
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "import.langfuse"
     assert payload["item"]["dry_run"] is True
+    assert payload["item"]["flow_name"].startswith(
+        "imported_support-agent__langfuse_v1_"
+    )
     assert payload["item"]["counts"] == {"would_create": 1}
     assert payload["item"]["outcomes"] == [
         {

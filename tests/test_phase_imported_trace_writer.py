@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from zenml.client import Client
 
+import kitaru.imports._writer as imported_trace_writer
 from kitaru.client import KitaruClient
 from kitaru.imports import normalize_langfuse_observations, read_langfuse_jsonl
 from kitaru.imports._writer import (
@@ -130,6 +131,25 @@ def test_invalid_graph_is_not_persisted(primed_zenml: None) -> None:
         persist_imported_trace(trace, agent_name="support-agent")
 
 
+def test_incomplete_source_trace_is_not_persisted(primed_zenml: None) -> None:
+    del primed_zenml
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "unfinished",
+                "traceId": "trace-incomplete",
+                "type": "AGENT",
+                "name": "unfinished-agent",
+                "startTime": "2026-07-15T10:00:00Z",
+            }
+        ],
+        project_id="project-1",
+    )[0]
+
+    with pytest.raises(ImportedTracePersistenceError, match="terminal status"):
+        persist_imported_trace(trace, agent_name="support-agent")
+
+
 def test_root_error_fails_execution_but_child_error_does_not(
     primed_zenml: None,
 ) -> None:
@@ -187,3 +207,42 @@ def test_interrupted_import_resumes_missing_steps(
     assert resumed.resumed is True
     assert execution.status.value == "completed"
     assert len(execution.checkpoints) == len(trace.observations)
+
+
+def test_interrupted_metadata_write_is_repaired_on_resume(
+    primed_zenml: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del primed_zenml
+    trace = _trace()
+    write_step_metadata = imported_trace_writer._write_step_metadata
+    interrupted = False
+
+    def interrupt_generation_metadata(*, client, step_id, metadata):
+        nonlocal interrupted
+        if not interrupted and "llm_usage_v1" in metadata:
+            interrupted = True
+            raise RuntimeError("synthetic metadata interruption")
+        return write_step_metadata(client=client, step_id=step_id, metadata=metadata)
+
+    monkeypatch.setattr(
+        imported_trace_writer,
+        "_write_step_metadata",
+        interrupt_generation_metadata,
+    )
+    with pytest.raises(RuntimeError, match="synthetic metadata interruption"):
+        persist_imported_trace(trace, agent_name="support-agent")
+
+    monkeypatch.setattr(
+        imported_trace_writer, "_write_step_metadata", write_step_metadata
+    )
+    resumed = persist_imported_trace(trace, agent_name="support-agent")
+    execution = KitaruClient().executions.get(resumed.execution_id)
+    generation = next(
+        checkpoint
+        for checkpoint in execution.checkpoints
+        if checkpoint.metadata.get("kitaru_import_observation_id_v1") == "generation-1"
+    )
+
+    assert resumed.resumed is True
+    assert generation.adapter == "langfuse_import"
+    assert generation.llm_usage_records[0]["usage"]["total_tokens"] == 16
