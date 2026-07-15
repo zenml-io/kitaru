@@ -449,9 +449,64 @@ for row in matrix.rows:
 CLI:
 
 ```bash
+# Compact checkpoint comparison in the default text output
+kitaru executions diff kr-original kr-replay-a
+
+# Complete structured results
 kitaru executions diff kr-original kr-replay-a -o json
 kitaru executions diff-matrix kr-a kr-b kr-c -o json
 ```
+
+The default `executions diff` output shows one row per checkpoint for each compared replay:
+
+```text
+Diff for kr-original
+  Compared against 1 replay execution(s).
+Checkpoint differences
+  Replay        Checkpoint          Result    Input Δ   Output Δ   Total Δ   Cost Δ (USD)
+  ------------  ------------------  --------  --------  ---------  --------  ------------
+  kr-replay-a   research            match     +0        +0         +0        +0.000000
+  kr-replay-a   write_draft         changed   -120      +40        -80       -0.001700
+Applied output overrides [kr-replay-a]:
+  checkpoint family 'research' -> research, research_2
+```
+
+The table reports `changed` when checkpoint status, token usage, cost, or
+artifact hashes differ. It uses `original only` when a source checkpoint has no
+replay match and `replay only` when a new checkpoint appears only in the replay. `n/a` means the
+corresponding token or cost delta is unavailable. `executions diff-matrix` keeps
+its existing summary-only text output.
+
+Each replay entry in JSON has an additive `applied_output_overrides` field. It
+contains only the selector, selector kind, resolved checkpoint invocation IDs,
+and the fact that the `output` field was overridden:
+
+```json
+{
+  "replay_exec_id": "kr-replay-a",
+  "applied_output_overrides": [
+    {
+      "selector_kind": "checkpoint",
+      "selector": "research",
+      "matched_invocation_ids": ["research", "research_2"],
+      "field": "output"
+    }
+  ]
+}
+```
+
+The replacement value is never included. `applied_output_overrides: null` means
+the evidence is unavailable, as with an older replay or malformed metadata.
+`applied_output_overrides: []` proves that the replay was recorded with no
+output override. Matrix JSON includes the same field inside each compared replay.
+This is submission-time evidence from the resolved replay plan, not confirmation
+that a downstream checkpoint completed; use the checkpoint status rows to see
+what actually ran.
+
+An output override remains a downstream injection, not a replacement artifact.
+Kitaru skips the targeted checkpoint, passes the supplied value to downstream
+checkpoint inputs, and continues to report the source checkpoint's recorded
+artifact. Its original and replay artifact hashes therefore remain the same.
 
 Checkpoint token and cost deltas in JSON output are always calculated as
 **replay minus original**. For example:

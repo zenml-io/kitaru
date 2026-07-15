@@ -17,7 +17,13 @@ from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
 import kitaru.config as config_module
-from kitaru._cli._executions import _execution_statistics_table
+from kitaru._cli._executions import (
+    _checkpoint_diff_status,
+    _checkpoint_diff_table,
+    _execution_statistics_table,
+    _format_diff_delta,
+    _print_applied_output_overrides,
+)
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru._client._statistics import (
     LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
@@ -4590,9 +4596,23 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`executions diff-matrix` should replace the old diff-cohort command."""
+    serialized = {
+        "rows": [
+            {
+                "original_exec_id": "kr-a",
+                "compared": [
+                    {
+                        "replay_exec_id": "kr-replay-a",
+                        "checkpoints": [],
+                        "applied_output_overrides": [],
+                    }
+                ],
+            }
+        ]
+    }
     with (
         patch("kitaru.diff.diff_cohort", return_value=object()) as diff_cohort,
-        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": []}),
+        patch("kitaru.diff.serialize_cohort_diff", return_value=serialized),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["executions", "diff-matrix", "kr-a", "kr-b", "-o", "json"])
@@ -4601,7 +4621,7 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     diff_cohort.assert_called_once_with(["kr-a", "kr-b"])
     assert json.loads(capsys.readouterr().out) == {
         "command": "executions.diff_matrix",
-        "item": {"rows": []},
+        "item": serialized,
     }
 
 
@@ -4667,6 +4687,222 @@ def test_executions_diff_rejects_blank_replay_with_structured_error(
     }
 
 
+def _checkpoint_diff_payload(**updates: Any) -> dict[str, Any]:
+    payload = {
+        "name": "write_draft",
+        "original_call_id": "original",
+        "replay_call_id": "replay",
+        "status_match": False,
+        "token_delta": None,
+        "cost_delta_usd": None,
+    }
+    payload.update(updates)
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (10, "+10"),
+        (1_234_567, "+1234567"),
+        (-1_234_567, "-1234567"),
+        (0, "+0"),
+        (0.0, "n/a"),
+        (None, "n/a"),
+        (True, "n/a"),
+        (float("inf"), "n/a"),
+    ],
+)
+def test_format_diff_delta(value: Any, expected: str) -> None:
+    assert _format_diff_delta(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.00003, "+0.000030"),
+        (-0.0017, "-0.001700"),
+        (0.0, "+0.000000"),
+        (None, "n/a"),
+        (True, "n/a"),
+        (float("inf"), "n/a"),
+    ],
+)
+def test_format_diff_cost_delta(value: Any, expected: str) -> None:
+    assert _format_diff_delta(value, decimal_places=6) == expected
+
+
+@pytest.mark.parametrize(
+    ("original_call_id", "replay_call_id", "status_match", "expected"),
+    [
+        ("original", "replay", True, "match"),
+        ("original", "replay", False, "changed"),
+        ("original", None, False, "original only"),
+        (None, "replay", False, "replay only"),
+    ],
+)
+def test_checkpoint_diff_status(
+    original_call_id: str | None,
+    replay_call_id: str | None,
+    status_match: bool,
+    expected: str,
+) -> None:
+    assert (
+        _checkpoint_diff_status(
+            {
+                "original_call_id": original_call_id,
+                "replay_call_id": replay_call_id,
+                "status_match": status_match,
+            }
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"token_delta": {"prompt_tokens": 1}},
+        {"cost_delta_usd": 0.000001},
+        {"artifact_hashes": {"output": {"original": "hash-a", "replay": "hash-b"}}},
+    ],
+)
+def test_checkpoint_diff_status_detects_content_changes(
+    updates: dict[str, Any],
+) -> None:
+    checkpoint = _checkpoint_diff_payload(status_match=True, **updates)
+
+    assert _checkpoint_diff_status(checkpoint) == "changed"
+
+
+def test_checkpoint_diff_status_matches_unchanged_content() -> None:
+    checkpoint = _checkpoint_diff_payload(
+        status_match=True,
+        token_delta={
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        cost_delta_usd=0.0,
+        artifact_hashes={"output": {"original": "same-hash", "replay": "same-hash"}},
+    )
+
+    assert _checkpoint_diff_status(checkpoint) == "match"
+
+
+def test_checkpoint_diff_table_formats_rows_and_tracks_empty_replays() -> None:
+    rows, empty_replay_ids = _checkpoint_diff_table(
+        {
+            "compared": [
+                {
+                    "replay_exec_id": "kr-replay",
+                    "checkpoints": [
+                        _checkpoint_diff_payload(
+                            token_delta={
+                                "prompt_tokens": 10,
+                                "completion_tokens": -5,
+                                "total_tokens": 5,
+                            },
+                            cost_delta_usd=0.25,
+                        )
+                    ],
+                },
+                {"replay_exec_id": "kr-empty", "checkpoints": []},
+            ]
+        }
+    )
+
+    assert rows == [
+        [
+            "kr-replay",
+            "write_draft",
+            "changed",
+            "+10",
+            "-5",
+            "+5",
+            "+0.250000",
+        ]
+    ]
+    assert empty_replay_ids == ["kr-empty"]
+
+
+def test_print_applied_output_overrides_distinguishes_evidence_states(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _print_applied_output_overrides(
+        {
+            "compared": [
+                {
+                    "replay_exec_id": "kr-populated",
+                    "applied_output_overrides": [
+                        {
+                            "selector_kind": "checkpoint",
+                            "selector": "lookup",
+                            "matched_invocation_ids": ["lookup_1", "lookup_2"],
+                        }
+                    ],
+                },
+                {
+                    "replay_exec_id": "kr-unavailable",
+                    "applied_output_overrides": None,
+                },
+                {
+                    "replay_exec_id": "kr-empty",
+                    "applied_output_overrides": [],
+                },
+            ]
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "Applied output overrides [kr-populated]:" in output
+    assert "checkpoint family 'lookup' -> lookup_1, lookup_2" in output
+    assert "Applied output overrides: unavailable [kr-unavailable]" in output
+    assert "kr-empty" not in output
+
+
+def test_executions_diff_text_renders_compact_result(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    serialized = {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay",
+                "checkpoints": [_checkpoint_diff_payload()],
+                "applied_output_overrides": [
+                    {
+                        "selector_kind": "invocation",
+                        "selector": "write_draft",
+                        "matched_invocation_ids": ["write_draft"],
+                    }
+                ],
+            },
+            {
+                "replay_exec_id": "kr-empty",
+                "checkpoints": [],
+                "applied_output_overrides": [],
+            },
+        ],
+        "urls": ["https://example.test/compare"],
+        "warnings": [],
+    }
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original", "kr-replay", "kr-empty"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Compared against 2 replay execution(s)." in output
+    assert "Checkpoint differences" in output
+    assert "write_draft" in output
+    assert "No checkpoint rows for replay kr-empty." in output
+    assert "Applied output overrides [kr-replay]:" in output
+    assert "https://example.test/compare" in output
+
+
 def test_executions_diff_text_prints_discovery_warning(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -4708,6 +4944,8 @@ def test_executions_diff_matrix_text_deduplicates_discovery_warnings(
     captured = capsys.readouterr()
     assert captured.err.count(f"Warning: {warning}") == 1
     assert "Compared 2 original execution(s)." in captured.out
+    assert "Checkpoint differences" not in captured.out
+    assert "Applied output overrides" not in captured.out
 
 
 def test_executions_diff_json_serializes_checkpoint_usage_deltas(
@@ -4717,6 +4955,8 @@ def test_executions_diff_json_serializes_checkpoint_usage_deltas(
     serialized = {
         "compared": [
             {
+                "replay_exec_id": "kr-replay",
+                "applied_output_overrides": [],
                 "checkpoints": [
                     {
                         "token_delta": {
@@ -4726,7 +4966,7 @@ def test_executions_diff_json_serializes_checkpoint_usage_deltas(
                         },
                         "cost_delta_usd": 0.25,
                     }
-                ]
+                ],
             }
         ]
     }

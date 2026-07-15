@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
+- `kitaru executions diff` now shows useful checkpoint comparison rows in its default text output, and diff serialization includes redacted evidence that replay output overrides were applied without exposing override values. (#563)
 
 ## [0.21.0] - 2026-07-14
 

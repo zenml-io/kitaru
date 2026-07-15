@@ -24,12 +24,15 @@ from kitaru._llm_usage import (
 )
 from kitaru._ui_urls import UiUrlContext
 from kitaru.diff import (
+    CohortDiff,
     ExecutionDiff,
     diff,
     serialize_checkpoint_diff,
+    serialize_diff_matrix,
     serialize_execution_diff,
 )
 from kitaru.errors import KitaruUsageError
+from kitaru.replay import REPLAY_OUTPUT_OVERRIDES_METADATA_KEY, AppliedOutputOverride
 from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 _diff_module = import_module("kitaru.diff")
@@ -327,6 +330,90 @@ def _execution(
         project_id=project_id,
         project_name=project_name,
     )
+
+
+def test_diff_associates_and_serializes_output_override_evidence() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay_with_override = _execution(
+        "kr-replay-populated",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={
+            REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: [
+                {
+                    "selector_kind": "checkpoint",
+                    "selector": "lookup",
+                    "matched_invocation_ids": ["lookup_1", "lookup_2"],
+                    "field": "output",
+                }
+            ]
+        },
+    )
+    replay_without_override = _execution(
+        "kr-replay-empty",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: []},
+    )
+    old_replay = _execution(
+        "kr-replay-unavailable",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: "malformed"},
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original,
+        replay_with_override,
+        replay_without_override,
+        old_replay,
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff(
+            "kr-original",
+            "replay-populated-alias",
+            "replay-empty-alias",
+            "replay-unavailable-alias",
+        )
+
+    assert result.applied_output_overrides == {
+        "kr-replay-populated": [
+            AppliedOutputOverride(
+                selector_kind="checkpoint",
+                selector="lookup",
+                matched_invocation_ids=("lookup_1", "lookup_2"),
+            )
+        ],
+        "kr-replay-empty": [],
+        "kr-replay-unavailable": None,
+    }
+    serialized = serialize_execution_diff(result)
+    assert serialized["compared"][0]["applied_output_overrides"] == [
+        {
+            "selector_kind": "checkpoint",
+            "selector": "lookup",
+            "matched_invocation_ids": ["lookup_1", "lookup_2"],
+            "field": "output",
+        }
+    ]
+    assert serialized["compared"][1]["applied_output_overrides"] == []
+    assert serialized["compared"][2]["applied_output_overrides"] is None
+
+
+def test_diff_matrix_serialization_includes_output_override_evidence() -> None:
+    row = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[("kr-replay", [])],
+        applied_output_overrides={"kr-replay": []},
+    )
+
+    payload = serialize_diff_matrix(CohortDiff(rows=[row]))
+
+    assert payload["rows"][0]["compared"][0]["applied_output_overrides"] == []
 
 
 def test_diff_aligns_checkpoints_by_original_call_id() -> None:
