@@ -193,6 +193,7 @@ class _DummyStep:
         step_id: UUID | None = None,
         version: int = 1,
         original_step_run_id: UUID | None = None,
+        parent_step_ids: list[UUID] | None = None,
         run_metadata: dict[str, Any] | None = None,
         exception_traceback: str | None = None,
         spec: Any | None = None,
@@ -206,7 +207,7 @@ class _DummyStep:
         self.end_time = None
         self.run_metadata = run_metadata or {}
         self.original_step_run_id = original_step_run_id
-        self.parent_step_ids: list[UUID] = []
+        self.parent_step_ids = list(parent_step_ids or [])
         self.inputs = inputs or {}
         self.outputs = outputs
         self.spec = spec
@@ -2575,6 +2576,69 @@ def test_get_surfaces_checkpoint_attempt_history() -> None:
     assert checkpoint.attempts[1].status == ExecutionStatus.COMPLETED
     assert checkpoint.attempts[1].failure is None
     assert checkpoint.failure is None
+
+
+def test_get_normalizes_retry_parent_ids_to_visible_checkpoint_calls() -> None:
+    hidden_attempt = _DummyStep(
+        name="research",
+        version=1,
+        status=ZenMLExecutionStatus.RETRIED,
+        outputs={},
+    )
+    visible_attempt = _DummyStep(
+        name="research",
+        version=2,
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    downstream = _DummyStep(
+        name="publish",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        parent_step_ids=[hidden_attempt.id],
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={
+            visible_attempt.name: visible_attempt,
+            downstream.name: downstream,
+        },
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(
+            items=[
+                _as_step_run(hidden_attempt),
+                _as_step_run(visible_attempt),
+                _as_step_run(downstream),
+            ]
+        )
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    checkpoints_by_name = {
+        checkpoint.name: checkpoint for checkpoint in execution.checkpoints
+    }
+    assert checkpoints_by_name["research"].call_id == str(visible_attempt.id)
+    assert checkpoints_by_name["publish"].parent_call_ids == [
+        checkpoints_by_name["research"].call_id
+    ]
+    public_call_ids = {checkpoint.call_id for checkpoint in execution.checkpoints}
+    assert all(
+        parent_call_id in public_call_ids
+        for checkpoint in execution.checkpoints
+        for parent_call_id in checkpoint.parent_call_ids
+    )
 
 
 def test_get_merges_run_step_into_partial_attempt_history() -> None:
