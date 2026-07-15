@@ -78,6 +78,80 @@ def test_persists_trace_as_visible_execution_without_running_source_code(
     assert tool.failure.message == "Synthetic error"
 
 
+def test_imported_snapshot_contains_every_rendered_step_node(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    trace = _trace()
+    result = persist_imported_trace(trace, agent_name="support-agent")
+    client = Client()
+    run = client.get_pipeline_run(result.execution_id)
+    snapshot_id = getattr(run.snapshot, "id", run.snapshot)
+    snapshot = client.get_snapshot(
+        name_id_or_prefix=snapshot_id,
+        project=client.active_project.id,
+        hydrate=True,
+    )
+    run_step_names = {
+        step.name
+        for step in client.list_run_steps(
+            pipeline_run_id=run.id,
+            project=client.active_project.id,
+            size=100,
+            hydrate=True,
+        ).items
+    }
+
+    assert run_step_names == set(snapshot.step_configurations)
+    assert run_step_names == {
+        step.invocation_id for step in snapshot.pipeline_spec.steps
+    }
+
+
+def test_child_first_source_order_renders_without_a_dag_error(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "child",
+                "traceId": "child-first",
+                "parentObservationId": "parent",
+                "type": "GENERATION",
+                "name": "child",
+                "startTime": "2026-07-15T10:00:01Z",
+                "endTime": "2026-07-15T10:00:02Z",
+            },
+            {
+                "id": "parent",
+                "traceId": "child-first",
+                "type": "AGENT",
+                "name": "parent",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:03Z",
+            },
+        ],
+        project_id="project-1",
+    )[0]
+
+    result = persist_imported_trace(trace, agent_name="support-agent")
+    client = Client()
+    dag = client.zen_store.get_pipeline_run_dag(result.execution_id)  # type: ignore[attr-defined]
+    step_nodes = [node for node in dag.nodes if node.type == "step"]
+    execution = KitaruClient().executions.get(result.execution_id)
+    checkpoints = {
+        checkpoint.metadata["kitaru_import_observation_id_v1"]: checkpoint
+        for checkpoint in execution.checkpoints
+    }
+
+    assert {node.name.split("_", maxsplit=3)[2] for node in step_nodes} == {
+        "parent",
+        "child",
+    }
+    assert checkpoints["child"].parent_call_ids == [checkpoints["parent"].call_id]
+
+
 def test_exact_reimport_is_a_noop(primed_zenml: None) -> None:
     del primed_zenml
     trace = _trace()
@@ -99,10 +173,31 @@ def test_changed_source_content_conflicts(primed_zenml: None) -> None:
     changed = trace.model_copy(update={"content_digest": "f" * 64})
     pipeline_count = len(Client().list_pipelines(size=100).items)
 
-    with pytest.raises(ImportedTraceConflictError, match="already imported"):
+    with pytest.raises(
+        ImportedTraceConflictError, match="already imported"
+    ) as exc_info:
         persist_imported_trace(changed, agent_name="different-agent")
 
+    assert exc_info.value.existing_execution_id is not None
+    assert "will not overwrite" in (exc_info.value.resolution or "")
     assert len(Client().list_pipelines(size=100).items) == pipeline_count
+
+
+def test_different_agent_conflict_explains_how_to_reuse_or_regroup(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+    trace = _trace()
+    existing = persist_imported_trace(trace, agent_name="support-agent")
+
+    with pytest.raises(
+        ImportedTraceConflictError, match="agent_name='support-agent'"
+    ) as exc_info:
+        persist_imported_trace(trace, agent_name="renamed-agent")
+
+    assert exc_info.value.existing_execution_id == existing.execution_id
+    assert "agent_name='support-agent'" in (exc_info.value.resolution or "")
+    assert "imports are not relabeled in place" in (exc_info.value.resolution or "")
 
 
 def test_invalid_graph_is_not_persisted(primed_zenml: None) -> None:

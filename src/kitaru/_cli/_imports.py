@@ -40,7 +40,9 @@ def _serialize_outcome(outcome: TraceImportOutcome) -> dict[str, Any]:
         "observation_count": outcome.observation_count,
         "status": outcome.status.value,
         "execution_id": outcome.execution_id,
+        "existing_execution_id": outcome.existing_execution_id,
         "reason": outcome.reason,
+        "resolution": outcome.resolution,
     }
 
 
@@ -79,7 +81,16 @@ def _render_result(result: LangfuseImportResult) -> None:
     )
     _emit_table(
         "Trace outcomes",
-        ["Trace ID", "Integrity", "Observations", "Status", "Execution ID", "Reason"],
+        [
+            "Trace ID",
+            "Integrity",
+            "Observations",
+            "Status",
+            "Execution ID",
+            "Existing execution",
+            "Reason",
+            "Next action",
+        ],
         [
             [
                 outcome.trace_id,
@@ -87,7 +98,9 @@ def _render_result(result: LangfuseImportResult) -> None:
                 str(outcome.observation_count),
                 outcome.status.value,
                 outcome.execution_id or "-",
+                outcome.existing_execution_id or "-",
                 outcome.reason or "-",
+                outcome.resolution or "-",
             ]
             for outcome in result.outcomes
         ],

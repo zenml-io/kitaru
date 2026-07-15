@@ -46,7 +46,7 @@ def test_dry_run_plans_without_persisting(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.selected_trace_count == 1
     assert result.outcomes[0].status is ImportOutcomeStatus.WOULD_CREATE
     assert result.outcomes[0].execution_id is None
-    assert result.flow_name.startswith("imported_support-agent__langfuse_v1_")
+    assert result.flow_name.startswith("imported_support-agent__langfuse_v4_")
     assert "input and output payloads" in result.storage_warning
 
 
@@ -212,6 +212,36 @@ def test_actual_import_collects_per_trace_outcomes(
         ImportOutcomeStatus.CONFLICT,
     ]
     assert result.counts == {"conflict": 1, "created": 1, "unchanged": 1}
+
+
+def test_conflict_outcome_preserves_existing_execution_and_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def conflict(*args, **kwargs):
+        del args, kwargs
+        raise ImportedTraceConflictError(
+            "already imported with another label",
+            existing_execution_id="execution-existing",
+            resolution="Retry with the original agent name.",
+        )
+
+    monkeypatch.setattr("kitaru.imports._service.persist_imported_trace", conflict)
+
+    result = import_langfuse_jsonl(
+        FIXTURE,
+        source_project_id="source-project",
+        agent_name="support-agent",
+        trace_ids=["trace-complete"],
+        dry_run=False,
+        confirm_data_storage=True,
+        client=MagicMock(),
+    )
+
+    outcome = result.outcomes[0]
+    assert outcome.status is ImportOutcomeStatus.CONFLICT
+    assert outcome.existing_execution_id == "execution-existing"
+    assert outcome.reason == "already imported with another label"
+    assert outcome.resolution == "Retry with the original agent name."
 
 
 def test_rejects_invalid_options() -> None:

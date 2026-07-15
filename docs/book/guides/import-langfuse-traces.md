@@ -184,7 +184,7 @@ time, then retry the import.
 | `created` | A new synthetic execution was stored. |
 | `resumed` | An interrupted import was completed. |
 | `unchanged` | The same source identity and content already has a finished import. Nothing was rewritten. |
-| `conflict` | The source identity already exists with different content or a different agent name. |
+| `conflict` | The source identity already exists with different content or a different agent name. The outcome includes the existing execution ID and a specific next action. |
 | `rejected` | The trace or request violates an import safety rule. |
 | `failed` | A backend operation failed for that trace. |
 
@@ -192,6 +192,12 @@ The stable identity is the combination of provider, source project ID, and
 trace ID. Re-running an identical import is a no-op. Kitaru reports a conflict
 instead of silently replacing historical evidence when the same identity has
 different normalized content.
+
+For a conflict, inspect `existing_execution_id`, `reason`, and `resolution` in
+the SDK or JSON result. If only the agent name differs, retry with the original
+agent name to reuse the import. Changing the grouping label or replacing source
+content requires deleting the existing execution first; Kitaru does not
+silently relabel or overwrite imported history.
 
 The CLI exits non-zero if any selected trace is `conflict`, `rejected`, or
 `failed`, after printing all per-trace outcomes. This lets an automation keep

@@ -37,6 +37,10 @@ from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import source_utils
 
 from kitaru._checkpoint_metadata import adapter_checkpoint_metadata
+from kitaru._import_contract import (
+    IMPORTED_OBSERVATION_ID_METADATA_KEY,
+    IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY,
+)
 from kitaru._llm_usage import (
     CalculatedCostMetadata,
     build_usage_record,
@@ -52,7 +56,7 @@ from kitaru.imports._models import (
     TraceIntegrity,
 )
 
-_IMPORT_SCHEMA_VERSION = 1
+_IMPORT_SCHEMA_VERSION = 4
 _IMPORT_TAG = "kitaru-imported"
 _SOURCE_DIGEST_KEY = "kitaru_import_content_digest_v1"
 _SOURCE_PROVIDER_KEY = "kitaru_import_source_provider_v1"
@@ -60,7 +64,6 @@ _SOURCE_PROJECT_KEY = "kitaru_import_source_project_id_v1"
 _SOURCE_TRACE_KEY = "kitaru_import_source_trace_id_v1"
 _AGENT_NAME_KEY = "kitaru_import_agent_name_v1"
 _IMPORT_STATUS_KEY = "kitaru_import_status_v1"
-_OBSERVATION_ID_KEY = "kitaru_import_observation_id_v1"
 
 
 class ImportedTracePersistenceError(RuntimeError):
@@ -69,6 +72,17 @@ class ImportedTracePersistenceError(RuntimeError):
 
 class ImportedTraceConflictError(ImportedTracePersistenceError):
     """Raised when a source trace identity already has different content."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        existing_execution_id: str | None = None,
+        resolution: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.existing_execution_id = existing_execution_id
+        self.resolution = resolution
 
 
 class ImportedTracePlan(StrEnum):
@@ -174,6 +188,30 @@ def persist_imported_trace(
         observation.ended_at or observation.started_at
         for observation in trace.observations
     )
+    step_name_by_observation = {
+        observation.id: _step_name(observation, index=index)
+        for index, observation in enumerate(trace.observations, start=1)
+    }
+    step_metadata_by_observation = {
+        observation.id: _step_metadata(
+            observation,
+            step_name=step_name_by_observation[observation.id],
+        )
+        for observation in trace.observations
+    }
+    step_config_by_observation = {
+        observation.id: _dynamic_step_config(
+            step_name=step_name_by_observation[observation.id],
+            upstream_names=(
+                [step_name_by_observation[observation.parent_id]]
+                if observation.parent_id in step_name_by_observation
+                else []
+            ),
+            observation=observation,
+            metadata=step_metadata_by_observation[observation.id],
+        )
+        for observation in trace.observations
+    }
     if existing_run is None:
         pipeline = _get_or_create_pipeline(
             client=zenml_client,
@@ -186,6 +224,8 @@ def persist_imported_trace(
             project_id=project_id,
             pipeline_id=pipeline.id,
             pipeline_name=pipeline.name,
+            trace=trace,
+            step_config_by_observation=step_config_by_observation,
         )
         run_request = PipelineRunRequest(
             project=project_id,
@@ -219,13 +259,9 @@ def persist_imported_trace(
     existing_steps = _steps_by_name(zenml_client, run_id=run.id)
     step_ids_by_observation: dict[str, UUID] = {}
     output_ids_by_observation: dict[str, UUID] = {}
-    step_name_by_observation = {
-        observation.id: _step_name(observation, index=index)
-        for index, observation in enumerate(trace.observations, start=1)
-    }
     for observation in trace.observations:
         step_name = step_name_by_observation[observation.id]
-        metadata = _step_metadata(observation, step_name=step_name)
+        metadata = step_metadata_by_observation[observation.id]
         existing_step = existing_steps.get(step_name)
         if existing_step is not None:
             step_ids_by_observation[observation.id] = existing_step.id
@@ -255,18 +291,10 @@ def persist_imported_trace(
             role="output",
         )
         parent_ids = []
-        upstream_names = []
         if observation.parent_id in step_ids_by_observation:
             parent_id = observation.parent_id
             assert parent_id is not None
             parent_ids.append(step_ids_by_observation[parent_id])
-            upstream_names.append(step_name_by_observation[parent_id])
-        dynamic_config = _dynamic_step_config(
-            step_name=step_name,
-            upstream_names=upstream_names,
-            observation=observation,
-            metadata=metadata,
-        )
         failed = observation.status is ObservationStatus.ERROR
         step = zenml_client.zen_store.create_run_step(
             StepRunRequest(
@@ -292,7 +320,16 @@ def persist_imported_trace(
                     if failed
                     else None
                 ),
-                dynamic_config=dynamic_config,
+                # ZenML's dynamic DAG builder iterates persisted run steps in
+                # database order and resolves upstream names immediately. That
+                # order is not guaranteed to be parent-first, so embedding the
+                # observed edges here can make an otherwise valid run fail to
+                # render. Parent lineage remains recorded in the step metadata
+                # and complete snapshot graph; the client restores public
+                # parent_call_ids from that metadata.
+                dynamic_config=_dag_safe_dynamic_step_config(
+                    step_config_by_observation[observation.id]
+                ),
             )
         )
         step_ids_by_observation[observation.id] = step.id
@@ -390,11 +427,25 @@ def _get_or_create_pipeline(
 
 
 def _get_or_create_snapshot(
-    *, client: Client, project_id: UUID, pipeline_id: UUID, pipeline_name: str
+    *,
+    client: Client,
+    project_id: UUID,
+    pipeline_id: UUID,
+    pipeline_name: str,
+    trace: ImportedTrace,
+    step_config_by_observation: dict[str, Step],
 ) -> PipelineSnapshotResponse:
     stack_id = client.active_stack_model.id
-    stack_identity = hashlib.sha256(str(stack_id).encode("utf-8")).hexdigest()[:12]
-    name = f"kitaru-import-schema-v{_IMPORT_SCHEMA_VERSION}-{stack_identity}"
+    snapshot_identity = hashlib.sha256(
+        "\0".join(
+            (
+                str(stack_id),
+                *trace.source.identity,
+                trace.content_digest,
+            )
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+    name = f"kitaru-import-v{_IMPORT_SCHEMA_VERSION}-{snapshot_identity}"
     matches = client.list_snapshots(
         name=name,
         pipeline=pipeline_id,
@@ -407,20 +458,22 @@ def _get_or_create_snapshot(
     request = PipelineSnapshotRequest(
         project=project_id,
         name=name,
-        description="Synthetic dynamic snapshot for imported traces.",
+        description="Synthetic observed graph for one imported trace.",
         run_name_template="imported-{date}-{time}",
         pipeline_configuration=PipelineConfiguration(
             name=pipeline_name,
             enable_cache=False,
         ),
-        step_configurations={},
-        pipeline_spec=PipelineSpec(steps=[]),
+        step_configurations={
+            step.config.name: step for step in step_config_by_observation.values()
+        },
+        pipeline_spec=PipelineSpec(
+            steps=[step.spec for step in step_config_by_observation.values()]
+        ),
         is_dynamic=True,
         stack=stack_id,
         pipeline=pipeline_id,
-        pipeline_version_hash=(
-            f"kitaru-import-v{_IMPORT_SCHEMA_VERSION}-{stack_identity}"
-        ),
+        pipeline_version_hash=name,
         tags=[_IMPORT_TAG],
     )
     try:
@@ -456,16 +509,36 @@ def _validate_existing_run(
     )
     if any(environment.get(key) != expected[key] for key in identity_keys):
         raise ImportedTraceConflictError(
-            f"Trace {trace.source.trace_id!r} collides with another imported identity."
+            f"Trace {trace.source.trace_id!r} collides with another imported identity.",
+            existing_execution_id=str(run.id),
+            resolution=(
+                "Verify the source project ID and trace ID. If this is a "
+                "different source trace, import it with its actual source identity."
+            ),
         )
     if environment.get(_SOURCE_DIGEST_KEY) != trace.content_digest:
         raise ImportedTraceConflictError(
             f"Trace {trace.source.trace_id!r} was already imported with "
-            "different content."
+            "different content.",
+            existing_execution_id=str(run.id),
+            resolution=(
+                f"Kitaru will not overwrite execution {str(run.id)!r}. Reuse the "
+                "original export for an idempotent import, or delete that execution "
+                "before importing the changed trace."
+            ),
         )
     if environment.get(_AGENT_NAME_KEY) != agent_name:
+        existing_agent_name = environment.get(_AGENT_NAME_KEY)
         raise ImportedTraceConflictError(
-            f"Trace {trace.source.trace_id!r} was already imported for another agent."
+            f"Trace {trace.source.trace_id!r} was already imported with agent_name="
+            f"{existing_agent_name!r}.",
+            existing_execution_id=str(run.id),
+            resolution=(
+                f"Retry with agent_name={existing_agent_name!r} to reuse it. "
+                "To regroup the "
+                f"trace as {agent_name!r}, delete execution {str(run.id)!r} first; "
+                "imports are not relabeled in place."
+            ),
         )
 
 
@@ -520,6 +593,13 @@ def _dynamic_step_config(
     )
 
 
+def _dag_safe_dynamic_step_config(step: Step) -> Step:
+    """Remove dynamic edges ZenML may resolve before creating their nodes."""
+    return step.model_copy(
+        update={"spec": step.spec.model_copy(update={"upstream_steps": []})}
+    )
+
+
 def _save_observation_artifact(
     value: Any,
     *,
@@ -537,7 +617,7 @@ def _save_observation_artifact(
         user_metadata={
             "kitaru_artifact_type": role,
             _SOURCE_TRACE_KEY: trace.source.trace_id,
-            _OBSERVATION_ID_KEY: observation.id,
+            IMPORTED_OBSERVATION_ID_METADATA_KEY: observation.id,
         },
         save_type=ArtifactSaveType.MANUAL,
         has_custom_name=False,
@@ -554,8 +634,8 @@ def _step_metadata(
             input_slots=(_input_name(observation),),
             output_slots=("output",),
         ),
-        _OBSERVATION_ID_KEY: observation.id,
-        "kitaru_import_parent_observation_id_v1": observation.parent_id or "",
+        IMPORTED_OBSERVATION_ID_METADATA_KEY: observation.id,
+        IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY: observation.parent_id or "",
         "kitaru_import_source_type_v1": observation.source_type.value,
         "kitaru_import_source_status_v1": observation.status.value,
         "kitaru_import_source_name_v1": observation.name,
@@ -720,7 +800,10 @@ def imported_flow_name(*, provider: str, agent_name: str) -> str:
 
 
 def _run_name(trace: ImportedTrace, *, identity_digest: str) -> str:
-    return f"imported-{_slug(trace.source.trace_id, limit=100)}-{identity_digest}"
+    return (
+        f"imported-v{_IMPORT_SCHEMA_VERSION}-"
+        f"{_slug(trace.source.trace_id, limit=100)}-{identity_digest}"
+    )
 
 
 def _step_name(observation: ImportedObservation, *, index: int) -> str:

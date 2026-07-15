@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import ValidationError
@@ -33,6 +34,10 @@ from kitaru._client._models import (
     ExecutionStatus,
     FailureInfo,
     PendingWait,
+)
+from kitaru._import_contract import (
+    IMPORTED_OBSERVATION_ID_METADATA_KEY,
+    IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY,
 )
 from kitaru._run_identity import extract_run_project_identity
 from kitaru._source_aliases import (
@@ -68,7 +73,6 @@ if TYPE_CHECKING:
     from kitaru.client import KitaruClient
 
 _WAIT_CONDITION_STATUS_PENDING = "pending"
-
 _RAW_STATUSES_BY_PUBLIC_STATUS: dict[ExecutionStatus, tuple[str, ...]] = {
     ExecutionStatus.RUNNING: (
         "cancelling",
@@ -465,6 +469,39 @@ def _map_checkpoint_call(
     )
 
 
+def _restore_imported_parent_call_ids(
+    checkpoints: list[CheckpointCall],
+) -> list[CheckpointCall]:
+    """Restore imported lineage when ZenML omits dynamic parent relations."""
+    call_id_by_observation_id = {
+        observation_id: checkpoint.call_id
+        for checkpoint in checkpoints
+        if isinstance(
+            observation_id := checkpoint.metadata.get(
+                IMPORTED_OBSERVATION_ID_METADATA_KEY
+            ),
+            str,
+        )
+    }
+    if not call_id_by_observation_id:
+        return checkpoints
+
+    restored: list[CheckpointCall] = []
+    for checkpoint in checkpoints:
+        if checkpoint.parent_call_ids:
+            restored.append(checkpoint)
+            continue
+        parent_observation_id = checkpoint.metadata.get(
+            IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY
+        )
+        parent_call_id = call_id_by_observation_id.get(parent_observation_id)
+        if parent_call_id is None:
+            restored.append(checkpoint)
+            continue
+        restored.append(replace(checkpoint, parent_call_ids=[parent_call_id]))
+    return restored
+
+
 def _map_pending_wait(wait_condition: Any) -> PendingWait:
     """Map a wait condition response to the public pending wait model."""
     data_schema = wait_condition.data_schema
@@ -696,6 +733,8 @@ def _map_execution(
                     visible_call_id_by_attempt_id=visible_call_id_by_attempt_id,
                 )
             )
+
+        checkpoints = _restore_imported_parent_call_ids(checkpoints)
 
         artifact_indexes_by_id: dict[str, int] = {}
         for checkpoint in checkpoints:

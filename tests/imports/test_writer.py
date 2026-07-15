@@ -225,6 +225,19 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
     client.zen_store.create_snapshot.side_effect = lambda request: request
     first_stack = UUID(int=1)
     second_stack = UUID(int=2)
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "span-1",
+                "traceId": "trace-1",
+                "type": "SPAN",
+                "name": "span",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:01Z",
+            }
+        ],
+        project_id="project-1",
+    )[0]
 
     client.active_stack_model.id = first_stack
     first = _get_or_create_snapshot(
@@ -232,6 +245,8 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
         project_id=UUID(int=3),
         pipeline_id=UUID(int=4),
         pipeline_name="imported-agent",
+        trace=trace,
+        step_config_by_observation={},
     )
     client.active_stack_model.id = second_stack
     second = _get_or_create_snapshot(
@@ -239,6 +254,8 @@ def test_import_snapshot_identity_includes_active_stack() -> None:
         project_id=UUID(int=3),
         pipeline_id=UUID(int=4),
         pipeline_name="imported-agent",
+        trace=trace,
+        step_config_by_observation={},
     )
 
     assert first.name != second.name

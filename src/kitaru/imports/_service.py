@@ -54,7 +54,9 @@ class TraceImportOutcome:
     observation_count: int
     status: ImportOutcomeStatus
     execution_id: str | None = None
+    existing_execution_id: str | None = None
     reason: str | None = None
+    resolution: str | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +168,13 @@ def import_langfuse_jsonl(
                 execution_id=persisted.execution_id,
             )
         except ImportedTraceConflictError as exc:
-            return _outcome(trace, ImportOutcomeStatus.CONFLICT, reason=str(exc))
+            return _outcome(
+                trace,
+                ImportOutcomeStatus.CONFLICT,
+                existing_execution_id=exc.existing_execution_id,
+                reason=str(exc),
+                resolution=exc.resolution,
+            )
         except ImportedTracePersistenceError as exc:
             return _outcome(trace, ImportOutcomeStatus.REJECTED, reason=str(exc))
         except Exception as exc:  # Backend failures are per-trace outcomes.
@@ -193,7 +201,9 @@ def _outcome(
     status: ImportOutcomeStatus,
     *,
     execution_id: str | None = None,
+    existing_execution_id: str | None = None,
     reason: str | None = None,
+    resolution: str | None = None,
 ) -> TraceImportOutcome:
     return TraceImportOutcome(
         trace_id=trace.source.trace_id,
@@ -201,7 +211,9 @@ def _outcome(
         observation_count=len(trace.observations),
         status=status,
         execution_id=execution_id,
+        existing_execution_id=existing_execution_id,
         reason=reason,
+        resolution=resolution,
     )
 
 
