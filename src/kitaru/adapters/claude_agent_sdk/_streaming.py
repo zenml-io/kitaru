@@ -12,6 +12,13 @@ from kitaru.adapters._streaming_utils import (
     safe_string,
 )
 
+from ._runner import (
+    ClaudeResultMessageError,
+    _api_error_status_or_none,
+    _assistant_error_or_none,
+    _diagnostic_subtype_or_none,
+)
+
 CLAUDE_STREAM_STARTED = "claude_agent_sdk.stream.started"
 CLAUDE_STREAM_EVENT = "claude_agent_sdk.stream.event"
 CLAUDE_STREAM_COMPLETED = "claude_agent_sdk.stream.completed"
@@ -85,6 +92,13 @@ class ClaudeStreamPublisher(BaseStreamPublisher):
     def failed(self, error: BaseException) -> None:
         self._clear_tool_state()
         self._publish_failed(error)
+
+    def _failed_fields(self, error: BaseException) -> dict[str, Any]:
+        if isinstance(error, ClaudeResultMessageError):
+            return {
+                "claude_result_diagnostic": error.diagnostic.as_metadata(),
+            }
+        return {}
 
     def _normalize_publishable(self, item: Any) -> tuple[str, dict[str, Any]]:
         return CLAUDE_STREAM_EVENT, self.normalize_message(item)
@@ -293,6 +307,9 @@ class ClaudeStreamPublisher(BaseStreamPublisher):
         stop_reason = safe_string(getattr(message, "stop_reason", None))
         if stop_reason is not None:
             payload["stop_reason"] = stop_reason
+        assistant_error = _assistant_error_or_none(getattr(message, "error", None))
+        if assistant_error is not None:
+            payload["assistant_error"] = assistant_error
         return payload
 
     def _normalize_user_message(self, message: Any) -> dict[str, Any]:
@@ -326,7 +343,7 @@ class ClaudeStreamPublisher(BaseStreamPublisher):
         return payload
 
     def _normalize_result_message(self, message: Any) -> dict[str, Any]:
-        subtype = safe_string(getattr(message, "subtype", None))
+        subtype = _diagnostic_subtype_or_none(getattr(message, "subtype", None))
         is_error = bool(getattr(message, "is_error", False))
         payload = self._base_payload(
             category="result_message",
@@ -345,6 +362,11 @@ class ClaudeStreamPublisher(BaseStreamPublisher):
             payload["session_id"] = session_id
         if subtype is not None:
             payload["subtype"] = subtype
+        api_error_status = _api_error_status_or_none(
+            getattr(message, "api_error_status", None)
+        )
+        if api_error_status is not None:
+            payload["api_error_status"] = api_error_status
         stop_reason = safe_string(getattr(message, "stop_reason", None))
         if stop_reason is not None:
             payload["stop_reason"] = stop_reason

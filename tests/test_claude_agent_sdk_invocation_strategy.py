@@ -33,8 +33,9 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     sdk.__dict__["messages"] = messages
 
     class AssistantMessage:
-        def __init__(self, text: str) -> None:
+        def __init__(self, text: str, *, error: object | None = None) -> None:
             self.text = text
+            self.error = error
 
     class StreamEvent:
         def __init__(self, event: dict[str, object]) -> None:
@@ -57,17 +58,20 @@ def fake_sdk(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             self,
             *,
             session_id: str = "session-123",
-            result: str = "done",
+            result: object = "done",
             is_error: bool = False,
+            api_error_status: object | None = None,
+            subtype: object = "success",
         ) -> None:
             self.session_id = session_id
             self.result = result
             self.is_error = is_error
+            self.api_error_status = api_error_status
             self.usage = {"input_tokens": 3, "output_tokens": 5}
             self.total_cost_usd = 0.04
             self.model_usage = {"claude-sonnet": {"input_tokens": 3}}
             self.stop_reason = "end_turn"
-            self.subtype = "success"
+            self.subtype = subtype
             self.num_turns = 1
             self.duration_ms = 12.5
             self.duration_api_ms = 10.0
@@ -725,8 +729,11 @@ def test_failed_invocation_manifest_build_failure_preserves_sdk_error(
         capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
     )
 
-    with pytest.raises(RuntimeError, match="permission denied"):
+    with pytest.raises(RuntimeError, match="error ResultMessage") as exc_info:
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert type(exc_info.value).__name__ == "ClaudeResultMessageError"
+    assert "permission denied" not in str(exc_info.value)
 
 
 def test_failed_invocation_capture_failure_preserves_sdk_error(
@@ -750,8 +757,11 @@ def test_failed_invocation_capture_failure_preserves_sdk_error(
         capture=claude_adapter.ClaudeCapturePolicy(fail_on_artifact_capture_error=True),
     )
 
-    with pytest.raises(RuntimeError, match="permission denied"):
+    with pytest.raises(RuntimeError, match="error ResultMessage") as exc_info:
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert type(exc_info.value).__name__ == "ClaudeResultMessageError"
+    assert "permission denied" not in str(exc_info.value)
 
 
 def test_event_persistence_failure_is_non_fatal_by_default(
@@ -1632,8 +1642,130 @@ def test_runner_raises_when_sdk_result_is_error(
         name="claude",
     )
 
-    with pytest.raises(RuntimeError, match="error ResultMessage"):
+    with pytest.raises(RuntimeError, match="error ResultMessage") as exc_info:
         runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert "permission denied" not in str(exc_info.value)
+
+
+def test_failed_result_diagnostic_is_safe_and_persisted(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_inline_scope(monkeypatch)
+    saved: list[tuple[str, object]] = []
+    logs: list[dict[str, object]] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_event=lambda name, value, *, type: saved.append((name, value)),
+        log_event=lambda **kwargs: logs.append(kwargs),
+    )
+    assistant_message = fake_sdk.__dict__["AssistantMessage"]
+    result_message = fake_sdk.__dict__["ResultMessage"]
+    secret = "SECRET_RESULT_TEXT_SHOULD_NOT_LEAK"
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [
+        assistant_message("first", error="rate_limit"),
+        assistant_message("second", error="billing_error"),
+        assistant_message("ignored", error="not_allowlisted"),
+        result_message(
+            is_error=True,
+            result=secret,
+            api_error_status=529,
+            subtype="success",
+        ),
+    ]
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    expected_diagnostic = {
+        "assistant_error": "billing_error",
+        "api_error_status": 529,
+        "subtype": "success",
+    }
+    assert type(exc_info.value).__name__ == "ClaudeResultMessageError"
+    assert str(exc_info.value) == (
+        "Claude Agent SDK returned an error ResultMessage; "
+        "assistant_error='billing_error'; api_error_status=529; "
+        "subtype='success'"
+    )
+    assert secret not in str(exc_info.value)
+
+    event_log = next(value for name, value in saved if name.startswith("event_log__"))
+    run_summary = next(
+        value for name, value in saved if name.startswith("run_summary__")
+    )
+    event = cast(list[dict[str, Any]], event_log)[0]
+    summary = cast(dict[str, Any], run_summary)
+    assert event["metadata"]["claude_result_diagnostic"] == expected_diagnostic
+    assert summary["metadata"]["claude_result_diagnostic"] == expected_diagnostic
+    assert event["error"]["message"] == str(exc_info.value)
+    assert summary["error"]["message"] == str(exc_info.value)
+    assert secret not in repr(saved)
+    assert secret not in repr(logs)
+
+
+@pytest.mark.parametrize(
+    "api_error_status",
+    [
+        True,
+        type("IntSubclass", (int,), {})(529),
+        SimpleNamespace(secret="SECRET_HOSTILE_API_STATUS"),
+    ],
+)
+def test_failed_result_diagnostic_rejects_hostile_values(
+    claude_adapter: types.ModuleType,
+    fake_sdk: types.ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    api_error_status: object,
+) -> None:
+    class HostileValue:
+        def __str__(self) -> str:
+            return "SECRET_HOSTILE_VALUE"
+
+        def __repr__(self) -> str:
+            return "SECRET_HOSTILE_VALUE"
+
+    _patch_inline_scope(monkeypatch)
+    saved: list[tuple[str, object]] = []
+    _patch_direct_execution_persistence(
+        monkeypatch,
+        save_event=lambda name, value, *, type: saved.append((name, value)),
+    )
+    assistant_message = fake_sdk.__dict__["AssistantMessage"]
+    result_message = fake_sdk.__dict__["ResultMessage"]
+    cast(list[object], fake_sdk.__dict__["messages"])[:] = [
+        assistant_message("ignored", error=HostileValue()),
+        result_message(
+            is_error=True,
+            result=HostileValue(),
+            api_error_status=api_error_status,
+            subtype=HostileValue(),
+        ),
+    ]
+    runner = claude_adapter.KitaruClaudeRunner(
+        allow_direct_execution_inside_checkpoint=True,
+        name="claude",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        runner.run_sync(claude_adapter.ClaudeRunRequest.start("hello"))
+
+    assert str(exc_info.value) == ("Claude Agent SDK returned an error ResultMessage")
+    assert "SECRET_HOSTILE" not in str(exc_info.value)
+    event_log = next(value for name, value in saved if name.startswith("event_log__"))
+    event = cast(list[dict[str, Any]], event_log)[0]
+    assert event["metadata"]["claude_result_diagnostic"] == {
+        "assistant_error": None,
+        "api_error_status": None,
+        "subtype": None,
+    }
+    assert "SECRET_HOSTILE" not in repr(saved)
 
 
 def test_transcript_path_rejects_non_ascii_cwd(
