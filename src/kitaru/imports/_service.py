@@ -23,7 +23,7 @@ from kitaru.imports._writer import (
 
 STORAGE_WARNING = (
     "Writing imported traces stores their full input and output payloads in the "
-    "active Kitaru/ZenML artifact store. Confirm retention and access controls "
+    "active Kitaru storage backend. Confirm retention and access controls "
     "before proceeding."
 )
 

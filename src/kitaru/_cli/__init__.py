@@ -44,6 +44,10 @@ executions_app = cyclopts.App(
     name="executions",
     help="Inspect and manage flow executions.",
 )
+import_app = cyclopts.App(
+    name="import",
+    help="Import external agent traces as synthetic Kitaru executions.",
+)
 clean_app = cyclopts.App(
     name="clean",
     help="Reset Kitaru state.",
@@ -84,6 +88,7 @@ app.command(project_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
+app.command(import_app)
 app.command(clean_app)
 app.command(analytics_app)
 app.command(auth_app)
@@ -113,6 +118,7 @@ from . import (  # noqa: F401,E402
     _clean,
     _executions,
     _flows,
+    _imports,
     _init,
     _models,
     _projects,
@@ -132,6 +138,7 @@ __all__ = [
     "executions_app",
     "flow_app",
     "flow_deployments_app",
+    "import_app",
     "log_store_app",
     "main",
     "model_app",

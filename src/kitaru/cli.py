@@ -36,6 +36,7 @@ from kitaru._cli import (
     executions_app,
     flow_app,
     flow_deployments_app,
+    import_app,
     log_store_app,
     main,
     model_app,
@@ -151,6 +152,7 @@ from kitaru._cli._helpers import (
     _validate_pagination,
     _value_style,
 )
+from kitaru._cli._imports import langfuse as import_langfuse
 from kitaru._cli._init import init
 from kitaru._cli._models import _model_rows, list___, register
 from kitaru._cli._projects import (
@@ -331,6 +333,7 @@ _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
         "clean",
         "executions",
         "flow",
+        "import",
         "secrets",
         "log-store",
         "stack",
@@ -524,6 +527,8 @@ __all__ = [
     "get_current_stack",
     "get_project",
     "global_",
+    "import_app",
+    "import_langfuse",
     "info",
     "init",
     "input_",

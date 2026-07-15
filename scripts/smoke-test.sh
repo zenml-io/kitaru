@@ -1600,6 +1600,7 @@ run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
 run_test "kitaru flow --help"             $UV_RUN kitaru flow --help
 run_test "kitaru flow deployments --help" $UV_RUN kitaru flow deployments --help
 run_test "kitaru flow deployments curl --help" $UV_RUN kitaru flow deployments curl --help
+run_test "kitaru import langfuse --help" $UV_RUN kitaru import langfuse --help
 run_test "kitaru flow list"               $UV_RUN kitaru flow list
 run_test "kitaru flow list -o json"       $UV_RUN kitaru flow list -o json
 ANALYTICS_OUT=$($UV_RUN kitaru analytics status -o json 2>&1) || true
