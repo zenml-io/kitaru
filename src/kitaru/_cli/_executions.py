@@ -133,6 +133,29 @@ def _checkpoint_diff_status(checkpoint: Mapping[str, Any]) -> str:
     return "match"
 
 
+def _format_artifact_states(artifact_hashes: Any) -> str:
+    """Format role-sorted artifact comparisons without exposing hashes."""
+    if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+        return "n/a"
+
+    states: list[str] = []
+    for role in sorted(artifact_hashes):
+        hashes = artifact_hashes[role]
+        if not isinstance(hashes, Mapping):
+            state = "unavailable"
+        else:
+            original_hash = hashes.get("original")
+            replay_hash = hashes.get("replay")
+            if original_hash is None or replay_hash is None:
+                state = "unavailable"
+            elif original_hash == replay_hash:
+                state = "unchanged"
+            else:
+                state = "changed"
+        states.append(f"{role}={state}")
+    return ", ".join(states)
+
+
 def _checkpoint_diff_table(
     payload: Mapping[str, Any],
 ) -> tuple[list[list[str]], list[str]]:
@@ -161,12 +184,16 @@ def _checkpoint_diff_table(
                     replay_exec_id,
                     str(checkpoint.get("name") or "unknown checkpoint"),
                     _checkpoint_diff_status(checkpoint),
+                    _format_diff_delta(
+                        checkpoint.get("duration_delta_ms"), decimal_places=1
+                    ),
                     _format_diff_delta(token_mapping.get("prompt_tokens")),
                     _format_diff_delta(token_mapping.get("completion_tokens")),
                     _format_diff_delta(token_mapping.get("total_tokens")),
                     _format_diff_delta(
                         checkpoint.get("cost_delta_usd"), decimal_places=6
                     ),
+                    _format_artifact_states(checkpoint.get("artifact_hashes")),
                 ]
             )
     return rows, empty_replay_ids
@@ -1849,12 +1876,15 @@ def diff_(
                 "Replay",
                 "Checkpoint",
                 "Result",
+                "Duration Δ (ms)",
                 "Input Δ",
                 "Output Δ",
                 "Total Δ",
                 "Cost Δ (USD)",
+                "Artifacts",
             ],
             checkpoint_rows,
+            rich_multiline_columns={"Artifacts": 18},
         )
     for replay_exec_id in empty_replay_ids:
         print(f"No checkpoint rows for replay {replay_exec_id}.")
