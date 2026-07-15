@@ -454,17 +454,19 @@ kitaru executions diff kr-original kr-replay-a
 
 ```text
 Diff for kr-original
-Compared against 1 replay execution(s).
+  Compared against 1 replay execution(s).
 Replay kr-replay-a checkpoints
-  Checkpoint   Status    Duration   Tokens                                 Cost       Artifacts
-  ----------   -------   --------   ------------------------------------   --------   ------------------------------------------------------
-  generate     same      +12.5 ms   input=+10, output=-5, total=+5         +0.0 USD   model=changed, output=unchanged, report=unavailable
-  publish      changed   n/a        n/a                                    n/a        n/a
+  Checkpoint   Status    Duration   Tokens                           Cost       Artifacts
+  ----------   -------   --------   ------------------------------   --------   ---------------------------------------------------
+  generate     same      +12.5 ms   input=+10, output=-5, total=+5   +0.0 USD   model=changed, output=unchanged, report=unavailable
+  publish      changed   n/a        n/a                              n/a        n/a
   ui: https://kitaru.example/compare
 ```
 
 `Status` is `same` when the original and replay checkpoint statuses match, and
-`changed` otherwise. Artifact roles are sorted by name. Each role is
+`changed` when both ran but their statuses differ. A checkpoint that ran only in
+the replay shows `added`, and one that ran only in the original shows `removed`.
+Artifact roles are sorted by name. Each role is
 `unchanged` when both hashes match, `changed` when both hashes exist but differ,
 or `unavailable` when either hash is missing. `n/a` means the optional metric or
 artifact comparison is not available.
