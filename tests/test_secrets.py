@@ -15,6 +15,7 @@ from kitaru.secrets import (
     Secret,
     SecretSummary,
     _read_secret_values,
+    _secret_summary_from_response,
     create_secret,
     delete_secret,
     get_secret,
@@ -68,15 +69,15 @@ def test_list_secrets_scans_all_backend_pages_at_fixed_size() -> None:
         summaries = list_secrets()
 
     assert client.list_secrets.call_args_list == [
-        call(page=1, size=50),
-        call(page=2, size=50),
-        call(page=3, size=50),
+        call(page=1, size=50, hydrate=False),
+        call(page=2, size=50, hydrate=False),
+        call(page=3, size=50, hydrate=False),
     ]
     assert [summary.name for summary in summaries] == ["alpha", "bravo", "charlie"]
 
 
 def test_list_secrets_returns_metadata_without_raw_values() -> None:
-    """SDK listing should normalize IDs and expose key names, not values."""
+    """SDK listing should not infer key metadata or expose raw values."""
     client = Mock()
     client.list_secrets.return_value = SimpleNamespace(
         items=[
@@ -99,9 +100,11 @@ def test_list_secrets_returns_metadata_without_raw_values() -> None:
         "name": "provider-creds",
         "id": "123",
         "private": True,
-        "keys": ["A_KEY", "Z_TOKEN"],
-        "has_missing_values": True,
+        "keys": [],
+        "keys_known": False,
+        "has_missing_values": False,
     }
+    client.get_secret.assert_not_called()
 
 
 def test_list_secrets_returns_empty_keys_without_backend_values() -> None:
@@ -128,6 +131,7 @@ def test_list_secrets_returns_empty_keys_without_backend_values() -> None:
             id="secret-id",
             private=False,
             keys=[],
+            keys_known=False,
             has_missing_values=False,
         )
     ]
@@ -189,8 +193,8 @@ def test_list_secrets_maps_later_page_failure_to_backend_error() -> None:
         list_secrets()
 
     assert client.list_secrets.call_args_list == [
-        call(page=1, size=50),
-        call(page=2, size=50),
+        call(page=1, size=50, hydrate=False),
+        call(page=2, size=50, hydrate=False),
     ]
 
 
@@ -283,12 +287,31 @@ def test_create_secret_creates_public_secret_by_default() -> None:
         id="123",
         private=False,
         keys=["COUNT", "OPENAI_API_KEY"],
+        keys_known=True,
         has_missing_values=False,
     )
     track_mock.assert_called_once_with(
         AnalyticsEvent.SECRET_UPSERTED,
         {"operation": "created", "key_count": 2},
     )
+
+
+def test_secret_summary_marks_authoritative_empty_keys_as_known() -> None:
+    """An authoritative empty mapping should remain distinguishable."""
+    summary = _secret_summary_from_response(
+        SimpleNamespace(
+            name="empty-creds",
+            id="secret-id",
+            private=False,
+            values={},
+            has_missing_values=False,
+        ),
+        keys_known=True,
+    )
+
+    assert summary.keys == []
+    assert summary.keys_known is True
+    assert summary.has_missing_values is False
 
 
 def test_create_secret_forwards_private_flag() -> None:
@@ -315,6 +338,7 @@ def test_create_secret_forwards_private_flag() -> None:
         private=True,
     )
     assert summary.private is True
+    assert summary.keys_known is True
 
 
 @pytest.mark.parametrize(
@@ -405,6 +429,7 @@ def test_delete_secret_resolves_exact_secret_and_deletes_by_id() -> None:
         id="123",
         private=False,
         keys=["OPENAI_API_KEY"],
+        keys_known=True,
     )
 
 

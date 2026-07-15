@@ -296,7 +296,12 @@ class TestExtractApi:
         secrets_module = filtered.get("modules", {}).get("secrets", {})
 
         assert "Secret" in secrets_module.get("classes", {})
-        assert "SecretSummary" in secrets_module.get("classes", {})
+        secret_summary = secrets_module.get("classes", {})["SecretSummary"]
+        summary_attributes = {
+            attribute["name"] for attribute in secret_summary.get("attributes", [])
+        }
+
+        assert "keys_known" in summary_attributes
         assert "Client" not in secrets_module.get("classes", {})
         assert "ZenKeyError" not in secrets_module.get("classes", {})
         assert "create_secret" in secrets_module.get("functions", {})

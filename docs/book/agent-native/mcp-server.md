@@ -164,13 +164,15 @@ Secret tools:
 - `kitaru_secrets_list`
 
 `kitaru_secrets_list` accepts `page` and `size` (defaults: `1` and `20`) and
-returns only metadata for each secret: `id`, `name`, `visibility`, `keys`, and
-`has_missing_values`. It never returns secret values. Pages beyond the available
-results return `[]`.
+returns only metadata for each secret: `id`, `name`, `visibility`, `keys`,
+`keys_known`, and `has_missing_values`. It never returns secret values. Pages
+beyond the available results return `[]`.
 
-When listing secrets, `keys` and `has_missing_values` may be unpopulated because
-the backend does not include key names in list responses. These fields are
-meaningful in `kitaru_secrets_create` responses and the CLI `secrets show` path.
+List responses use `keys_known=false` because the backend does not include key
+metadata there. In that state, `keys=[]` and `has_missing_values=false` mean the
+metadata is unavailable, not that the secret is empty or fully readable.
+`kitaru_secrets_create` returns `keys_known=true`, so its `keys` and
+`has_missing_values` fields are authoritative.
 
 `kitaru_secrets_create` also returns metadata only. The MCP server intentionally
 does not expose `kitaru_secrets_delete`; use the CLI or Python SDK for deletion.
@@ -534,6 +536,13 @@ For diffs, use:
 
 - `kitaru_executions_diff` for one original execution against one or more replays;
 - `kitaru_executions_diff_matrix` for many original executions against their auto-discovered replays.
+
+Both tools calculate deltas as replay minus original, but tokens and cost use
+different accounting bases. `token_delta` measures workload tokens, including
+model work that the replay reused. It is null only when neither side has
+canonical usage. `cost_delta_usd` measures incurred display cost, and explicitly
+reused work contributes zero. It is null when either side contains unpriced work
+that was not explicitly reused.
 
 Replay does not support `wait.*` overrides. If the replayed execution reaches a
 wait, resolve it through the normal input flow afterward.
