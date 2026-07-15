@@ -80,10 +80,11 @@ kitaru secrets delete openai-creds
 ## Use secrets from Python
 
 Create and delete helpers return `SecretSummary`, a metadata-only model that
-lists key names but never includes raw secret values:
+never includes raw secret values. Its `keys_known` field tells you whether
+`keys` and `has_missing_values` are authoritative:
 
 ```python
-from kitaru import create_secret, delete_secret, get_secret
+from kitaru import create_secret, delete_secret, get_secret, list_secrets
 
 created = create_secret(
     "github-creds",
@@ -100,8 +101,20 @@ private_created = create_secret(
 secret = get_secret("github-creds")
 token = secret.get("GITHUB_TOKEN")
 
+listed = list_secrets()
+for summary in listed:
+    print(summary.name, summary.keys_known)  # keys_known is False for list results
+
 deleted = delete_secret("github-creds")
 ```
+
+`create_secret()` and `delete_secret()` receive authoritative key metadata, so
+`keys_known=True` and `keys` is authoritative, including when it is empty.
+`list_secrets()` deliberately uses metadata-only backend responses and does not
+load each secret individually. Its summaries therefore use `keys_known=False`,
+`keys=[]`, and `has_missing_values=False`. Those empty and false values mean the
+key metadata was unavailable, not that the stored secret has no keys or missing
+values.
 
 `get_secret()` performs an exact lookup by secret name or ID. It returns a
 Kitaru `Secret` model with `.name`, `.id`, `.values: dict[str, str]`, and
@@ -145,8 +158,10 @@ raw secret values from checkpoints unless that is explicitly intended.
 ## MCP support
 
 The Kitaru MCP server exposes `kitaru_secrets_create` for metadata-only secret
-creation from MCP clients. It intentionally does not expose secret deletion; use
-the CLI or Python SDK when you need to delete a secret.
+creation and `kitaru_secrets_list` for paginated discovery without values. List
+results follow the same `keys_known=False` contract described above. The server
+intentionally does not expose secret deletion; use the CLI or Python SDK when
+you need to delete a secret.
 
 ## Related reference pages
 

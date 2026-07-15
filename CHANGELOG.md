@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - `kitaru executions diff` now shows a checkpoint-level table for each replay in its default text output, including status, duration, token, cost, and artifact comparisons. (#520)
 
+### Fixed
+- Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
+- Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
+
 ## [0.21.0] - 2026-07-14
 
 ### Added
