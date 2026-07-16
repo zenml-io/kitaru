@@ -22,6 +22,7 @@ from pydantic_core import to_jsonable_python
 LLM_USAGE_METADATA_KEY = "llm_usage_v1"
 LLM_USAGE_SUMMARY_METADATA_KEY = "llm_usage_summary_v1"
 LLM_USAGE_SCHEMA_VERSION = 1
+LLM_USAGE_COST_POLICY = "non_reused_is_incurred_v1"
 
 LLM_FLAT_USAGE_RECORD_COUNT_KEY = "kitaru_llm_usage_record_count_v1"
 LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY = "kitaru_llm_incurred_usage_record_count_v1"
@@ -994,6 +995,7 @@ def parse_usage_records(
     value: Any,
     *,
     source_attempt_id: str | None = None,
+    default_checkpoint_id: str | None = None,
     default_checkpoint_name: str | None = None,
     reused: bool = False,
     reused_cache_status: LLMCacheStatus = "checkpoint_cache_hit",
@@ -1023,6 +1025,11 @@ def parse_usage_records(
             continue
         normalized = dict(record)
         if (
+            normalized.get("checkpoint_id") is None
+            and default_checkpoint_id is not None
+        ):
+            normalized["checkpoint_id"] = default_checkpoint_id
+        if (
             normalized.get("checkpoint_name") is None
             and default_checkpoint_name is not None
         ):
@@ -1040,6 +1047,7 @@ def usage_records_from_metadata(
     metadata: Mapping[str, Any],
     *,
     source_attempt_id: str | None = None,
+    default_checkpoint_id: str | None = None,
     default_checkpoint_name: str | None = None,
     reused: bool = False,
     reused_cache_status: LLMCacheStatus = "checkpoint_cache_hit",
@@ -1048,6 +1056,7 @@ def usage_records_from_metadata(
     return parse_usage_records(
         metadata.get(LLM_USAGE_METADATA_KEY),
         source_attempt_id=source_attempt_id,
+        default_checkpoint_id=default_checkpoint_id,
         default_checkpoint_name=default_checkpoint_name,
         reused=reused,
         reused_cache_status=reused_cache_status,
@@ -1068,7 +1077,8 @@ def _record_cost(record: Mapping[str, Any], key: str) -> float | None:
     return coerce_cost_usd(cost.get(key))
 
 
-def _round_money(value: float) -> float:
+def round_cost_usd(value: float) -> float:
+    """Round USD costs to suppress insignificant floating-point noise."""
     return round(value, 10)
 
 
@@ -1094,24 +1104,26 @@ def empty_usage_summary() -> dict[str, Any]:
         "records_without_cost_count": 0,
         "adapters": [],
         "models": [],
-        "cost_policy": (
-            "display_cost_usd uses actual_cost_usd when present for a record, "
-            "otherwise estimated_cost_usd. It is an observability estimate, "
-            "not an invoice."
-        ),
+        "cost_policy": LLM_USAGE_COST_POLICY,
         "warnings": [],
     }
 
 
-def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Aggregate canonical records into an execution-level summary.
+def aggregate_usage_records_with_cost_completeness(
+    records: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    """Aggregate records and report whether any incurred cost is unavailable.
 
-    Duplicate records are skipped only when they came from the same source
-    attempt and have the same record identity. The same logical record ID on a
-    later retry attempt is counted again because that second attempt could have
-    made a second provider call.
+    The ``non_reused_is_incurred_v1`` policy treats every record as incurred
+    unless its billing effect is explicitly ``reused_not_incurred``. This keeps
+    incurred counts, tokens, display cost, and cost completeness on the same
+    conservative basis. Duplicate records are skipped only when they came from
+    the same source attempt and have the same record identity. The same logical
+    record ID on a later retry attempt is counted again because that second
+    attempt could have made a second provider call.
     """
     summary = empty_usage_summary()
+    has_unpriced_incurred_record = False
     adapters: set[str] = set()
     models: set[str] = set()
     warnings: list[str] = []
@@ -1132,7 +1144,7 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
 
         billing_effect = record.get("billing_effect")
         is_reused = billing_effect == "reused_not_incurred"
-        is_incurred = billing_effect == "incurred"
+        is_incurred = not is_reused
 
         summary["usage_record_count"] += 1
         if is_incurred:
@@ -1160,7 +1172,7 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
 
         actual_cost = _record_cost(record, "actual_cost_usd")
         estimated_cost = _record_cost(record, "estimated_cost_usd")
-        if not is_reused:
+        if is_incurred:
             if actual_cost is not None:
                 summary["actual_cost_usd"] += actual_cost
             if estimated_cost is not None:
@@ -1171,6 +1183,8 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
                 summary["display_cost_usd"] += estimated_cost
         if actual_cost is None and estimated_cost is None:
             summary["records_without_cost_count"] += 1
+            if is_incurred:
+                has_unpriced_incurred_record = True
 
         adapter = record.get("adapter")
         if isinstance(adapter, str):
@@ -1182,12 +1196,18 @@ def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, A
         if isinstance(record_warnings, list):
             warnings.extend(str(warning) for warning in record_warnings)
 
-    summary["actual_cost_usd"] = _round_money(float(summary["actual_cost_usd"]))
-    summary["estimated_cost_usd"] = _round_money(float(summary["estimated_cost_usd"]))
-    summary["display_cost_usd"] = _round_money(float(summary["display_cost_usd"]))
+    summary["actual_cost_usd"] = round_cost_usd(float(summary["actual_cost_usd"]))
+    summary["estimated_cost_usd"] = round_cost_usd(float(summary["estimated_cost_usd"]))
+    summary["display_cost_usd"] = round_cost_usd(float(summary["display_cost_usd"]))
     summary["adapters"] = sorted(adapters)
     summary["models"] = sorted(models)
     summary["warnings"] = warnings
+    return summary, has_unpriced_incurred_record
+
+
+def aggregate_usage_records(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate canonical records into an execution-level summary."""
+    summary, _ = aggregate_usage_records_with_cost_completeness(records)
     return summary
 
 
@@ -1308,8 +1328,7 @@ def metadata_has_complete_usage_summary(metadata: Mapping[str, Any]) -> bool:
 
     if any(not isinstance(summary.get(key), list) for key in _SUMMARY_LIST_FIELDS):
         return False
-    cost_policy = summary.get("cost_policy")
-    return isinstance(cost_policy, str) and bool(cost_policy.strip())
+    return summary.get("cost_policy") == LLM_USAGE_COST_POLICY
 
 
 def execution_metadata_from_records(

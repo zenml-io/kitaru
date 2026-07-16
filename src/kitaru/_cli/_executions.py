@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from kitaru._client._statistics import (
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import (
+    CheckpointCall,
     Execution,
     ExecutionStatistics,
     ExecutionStatus,
@@ -44,10 +46,11 @@ from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    SnapshotSection,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
-    _emit_snapshot,
+    _emit_snapshot_sections,
     _emit_table,
     _exit_with_error,
     _format_table_timestamp,
@@ -56,9 +59,178 @@ from ._helpers import (
     _is_interactive,
     _paginate_items,
     _print_success,
+    _print_warning,
     _resolve_output_format,
     _validate_pagination,
 )
+
+_SAFE_REPLAY_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _print_diff_warnings(payload: Mapping[str, Any]) -> None:
+    """Print each unique warning carried by a diff result."""
+    warnings: list[str] = []
+    raw_warnings = payload.get("warnings", [])
+    if isinstance(raw_warnings, list):
+        warnings.extend(item for item in raw_warnings if isinstance(item, str))
+
+    rows = payload.get("rows", [])
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            row_warnings = row.get("warnings", [])
+            if isinstance(row_warnings, list):
+                warnings.extend(item for item in row_warnings if isinstance(item, str))
+
+    for warning in dict.fromkeys(warnings):
+        _print_warning(f"Warning: {warning}")
+
+
+def _format_diff_delta(value: Any, *, decimal_places: int | None = None) -> str:
+    """Format one signed numeric delta for compact diff output."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "n/a"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "n/a"
+    if decimal_places is None:
+        return f"{value:+d}" if isinstance(value, int) else "n/a"
+    return f"{value:+.{decimal_places}f}"
+
+
+def _checkpoint_diff_status(checkpoint: Mapping[str, Any]) -> str:
+    """Return the compact result label for one checkpoint diff."""
+    original_present = checkpoint.get("original_call_id") is not None
+    replay_present = checkpoint.get("replay_call_id") is not None
+    if original_present and not replay_present:
+        return "original only"
+    if replay_present and not original_present:
+        return "replay only"
+    if checkpoint.get("status_match") is not True:
+        return "changed"
+
+    token_delta = checkpoint.get("token_delta")
+    if isinstance(token_delta, Mapping) and any(
+        isinstance(value, int | float) and not isinstance(value, bool) and value != 0
+        for value in token_delta.values()
+    ):
+        return "changed"
+
+    cost_delta = checkpoint.get("cost_delta_usd")
+    if (
+        isinstance(cost_delta, int | float)
+        and not isinstance(cost_delta, bool)
+        and cost_delta != 0
+    ):
+        return "changed"
+
+    artifact_hashes = checkpoint.get("artifact_hashes")
+    if isinstance(artifact_hashes, Mapping) and any(
+        isinstance(hashes, Mapping) and hashes.get("original") != hashes.get("replay")
+        for hashes in artifact_hashes.values()
+    ):
+        return "changed"
+    return "match"
+
+
+def _format_artifact_states(artifact_hashes: Any) -> str:
+    """Format role-sorted artifact comparisons without exposing hashes."""
+    if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+        return "n/a"
+
+    states: list[str] = []
+    for role in sorted(artifact_hashes):
+        hashes = artifact_hashes[role]
+        if not isinstance(hashes, Mapping):
+            state = "unavailable"
+        else:
+            original_hash = hashes.get("original")
+            replay_hash = hashes.get("replay")
+            if original_hash is None or replay_hash is None:
+                state = "unavailable"
+            elif original_hash == replay_hash:
+                state = "unchanged"
+            else:
+                state = "changed"
+        states.append(f"{role}={state}")
+    return ", ".join(states)
+
+
+def _checkpoint_diff_table(
+    payload: Mapping[str, Any],
+) -> tuple[list[list[str]], list[str]]:
+    """Build compact checkpoint rows and identify compared replays without rows."""
+    rows: list[list[str]] = []
+    empty_replay_ids: list[str] = []
+    compared = payload.get("compared", [])
+    if not isinstance(compared, list):
+        return rows, empty_replay_ids
+
+    for comparison in compared:
+        if not isinstance(comparison, Mapping):
+            continue
+        replay_exec_id = str(comparison.get("replay_exec_id") or "unknown replay")
+        checkpoints = comparison.get("checkpoints", [])
+        if not isinstance(checkpoints, list) or not checkpoints:
+            empty_replay_ids.append(replay_exec_id)
+            continue
+        for checkpoint in checkpoints:
+            if not isinstance(checkpoint, Mapping):
+                continue
+            token_delta = checkpoint.get("token_delta")
+            token_mapping = token_delta if isinstance(token_delta, Mapping) else {}
+            rows.append(
+                [
+                    replay_exec_id,
+                    str(checkpoint.get("name") or "unknown checkpoint"),
+                    _checkpoint_diff_status(checkpoint),
+                    _format_diff_delta(
+                        checkpoint.get("duration_delta_ms"), decimal_places=1
+                    ),
+                    _format_diff_delta(token_mapping.get("prompt_tokens")),
+                    _format_diff_delta(token_mapping.get("completion_tokens")),
+                    _format_diff_delta(token_mapping.get("total_tokens")),
+                    _format_diff_delta(
+                        checkpoint.get("cost_delta_usd"), decimal_places=6
+                    ),
+                    _format_artifact_states(checkpoint.get("artifact_hashes")),
+                ]
+            )
+    return rows, empty_replay_ids
+
+
+def _print_applied_output_overrides(payload: Mapping[str, Any]) -> None:
+    """Print redacted output override evidence associated with each replay."""
+    compared = payload.get("compared", [])
+    if not isinstance(compared, list):
+        return
+
+    for comparison in compared:
+        if not isinstance(comparison, Mapping):
+            continue
+        replay_exec_id = str(comparison.get("replay_exec_id") or "unknown replay")
+        overrides = comparison.get("applied_output_overrides")
+        if overrides is None:
+            print(f"Applied output overrides: unavailable [{replay_exec_id}]")
+            continue
+        if not isinstance(overrides, list) or not overrides:
+            continue
+
+        print(f"Applied output overrides [{replay_exec_id}]:")
+        for override in overrides:
+            if not isinstance(override, Mapping):
+                continue
+            selector_kind = override.get("selector_kind")
+            kind_label = (
+                "checkpoint family" if selector_kind == "checkpoint" else "invocation"
+            )
+            selector = str(override.get("selector") or "unknown selector")
+            raw_ids = override.get("matched_invocation_ids", [])
+            matched_ids = (
+                [str(item) for item in raw_ids] if isinstance(raw_ids, list) else []
+            )
+            resolved = ", ".join(matched_ids) or "no resolved checkpoint IDs"
+            print(f"  {kind_label} '{selector}' -> {resolved}")
 
 
 def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
@@ -208,22 +380,56 @@ def _status_label(status: ExecutionStatus | str) -> str:
 
 
 def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
-    """Render a compact checkpoint status summary string."""
+    """Render the legacy compact checkpoint summary."""
     if not checkpoints:
         return "none"
 
-    entries: list[str] = []
-    for checkpoint in checkpoints[:max_items]:
-        name = str(getattr(checkpoint, "name", "unknown"))
-        raw_status = getattr(checkpoint, "status", "unknown")
-        status = _status_label(raw_status)
-        entries.append(f"{name} ({status})")
-
+    entries = [
+        f"{getattr(checkpoint, 'name', 'unknown')} "
+        f"({_status_label(getattr(checkpoint, 'status', 'unknown'))})"
+        for checkpoint in checkpoints[:max_items]
+    ]
     remaining = len(checkpoints) - len(entries)
     if remaining > 0:
         entries.append(f"... (+{remaining} more)")
-
     return ", ".join(entries)
+
+
+def _checkpoint_rows(checkpoints: list[CheckpointCall]) -> list[tuple[str, str]]:
+    """Build one display row for each checkpoint call."""
+    if not checkpoints:
+        return [("Calls", "none")]
+
+    rows: list[tuple[str, str]] = []
+    for checkpoint in checkpoints:
+        call_id = checkpoint.call_id.strip()
+        label = f"Call ID {call_id or 'not available'}"
+        value = f"{checkpoint.name} ({checkpoint.status.value})"
+        original_call_id = checkpoint.original_call_id
+        if original_call_id:
+            value += (
+                f"; original call ID: {original_call_id} "
+                "(may identify a call in the source execution; "
+                "not a --at selector for this execution)"
+            )
+        rows.append((label, value))
+    return rows
+
+
+def _replay_command(execution: Execution) -> str | None:
+    """Return a replay command for the first eligible failed checkpoint."""
+    if execution.status != ExecutionStatus.FAILED:
+        return None
+    if _SAFE_REPLAY_IDENTIFIER.fullmatch(execution.exec_id) is None:
+        return None
+
+    for checkpoint in execution.checkpoints:
+        if checkpoint.status != ExecutionStatus.FAILED:
+            continue
+        call_id = checkpoint.call_id
+        if _SAFE_REPLAY_IDENTIFIER.fullmatch(call_id) is not None:
+            return f"kitaru executions replay {execution.exec_id} --at {call_id}"
+    return None
 
 
 def _display_int(value: Any) -> int | None:
@@ -297,7 +503,6 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Pending wait", pending_wait_name),
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
-        ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
         ("LLM usage", _format_llm_usage_summary(execution.llm_usage_summary)),
     ]
 
@@ -645,7 +850,21 @@ def get_(
         _emit_json_item(command, serialize_execution(execution), output=output_format)
         return
 
-    _emit_snapshot("Kitaru execution", _execution_rows(execution))
+    sections = [
+        SnapshotSection(title=None, rows=_execution_rows(execution)),
+        SnapshotSection(
+            title="Checkpoints", rows=_checkpoint_rows(execution.checkpoints)
+        ),
+    ]
+    replay_command = _replay_command(execution)
+    if replay_command is not None:
+        sections.append(
+            SnapshotSection(
+                title="Replay into a new execution",
+                rows=[("Command", replay_command)],
+            )
+        )
+    _emit_snapshot_sections("Kitaru execution", sections)
 
 
 @executions_app.command
@@ -1615,7 +1834,14 @@ def diff_(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Compare an original execution against replay executions."""
+    """Compare an original execution against replay executions.
+
+    Token deltas are replay minus original workload tokens, including reused
+    model work. Cost deltas are replay minus original incurred display cost,
+    where explicitly reused work contributes zero. Token deltas are null only
+    when neither side has canonical usage; cost deltas are null when either side
+    has unpriced work that is not explicitly reused.
+    """
     from kitaru.diff import diff, serialize_execution_diff
 
     command = "executions.diff"
@@ -1636,11 +1862,33 @@ def diff_(
         _emit_json_item(command, payload, output=output_format)
         return
 
+    _print_diff_warnings(payload)
     compared_count = len(payload.get("compared", []))
     _print_success(
         f"Diff for {original}",
         detail=f"Compared against {compared_count} replay execution(s).",
     )
+    checkpoint_rows, empty_replay_ids = _checkpoint_diff_table(payload)
+    if checkpoint_rows:
+        _emit_table(
+            "Checkpoint differences",
+            [
+                "Replay",
+                "Checkpoint",
+                "Result",
+                "Duration Δ (ms)",
+                "Input Δ",
+                "Output Δ",
+                "Total Δ",
+                "Cost Δ (USD)",
+                "Artifacts",
+            ],
+            checkpoint_rows,
+            rich_multiline_columns={"Artifacts": 18},
+        )
+    for replay_exec_id in empty_replay_ids:
+        print(f"No checkpoint rows for replay {replay_exec_id}.")
+    _print_applied_output_overrides(payload)
     for url in payload.get("urls", []):
         print(f"  ui: {url}")
 
@@ -1653,7 +1901,13 @@ def diff_matrix_(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Diff many original executions against their auto-discovered replays."""
+    """Diff originals against replays using workload-token and incurred-cost bases.
+
+    Deltas are replay minus original. Tokens include reused model work; cost
+    excludes explicitly reused work. Token deltas are null only when neither
+    side has canonical usage, while cost deltas are null when either side has
+    unpriced work that is not explicitly reused.
+    """
     from kitaru.diff import diff_cohort, serialize_cohort_diff
 
     command = "executions.diff_matrix"
@@ -1674,6 +1928,7 @@ def diff_matrix_(
         _emit_json_item(command, payload, output=output_format)
         return
 
+    _print_diff_warnings(payload)
     row_count = len(payload.get("rows", []))
     _print_success(
         "Diff matrix complete",

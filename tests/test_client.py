@@ -193,6 +193,7 @@ class _DummyStep:
         step_id: UUID | None = None,
         version: int = 1,
         original_step_run_id: UUID | None = None,
+        parent_step_ids: list[UUID] | None = None,
         run_metadata: dict[str, Any] | None = None,
         exception_traceback: str | None = None,
         spec: Any | None = None,
@@ -206,7 +207,7 @@ class _DummyStep:
         self.end_time = None
         self.run_metadata = run_metadata or {}
         self.original_step_run_id = original_step_run_id
-        self.parent_step_ids: list[UUID] = []
+        self.parent_step_ids = list(parent_step_ids or [])
         self.inputs = inputs or {}
         self.outputs = outputs
         self.spec = spec
@@ -223,7 +224,7 @@ class _DummyRun:
         self,
         *,
         status: Any,
-        flow_name: str,
+        flow_name: str | None,
         flow_id: str | None = None,
         run_metadata: dict[str, Any] | None = None,
         steps: dict[str, _DummyStep] | None = None,
@@ -1987,18 +1988,18 @@ def test_deployment_facade_methods_forward_to_client_api() -> None:
         assert deployment.remove_tag("canary") is deployment
         deployment.delete()
 
-    client.deployments.tag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.tag.assert_called_once_with(
         flow="research_flow",
         version=2,
         tag="stable",
         exclusive=True,
     )
-    client.deployments.untag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.untag.assert_called_once_with(
         flow="research_flow",
         version=2,
         tag="canary",
     )
-    client.deployments.delete.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+    client.deployments.delete.assert_called_once_with(
         flow="research_flow",
         version=2,
     )
@@ -2577,6 +2578,69 @@ def test_get_surfaces_checkpoint_attempt_history() -> None:
     assert checkpoint.failure is None
 
 
+def test_get_normalizes_retry_parent_ids_to_visible_checkpoint_calls() -> None:
+    hidden_attempt = _DummyStep(
+        name="research",
+        version=1,
+        status=ZenMLExecutionStatus.RETRIED,
+        outputs={},
+    )
+    visible_attempt = _DummyStep(
+        name="research",
+        version=2,
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    downstream = _DummyStep(
+        name="publish",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        parent_step_ids=[hidden_attempt.id],
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={
+            visible_attempt.name: visible_attempt,
+            downstream.name: downstream,
+        },
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(
+            items=[
+                _as_step_run(hidden_attempt),
+                _as_step_run(visible_attempt),
+                _as_step_run(downstream),
+            ]
+        )
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    checkpoints_by_name = {
+        checkpoint.name: checkpoint for checkpoint in execution.checkpoints
+    }
+    assert checkpoints_by_name["research"].call_id == str(visible_attempt.id)
+    assert checkpoints_by_name["publish"].parent_call_ids == [
+        checkpoints_by_name["research"].call_id
+    ]
+    public_call_ids = {checkpoint.call_id for checkpoint in execution.checkpoints}
+    assert all(
+        parent_call_id in public_call_ids
+        for checkpoint in execution.checkpoints
+        for parent_call_id in checkpoint.parent_call_ids
+    )
+
+
 def test_get_merges_run_step_into_partial_attempt_history() -> None:
     attempt_one = _DummyStep(
         name="research",
@@ -2801,6 +2865,298 @@ def test_list_filters_flow_status_and_limit() -> None:
 
     assert len(executions) == 1
     assert executions[0].exec_id == str(run_1.id)
+
+
+def test_replay_scan_discovers_native_replays_without_metadata() -> None:
+    replay_a = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    replay_a.original_run = SimpleNamespace(id="original-a")
+    replay_b = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    replay_b.original_run = SimpleNamespace(id='original-"b"')
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(replay_a), _as_pipeline_run(replay_b)],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=[" original-a ", 'original-"b"'],
+            expected_flow_name="flow_a",
+            limit=2,
+        )
+
+    assert [execution.original_exec_id for execution in executions] == [
+        "original-a",
+        'original-"b"',
+    ]
+    assert truncated is False
+    kwargs = client_mock.list_pipeline_runs.call_args.kwargs
+    assert "run_metadata" not in kwargs
+    assert set(_backend_filter_values(kwargs["pipeline_name"])) == {
+        "flow_a",
+        f"{_PIPELINE_SOURCE_ALIAS_PREFIX}flow_a",
+    }
+    assert kwargs["project"] == "project-a"
+    assert kwargs["hydrate"] is False
+
+
+def test_replay_scan_does_not_map_or_hydrate_matching_runs() -> None:
+    replay = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    replay.original_run = SimpleNamespace(id="original-a")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._map_execution") as map_execution,
+    ):
+        client_cls.return_value.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(replay)],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        links, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=1,
+        )
+
+    assert [(link.exec_id, link.original_exec_id) for link in links] == [
+        (str(replay.id), "original-a")
+    ]
+    assert truncated is False
+    map_execution.assert_not_called()
+
+
+def test_replay_scan_skips_unrelated_waiting_and_running_runs() -> None:
+    native_match = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "stale-original"},
+    )
+    native_match.original_run = SimpleNamespace(id="original-a")
+    metadata_only_match = _DummyRun(
+        status=ZenMLExecutionStatus.PAUSED,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "original-a"},
+    )
+    metadata_only_match.original_run = SimpleNamespace(id="different-original")
+    unrelated_running = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_metadata={"original_exec_id": "original-a"},
+    )
+    unrelated_running.original_run = SimpleNamespace(id="another-original")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru._client._mappers._first_pending_wait") as first_pending_wait,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[
+                _as_pipeline_run(native_match),
+                _as_pipeline_run(metadata_only_match),
+                _as_pipeline_run(unrelated_running),
+            ],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=10,
+        )
+
+    assert [execution.exec_id for execution in executions] == [str(native_match.id)]
+    assert truncated is False
+    assert "run_metadata" not in client_mock.list_pipeline_runs.call_args.kwargs
+    first_pending_wait.assert_not_called()
+
+
+def test_replay_scan_paginates_and_unrelated_rows_consume_limit() -> None:
+    runs = []
+    for index in range(151):
+        run = _DummyRun(
+            status=ZenMLExecutionStatus.COMPLETED,
+            flow_name="flow_a",
+        )
+        original_id = "outside-cohort" if index < 100 else "original-a"
+        run.original_run = SimpleNamespace(id=original_id)
+        runs.append(run)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.side_effect = [
+            SimpleNamespace(
+                items=[_as_pipeline_run(run) for run in runs[:100]],
+                index=1,
+                total_pages=2,
+            ),
+            SimpleNamespace(
+                items=[_as_pipeline_run(run) for run in runs[100:]],
+                index=2,
+                total_pages=2,
+            ),
+        ]
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=150,
+        )
+
+    assert [execution.exec_id for execution in executions] == [
+        str(run.id) for run in runs[100:150]
+    ]
+    assert truncated is True
+    assert [
+        item.kwargs["page"] for item in client_mock.list_pipeline_runs.call_args_list
+    ] == [1, 2]
+    assert [
+        item.kwargs["size"] for item in client_mock.list_pipeline_runs.call_args_list
+    ] == [100, 100]
+
+
+@pytest.mark.parametrize(
+    ("total", "expected_truncated"),
+    [(3, False), (4, True)],
+)
+def test_replay_scan_distinguishes_exact_cap_from_older_rows(
+    total: int,
+    expected_truncated: bool,
+) -> None:
+    runs = [
+        _DummyRun(
+            status=ZenMLExecutionStatus.COMPLETED,
+            flow_name="flow_a",
+        )
+        for _ in range(total)
+    ]
+    for run in runs:
+        run.original_run = SimpleNamespace(id="outside-cohort")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(run) for run in runs],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name="flow_a",
+            limit=3,
+        )
+
+    assert executions == []
+    assert truncated is expected_truncated
+
+
+def test_replay_scan_handles_missing_flow_name() -> None:
+    named_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    named_run.original_run = SimpleNamespace(id="original-a")
+    unnamed_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name=None,
+    )
+    unnamed_run.original_run = SimpleNamespace(id="original-a")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(named_run), _as_pipeline_run(unnamed_run)],
+            index=1,
+            total_pages=1,
+        )
+
+        client = KitaruClient()
+        executions, truncated = client.executions._list_replays_for_originals(
+            original_exec_ids=["original-a"],
+            expected_flow_name=None,
+            limit=10,
+        )
+
+    assert [execution.exec_id for execution in executions] == [str(unnamed_run.id)]
+    assert truncated is False
+    assert "pipeline_name" not in client_mock.list_pipeline_runs.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    "original_ids",
+    [[], [""], ["   "], "original-a", [1]],
+)
+def test_filtered_replay_list_rejects_invalid_original_ids(
+    original_ids: Any,
+) -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client = KitaruClient()
+        with pytest.raises(KitaruUsageError, match="original_exec_ids"):
+            client.executions._list_replays_for_originals(
+                original_exec_ids=original_ids,
+                expected_flow_name="flow_a",
+                limit=10_000,
+            )
+
+    client_cls.return_value.list_pipeline_runs.assert_not_called()
 
 
 @pytest.mark.parametrize("blank_flow", ["", "   ", "\t\n"])
@@ -6015,6 +6371,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         flow_name="sample_flow",
     )
     project_events: list[tuple[str, str | None]] = []
+    persisted_metadata: dict[str, Any] = {}
 
     @contextmanager
     def _project_context(project: str | None) -> Iterator[None]:
@@ -6028,7 +6385,8 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         assert project_events == [("enter", "production")]
         return _as_pipeline_run(replayed_run)
 
-    def _persist_submission(**_kwargs: Any) -> None:
+    def _persist_submission(**kwargs: Any) -> None:
+        persisted_metadata.update(kwargs)
         assert project_events == [
             ("enter", "production"),
             ("exit", "production"),
@@ -6081,6 +6439,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
     assert submission.results[0].replay_exec_id == str(replayed_run.id)
+    assert persisted_metadata["replay_plan"] == submission.plan
     replay_handle = submission.results[0].handle
     assert replay_handle is not None
     assert replay_handle._project == "production"

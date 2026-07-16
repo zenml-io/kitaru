@@ -447,14 +447,17 @@ def serialize_secret_summary(secret: Any) -> dict[str, Any]:
 
     if isinstance(secret, SecretSummary):
         keys = sorted(secret.keys)
+        keys_known = secret.keys_known
     else:
         keys = sorted(str(key) for key in secret.values)
+        keys_known = True
 
     return {
         "id": str(secret.id),
         "name": secret.name,
         "visibility": "private" if secret.private else "public",
         "keys": keys,
+        "keys_known": keys_known,
         "has_missing_values": bool(getattr(secret, "has_missing_values", False)),
     }
 

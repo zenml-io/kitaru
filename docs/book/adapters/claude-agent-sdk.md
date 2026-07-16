@@ -289,7 +289,13 @@ as:
 Failed Claude invocations raise an exception instead of returning a
 `ClaudeRunResult(status="failed")`. If the failure happens inside a Kitaru
 checkpoint, the adapter still records best-effort failure metadata before the
-exception propagates.
+exception propagates. For a failed error `ResultMessage`, Kitaru does not copy
+the result text into the exception, failed terminal live event, or durable
+failure records. The exception message and the `claude_result_diagnostic`
+attached to those records contain only `assistant_error`, `api_error_status`,
+and `subtype`. Normalized SDK message events are separate and may contain
+other allowlisted structural fields.
+Successful `final_text` and explicitly enabled capture artifacts are unchanged.
 
 ## Live streaming with Kitaru durability
 

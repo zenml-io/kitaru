@@ -17,6 +17,11 @@ from ._usage import normalize_usage
 from ._utils import elapsed_ms
 
 try:
+    from claude_agent_sdk import AssistantMessage as _SDK_ASSISTANT_MESSAGE_TYPE
+except (ImportError, AttributeError):
+    _SDK_ASSISTANT_MESSAGE_TYPE: type[Any] | None = None
+
+try:
     from claude_agent_sdk import ResultMessage as _SDK_RESULT_MESSAGE_TYPE
 except (ImportError, AttributeError):
     _SDK_RESULT_MESSAGE_TYPE: type[Any] | None = None
@@ -25,6 +30,53 @@ try:
     from claude_agent_sdk import StreamEvent as _SDK_STREAM_EVENT_TYPE
 except (ImportError, AttributeError):
     _SDK_STREAM_EVENT_TYPE: type[Any] | None = None
+
+
+_ALLOWED_ASSISTANT_ERROR_CATEGORIES = frozenset(
+    {
+        "authentication_failed",
+        "billing_error",
+        "rate_limit",
+        "invalid_request",
+        "server_error",
+        "unknown",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ClaudeResultDiagnostic:
+    """Allowlisted diagnostics for a failed Claude SDK result."""
+
+    assistant_error: str | None
+    api_error_status: int | None
+    subtype: str | None
+
+    @classmethod
+    def from_result_message(
+        cls,
+        final_message: Any,
+        *,
+        assistant_error: Any = None,
+    ) -> "ClaudeResultDiagnostic":
+        """Extract only safe diagnostic fields from an SDK failure."""
+        return cls(
+            assistant_error=_assistant_error_or_none(assistant_error),
+            api_error_status=_api_error_status_or_none(
+                getattr(final_message, "api_error_status", None)
+            ),
+            subtype=_diagnostic_subtype_or_none(
+                getattr(final_message, "subtype", None)
+            ),
+        )
+
+    def as_metadata(self) -> dict[str, str | int | None]:
+        """Return the stable diagnostic metadata representation."""
+        return {
+            "assistant_error": self.assistant_error,
+            "api_error_status": self.api_error_status,
+            "subtype": self.subtype,
+        }
 
 
 @dataclass(frozen=True)
@@ -103,6 +155,7 @@ async def _run_claude_invocation(
     started_at = time.perf_counter()
     messages: list[Any] = []
     final_message: Any | None = None
+    latest_assistant_error: str | None = None
 
     query_result = query(prompt=request.prompt, options=options)
     if inspect.isawaitable(query_result):
@@ -114,13 +167,20 @@ async def _run_claude_invocation(
             await _notify_stream_callback(on_event, message)
         if store_stream_events or not is_stream_event(message):
             messages.append(to_json_safe(message))
+        if is_assistant_message(message):
+            assistant_error = _assistant_error_or_none(getattr(message, "error", None))
+            if assistant_error is not None:
+                latest_assistant_error = assistant_error
         if is_result_message(message):
             final_message = message
 
     if final_message is None:
         raise RuntimeError("Claude Agent SDK did not return a final ResultMessage.")
     if bool(getattr(final_message, "is_error", False)):
-        raise ClaudeResultMessageError(final_message)
+        raise ClaudeResultMessageError(
+            final_message,
+            assistant_error=latest_assistant_error,
+        )
 
     session_id = _string_or_none(getattr(final_message, "session_id", None))
     transcript_path: str | None = None
@@ -166,6 +226,15 @@ async def _notify_stream_callback(on_event: Callable[[Any], Any], message: Any) 
         return
 
 
+def is_assistant_message(message: Any) -> bool:
+    """Return whether a message looks like Claude's AssistantMessage."""
+    if _SDK_ASSISTANT_MESSAGE_TYPE is not None and isinstance(
+        message, _SDK_ASSISTANT_MESSAGE_TYPE
+    ):
+        return True
+    return type(message).__name__ == "AssistantMessage"
+
+
 def is_result_message(message: Any) -> bool:
     """Return whether ``message`` looks like Claude's final ``ResultMessage``."""
     if _SDK_RESULT_MESSAGE_TYPE is not None and isinstance(
@@ -185,25 +254,46 @@ def is_stream_event(message: Any) -> bool:
 
 
 class ClaudeResultMessageError(RuntimeError):
-    """Claude SDK final error that separates raised and live-event messages."""
+    """Claude SDK final error containing only allowlisted diagnostics."""
 
-    def __init__(self, final_message: Any) -> None:
-        self.safe_live_message = format_result_error(
-            final_message, include_result=False
+    def __init__(self, final_message: Any, *, assistant_error: Any = None) -> None:
+        self.diagnostic = ClaudeResultDiagnostic.from_result_message(
+            final_message,
+            assistant_error=assistant_error,
         )
-        super().__init__(format_result_error(final_message, include_result=True))
+        message = format_result_error(self.diagnostic)
+        self.safe_live_message = message
+        super().__init__(message)
 
 
-def format_result_error(final_message: Any, *, include_result: bool = True) -> str:
-    """Format a Claude final error message without assuming SDK details."""
-    subtype = getattr(final_message, "subtype", None)
-    result = getattr(final_message, "result", None)
+def format_result_error(diagnostic: ClaudeResultDiagnostic) -> str:
+    """Format a failed Claude result without content-bearing SDK fields."""
     parts = ["Claude Agent SDK returned an error ResultMessage"]
-    if subtype:
-        parts.append(f"subtype={subtype!r}")
-    if include_result and result:
-        parts.append(f"result={result!r}")
+    if diagnostic.assistant_error is not None:
+        parts.append(f"assistant_error={diagnostic.assistant_error!r}")
+    if diagnostic.api_error_status is not None:
+        parts.append(f"api_error_status={diagnostic.api_error_status}")
+    if diagnostic.subtype is not None:
+        parts.append(f"subtype={diagnostic.subtype!r}")
     return "; ".join(parts)
+
+
+def _assistant_error_or_none(value: Any) -> str | None:
+    if type(value) is str and value in _ALLOWED_ASSISTANT_ERROR_CATEGORIES:
+        return value
+    return None
+
+
+def _api_error_status_or_none(value: Any) -> int | None:
+    if type(value) is int:
+        return value
+    return None
+
+
+def _diagnostic_subtype_or_none(value: Any) -> str | None:
+    if type(value) is str:
+        return value
+    return None
 
 
 def _load_transcript(

@@ -9,12 +9,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kitaru._client._models import CheckpointCall, Execution
+from kitaru._llm_usage import aggregate_usage_records, round_cost_usd
 from kitaru._ui_urls import (
     UiUrlContext,
     build_compare_url_from_context,
     resolve_ui_url_context,
 )
 from kitaru.client import KitaruClient
+from kitaru.errors import KitaruUsageError
+from kitaru.replay import AppliedOutputOverride, parse_replay_output_overrides_metadata
 
 DEFAULT_COMPARE_FLOW_VERSION = "local"
 _AUTO_DISCOVERY_SCAN_LIMIT = 10_000
@@ -22,7 +25,15 @@ _AUTO_DISCOVERY_SCAN_LIMIT = 10_000
 
 @dataclass(frozen=True)
 class CheckpointDiff:
-    """Per-checkpoint comparison between an original and replay execution."""
+    """Per-checkpoint comparison between an original and replay execution.
+
+    ``token_delta`` is replay minus original workload tokens and includes model
+    work reused by the replay. It is ``None`` only when neither checkpoint has
+    canonical usage records. ``cost_delta_usd`` is replay minus original
+    incurred display cost, so explicitly reused work contributes zero. It is
+    ``None`` when either checkpoint has unpriced work that is not explicitly
+    reused.
+    """
 
     name: str
     original_call_id: str | None
@@ -31,6 +42,7 @@ class CheckpointDiff:
     duration_delta_ms: float | None
     token_delta: dict[str, int] | None
     artifact_hashes: dict[str, tuple[str | None, str | None]]
+    cost_delta_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +53,9 @@ class ExecutionDiff:
     compared: list[tuple[str, list[CheckpointDiff]]] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    applied_output_overrides: dict[str, list[AppliedOutputOverride] | None] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -211,36 +226,41 @@ def _checkpoint_duration_ms(checkpoint: CheckpointCall) -> float | None:
     return (checkpoint.ended_at - checkpoint.started_at).total_seconds() * 1000
 
 
-def _token_totals(checkpoint: CheckpointCall) -> dict[str, int]:
-    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    for record in checkpoint.llm_usage_records:
-        for key in totals:
-            value = record.get(key)
-            if isinstance(value, int):
-                totals[key] += value
-    if not any(totals.values()):
-        return {}
-    return totals
+def _checkpoint_usage_summary(
+    checkpoint: CheckpointCall | None,
+) -> tuple[dict[str, Any], bool]:
+    if checkpoint is None:
+        return aggregate_usage_records(()), False
+    return checkpoint.aggregated_llm_usage_with_cost_completeness()
 
 
-def _artifact_content_hash(artifact_id: str, client: KitaruClient) -> str | None:
+def _artifact_content_hash(
+    artifact_id: str,
+    client: KitaruClient,
+    cache: dict[str, str],
+) -> str | None:
+    if artifact_id in cache:
+        return cache[artifact_id]
     try:
         artifact = client._get_artifact_version(artifact_id, hydrate=True)
         value = artifact.load()
         payload = json.dumps(value, sort_keys=True, default=str)
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        result = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     except Exception:
         return None
+    cache[artifact_id] = result
+    return result
 
 
 def _artifact_hashes(
     checkpoint: CheckpointCall,
     client: KitaruClient,
+    cache: dict[str, str],
 ) -> dict[str, str | None]:
     hashes: dict[str, str | None] = {}
     for artifact in checkpoint.artifacts:
         role = artifact.name or artifact.kind or "artifact"
-        hashes[role] = _artifact_content_hash(artifact.artifact_id, client)
+        hashes[role] = _artifact_content_hash(artifact.artifact_id, client, cache)
     return hashes
 
 
@@ -282,6 +302,7 @@ def _compare_checkpoints(
     original_cp: CheckpointCall | None,
     replay_cp: CheckpointCall | None,
     client: KitaruClient,
+    artifact_hash_cache: dict[str, str],
 ) -> CheckpointDiff:
     checkpoint = original_cp or replay_cp
     name = checkpoint.name if checkpoint is not None else "unknown"
@@ -295,19 +316,38 @@ def _compare_checkpoints(
     if original_duration is not None and replay_duration is not None:
         duration_delta = replay_duration - original_duration
 
-    original_tokens = _token_totals(original_cp) if original_cp is not None else {}
-    replay_tokens = _token_totals(replay_cp) if replay_cp is not None else {}
+    original_usage, original_has_unpriced_cost = _checkpoint_usage_summary(original_cp)
+    replay_usage, replay_has_unpriced_cost = _checkpoint_usage_summary(replay_cp)
     token_delta: dict[str, int] | None = None
-    if original_tokens or replay_tokens:
+    if original_usage["usage_record_count"] or replay_usage["usage_record_count"]:
+        token_keys = {
+            "prompt_tokens": "input_tokens",
+            "completion_tokens": "output_tokens",
+            "total_tokens": "total_tokens",
+        }
         token_delta = {
-            key: replay_tokens.get(key, 0) - original_tokens.get(key, 0)
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+            public_key: replay_usage[summary_key] - original_usage[summary_key]
+            for public_key, summary_key in token_keys.items()
         }
 
+    cost_delta: float | None = None
+    if not (original_has_unpriced_cost or replay_has_unpriced_cost):
+        cost_delta = round_cost_usd(
+            replay_usage["display_cost_usd"] - original_usage["display_cost_usd"]
+        )
+        if cost_delta == 0:
+            cost_delta = 0.0
+
     original_hashes = (
-        _artifact_hashes(original_cp, client) if original_cp is not None else {}
+        _artifact_hashes(original_cp, client, artifact_hash_cache)
+        if original_cp is not None
+        else {}
     )
-    replay_hashes = _artifact_hashes(replay_cp, client) if replay_cp is not None else {}
+    replay_hashes = (
+        _artifact_hashes(replay_cp, client, artifact_hash_cache)
+        if replay_cp is not None
+        else {}
+    )
     roles = sorted(set(original_hashes) | set(replay_hashes))
     artifact_hashes = {
         role: (original_hashes.get(role), replay_hashes.get(role)) for role in roles
@@ -327,6 +367,7 @@ def _compare_checkpoints(
         duration_delta_ms=duration_delta,
         token_delta=token_delta,
         artifact_hashes=artifact_hashes,
+        cost_delta_usd=cost_delta,
     )
 
 
@@ -348,6 +389,7 @@ def _resolve_compare_flow_version(execution: Execution) -> str:
 
 
 def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
+    """Serialize replay-minus-original workload and incurred-cost deltas."""
     return {
         "name": item.name,
         "original_call_id": item.original_call_id,
@@ -355,11 +397,20 @@ def serialize_checkpoint_diff(item: CheckpointDiff) -> dict[str, Any]:
         "status_match": item.status_match,
         "duration_delta_ms": item.duration_delta_ms,
         "token_delta": item.token_delta,
+        "cost_delta_usd": item.cost_delta_usd,
         "artifact_hashes": {
             role: {"original": left, "replay": right}
             for role, (left, right) in item.artifact_hashes.items()
         },
     }
+
+
+def _serialize_applied_output_overrides(
+    overrides: list[AppliedOutputOverride] | None,
+) -> list[dict[str, Any]] | None:
+    if overrides is None:
+        return None
+    return [override.to_json() for override in overrides]
 
 
 def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
@@ -372,6 +423,9 @@ def serialize_execution_diff(item: ExecutionDiff) -> dict[str, Any]:
                     serialize_checkpoint_diff(checkpoint)
                     for checkpoint in checkpoint_diffs
                 ],
+                "applied_output_overrides": _serialize_applied_output_overrides(
+                    item.applied_output_overrides.get(replay_exec_id)
+                ),
             }
             for replay_exec_id, checkpoint_diffs in item.compared
         ],
@@ -390,82 +444,83 @@ def serialize_diff_matrix(item: CohortDiff) -> dict[str, Any]:
     }
 
 
+def _replay_discovery_warning(flow_name: str | None) -> str:
+    if flow_name is None:
+        query_scope = "executions without an available flow name"
+    else:
+        query_scope = f"flow {flow_name}"
+    return (
+        f"Replay discovery for {query_scope} scanned "
+        f"{_AUTO_DISCOVERY_SCAN_LIMIT} executions before confirming that older "
+        "executions remain. This row may omit older replays; pass replay execution "
+        "IDs explicitly to compare them."
+    )
+
+
 def _discover_replays(
     client: KitaruClient,
     *,
     flow_name: str | None,
-    original: str,
-) -> tuple[list[str], list[str]]:
-    """Find replay executions for one original with a bounded single-pass scan.
-
-    Public ``executions.list(page=..., size=...)`` currently starts from backend
-    page 1 and skips client-side, so walking public pages here would make later
-    pages reread earlier backend pages. A single capped ``limit`` call lets the
-    client walk the backend once while still preventing unbounded discovery work.
-    """
-    candidates = client.executions.list(
-        flow=flow_name,
+    original_exec_ids: Sequence[str],
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Find matching native replays with one bounded scan for one flow."""
+    candidates, truncated = client.executions._list_replays_for_originals(
+        original_exec_ids=original_exec_ids,
+        expected_flow_name=flow_name,
         limit=_AUTO_DISCOVERY_SCAN_LIMIT,
     )
-    replay_ids = [
-        candidate.exec_id
-        for candidate in candidates
-        if candidate.original_exec_id == original
-    ]
-    warnings: list[str] = []
-    if len(candidates) == _AUTO_DISCOVERY_SCAN_LIMIT:
-        warnings.append(
-            "Replay auto-discovery stopped after scanning "
-            f"{_AUTO_DISCOVERY_SCAN_LIMIT} executions for flow {flow_name}. "
-            "If older replays exist, pass replay execution IDs explicitly."
-        )
-    return replay_ids, warnings
+    replay_ids_by_original = {exec_id: [] for exec_id in original_exec_ids}
+    for candidate in candidates:
+        original_exec_id = candidate.original_exec_id
+        if original_exec_id in replay_ids_by_original:
+            replay_ids_by_original[original_exec_id].append(candidate.exec_id)
+
+    warnings = [_replay_discovery_warning(flow_name)] if truncated else []
+    return replay_ids_by_original, warnings
 
 
-def _diff_impl(
-    original: str,
-    *executions: str,
+def _compare_loaded_executions(
+    *,
+    client: KitaruClient,
+    original_execution: Execution,
+    replay_executions: Sequence[Execution],
+    warnings: Sequence[str],
+    artifact_hash_cache: dict[str, str],
+    ui_context: UiUrlContext | None,
 ) -> ExecutionDiff:
-    client = KitaruClient()
-    original_execution = client.executions.get(original)
-
-    compared_exec_ids: list[str]
-    warnings: list[str] = []
-    if executions:
-        compared_exec_ids = list(executions)
-    else:
-        compared_exec_ids, warnings = _discover_replays(
-            client,
-            flow_name=original_execution.flow_name,
-            original=original,
-        )
-
     compared: list[tuple[str, list[CheckpointDiff]]] = []
-    for replay_exec_id in compared_exec_ids:
-        replay_execution = client.executions.get(replay_exec_id)
+    applied_output_overrides: dict[str, list[AppliedOutputOverride] | None] = {}
+    for replay_execution in replay_executions:
+        replay_exec_id = replay_execution.exec_id
+        replay_metadata = (
+            replay_execution.metadata
+            if isinstance(replay_execution.metadata, Mapping)
+            else {}
+        )
+        applied_output_overrides[replay_exec_id] = (
+            parse_replay_output_overrides_metadata(replay_metadata)
+        )
         pairs = _align_checkpoints(original_execution, replay_execution)
         checkpoint_diffs = [
             _compare_checkpoints(
                 original_cp=original_cp,
                 replay_cp=replay_cp,
                 client=client,
+                artifact_hash_cache=artifact_hash_cache,
             )
             for original_cp, replay_cp in pairs
         ]
-        compared.append((replay_exec_id, checkpoint_diffs))
+        compared.append((replay_execution.exec_id, checkpoint_diffs))
 
-    ui_context = _client_ui_url_context(client)
-    server_url = None
-    flow_id = original_execution.flow_id
-    flow_version = _resolve_compare_flow_version(original_execution)
-    project_name_or_id = _execution_project_name_or_id(original_execution)
-    if compared_exec_ids:
+    original_exec_id = original_execution.exec_id
+    replay_exec_ids = [execution.exec_id for execution in replay_executions]
+    if replay_exec_ids:
         multi_url = build_compare_url_for_executions(
-            server_url=server_url,
-            flow_id=flow_id,
-            exec_ids=[original, *compared_exec_ids],
-            flow_version=flow_version,
-            project_name_or_id=project_name_or_id,
+            server_url=None,
+            flow_id=original_execution.flow_id,
+            exec_ids=[original_exec_id, *replay_exec_ids],
+            flow_version=_resolve_compare_flow_version(original_execution),
+            project_name_or_id=_execution_project_name_or_id(original_execution),
             ui_context=ui_context,
         )
         compare_urls = [multi_url] if multi_url else []
@@ -473,11 +528,58 @@ def _diff_impl(
         compare_urls = []
 
     return ExecutionDiff(
-        original_exec_id=original,
+        original_exec_id=original_exec_id,
         compared=compared,
         urls=compare_urls,
-        warnings=warnings,
+        warnings=list(warnings),
+        applied_output_overrides=applied_output_overrides,
     )
+
+
+def _normalize_execution_selector(selector: str, *, label: str) -> str:
+    normalized = selector.strip()
+    if not normalized:
+        raise KitaruUsageError(f"{label} must not be blank.")
+    return normalized
+
+
+def _resolve_explicit_replays(
+    client: KitaruClient,
+    *,
+    original_execution: Execution,
+    replay_selectors: Sequence[str],
+) -> list[Execution]:
+    original_exec_id = original_execution.exec_id
+    seen_selectors: set[str] = set()
+    seen_exec_ids: set[str] = set()
+    replay_executions: list[Execution] = []
+
+    for selector in replay_selectors:
+        if selector in seen_selectors:
+            continue
+        seen_selectors.add(selector)
+
+        replay_execution = client.executions.get(selector)
+        replay_original_exec_id = replay_execution.original_exec_id
+        if replay_original_exec_id is None:
+            raise KitaruUsageError(
+                f"Replay execution '{selector}' resolves to "
+                f"'{replay_execution.exec_id}', which has no recorded direct "
+                f"replay lineage to original execution '{original_exec_id}'."
+            )
+        if replay_original_exec_id != original_exec_id:
+            raise KitaruUsageError(
+                f"Replay execution '{selector}' resolves to "
+                f"'{replay_execution.exec_id}', whose recorded direct original "
+                f"is '{replay_original_exec_id}', not '{original_exec_id}'."
+            )
+
+        if replay_execution.exec_id in seen_exec_ids:
+            continue
+        seen_exec_ids.add(replay_execution.exec_id)
+        replay_executions.append(replay_execution)
+
+    return replay_executions
 
 
 def diff(
@@ -491,6 +593,18 @@ def diff(
     """
     from kitaru.analytics import AnalyticsEvent, track
 
+    normalized_original = _normalize_execution_selector(
+        original,
+        label="Original execution ID",
+    )
+    normalized_replays = [
+        _normalize_execution_selector(
+            selector,
+            label=f"Replay execution ID at position {index}",
+        )
+        for index, selector in enumerate(executions, start=1)
+    ]
+
     track(
         AnalyticsEvent.DIFF_REQUESTED,
         {
@@ -498,14 +612,58 @@ def diff(
             "replay_count": len(executions),
         },
     )
-    return _diff_impl(original, *executions)
+    client = KitaruClient()
+    original_execution = client.executions.get(normalized_original)
+
+    if normalized_replays:
+        replay_executions = _resolve_explicit_replays(
+            client,
+            original_execution=original_execution,
+            replay_selectors=normalized_replays,
+        )
+        artifact_hash_cache: dict[str, str] = {}
+        ui_context = _client_ui_url_context(client)
+        return _compare_loaded_executions(
+            client=client,
+            original_execution=original_execution,
+            replay_executions=replay_executions,
+            warnings=[],
+            artifact_hash_cache=artifact_hash_cache,
+            ui_context=ui_context,
+        )
+
+    replay_ids_by_original, warnings = _discover_replays(
+        client,
+        flow_name=original_execution.flow_name,
+        original_exec_ids=[original_execution.exec_id],
+    )
+    artifact_hash_cache = {}
+    ui_context = _client_ui_url_context(client)
+    replay_executions = [
+        client.executions.get(replay_exec_id)
+        for replay_exec_id in replay_ids_by_original[original_execution.exec_id]
+    ]
+    return _compare_loaded_executions(
+        client=client,
+        original_execution=original_execution,
+        replay_executions=replay_executions,
+        warnings=warnings,
+        artifact_hash_cache=artifact_hash_cache,
+        ui_context=ui_context,
+    )
 
 
 def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
     from kitaru.analytics import AnalyticsEvent, track
     from kitaru.cohort import coerce_exec_ids
 
-    resolved_ids = coerce_exec_ids(exec_ids)
+    resolved_ids = [
+        _normalize_execution_selector(
+            selector,
+            label=f"Execution ID at position {index}",
+        )
+        for index, selector in enumerate(coerce_exec_ids(exec_ids), start=1)
+    ]
     track(
         AnalyticsEvent.DIFF_REQUESTED,
         {
@@ -514,7 +672,56 @@ def _build_diff_matrix(exec_ids: Sequence[str] | Any) -> CohortDiff:
             "cohort": True,
         },
     )
-    return CohortDiff(rows=[_diff_impl(exec_id) for exec_id in resolved_ids])
+    client = KitaruClient()
+    artifact_hash_cache: dict[str, str] = {}
+    ui_context = _client_ui_url_context(client)
+    executions_by_selector: dict[str, Execution] = {}
+    originals_by_id: dict[str, Execution] = {}
+    canonical_ids_in_requested_order: list[str] = []
+    original_ids_by_flow: dict[str | None, list[str]] = {}
+    for selector in resolved_ids:
+        original_execution = executions_by_selector.get(selector)
+        if original_execution is None:
+            original_execution = client.executions.get(selector)
+            executions_by_selector[selector] = original_execution
+
+        canonical_id = original_execution.exec_id
+        canonical_ids_in_requested_order.append(canonical_id)
+        if canonical_id in originals_by_id:
+            continue
+        originals_by_id[canonical_id] = original_execution
+        original_ids_by_flow.setdefault(original_execution.flow_name, []).append(
+            canonical_id
+        )
+
+    replay_ids_by_original: dict[str, list[str]] = {}
+    warnings_by_flow: dict[str | None, list[str]] = {}
+    for flow_name, original_ids in original_ids_by_flow.items():
+        discovered, warnings = _discover_replays(
+            client,
+            flow_name=flow_name,
+            original_exec_ids=original_ids,
+        )
+        replay_ids_by_original.update(discovered)
+        warnings_by_flow[flow_name] = warnings
+
+    diffs_by_id: dict[str, ExecutionDiff] = {}
+    for exec_id, original_execution in originals_by_id.items():
+        replay_executions = [
+            client.executions.get(replay_exec_id)
+            for replay_exec_id in replay_ids_by_original[exec_id]
+        ]
+        diffs_by_id[exec_id] = _compare_loaded_executions(
+            client=client,
+            original_execution=original_execution,
+            replay_executions=replay_executions,
+            warnings=warnings_by_flow[original_execution.flow_name],
+            artifact_hash_cache=artifact_hash_cache,
+            ui_context=ui_context,
+        )
+    return CohortDiff(
+        rows=[diffs_by_id[exec_id] for exec_id in canonical_ids_in_requested_order]
+    )
 
 
 def diff_cohort(

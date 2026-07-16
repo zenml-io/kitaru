@@ -14,6 +14,7 @@ import pytest
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
 from kitaru._flow_loading import _load_flow_target as _load_shared_flow_target
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
 from kitaru.client import ExecutionStatistics, ExecutionStatisticsGroup, ExecutionStatus
 from kitaru.config import (
     ActiveEnvironmentVariable,
@@ -50,6 +51,7 @@ from kitaru.mcp.server import (
     kitaru_deployments_untag,
     kitaru_executions_abort_wait,
     kitaru_executions_cancel,
+    kitaru_executions_diff,
     kitaru_executions_diff_matrix,
     kitaru_executions_get,
     kitaru_executions_input,
@@ -97,6 +99,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_executions_resume,
     kitaru_executions_retry,
     kitaru_executions_replay,
+    kitaru_executions_diff,
     kitaru_executions_diff_matrix,
     kitaru_secrets_create,
     kitaru_secrets_list,
@@ -564,6 +567,22 @@ def test_executions_get_returns_full_execution(
     sample_execution,
 ) -> None:
     """Get tool should return detailed execution payload."""
+    usage_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="write-call",
+        total_tokens=8,
+    )
+    checkpoint = sample_execution.checkpoints[0]
+    attempt = replace(
+        checkpoint.attempts[0],
+        metadata={LLM_USAGE_METADATA_KEY: {"write-call": usage_record}},
+        _checkpoint_name=checkpoint.name,
+    )
+    sample_execution = replace(
+        sample_execution,
+        checkpoints=[replace(checkpoint, attempts=[attempt])],
+    )
     mock_kitaru_client.executions.get.return_value = sample_execution
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
@@ -571,6 +590,10 @@ def test_executions_get_returns_full_execution(
 
     assert payload["exec_id"] == sample_execution.exec_id
     assert payload["checkpoints"][0]["name"] == "write_summary"
+    attempt_record = payload["checkpoints"][0]["attempts"][0]["llm_usage_records"][0]
+    assert attempt_record["checkpoint_id"] == "attempt-1"
+    assert attempt_record["checkpoint_name"] == "write_summary"
+    assert payload["llm_usage_records"][0]["checkpoint_id"] == "attempt-1"
 
 
 def test_executions_latest_with_stack_filter(
@@ -1328,6 +1351,51 @@ def test_executions_diff_matrix_returns_renamed_payload() -> None:
     assert "cohort" not in payload
 
 
+def test_executions_diff_matrix_preserves_blank_selector_error() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match="Execution ID at position 2 must not be blank",
+    ):
+        kitaru_executions_diff_matrix(["kr-original", "   "])
+
+
+def test_executions_diff_serializes_checkpoint_usage_deltas() -> None:
+    result = object()
+    serialized = {
+        "compared": [
+            {
+                "checkpoints": [
+                    {
+                        "token_delta": {
+                            "prompt_tokens": -4,
+                            "completion_tokens": -2,
+                            "total_tokens": -6,
+                        },
+                        "cost_delta_usd": None,
+                    }
+                ]
+            }
+        ]
+    }
+
+    with (
+        patch("kitaru.diff.diff", return_value=result) as mock_diff,
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value=serialized,
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_diff("kr-original", ["kr-replay"])
+
+    mock_diff.assert_called_once_with("kr-original", "kr-replay")
+    mock_serialize.assert_called_once_with(result)
+    assert payload == {
+        "available": True,
+        "operation": "diff",
+        "diff": serialized,
+    }
+
+
 def test_execution_mutation_tools_return_serialized_execution(
     mock_kitaru_client: MagicMock,
     sample_execution,
@@ -1494,7 +1562,8 @@ def test_secrets_list_uses_default_pagination() -> None:
             name=f"secret-{index:02d}",
             id=f"secret-id-{index:02d}",
             private=False,
-            keys=["API_KEY"],
+            keys=[],
+            keys_known=False,
         )
         for index in range(25)
     ]
@@ -1518,7 +1587,8 @@ def test_secrets_list_applies_non_default_pagination_without_resorting() -> None
             name=name,
             id=f"secret-id-{index}",
             private=False,
-            keys=["API_KEY"],
+            keys=[],
+            keys_known=False,
         )
         for index, name in enumerate(["zeta", "alpha", "gamma", "beta", "delta"])
     ]
@@ -1542,7 +1612,8 @@ def test_secrets_list_returns_empty_for_out_of_range_page() -> None:
             name="openai-creds",
             id="secret-id",
             private=False,
-            keys=["OPENAI_API_KEY"],
+            keys=[],
+            keys_known=False,
         )
     ]
 
@@ -1561,14 +1632,15 @@ def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> 
             name="shared-creds",
             id="public-id",
             private=False,
-            keys=["OPENAI_API_KEY"],
-            has_missing_values=True,
+            keys=[],
+            keys_known=False,
         ),
         SecretSummary(
             name="personal-creds",
             id="private-id",
             private=True,
-            keys=["ANTHROPIC_API_KEY"],
+            keys=[],
+            keys_known=False,
         ),
     ]
 
@@ -1583,14 +1655,16 @@ def test_secrets_list_returns_metadata_only_for_public_and_private_secrets() -> 
             "id": "public-id",
             "name": "shared-creds",
             "visibility": "public",
-            "keys": ["OPENAI_API_KEY"],
-            "has_missing_values": True,
+            "keys": [],
+            "keys_known": False,
+            "has_missing_values": False,
         },
         {
             "id": "private-id",
             "name": "personal-creds",
             "visibility": "private",
-            "keys": ["ANTHROPIC_API_KEY"],
+            "keys": [],
+            "keys_known": False,
             "has_missing_values": False,
         },
     ]
@@ -1603,6 +1677,7 @@ def test_secrets_list_returns_empty_keys_when_backend_omits_value_metadata() -> 
         id="secret-id",
         private=False,
         keys=[],
+        keys_known=False,
         has_missing_values=False,
     )
 
@@ -1618,6 +1693,7 @@ def test_secrets_list_returns_empty_keys_when_backend_omits_value_metadata() -> 
             "name": "provider-creds",
             "visibility": "public",
             "keys": [],
+            "keys_known": False,
             "has_missing_values": False,
         }
     ]
@@ -1675,6 +1751,7 @@ def test_secrets_create_returns_metadata_without_values() -> None:
         "name": "openai-creds",
         "visibility": "public",
         "keys": ["OPENAI_API_KEY"],
+        "keys_known": True,
         "has_missing_values": False,
     }
     assert "values" not in payload

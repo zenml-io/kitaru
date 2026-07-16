@@ -5,13 +5,35 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from kitaru._client._models import CheckpointCall, Execution, ExecutionStatus
+from kitaru._client._models import (
+    ArtifactRef,
+    CheckpointAttempt,
+    CheckpointCall,
+    Execution,
+    ExecutionStatus,
+)
+from kitaru._llm_usage import (
+    LLM_USAGE_METADATA_KEY,
+    LLMBillingEffect,
+    build_usage_record,
+)
 from kitaru._ui_urls import UiUrlContext
-from kitaru.diff import diff, serialize_execution_diff
+from kitaru.diff import (
+    CohortDiff,
+    ExecutionDiff,
+    diff,
+    serialize_checkpoint_diff,
+    serialize_diff_matrix,
+    serialize_execution_diff,
+)
+from kitaru.errors import KitaruUsageError
+from kitaru.replay import REPLAY_OUTPUT_OVERRIDES_METADATA_KEY, AppliedOutputOverride
+from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 _diff_module = import_module("kitaru.diff")
 
@@ -30,6 +52,8 @@ def _checkpoint(
     call_id: str,
     name: str,
     original_call_id: str | None = None,
+    artifact_ids: list[str] | None = None,
+    attempts: list[CheckpointAttempt] | None = None,
 ) -> CheckpointCall:
     started = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     ended = datetime(2026, 3, 9, 10, 1, tzinfo=UTC)
@@ -43,10 +67,257 @@ def _checkpoint(
         original_call_id=original_call_id,
         parent_call_ids=[],
         failure=None,
-        attempts=[],
-        artifacts=[],
+        attempts=attempts or [],
+        artifacts=[
+            ArtifactRef(
+                artifact_id=artifact_id,
+                name="output",
+                kind="dict",
+                save_type="dict",
+                producing_call=call_id,
+                metadata={},
+                _client=MagicMock(),
+            )
+            for artifact_id in artifact_ids or []
+        ],
         checkpoint_type="tool_call",
     )
+
+
+def _usage_record(
+    *,
+    record_id: str | None = None,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    total_tokens: int = 15,
+    actual_cost_usd: float | None = None,
+    estimated_cost_usd: float | None = None,
+    billing_effect: LLMBillingEffect = "incurred",
+) -> dict[str, Any]:
+    return build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id=record_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        actual_cost_usd=actual_cost_usd,
+        estimated_cost_usd=estimated_cost_usd,
+        billing_effect=billing_effect,
+    )
+
+
+@pytest.mark.parametrize(
+    ("original_record", "replay_record", "expected_tokens", "expected_cost"),
+    [
+        (
+            _usage_record(actual_cost_usd=0.1),
+            _usage_record(
+                input_tokens=20,
+                output_tokens=8,
+                total_tokens=28,
+                actual_cost_usd=0.4,
+            ),
+            {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13},
+            0.3,
+        ),
+        (
+            _usage_record(
+                input_tokens=20,
+                output_tokens=8,
+                total_tokens=28,
+                actual_cost_usd=0.4,
+            ),
+            _usage_record(actual_cost_usd=0.1),
+            {"prompt_tokens": -10, "completion_tokens": -3, "total_tokens": -13},
+            -0.3,
+        ),
+        (
+            _usage_record(actual_cost_usd=0.1),
+            _usage_record(actual_cost_usd=0.1),
+            {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            0.0,
+        ),
+    ],
+)
+def test_checkpoint_diff_uses_canonical_records_for_signed_usage_deltas(
+    original_record: dict[str, Any],
+    replay_record: dict[str, Any],
+    expected_tokens: dict[str, int],
+    expected_cost: float,
+) -> None:
+    result = checkpoint_diff_from_usage_records(
+        original_records=[original_record],
+        replay_records=[replay_record],
+    )
+
+    assert result.token_delta == expected_tokens
+    assert result.cost_delta_usd == expected_cost
+
+
+def test_fully_reused_replay_keeps_workload_tokens_and_avoids_cost() -> None:
+    original = _usage_record(actual_cost_usd=0.25)
+    replay = _usage_record(
+        actual_cost_usd=0.25,
+        billing_effect="reused_not_incurred",
+    )
+
+    result = checkpoint_diff_from_usage_records(
+        original_records=[original],
+        replay_records=[replay],
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert result.cost_delta_usd == -0.25
+
+
+@pytest.mark.parametrize(
+    ("original_present", "expected_sign"),
+    [(True, -1), (False, 1)],
+)
+def test_checkpoint_diff_counts_usage_on_checkpoint_present_on_only_one_side(
+    original_present: bool,
+    expected_sign: int,
+) -> None:
+    record = _usage_record(actual_cost_usd=0.25)
+    result = checkpoint_diff_from_usage_records(
+        original_records=[record] if original_present else None,
+        replay_records=None if original_present else [record],
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": expected_sign * 10,
+        "completion_tokens": expected_sign * 5,
+        "total_tokens": expected_sign * 15,
+    }
+    assert result.cost_delta_usd == expected_sign * 0.25
+
+
+def test_checkpoint_diff_distinguishes_no_usage_from_zero_valued_usage() -> None:
+    no_usage = checkpoint_diff_from_usage_records()
+    zero_usage = checkpoint_diff_from_usage_records(
+        replay_records=[
+            _usage_record(
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                actual_cost_usd=0.0,
+            )
+        ]
+    )
+
+    assert no_usage.token_delta is None
+    assert no_usage.cost_delta_usd == 0.0
+    assert zero_usage.token_delta == {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert zero_usage.cost_delta_usd == 0.0
+
+
+@pytest.mark.parametrize(
+    ("record", "expected_cost"),
+    [
+        (
+            _usage_record(actual_cost_usd=0.2, estimated_cost_usd=0.9),
+            0.2,
+        ),
+        (_usage_record(estimated_cost_usd=0.3), 0.3),
+        (_usage_record(actual_cost_usd=0.0), 0.0),
+        (_usage_record(), None),
+        (_usage_record(billing_effect="reused_not_incurred"), 0.0),
+        (_usage_record(estimated_cost_usd=0.35, billing_effect="unknown"), 0.35),
+        (_usage_record(billing_effect="unknown"), None),
+    ],
+)
+def test_checkpoint_diff_applies_canonical_cost_policy(
+    record: dict[str, Any],
+    expected_cost: float | None,
+) -> None:
+    result = checkpoint_diff_from_usage_records(replay_records=[record])
+
+    assert result.cost_delta_usd == expected_cost
+    assert result.token_delta == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+
+
+def test_checkpoint_diff_deduplicates_within_attempt_not_across_retries() -> None:
+    first = _usage_record(
+        record_id="same-call",
+        input_tokens=7,
+        output_tokens=4,
+        total_tokens=11,
+        actual_cost_usd=0.1,
+    )
+    second = _usage_record(
+        record_id="same-call",
+        input_tokens=8,
+        output_tokens=5,
+        total_tokens=13,
+        actual_cost_usd=0.2,
+    )
+    attempts = [
+        CheckpointAttempt(
+            attempt_id="attempt-1",
+            status=ExecutionStatus.COMPLETED,
+            started_at=None,
+            ended_at=None,
+            metadata={LLM_USAGE_METADATA_KEY: [first, first]},
+            failure=None,
+        ),
+        CheckpointAttempt(
+            attempt_id="attempt-2",
+            status=ExecutionStatus.COMPLETED,
+            started_at=None,
+            ended_at=None,
+            metadata={LLM_USAGE_METADATA_KEY: [second]},
+            failure=None,
+        ),
+    ]
+
+    result = _diff_module._compare_checkpoints(
+        original_cp=None,
+        replay_cp=_checkpoint(
+            call_id="cp-replay",
+            name="model_call",
+            attempts=attempts,
+        ),
+        client=MagicMock(),
+        artifact_hash_cache={},
+    )
+
+    assert result.token_delta == {
+        "prompt_tokens": 15,
+        "completion_tokens": 9,
+        "total_tokens": 24,
+    }
+    assert result.cost_delta_usd == 0.3
+
+
+def test_diff_serializers_include_cost_numbers_and_null() -> None:
+    priced = checkpoint_diff_from_usage_records(
+        replay_records=[_usage_record(actual_cost_usd=0.25)]
+    )
+    unpriced = checkpoint_diff_from_usage_records(replay_records=[_usage_record()])
+    execution = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[("kr-replay", [priced, unpriced])],
+    )
+
+    serialized_checkpoints = serialize_execution_diff(execution)["compared"][0][
+        "checkpoints"
+    ]
+    assert serialize_checkpoint_diff(priced)["cost_delta_usd"] == 0.25
+    assert serialized_checkpoints[0]["cost_delta_usd"] == 0.25
+    assert serialized_checkpoints[1]["cost_delta_usd"] is None
 
 
 def _execution(
@@ -57,11 +328,13 @@ def _execution(
     project_id: str | None = "project-123",
     project_name: str | None = "default",
     metadata: dict[str, object] | None = None,
+    flow_id: str = "flow-1",
+    flow_name: str | None = "support_copilot_flow",
 ) -> Execution:
     return Execution(
         exec_id=exec_id,
-        flow_id="flow-1",
-        flow_name="support_copilot_flow",
+        flow_id=flow_id,
+        flow_name=flow_name,
         status=ExecutionStatus.COMPLETED,
         started_at=None,
         ended_at=None,
@@ -78,6 +351,90 @@ def _execution(
         project_id=project_id,
         project_name=project_name,
     )
+
+
+def test_diff_associates_and_serializes_output_override_evidence() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay_with_override = _execution(
+        "kr-replay-populated",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={
+            REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: [
+                {
+                    "selector_kind": "checkpoint",
+                    "selector": "lookup",
+                    "matched_invocation_ids": ["lookup_1", "lookup_2"],
+                    "field": "output",
+                }
+            ]
+        },
+    )
+    replay_without_override = _execution(
+        "kr-replay-empty",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: []},
+    )
+    old_replay = _execution(
+        "kr-replay-unavailable",
+        original_exec_id="kr-original",
+        checkpoints=[],
+        metadata={REPLAY_OUTPUT_OVERRIDES_METADATA_KEY: "malformed"},
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original,
+        replay_with_override,
+        replay_without_override,
+        old_replay,
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff(
+            "kr-original",
+            "replay-populated-alias",
+            "replay-empty-alias",
+            "replay-unavailable-alias",
+        )
+
+    assert result.applied_output_overrides == {
+        "kr-replay-populated": [
+            AppliedOutputOverride(
+                selector_kind="checkpoint",
+                selector="lookup",
+                matched_invocation_ids=("lookup_1", "lookup_2"),
+            )
+        ],
+        "kr-replay-empty": [],
+        "kr-replay-unavailable": None,
+    }
+    serialized = serialize_execution_diff(result)
+    assert serialized["compared"][0]["applied_output_overrides"] == [
+        {
+            "selector_kind": "checkpoint",
+            "selector": "lookup",
+            "matched_invocation_ids": ["lookup_1", "lookup_2"],
+            "field": "output",
+        }
+    ]
+    assert serialized["compared"][1]["applied_output_overrides"] == []
+    assert serialized["compared"][2]["applied_output_overrides"] is None
+
+
+def test_diff_matrix_serialization_includes_output_override_evidence() -> None:
+    row = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[("kr-replay", [])],
+        applied_output_overrides={"kr-replay": []},
+    )
+
+    payload = serialize_diff_matrix(CohortDiff(rows=[row]))
+
+    assert payload["rows"][0]["compared"][0]["applied_output_overrides"] == []
 
 
 def test_diff_aligns_checkpoints_by_original_call_id() -> None:
@@ -155,14 +512,14 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [
         original_a,
-        replay_a,
         original_b,
+        replay_a,
         replay_b,
     ]
-    fake_client.executions.list.side_effect = [
-        [replay_a],
-        [replay_b],
-    ]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         from kitaru.diff import diff_cohort
@@ -174,6 +531,633 @@ def test_diff_cohort_returns_one_row_per_original() -> None:
     assert matrix.rows[1].original_exec_id == "kr-original-b"
     assert matrix.rows[0].compared[0][0] == "kr-replay-a"
     assert matrix.rows[1].compared[0][0] == "kr-replay-b"
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original-a", "kr-original-b"],
+        expected_flow_name="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+
+
+def test_diff_uses_loaded_original_id_and_resolves_ui_context_once() -> None:
+    original = _execution("kr-canonical", checkpoints=[])
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-canonical",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.diff._client_ui_url_context",
+            return_value=None,
+        ) as ui_context_mock,
+    ):
+        result = diff("kr-requested-alias", "kr-replay")
+
+    assert result.original_exec_id == "kr-canonical"
+    assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-requested-alias"),
+        call("kr-replay"),
+    ]
+    ui_context_mock.assert_called_once_with(fake_client)
+    fake_client.executions._list_replays_for_originals.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("original", "replays", "expected_message"),
+    [
+        ("", (), "Original execution ID must not be blank."),
+        (" \t ", (), "Original execution ID must not be blank."),
+        (
+            "kr-original",
+            ("",),
+            "Replay execution ID at position 1 must not be blank.",
+        ),
+        (
+            "kr-original",
+            ("kr-replay", " \t "),
+            "Replay execution ID at position 2 must not be blank.",
+        ),
+    ],
+)
+def test_diff_rejects_blank_selectors_before_client_construction(
+    original: str,
+    replays: tuple[str, ...],
+    expected_message: str,
+) -> None:
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff(original, *replays)
+
+    assert str(exc_info.value) == expected_message
+    client_constructor.assert_not_called()
+
+
+def test_diff_strips_surrounding_whitespace_before_lookup() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("  original-alias  ", "\treplay-alias\n")
+
+    assert result.original_exec_id == "kr-original"
+    assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
+    assert fake_client.executions.get.call_args_list == [
+        call("original-alias"),
+        call("replay-alias"),
+    ]
+
+
+def test_diff_rejects_same_flow_replay_linked_to_another_original() -> None:
+    original = _execution("kr-original", flow_id="flow-shared", checkpoints=[])
+    unrelated_replay = _execution(
+        "kr-unrelated-replay",
+        original_exec_id="kr-another-original",
+        flow_id="flow-shared",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, unrelated_replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff("kr-original", "kr-unrelated-replay")
+
+    assert str(exc_info.value) == (
+        "Replay execution 'kr-unrelated-replay' resolves to "
+        "'kr-unrelated-replay', whose recorded direct original is "
+        "'kr-another-original', not 'kr-original'."
+    )
+    align_checkpoints.assert_not_called()
+
+
+def test_diff_rejects_replay_without_recorded_lineage() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    unlinked_execution = _execution("kr-unlinked", checkpoints=[])
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, unlinked_execution]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        diff("kr-original", "kr-unlinked")
+
+    assert str(exc_info.value) == (
+        "Replay execution 'kr-unlinked' resolves to 'kr-unlinked', which has no "
+        "recorded direct replay lineage to original execution 'kr-original'."
+    )
+    align_checkpoints.assert_not_called()
+
+
+def test_diff_stably_deduplicates_selectors_and_canonical_replay_ids() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original,
+        replay_a,
+        replay_a,
+        replay_b,
+    ]
+    ui_context = UiUrlContext(
+        base_url="https://demo.kitaru.zenml.io",
+        route_kind="legacy",
+        source="connection_config",
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=ui_context),
+    ):
+        result = diff(
+            " kr-original-alias ",
+            " replay-a ",
+            "replay-a",
+            " latest-replay-a ",
+            "latest-replay-a",
+            " replay-b ",
+        )
+
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-original-alias"),
+        call("replay-a"),
+        call("latest-replay-a"),
+        call("replay-b"),
+    ]
+    assert [replay_id for replay_id, _ in result.compared] == [
+        "kr-replay-a",
+        "kr-replay-b",
+    ]
+    assert result.urls == [
+        "https://demo.kitaru.zenml.io/flows/flow-1/v/local/compare"
+        "?executions=kr-original,kr-replay-a,kr-replay-b"
+    ]
+
+
+def test_diff_validates_all_explicit_replays_before_checkpoint_comparison() -> None:
+    original = _execution("kr-original", checkpoints=[])
+    valid_replay = _execution(
+        "kr-valid-replay",
+        original_exec_id="kr-original",
+        checkpoints=[],
+    )
+    invalid_replay = _execution(
+        "kr-invalid-replay",
+        original_exec_id="kr-another-original",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, valid_replay, invalid_replay]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._align_checkpoints") as align_checkpoints,
+        patch("kitaru.diff._client_ui_url_context") as ui_context_mock,
+        pytest.raises(KitaruUsageError),
+    ):
+        diff("kr-original", "kr-valid-replay", "kr-invalid-replay")
+
+    assert fake_client.executions.get.call_args_list == [
+        call("kr-original"),
+        call("kr-valid-replay"),
+        call("kr-invalid-replay"),
+    ]
+    align_checkpoints.assert_not_called()
+    ui_context_mock.assert_not_called()
+    fake_client._get_artifact_version.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("selectors", "blank_position"),
+    [
+        ([""], 1),
+        (["kr-original", "   "], 2),
+    ],
+)
+def test_diff_cohort_rejects_blank_selectors_before_loading_client(
+    selectors: list[str],
+    blank_position: int,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(
+            KitaruUsageError,
+            match=f"Execution ID at position {blank_position} must not be blank",
+        ),
+    ):
+        diff_cohort(selectors)
+
+    client_constructor.assert_not_called()
+
+
+def test_diff_cohort_uses_canonical_ids_for_aliases_and_duplicates() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_a = _execution("kr-original-a", checkpoints=[])
+    original_b = _execution("kr-original-b", checkpoints=[])
+    replay_a = _execution(
+        "kr-replay-a",
+        original_exec_id="kr-original-a",
+        checkpoints=[],
+    )
+    replay_b = _execution(
+        "kr-replay-b",
+        original_exec_id="kr-original-b",
+        checkpoints=[],
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [
+        original_a,
+        original_b,
+        original_a,
+        replay_a,
+        replay_b,
+    ]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.diff._client_ui_url_context",
+            return_value=None,
+        ) as ui_context_mock,
+    ):
+        matrix = diff_cohort(["latest-a", "kr-original-b", "kr-original-a", "latest-a"])
+
+    assert [row.original_exec_id for row in matrix.rows] == [
+        "kr-original-a",
+        "kr-original-b",
+        "kr-original-a",
+        "kr-original-a",
+    ]
+    assert matrix.rows[0] is matrix.rows[2] is matrix.rows[3]
+    assert fake_client.executions.get.call_args_list == [
+        call("latest-a"),
+        call("kr-original-b"),
+        call("kr-original-a"),
+        call("kr-replay-a"),
+        call("kr-replay-b"),
+    ]
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original-a", "kr-original-b"],
+        expected_flow_name="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+    ui_context_mock.assert_called_once_with(fake_client)
+
+
+def test_diff_cohort_discovers_once_and_excludes_unrelated_rows() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_ids = [f"kr-original-{index}" for index in range(50)]
+    originals = [_execution(exec_id, checkpoints=[]) for exec_id in original_ids]
+    replays = [
+        _execution(
+            f"kr-replay-{index}",
+            original_exec_id=original_id,
+            checkpoints=[],
+        )
+        for index, original_id in enumerate(original_ids)
+    ]
+    unrelated = [
+        _execution(
+            f"kr-unrelated-{index}",
+            original_exec_id="outside-cohort",
+            checkpoints=[],
+        )
+        for index in range(1_000)
+    ]
+    candidates = [*replays, *unrelated]
+    returned_rows = 0
+
+    def list_filtered_replays(
+        *,
+        original_exec_ids: list[str],
+        expected_flow_name: str | None,
+        limit: int,
+    ) -> tuple[list[Execution], bool]:
+        nonlocal returned_rows
+        requested_original_ids = set(original_exec_ids)
+        matching = [
+            candidate
+            for candidate in candidates
+            if candidate.original_exec_id in requested_original_ids
+            and candidate.flow_name == expected_flow_name
+        ][:limit]
+        returned_rows += len(matching)
+        return matching, False
+
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [*originals, *replays]
+    fake_client.executions._list_replays_for_originals.side_effect = (
+        list_filtered_replays
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert [row.original_exec_id for row in matrix.rows] == original_ids
+    assert [row.compared[0][0] for row in matrix.rows] == [
+        replay.exec_id for replay in replays
+    ]
+    assert returned_rows == 50
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=original_ids,
+        expected_flow_name="support_copilot_flow",
+        limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+    )
+
+
+def test_diff_cohort_discovers_once_per_flow_and_preserves_input_order() -> None:
+    from kitaru.diff import diff_cohort
+
+    original_ids = ["flow-b-1", "flow-a-1", "flow-b-2"]
+    originals = [
+        _execution("flow-b-1", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+        _execution("flow-a-1", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+        _execution("flow-b-2", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = originals
+    fake_client.executions._list_replays_for_originals.side_effect = [
+        ([], False),
+        ([], False),
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert [row.original_exec_id for row in matrix.rows] == original_ids
+    assert fake_client.executions._list_replays_for_originals.call_args_list == [
+        call(
+            original_exec_ids=["flow-b-1", "flow-b-2"],
+            expected_flow_name="flow_b",
+            limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+        ),
+        call(
+            original_exec_ids=["flow-a-1"],
+            expected_flow_name="flow_a",
+            limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
+        ),
+    ]
+
+
+def test_diff_cohort_attaches_truncation_warning_to_every_row_in_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original_ids = ["flow-a-1", "flow-b-1", "flow-a-2"]
+    originals = [
+        _execution("flow-a-1", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+        _execution("flow-b-1", checkpoints=[], flow_id="flow-b", flow_name="flow_b"),
+        _execution("flow-a-2", checkpoints=[], flow_id="flow-a", flow_name="flow_a"),
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = originals
+    fake_client.executions._list_replays_for_originals.side_effect = [
+        ([], True),
+        ([], False),
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(original_ids)
+
+    assert len(matrix.rows[0].warnings) == 1
+    assert matrix.rows[1].warnings == []
+    assert matrix.rows[2].warnings == matrix.rows[0].warnings
+    warning = matrix.rows[0].warnings[0]
+    assert "flow flow_a" in warning
+    assert "Replay discovery" in warning
+    assert "scanned 3 executions" in warning
+    assert "older executions remain" in warning
+    assert "This row may omit older replays" in warning
+    assert serialize_execution_diff(matrix.rows[0])["warnings"] == [warning]
+
+
+def test_diff_cohort_warning_describes_missing_flow_name_plainly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru.diff import diff_cohort
+
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original = _execution("kr-original", checkpoints=[], flow_name=None)
+    fake_client = MagicMock()
+    fake_client.executions.get.return_value = original
+    fake_client.executions._list_replays_for_originals.return_value = ([], True)
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(["kr-original"])
+
+    warning = matrix.rows[0].warnings[0]
+    assert "executions without an available flow name" in warning
+    assert "This row may omit older replays" in warning
+
+
+def test_diff_cohort_reuses_artifact_hashes_across_original_rows() -> None:
+    from kitaru.diff import diff_cohort
+
+    originals = [
+        _execution(
+            f"kr-original-{suffix}",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-original-{suffix}",
+                    name="checkpoint",
+                    artifact_ids=["artifact-shared"],
+                )
+            ],
+        )
+        for suffix in ("a", "b")
+    ]
+    replays = [
+        _execution(
+            f"kr-replay-{suffix}",
+            original_exec_id=f"kr-original-{suffix}",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-replay-{suffix}",
+                    name="checkpoint",
+                    original_call_id=f"cp-original-{suffix}",
+                    artifact_ids=["artifact-shared"],
+                )
+            ],
+        )
+        for suffix in ("a", "b")
+    ]
+    shared_artifact = SimpleNamespace(load=MagicMock(return_value={"value": "shared"}))
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [*originals, *replays]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        replays,
+        False,
+    )
+    fake_client._get_artifact_version.return_value = shared_artifact
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        matrix = diff_cohort(["kr-original-a", "kr-original-b"])
+
+    fake_client._get_artifact_version.assert_called_once_with(
+        "artifact-shared", hydrate=True
+    )
+    shared_artifact.load.assert_called_once_with()
+    assert [row.compared[0][1][0].artifact_hashes["output"] for row in matrix.rows] == [
+        (matrix.rows[0].compared[0][1][0].artifact_hashes["output"])
+    ] * 2
+
+
+def test_diff_caches_artifact_hashes_for_one_request() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-original",
+                name="checkpoint",
+                artifact_ids=["artifact-original"],
+            )
+        ],
+    )
+    replays = [
+        _execution(
+            replay_id,
+            original_exec_id="kr-original",
+            checkpoints=[
+                _checkpoint(
+                    call_id=f"cp-{replay_id}",
+                    name="checkpoint",
+                    original_call_id="cp-original",
+                    artifact_ids=["artifact-replay"],
+                )
+            ],
+        )
+        for replay_id in ("kr-replay-a", "kr-replay-b")
+    ]
+    loaded_artifacts = {
+        "artifact-original": SimpleNamespace(
+            load=MagicMock(return_value={"value": "original"})
+        ),
+        "artifact-replay": SimpleNamespace(
+            load=MagicMock(return_value={"value": "replay"})
+        ),
+    }
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, *replays]
+    fake_client._get_artifact_version.side_effect = lambda artifact_id, *, hydrate: (
+        loaded_artifacts[artifact_id]
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original", "kr-replay-a", "kr-replay-b")
+
+    assert fake_client._get_artifact_version.call_count == 2
+    assert loaded_artifacts["artifact-original"].load.call_count == 1
+    assert loaded_artifacts["artifact-replay"].load.call_count == 1
+    first_hashes = result.compared[0][1][0].artifact_hashes["output"]
+    second_hashes = result.compared[1][1][0].artifact_hashes["output"]
+    assert first_hashes == second_hashes
+    assert all(value is not None for value in first_hashes)
+
+
+def test_diff_retries_artifact_hash_after_transient_failure() -> None:
+    original = _execution(
+        "kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-original",
+                name="checkpoint",
+                artifact_ids=["shared-artifact"],
+            )
+        ],
+    )
+    replay = _execution(
+        "kr-replay",
+        original_exec_id="kr-original",
+        checkpoints=[
+            _checkpoint(
+                call_id="cp-replay",
+                name="checkpoint",
+                original_call_id="cp-original",
+                artifact_ids=["shared-artifact"],
+            )
+        ],
+    )
+    loaded_artifact = SimpleNamespace(
+        load=MagicMock(return_value={"value": "available"})
+    )
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, replay]
+    fake_client._get_artifact_version.side_effect = [
+        RuntimeError("transient"),
+        loaded_artifact,
+    ]
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original", "kr-replay")
+
+    assert fake_client._get_artifact_version.call_args_list == [
+        call("shared-artifact", hydrate=True),
+        call("shared-artifact", hydrate=True),
+    ]
+    loaded_artifact.load.assert_called_once_with()
+    original_hash, replay_hash = result.compared[0][1][0].artifact_hashes["output"]
+    assert original_hash is None
+    assert replay_hash is not None
 
 
 def test_build_compare_url_for_executions_supports_three_way_compare() -> None:
@@ -310,7 +1294,10 @@ def test_diff_auto_discovers_replays_and_returns_one_multi_exec_url() -> None:
 
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [original, replay_a, replay_b]
-    fake_client.executions.list.return_value = [replay_a, replay_b]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay_a, replay_b],
+        False,
+    )
     fake_client._client.return_value.zen_store.url = "https://demo.kitaru.zenml.io"
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
@@ -489,7 +1476,7 @@ def test_diff_omits_compare_url_when_cloud_url_metadata_is_incomplete() -> None:
     assert result.urls == []
 
 
-def test_diff_discovers_replay_beyond_first_200_candidates() -> None:
+def test_diff_auto_discovery_uses_bounded_flow_scan() -> None:
     original = _execution(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
@@ -505,24 +1492,19 @@ def test_diff_discovers_replay_beyond_first_200_candidates() -> None:
             )
         ],
     )
-    candidates = [
-        _execution(
-            f"kr-candidate-{index}",
-            original_exec_id="kr-other",
-            checkpoints=[],
-        )
-        for index in range(200)
-    ] + [replay]
-
     fake_client = MagicMock()
     fake_client.executions.get.side_effect = [original, replay]
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = (
+        [replay],
+        False,
+    )
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
-        flow="support_copilot_flow",
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
+        expected_flow_name="support_copilot_flow",
         limit=_diff_module._AUTO_DISCOVERY_SCAN_LIMIT,
     )
     assert [replay_id for replay_id, _ in result.compared] == ["kr-replay"]
@@ -537,23 +1519,51 @@ def test_diff_auto_discovery_does_not_warn_below_scan_limit(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
     )
-    candidates = [
-        _execution("kr-candidate-1", original_exec_id="kr-other", checkpoints=[]),
-        _execution("kr-candidate-2", original_exec_id="kr-other", checkpoints=[]),
-    ]
-
     fake_client = MagicMock()
     fake_client.executions.get.return_value = original
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = ([], False)
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
-        flow="support_copilot_flow",
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
+        expected_flow_name="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
+    assert result.warnings == []
+
+
+def test_diff_auto_discovery_returns_exact_scan_limit_without_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_diff_module, "_AUTO_DISCOVERY_SCAN_LIMIT", 3)
+    original = _execution("kr-original", checkpoints=[])
+    replays = [
+        _execution(
+            f"kr-replay-{index}",
+            original_exec_id="kr-original",
+            checkpoints=[],
+        )
+        for index in range(3)
+    ]
+    fake_client = MagicMock()
+    fake_client.executions.get.side_effect = [original, *replays]
+    fake_client.executions._list_replays_for_originals.return_value = (
+        replays,
+        False,
+    )
+
+    with (
+        patch("kitaru.diff.KitaruClient", return_value=fake_client),
+        patch("kitaru.diff._client_ui_url_context", return_value=None),
+    ):
+        result = diff("kr-original")
+
+    assert [replay_exec_id for replay_exec_id, _ in result.compared] == [
+        replay.exec_id for replay in replays
+    ]
     assert result.warnings == []
 
 
@@ -565,31 +1575,25 @@ def test_diff_warns_when_auto_discovery_hits_scan_limit(
         "kr-original",
         checkpoints=[_checkpoint(call_id="cp-1", name="lookup_policy_tool")],
     )
-    candidates = [
-        _execution(
-            f"kr-candidate-{index}",
-            original_exec_id="kr-other",
-            checkpoints=[],
-        )
-        for index in range(3)
-    ]
-
     fake_client = MagicMock()
     fake_client.executions.get.return_value = original
-    fake_client.executions.list.return_value = candidates
+    fake_client.executions._list_replays_for_originals.return_value = ([], True)
 
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original")
 
-    fake_client.executions.list.assert_called_once_with(
-        flow="support_copilot_flow",
+    fake_client.executions._list_replays_for_originals.assert_called_once_with(
+        original_exec_ids=["kr-original"],
+        expected_flow_name="support_copilot_flow",
         limit=3,
     )
     assert result.compared == []
     assert len(result.warnings) == 1
     warning = result.warnings[0]
-    assert "auto-discovery" in warning
-    assert "stopped after scanning 3 executions" in warning
+    assert "Replay discovery" in warning
+    assert "scanned 3 executions" in warning
+    assert "older executions remain" in warning
+    assert "This row may omit older replays" in warning
     assert "support_copilot_flow" in warning
     assert "execution IDs explicitly" in warning
     assert serialize_execution_diff(result)["warnings"] == result.warnings
@@ -618,6 +1622,6 @@ def test_diff_does_not_warn_for_explicit_replay_ids_at_candidate_limit() -> None
     with patch("kitaru.diff.KitaruClient", return_value=fake_client):
         result = diff("kr-original", "kr-replay")
 
-    fake_client.executions.list.assert_not_called()
+    fake_client.executions._list_replays_for_originals.assert_not_called()
     assert result.warnings == []
     assert serialize_execution_diff(result)["warnings"] == []

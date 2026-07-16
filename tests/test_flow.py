@@ -82,7 +82,7 @@ from kitaru.flow import (
     flow,
 )
 from kitaru.inspection import ActiveConfigSelectionProvenance
-from kitaru.replay import ReplayPlan
+from kitaru.replay import ReplayPlan, ReplayPlanDocument
 from kitaru.replay_context import (
     KITARU_REPLAY_CONTEXT_ENV,
     ReplayRuntimeContext,
@@ -4353,6 +4353,10 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         input_overrides={"topic": "new topic"},
         step_input_overrides={"write": {"research": "edited"}},
         runtime_context=ReplayRuntimeContext(at="write"),
+        document=ReplayPlanDocument(
+            invocation_overrides={"research": {"output": "edited"}},
+            matched_targets={"invocation:research": ["research"]},
+        ),
     )
 
     with (
@@ -4402,6 +4406,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         submission_id=submission.submission_id,
         tag=None,
         steps_to_skip={"fetch"},
+        replay_plan=replay_plan.document,
     )
     build_frozen_spec_call = base_pipeline.with_options.call_args
     docker_settings = build_frozen_spec_call.kwargs["settings"]["docker"]

@@ -8,7 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -17,17 +17,26 @@ from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
 import kitaru.config as config_module
-from kitaru._cli._executions import _execution_statistics_table
+from kitaru._cli._executions import (
+    _checkpoint_diff_status,
+    _checkpoint_diff_table,
+    _execution_statistics_table,
+    _format_artifact_states,
+    _format_diff_delta,
+    _print_applied_output_overrides,
+)
 from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru._client._statistics import (
     LLM_EXECUTION_STATISTICS_METRIC_SHORTCUTS_DISPLAY,
     normalize_execution_statistics_metrics,
 )
+from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     _build_runtime_snapshot,
+    _checkpoint_summary,
     _describe_local_server,
     _format_table_timestamp,
     _logout_current_connection,
@@ -35,6 +44,8 @@ from kitaru.cli import (
     app,
 )
 from kitaru.client import (
+    CheckpointCall,
+    Execution,
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatus,
@@ -63,6 +74,7 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.inspection import serialize_execution
 from kitaru.replay import ReplayPlanDocument, ReplayResultRow, ReplaySubmission
 from kitaru.secrets import SecretSummary
 
@@ -113,7 +125,7 @@ def _execution_stub(
     pending_wait: SimpleNamespace | None = None,
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
-    checkpoints: list[SimpleNamespace] | None = None,
+    checkpoints: list[CheckpointCall] | None = None,
     llm_usage_summary: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
@@ -135,6 +147,36 @@ def _execution_stub(
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
         llm_usage_records=[],
+    )
+
+
+def _checkpoint_stub(
+    *,
+    call_id: str,
+    name: str,
+    status: ExecutionStatus,
+    original_call_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> CheckpointCall:
+    """Build a complete checkpoint-call-shaped object for CLI tests."""
+    return CheckpointCall(
+        call_id=call_id,
+        name=name,
+        checkpoint_type=None,
+        checkpoint_origin="user",
+        adapter=None,
+        adapter_checkpoint_kind=None,
+        replay_input_slots=[],
+        replay_output_slots=[],
+        status=status,
+        started_at=None,
+        ended_at=None,
+        metadata=metadata or {},
+        original_call_id=original_call_id,
+        parent_call_ids=[],
+        failure=None,
+        attempts=[],
+        artifacts=[],
     )
 
 
@@ -2354,10 +2396,51 @@ def test_flow_tag_and_untag_call_public_apis(
     assert json.loads(capsys.readouterr().out)["command"] == "flow.untag"
 
 
-def test_executions_get_renders_execution_details(
+def test_checkpoint_summary_remains_available_from_compatibility_facade() -> None:
+    """The legacy private import remains available for integrations."""
+    checkpoints = [
+        SimpleNamespace(name=f"step-{index}", status=ExecutionStatus.COMPLETED)
+        for index in range(5)
+    ]
+
+    assert _checkpoint_summary(checkpoints) == (
+        "step-0 (completed), step-1 (completed), step-2 (completed), "
+        "step-3 (completed), ... (+1 more)"
+    )
+
+
+def test_executions_get_renders_all_checkpoint_call_ids(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions get` should render a detailed execution snapshot."""
+    """Execution details should show every checkpoint call without truncation."""
+    checkpoints = [
+        _checkpoint_stub(
+            call_id="call-research-1",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-1",
+            name="write",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-research-2",
+            name="research",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-review-1",
+            name="review",
+            status=ExecutionStatus.COMPLETED,
+        ),
+        _checkpoint_stub(
+            call_id="call-write-2",
+            name="write",
+            status=ExecutionStatus.FAILED,
+            original_call_id="call-write-1",
+        ),
+    ]
     execution = _execution_stub(
         exec_id="kr-123",
         flow_name="content_pipeline",
@@ -2366,10 +2449,7 @@ def test_executions_get_renders_execution_details(
             name="approve_draft",
             question="Ship this draft?",
         ),
-        checkpoints=[
-            SimpleNamespace(name="research", status=ExecutionStatus.COMPLETED),
-            SimpleNamespace(name="write", status=ExecutionStatus.RUNNING),
-        ],
+        checkpoints=checkpoints,
         llm_usage_summary={
             "usage_record_count": 2,
             "incurred_usage_record_count": 1,
@@ -2398,8 +2478,262 @@ def test_executions_get_renders_execution_details(
     assert "Status: waiting" in output
     assert "Pending wait: approve_draft" in output
     assert "Wait question: Ship this draft?" in output
-    assert "Checkpoints: research (completed), write (running)" in output
+    assert "Checkpoints" in output
+    for checkpoint in checkpoints:
+        assert f"Call ID {checkpoint.call_id}: {checkpoint.name}" in output
+        assert f"({checkpoint.status.value})" in output
+    assert output.count("research (completed)") == 2
+    assert (
+        "Call ID call-write-2: write (failed); original call ID: call-write-1 "
+        "(may identify a call in the source execution; "
+        "not a --at selector for this execution)"
+    ) in output
+    assert "(+1 more)" not in output
     assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_checkpoint_ids_in_rich_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Interactive output should contain the same checkpoint details."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-research-2",
+                name="research",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-research-1",
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_interactive", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Checkpoints" in output
+    assert "Call ID call-research-1" in output
+    assert "research (completed)" in output
+    assert "Call ID call-research-2" in output
+    assert "research (failed)" in output
+    assert "original call ID:" in output
+    assert "call-research-1 (may identify a call in the source execution;" in output
+    assert "not a --at" in output
+    assert "selector for this execution)" in output
+    assert "Replay into a new execution" in output
+    assert "Command:" in output
+    assert "kitaru executions replay kr-123 --at call-research-2" in output
+
+
+@pytest.mark.parametrize(
+    ("exec_id", "call_id"),
+    [
+        ("kr execution", "call-write-2"),
+        ("kr-123", "call 'write'"),
+        ("kr-123", 'call-"write"'),
+        ("kr-123", "call-write;$HOME"),
+    ],
+)
+def test_executions_get_omits_replay_command_for_unsafe_identifiers(
+    capsys: pytest.CaptureFixture[str],
+    exec_id: str,
+    call_id: str,
+) -> None:
+    """Replay guidance should require cross-shell-safe identifiers."""
+    execution = _execution_stub(
+        exec_id=exec_id,
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id=call_id,
+                name="write",
+                status=ExecutionStatus.FAILED,
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", exec_id])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    assert f"Call ID {call_id}: write (failed)" in output
+
+
+def test_executions_get_suggests_first_failed_checkpoint_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed execution should suggest its first eligible failed call ID."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-research-1",
+                name="research",
+                status=ExecutionStatus.COMPLETED,
+            ),
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+            ),
+            _checkpoint_stub(
+                call_id="call-publish-3",
+                name="publish",
+                status=ExecutionStatus.FAILED,
+            ),
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" in output
+    assert "Command: kitaru executions replay kr-123 --at call-write-2" in output
+    assert "--at call-publish-3" not in output
+
+
+@pytest.mark.parametrize(
+    ("execution_status", "checkpoints"),
+    [
+        (
+            ExecutionStatus.COMPLETED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+        (ExecutionStatus.FAILED, []),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="call-write-1",
+                    name="write",
+                    status=ExecutionStatus.COMPLETED,
+                )
+            ],
+        ),
+        (
+            ExecutionStatus.FAILED,
+            [
+                _checkpoint_stub(
+                    call_id="  ",
+                    name="write",
+                    status=ExecutionStatus.FAILED,
+                )
+            ],
+        ),
+    ],
+)
+def test_executions_get_omits_ineligible_replay_command(
+    capsys: pytest.CaptureFixture[str],
+    execution_status: ExecutionStatus,
+    checkpoints: list[CheckpointCall],
+) -> None:
+    """Replay guidance should appear only when its call ID is usable."""
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=execution_status,
+        checkpoints=checkpoints,
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Replay into a new execution" not in output
+    assert "Command: kitaru executions replay" not in output
+    if not checkpoints:
+        assert "Calls: none" in output
+    elif not checkpoints[0].call_id.strip():
+        assert "Call ID not available: write (failed)" in output
+
+
+def test_executions_get_json_contract_is_unchanged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text-only checkpoint guidance must not enter the JSON envelope."""
+    usage_record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="write-call",
+        total_tokens=8,
+    )
+    execution = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        checkpoints=[
+            _checkpoint_stub(
+                call_id="call-write-2",
+                name="write",
+                status=ExecutionStatus.FAILED,
+                original_call_id="call-write-1",
+                metadata={LLM_USAGE_METADATA_KEY: {"write-call": usage_record}},
+            )
+        ],
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "kr-123", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "executions.get",
+        "item": serialize_execution(cast(Execution, execution)),
+    }
+    checkpoint_record = payload["item"]["checkpoints"][0]["llm_usage_records"][0]
+    assert checkpoint_record["checkpoint_id"] == "call-write-2"
+    assert checkpoint_record["checkpoint_name"] == "write"
 
 
 def test_executions_get_renders_malformed_llm_usage_summary_honestly(
@@ -4276,9 +4610,23 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`executions diff-matrix` should replace the old diff-cohort command."""
+    serialized = {
+        "rows": [
+            {
+                "original_exec_id": "kr-a",
+                "compared": [
+                    {
+                        "replay_exec_id": "kr-replay-a",
+                        "checkpoints": [],
+                        "applied_output_overrides": [],
+                    }
+                ],
+            }
+        ]
+    }
     with (
         patch("kitaru.diff.diff_cohort", return_value=object()) as diff_cohort,
-        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": []}),
+        patch("kitaru.diff.serialize_cohort_diff", return_value=serialized),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["executions", "diff-matrix", "kr-a", "kr-b", "-o", "json"])
@@ -4287,7 +4635,568 @@ def test_executions_diff_matrix_json_uses_new_command_name(
     diff_cohort.assert_called_once_with(["kr-a", "kr-b"])
     assert json.loads(capsys.readouterr().out) == {
         "command": "executions.diff_matrix",
-        "item": {"rows": []},
+        "item": serialized,
+    }
+
+
+def test_executions_diff_matrix_rejects_blank_selector_with_structured_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "diff-matrix",
+                "kr-original",
+                "   ",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    client_constructor.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "command": "executions.diff_matrix",
+        "error": {
+            "message": "Execution ID at position 2 must not be blank.",
+            "type": "KitaruUsageError",
+        },
+    }
+
+
+def test_executions_diff_rejects_blank_replay_with_structured_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch("kitaru.diff.KitaruClient") as client_constructor,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "diff",
+                "kr-original",
+                "   ",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    client_constructor.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "command": "executions.diff",
+        "error": {
+            "message": "Replay execution ID at position 1 must not be blank.",
+            "type": "KitaruUsageError",
+        },
+    }
+
+
+def _checkpoint_diff_payload(**updates: Any) -> dict[str, Any]:
+    payload = {
+        "name": "write_draft",
+        "original_call_id": "original",
+        "replay_call_id": "replay",
+        "status_match": False,
+        "token_delta": None,
+        "cost_delta_usd": None,
+    }
+    payload.update(updates)
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (10, "+10"),
+        (1_234_567, "+1234567"),
+        (-1_234_567, "-1234567"),
+        (0, "+0"),
+        (0.0, "n/a"),
+        (None, "n/a"),
+        (True, "n/a"),
+        (float("inf"), "n/a"),
+    ],
+)
+def test_format_diff_delta(value: Any, expected: str) -> None:
+    assert _format_diff_delta(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.00003, "+0.000030"),
+        (-0.0017, "-0.001700"),
+        (0.0, "+0.000000"),
+        (None, "n/a"),
+        (True, "n/a"),
+        (float("inf"), "n/a"),
+    ],
+)
+def test_format_diff_cost_delta(value: Any, expected: str) -> None:
+    assert _format_diff_delta(value, decimal_places=6) == expected
+
+
+@pytest.mark.parametrize(
+    ("original_call_id", "replay_call_id", "status_match", "expected"),
+    [
+        ("original", "replay", True, "match"),
+        ("original", "replay", False, "changed"),
+        ("original", None, False, "original only"),
+        (None, "replay", False, "replay only"),
+    ],
+)
+def test_checkpoint_diff_status(
+    original_call_id: str | None,
+    replay_call_id: str | None,
+    status_match: bool,
+    expected: str,
+) -> None:
+    assert (
+        _checkpoint_diff_status(
+            {
+                "original_call_id": original_call_id,
+                "replay_call_id": replay_call_id,
+                "status_match": status_match,
+            }
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"token_delta": {"prompt_tokens": 1}},
+        {"cost_delta_usd": 0.000001},
+        {"artifact_hashes": {"output": {"original": "hash-a", "replay": "hash-b"}}},
+    ],
+)
+def test_checkpoint_diff_status_detects_content_changes(
+    updates: dict[str, Any],
+) -> None:
+    checkpoint = _checkpoint_diff_payload(status_match=True, **updates)
+
+    assert _checkpoint_diff_status(checkpoint) == "changed"
+
+
+def test_checkpoint_diff_status_matches_unchanged_content() -> None:
+    checkpoint = _checkpoint_diff_payload(
+        status_match=True,
+        token_delta={
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        cost_delta_usd=0.0,
+        artifact_hashes={"output": {"original": "same-hash", "replay": "same-hash"}},
+    )
+
+    assert _checkpoint_diff_status(checkpoint) == "match"
+
+
+def test_checkpoint_diff_table_formats_rows_and_tracks_empty_replays() -> None:
+    rows, empty_replay_ids = _checkpoint_diff_table(
+        {
+            "compared": [
+                {
+                    "replay_exec_id": "kr-replay",
+                    "checkpoints": [
+                        _checkpoint_diff_payload(
+                            duration_delta_ms=12.5,
+                            token_delta={
+                                "prompt_tokens": 10,
+                                "completion_tokens": -5,
+                                "total_tokens": 5,
+                            },
+                            cost_delta_usd=0.25,
+                            artifact_hashes={
+                                "report": {"original": None, "replay": "report-b"},
+                                "output": {"original": "same", "replay": "same"},
+                                "model": {"original": "model-a", "replay": "model-b"},
+                            },
+                        )
+                    ],
+                },
+                {"replay_exec_id": "kr-empty", "checkpoints": []},
+            ]
+        }
+    )
+
+    assert rows == [
+        [
+            "kr-replay",
+            "write_draft",
+            "changed",
+            "+12.5",
+            "+10",
+            "-5",
+            "+5",
+            "+0.250000",
+            "model=changed, output=unchanged, report=unavailable",
+        ]
+    ]
+    assert empty_replay_ids == ["kr-empty"]
+
+
+@pytest.mark.parametrize(
+    ("artifact_hashes", "expected"),
+    [
+        (None, "n/a"),
+        ({}, "n/a"),
+        ("not-a-mapping", "n/a"),
+        ({"output": "not-a-mapping"}, "output=unavailable"),
+        ({"output": {"original": "a", "replay": "a"}}, "output=unchanged"),
+        ({"output": {"original": "a", "replay": "b"}}, "output=changed"),
+        ({"output": {"original": None, "replay": "b"}}, "output=unavailable"),
+        (
+            {
+                "b-role": {"original": "x", "replay": "y"},
+                "a-role": {"original": "x", "replay": "x"},
+            },
+            "a-role=unchanged, b-role=changed",
+        ),
+    ],
+)
+def test_format_artifact_states(artifact_hashes: Any, expected: str) -> None:
+    assert _format_artifact_states(artifact_hashes) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (12.5, "+12.5"),
+        (-8.0, "-8.0"),
+        (-0.0, "-0.0"),
+        (0.0, "+0.0"),
+        (None, "n/a"),
+        (float("nan"), "n/a"),
+        (float("inf"), "n/a"),
+    ],
+)
+def test_format_diff_duration_delta(value: Any, expected: str) -> None:
+    assert _format_diff_delta(value, decimal_places=1) == expected
+
+
+def test_print_applied_output_overrides_distinguishes_evidence_states(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _print_applied_output_overrides(
+        {
+            "compared": [
+                {
+                    "replay_exec_id": "kr-populated",
+                    "applied_output_overrides": [
+                        {
+                            "selector_kind": "checkpoint",
+                            "selector": "lookup",
+                            "matched_invocation_ids": ["lookup_1", "lookup_2"],
+                        }
+                    ],
+                },
+                {
+                    "replay_exec_id": "kr-unavailable",
+                    "applied_output_overrides": None,
+                },
+                {
+                    "replay_exec_id": "kr-empty",
+                    "applied_output_overrides": [],
+                },
+            ]
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "Applied output overrides [kr-populated]:" in output
+    assert "checkpoint family 'lookup' -> lookup_1, lookup_2" in output
+    assert "Applied output overrides: unavailable [kr-unavailable]" in output
+    assert "kr-empty" not in output
+
+
+def test_executions_diff_text_renders_compact_result(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    serialized = {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay",
+                "checkpoints": [_checkpoint_diff_payload()],
+                "applied_output_overrides": [
+                    {
+                        "selector_kind": "invocation",
+                        "selector": "write_draft",
+                        "matched_invocation_ids": ["write_draft"],
+                    }
+                ],
+            },
+            {
+                "replay_exec_id": "kr-empty",
+                "checkpoints": [],
+                "applied_output_overrides": [],
+            },
+        ],
+        "urls": ["https://example.test/compare"],
+        "warnings": [],
+    }
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original", "kr-replay", "kr-empty"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Compared against 2 replay execution(s)." in output
+    assert "Checkpoint differences" in output
+    assert "write_draft" in output
+    assert "No checkpoint rows for replay kr-empty." in output
+    assert "Applied output overrides [kr-replay]:" in output
+    assert "https://example.test/compare" in output
+
+
+def test_executions_diff_rich_output_treats_checkpoint_name_as_literal(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    serialized = {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay",
+                "checkpoints": [
+                    {
+                        "name": "[/red]",
+                        "original_call_id": "original",
+                        "replay_call_id": "replay",
+                        "status_match": False,
+                        "token_delta": None,
+                        "cost_delta_usd": None,
+                        "artifact_hashes": {},
+                    }
+                ],
+                "applied_output_overrides": [],
+            }
+        ],
+        "urls": [],
+        "warnings": [],
+    }
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        patch("kitaru._cli._helpers._is_interactive", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original", "kr-replay"])
+
+    assert exc_info.value.code == 0
+    assert "[/red]" in capsys.readouterr().out
+
+
+def test_executions_diff_rich_output_splits_artifact_states_across_lines(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    serialized = {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay",
+                "checkpoints": [
+                    _checkpoint_diff_payload(
+                        duration_delta_ms=12.5,
+                        artifact_hashes={
+                            "report": {"original": None, "replay": "report-b"},
+                            "output": {"original": "same", "replay": "same"},
+                            "model": {"original": "model-a", "replay": "model-b"},
+                        },
+                    )
+                ],
+                "applied_output_overrides": [],
+            }
+        ],
+        "urls": [],
+        "warnings": [],
+    }
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch("kitaru.diff.serialize_execution_diff", return_value=serialized),
+        patch("kitaru._cli._helpers._is_interactive", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original", "kr-replay"])
+
+    assert exc_info.value.code == 0
+    lines = capsys.readouterr().out.splitlines()
+    row_line = next(i for i, line in enumerate(lines) if "model=changed" in line)
+    assert "+12.5" in lines[row_line]
+    assert "output=unchanged" in lines[row_line + 1]
+    assert "report=unavailable" in lines[row_line + 2]
+    assert "…" not in "\n".join(lines)
+
+
+def test_executions_diff_text_renders_real_serialized_diff(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from kitaru.diff import CheckpointDiff, ExecutionDiff
+
+    execution_diff = ExecutionDiff(
+        original_exec_id="kr-original",
+        compared=[
+            (
+                "kr-replay",
+                [
+                    CheckpointDiff(
+                        name="generate",
+                        original_call_id="call-generate-original",
+                        replay_call_id="call-generate-replay",
+                        status_match=True,
+                        duration_delta_ms=-0.0,
+                        token_delta={
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                        },
+                        artifact_hashes={"output": ("same", "same")},
+                        cost_delta_usd=0.0,
+                    ),
+                    CheckpointDiff(
+                        name="removed",
+                        original_call_id="call-removed",
+                        replay_call_id=None,
+                        status_match=False,
+                        duration_delta_ms=None,
+                        token_delta=None,
+                        artifact_hashes={},
+                        cost_delta_usd=None,
+                    ),
+                    CheckpointDiff(
+                        name="added",
+                        original_call_id=None,
+                        replay_call_id="call-added",
+                        status_match=False,
+                        duration_delta_ms=None,
+                        token_delta=None,
+                        artifact_hashes={},
+                        cost_delta_usd=None,
+                    ),
+                ],
+            )
+        ],
+    )
+    with (
+        patch("kitaru.diff.diff", return_value=execution_diff),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-original", "kr-replay"])
+
+    assert exc_info.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    assert "generate match -0.0 +0 +0 +0 +0.000000 output=unchanged" in output
+    assert "removed original only n/a n/a n/a n/a n/a n/a" in output
+    assert "added replay only n/a n/a n/a n/a n/a n/a" in output
+
+
+def test_executions_diff_text_prints_discovery_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text diff output should disclose potentially omitted older replays."""
+    warning = "Replay discovery reached its scan limit."
+    with (
+        patch("kitaru.diff.diff", return_value=object()),
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value={"compared": [], "urls": [], "warnings": [warning]},
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff", "kr-a"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert f"Warning: {warning}" in captured.err
+    assert "Compared against 0 replay execution(s)." in captured.out
+
+
+def test_executions_diff_matrix_text_deduplicates_discovery_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A shared flow-level warning should be printed once for a matrix."""
+    warning = "Replay discovery reached its scan limit."
+    rows = [
+        {"original_exec_id": exec_id, "warnings": [warning]}
+        for exec_id in ("kr-a", "kr-b")
+    ]
+    with (
+        patch("kitaru.diff.diff_cohort", return_value=object()),
+        patch("kitaru.diff.serialize_cohort_diff", return_value={"rows": rows}),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "diff-matrix", "kr-a", "kr-b"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err.count(f"Warning: {warning}") == 1
+    assert "Compared 2 original execution(s)." in captured.out
+    assert "Checkpoint differences" not in captured.out
+    assert "Applied output overrides" not in captured.out
+
+
+def test_executions_diff_json_serializes_checkpoint_usage_deltas(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = object()
+    serialized = {
+        "compared": [
+            {
+                "replay_exec_id": "kr-replay",
+                "applied_output_overrides": [],
+                "checkpoints": [
+                    {
+                        "token_delta": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                        "cost_delta_usd": 0.25,
+                    }
+                ],
+            }
+        ]
+    }
+
+    with (
+        patch("kitaru.diff.diff", return_value=result) as mock_diff,
+        patch(
+            "kitaru.diff.serialize_execution_diff",
+            return_value=serialized,
+        ) as mock_serialize,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "diff",
+                "kr-original",
+                "kr-replay",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_diff.assert_called_once_with("kr-original", "kr-replay")
+    mock_serialize.assert_called_once_with(result)
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "executions.diff",
+        "item": serialized,
     }
 
 
@@ -5528,6 +6437,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
     assert payload["item"]["visibility"] == "public"
+    assert payload["item"]["keys_known"] is True
 
 
 def test_secrets_show_hides_values_by_default(
@@ -5591,8 +6501,12 @@ def test_secrets_list_renders_shared_order(
 ) -> None:
     """`kitaru secrets list` should render the SDK's deterministic order."""
     secrets = [
-        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
-        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+        SecretSummary(
+            name="alpha", id="secret-a", private=True, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="zeta", id="secret-z", private=False, keys=[], keys_known=False
+        ),
     ]
 
     with (
@@ -5615,12 +6529,13 @@ def test_secrets_list_renders_shared_order(
 def test_secrets_list_json_contains_metadata_without_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """JSON list output should include key names but never secret values."""
+    """JSON list output should identify unavailable keys without values."""
     secret = SecretSummary(
         name="openai-creds",
         id="secret-id",
         private=True,
-        keys=["OPENAI_API_KEY"],
+        keys=[],
+        keys_known=False,
         has_missing_values=False,
     )
 
@@ -5639,7 +6554,8 @@ def test_secrets_list_json_contains_metadata_without_values(
                 "id": "secret-id",
                 "name": "openai-creds",
                 "visibility": "private",
-                "keys": ["OPENAI_API_KEY"],
+                "keys": [],
+                "keys_known": False,
                 "has_missing_values": False,
             }
         ],
@@ -5652,9 +6568,15 @@ def test_secrets_list_paginates_after_shared_ordering(
 ) -> None:
     """The CLI should slice the complete list after the SDK has ordered it."""
     secrets = [
-        SecretSummary(name="alpha", id="secret-a", private=True, keys=[]),
-        SecretSummary(name="beta", id="secret-b", private=False, keys=[]),
-        SecretSummary(name="zeta", id="secret-z", private=False, keys=[]),
+        SecretSummary(
+            name="alpha", id="secret-a", private=True, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="beta", id="secret-b", private=False, keys=[], keys_known=False
+        ),
+        SecretSummary(
+            name="zeta", id="secret-z", private=False, keys=[], keys_known=False
+        ),
     ]
 
     with (

@@ -293,6 +293,7 @@ def _map_checkpoint_attempt(
         ended_at=step.end_time,
         metadata=_to_plain_dict(step.run_metadata),
         failure=failure,
+        _checkpoint_name=checkpoint_name,
         _raw_status=str(getattr(step.status, "value", step.status)).strip().lower(),
         _replay_reused=(
             replay_skipped_steps is not None
@@ -356,6 +357,7 @@ def _map_checkpoint_call(
     client: KitaruClient,
     attempts_by_lineage: Mapping[str, list[StepRunResponse]],
     replay_skipped_steps: set[str] | None = None,
+    visible_call_id_by_attempt_id: Mapping[str, str] | None = None,
 ) -> CheckpointCall:
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
@@ -429,6 +431,13 @@ def _map_checkpoint_call(
     if step.original_step_run_id is not None:
         original_call_id = str(step.original_step_run_id)
 
+    parent_call_ids = [str(parent_id) for parent_id in step.parent_step_ids]
+    if visible_call_id_by_attempt_id is not None:
+        parent_call_ids = [
+            visible_call_id_by_attempt_id.get(parent_id, parent_id)
+            for parent_id in parent_call_ids
+        ]
+
     return CheckpointCall(
         call_id=str(step.id),
         name=producing_call,
@@ -437,7 +446,7 @@ def _map_checkpoint_call(
         ended_at=step.end_time,
         metadata=metadata,
         original_call_id=original_call_id,
-        parent_call_ids=[str(parent_id) for parent_id in step.parent_step_ids],
+        parent_call_ids=parent_call_ids,
         failure=failure,
         attempts=attempts,
         artifacts=artifacts,
@@ -671,6 +680,12 @@ def _map_execution(
             if visible_step is not None:
                 latest_steps_by_lineage[lineage_key] = visible_step
 
+        visible_call_id_by_attempt_id = {
+            str(attempt.id): str(visible_step.id)
+            for lineage_key, visible_step in latest_steps_by_lineage.items()
+            for attempt in attempts_by_lineage[lineage_key]
+        }
+
         for step in latest_steps_by_lineage.values():
             checkpoints.append(
                 _map_checkpoint_call(
@@ -678,6 +693,7 @@ def _map_execution(
                     client=client,
                     attempts_by_lineage=attempts_by_lineage,
                     replay_skipped_steps=replay_skipped_steps,
+                    visible_call_id_by_attempt_id=visible_call_id_by_attempt_id,
                 )
             )
 

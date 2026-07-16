@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from kitaru._llm_usage import (
     LLM_USAGE_SUMMARY_METADATA_KEY,
+    aggregate_usage_records,
+    aggregate_usage_records_with_cost_completeness,
     parse_usage_summary,
     strip_usage_record_bookkeeping,
     usage_records_from_metadata,
@@ -402,24 +404,34 @@ class CheckpointAttempt:
     ended_at: datetime | None
     metadata: dict[str, Any]
     failure: FailureInfo | None
+    _checkpoint_name: str | None = field(default=None, repr=False, compare=False)
     _raw_status: str | None = field(default=None, repr=False, compare=False)
     _replay_reused: bool = field(default=False, repr=False, compare=False)
 
-    @property
-    def llm_usage_records(self) -> list[dict[str, Any]]:
-        """Canonical LLM usage records persisted on this attempt."""
+    def _llm_usage_records_with_bookkeeping(self) -> list[dict[str, Any]]:
         reused, reused_cache_status = usage_reuse_classification(
             replay_reused=self._replay_reused,
             checkpoint_status=self._raw_status or self.status,
         )
+        return usage_records_from_metadata(
+            self.metadata,
+            source_attempt_id=self.attempt_id,
+            default_checkpoint_id=self.attempt_id,
+            default_checkpoint_name=self._checkpoint_name,
+            reused=reused,
+            reused_cache_status=reused_cache_status,
+        )
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical usage records attributed to this physical attempt.
+
+        Missing checkpoint identity fields default to this attempt's step-run ID
+        and normalized checkpoint name. Explicit producer identity is preserved.
+        """
         return [
             strip_usage_record_bookkeeping(record)
-            for record in usage_records_from_metadata(
-                self.metadata,
-                source_attempt_id=self.attempt_id,
-                reused=reused,
-                reused_cache_status=reused_cache_status,
-            )
+            for record in self._llm_usage_records_with_bookkeeping()
         ]
 
 
@@ -468,18 +480,42 @@ class CheckpointCall:
     replay_input_slots: list[str] = field(default_factory=list)
     replay_output_slots: list[str] = field(default_factory=list)
 
-    @property
-    def llm_usage_records(self) -> list[dict[str, Any]]:
-        """Canonical LLM usage records persisted on this checkpoint."""
+    def _llm_usage_records_with_bookkeeping(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for attempt in self.attempts:
-            records.extend(attempt.llm_usage_records)
+            records.extend(attempt._llm_usage_records_with_bookkeeping())
         if records:
-            return [strip_usage_record_bookkeeping(record) for record in records]
+            return records
+        return usage_records_from_metadata(
+            self.metadata,
+            default_checkpoint_id=self.call_id,
+            default_checkpoint_name=self.name,
+        )
+
+    @property
+    def llm_usage_records(self) -> list[dict[str, Any]]:
+        """Canonical usage records for this checkpoint and its attempts.
+
+        Attempt records retain physical-attempt identity. If no attempt records
+        exist, missing identity fields on call metadata default to this call.
+        """
         return [
             strip_usage_record_bookkeeping(record)
-            for record in usage_records_from_metadata(self.metadata)
+            for record in self._llm_usage_records_with_bookkeeping()
         ]
+
+    @property
+    def aggregated_llm_usage_summary(self) -> dict[str, Any]:
+        """Aggregate usage while retaining retry-attempt identities."""
+        return aggregate_usage_records(self._llm_usage_records_with_bookkeeping())
+
+    def aggregated_llm_usage_with_cost_completeness(
+        self,
+    ) -> tuple[dict[str, Any], bool]:
+        """Aggregate usage and retain internal cost-completeness state."""
+        return aggregate_usage_records_with_cost_completeness(
+            self._llm_usage_records_with_bookkeeping()
+        )
 
 
 @dataclass(frozen=True)
@@ -512,7 +548,12 @@ class Execution:
 
     @property
     def llm_usage_records(self) -> list[dict[str, Any]]:
-        """Canonical LLM usage records from execution and checkpoint metadata."""
+        """Canonical usage records from execution and checkpoint metadata.
+
+        Checkpoint-owned records carry attempt-aware identity when producer
+        identity is absent. Execution-level records remain unattributed unless
+        their producer supplied checkpoint identity explicitly.
+        """
         checkpoint_records: list[dict[str, Any]] = []
         checkpoint_identities: set[tuple[str | None, str | None]] = set()
         for checkpoint in self.checkpoints:

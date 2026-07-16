@@ -14,7 +14,10 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from kitaru._llm_usage import LLM_USAGE_METADATA_KEY
+from kitaru._llm_usage import (
+    LLM_USAGE_METADATA_KEY,
+    aggregate_usage_records_with_cost_completeness,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import (
     ResolvedModelSelection,
@@ -46,6 +49,7 @@ from tests._checkpoint_handle_helpers import (
     assert_checkpoint_handle_error,
     checkpoint_output_handle,
 )
+from tests._diff_helpers import checkpoint_diff_from_usage_records
 
 
 def _flow_checkpoint_scope() -> tuple[str, str]:
@@ -526,6 +530,16 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking(
     assert usage_record["cost"]["source_label"] == "genai-prices"
     assert usage_record["cost"]["pricing_version"].startswith("genai-prices:")
     assert usage_record["warnings"] == []
+    checkpoint_diff = checkpoint_diff_from_usage_records(
+        original_records=[],
+        replay_records=[usage_record],
+    )
+    assert checkpoint_diff.token_delta == {
+        "prompt_tokens": 10,
+        "completion_tokens": 20,
+        "total_tokens": 30,
+    }
+    assert checkpoint_diff.cost_delta_usd == 0.00123
     extract_usage.assert_called_once_with(
         {
             "model": "gpt-4o-mini",
@@ -1461,9 +1475,17 @@ def test_llm_mock_response_skips_provider_sdk(
     assert output == "mocked answer"
     mock_openai.assert_not_called()
     mock_anthropic.assert_not_called()
-    # Artifacts and metadata should still be persisted
+    # Artifacts and metadata should still be persisted.
     mock_save.assert_called()
     mock_log.assert_called_once()
+    usage_record = _single_usage_record(mock_log)
+    assert usage_record["billing_effect"] == "unknown"
+    summary, has_unpriced_incurred_record = (
+        aggregate_usage_records_with_cost_completeness([usage_record])
+    )
+    assert summary["incurred_usage_record_count"] == 1
+    assert summary["incurred_total_tokens"] == 0
+    assert has_unpriced_incurred_record is True
 
 
 def test_llm_mock_response_works_with_unsupported_provider(

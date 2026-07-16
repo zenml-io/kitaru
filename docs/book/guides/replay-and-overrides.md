@@ -436,7 +436,7 @@ execution_diff = kitaru.diff("kr-original")
 execution_diff = kitaru.diff("kr-original", "kr-replay-a", "kr-replay-b")
 ```
 
-When replay executions are omitted, `kitaru.diff` discovers all runs whose `original_exec_id` matches the source.
+When replay executions are omitted, `kitaru.diff` discovers all runs whose `original_exec_id` matches the source. An explicit single diff accepts only recorded direct replays of the requested original. Compare a replay chain one hop at a time: compare the original with its direct replay, then compare that replay with its own direct replay. Kitaru rejects blank execution IDs and executions with missing or conflicting replay lineage instead of comparing unrelated runs. Repeated selectors, including different aliases for the same replay, are compared once in first-occurrence order.
 
 Diff many originals against their auto-discovered replays:
 
@@ -449,9 +449,114 @@ for row in matrix.rows:
 CLI:
 
 ```bash
+# Compact checkpoint comparison in the default text output
+kitaru executions diff kr-original kr-replay-a
+
+# Complete structured results
 kitaru executions diff kr-original kr-replay-a -o json
 kitaru executions diff-matrix kr-a kr-b kr-c -o json
 ```
+
+The default `executions diff` output shows one row per checkpoint for each compared replay:
+
+```text
+Diff for kr-original
+  Compared against 1 replay execution(s).
+Checkpoint differences
+  Replay        Checkpoint    Result    Duration Δ (ms)   Input Δ   Output Δ   Total Δ   Cost Δ (USD)   Artifacts
+  -----------   -----------   -------   ---------------   -------   --------   -------   ------------   ----------------
+  kr-replay-a   research      match     -8.0              +0        +0         +0        +0.000000      output=unchanged
+  kr-replay-a   write_draft   changed   +412.5            -120      +40        -80       -0.001700      output=changed
+Applied output overrides [kr-replay-a]:
+  checkpoint family 'research' -> research, research_2
+```
+
+The table reports `changed` when checkpoint status, token usage, cost, or
+artifact hashes differ. It uses `original only` when a source checkpoint has no
+replay match and `replay only` when a new checkpoint appears only in the replay.
+Duration, token, and cost deltas are always **replay minus original**: a
+negative value means the replay was faster, used fewer tokens, or cost less.
+The `Artifacts` column lists each saved artifact role sorted by name —
+`unchanged` when both content hashes match, `changed` when both exist but
+differ, and `unavailable` when either hash is missing. Artifact hashes and
+values themselves are never printed. `n/a` means the corresponding metric or
+artifact comparison is unavailable, which is distinct from an explicit zero
+delta. `executions diff-matrix` keeps its existing summary-only text output.
+
+Each replay entry in JSON has an additive `applied_output_overrides` field. It
+contains only the selector, selector kind, resolved checkpoint invocation IDs,
+and the fact that the `output` field was overridden:
+
+```json
+{
+  "replay_exec_id": "kr-replay-a",
+  "applied_output_overrides": [
+    {
+      "selector_kind": "checkpoint",
+      "selector": "research",
+      "matched_invocation_ids": ["research", "research_2"],
+      "field": "output"
+    }
+  ]
+}
+```
+
+The replacement value is never included. `applied_output_overrides: null` means
+the evidence is unavailable, as with an older replay or malformed metadata.
+`applied_output_overrides: []` proves that the replay was recorded with no
+output override. Matrix JSON includes the same field inside each compared replay.
+This is submission-time evidence from the resolved replay plan, not confirmation
+that a downstream checkpoint completed; use the checkpoint status rows to see
+what actually ran.
+
+An output override remains a downstream injection, not a replacement artifact.
+Kitaru skips the targeted checkpoint, passes the supplied value to downstream
+checkpoint inputs, and continues to report the source checkpoint's recorded
+artifact. Its original and replay artifact hashes therefore remain the same.
+
+Checkpoint token and cost deltas in JSON output are always calculated as
+**replay minus original**. For example:
+
+```json
+{
+  "token_delta": {
+    "prompt_tokens": -120,
+    "completion_tokens": 40,
+    "total_tokens": -80
+  },
+  "cost_delta_usd": -0.0017
+}
+```
+
+The token object always uses the keys `prompt_tokens`, `completion_tokens`, and
+`total_tokens`. It measures workload, including model work reused by the replay.
+A negative value means the replay workload used fewer tokens than the original;
+a positive value means it used more. A recorded model call with zero tokens
+produces a three-key object containing zeroes, while `token_delta: null` means
+neither checkpoint has a model usage record.
+
+The cost follows the same subtraction rule but measures incurred display cost.
+`cost_delta_usd: null` means at least one model call that was not explicitly
+reused has neither usable actual cost nor a usable estimate, so Kitaru cannot
+calculate a trustworthy difference. Reused checkpoint work contributes zero
+cost because the provider call was not made again.
+
+For example, a replay that fully reuses the original model work can keep the
+same workload while avoiding all provider spend:
+
+```json
+{
+  "token_delta": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  },
+  "cost_delta_usd": -0.0025
+}
+```
+
+The zero token delta says the recorded workload is unchanged. The negative cost
+delta says the replay avoided the original $0.0025 of provider spend.
 
 `ExecutionDiff.urls` links to the Kitaru UI compare view — one URL listing the original and every compared replay, whether discovered automatically or passed explicitly:
 

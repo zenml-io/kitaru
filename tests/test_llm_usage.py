@@ -20,19 +20,23 @@ from kitaru._llm_usage import (
     LLM_FLAT_INCURRED_USAGE_RECORD_COUNT_KEY,
     LLM_FLAT_REUSED_TOTAL_TOKENS_KEY,
     LLM_FLAT_REUSED_USAGE_RECORD_COUNT_KEY,
+    LLM_USAGE_COST_POLICY,
     LLM_USAGE_METADATA_KEY,
     LLM_USAGE_SUMMARY_METADATA_KEY,
+    LLMBillingEffect,
     _normalize_provider_id,
     _provider_model_ref,
     _usage_has_genai_pricing_tokens,
     add_optional_token_count,
     aggregate_usage_records,
+    aggregate_usage_records_with_cost_completeness,
     build_usage_record,
     calculated_or_genai_cost_metadata,
     estimate_genai_prices_cost,
     execution_metadata_from_records,
     flat_usage_metadata_from_records,
     log_usage_record_best_effort,
+    metadata_has_complete_usage_summary,
     metadata_matches_flat_usage_metadata,
     parse_usage_summary,
     usage_records_from_metadata,
@@ -613,6 +617,8 @@ def test_aggregate_prefers_actual_cost_for_display() -> None:
     assert summary["actual_cost_usd"] == 0.25
     assert summary["estimated_cost_usd"] == 0.04
     assert summary["display_cost_usd"] == 0.29
+    assert summary["records_without_cost_count"] == 0
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_aggregate_preserves_explicit_zero_total_tokens() -> None:
@@ -631,6 +637,42 @@ def test_aggregate_preserves_explicit_zero_total_tokens() -> None:
     assert summary["output_tokens"] == 5
     assert summary["total_tokens"] == 0
     assert summary["incurred_total_tokens"] == 0
+
+
+def test_unknown_priced_record_uses_conservative_incurred_accounting() -> None:
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        input_tokens=11,
+        output_tokens=4,
+        total_tokens=17,
+        actual_cost_usd=0.25,
+        estimated_cost_usd=0.4,
+        billing_effect="unknown",
+    )
+
+    summary, has_unpriced_incurred_record = (
+        aggregate_usage_records_with_cost_completeness([record])
+    )
+
+    assert summary["cost_policy"] == LLM_USAGE_COST_POLICY
+    assert summary["usage_record_count"] == 1
+    assert summary["incurred_usage_record_count"] == 1
+    assert summary["reused_usage_record_count"] == 0
+    assert summary["input_tokens"] == 11
+    assert summary["output_tokens"] == 4
+    assert summary["total_tokens"] == 17
+    assert summary["incurred_input_tokens"] == 11
+    assert summary["incurred_output_tokens"] == 4
+    assert summary["incurred_total_tokens"] == 17
+    assert summary["reused_input_tokens"] == 0
+    assert summary["reused_output_tokens"] == 0
+    assert summary["reused_total_tokens"] == 0
+    assert summary["actual_cost_usd"] == 0.25
+    assert summary["estimated_cost_usd"] == 0.4
+    assert summary["display_cost_usd"] == 0.25
+    assert summary["records_without_cost_count"] == 0
+    assert has_unpriced_incurred_record is False
 
 
 def test_reused_records_do_not_add_incurred_cost_or_tokens() -> None:
@@ -654,6 +696,110 @@ def test_reused_records_do_not_add_incurred_cost_or_tokens() -> None:
     assert summary["reused_total_tokens"] == 120
     assert summary["incurred_total_tokens"] == 0
     assert summary["display_cost_usd"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("billing_effect", "expected_incurred"),
+    [
+        ("reused_not_incurred", False),
+        ("unknown", True),
+    ],
+)
+def test_unpriced_records_track_internal_cost_completeness(
+    billing_effect: LLMBillingEffect,
+    expected_incurred: bool,
+) -> None:
+    record = build_usage_record(
+        adapter="pydantic_ai",
+        surface="model_call",
+        input_tokens=10,
+        output_tokens=5,
+        billing_effect=billing_effect,
+    )
+
+    summary, has_unpriced_incurred_record = (
+        aggregate_usage_records_with_cost_completeness([record])
+    )
+
+    assert summary["usage_record_count"] == 1
+    assert summary["incurred_usage_record_count"] == int(expected_incurred)
+    assert summary["reused_usage_record_count"] == int(not expected_incurred)
+    assert summary["total_tokens"] == 15
+    assert summary["incurred_total_tokens"] == (15 if expected_incurred else 0)
+    assert summary["reused_total_tokens"] == (0 if expected_incurred else 15)
+    assert summary["actual_cost_usd"] == 0.0
+    assert summary["estimated_cost_usd"] == 0.0
+    assert summary["display_cost_usd"] == 0.0
+    assert summary["records_without_cost_count"] == 1
+    assert has_unpriced_incurred_record is expected_incurred
+    assert "non_reused_records_without_cost_count" not in summary
+
+
+def test_mixed_unknown_records_keep_cost_completeness_conservative() -> None:
+    priced_unknown = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        input_tokens=10,
+        output_tokens=5,
+        estimated_cost_usd=0.3,
+        billing_effect="unknown",
+    )
+    unpriced_unknown = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        input_tokens=6,
+        output_tokens=3,
+        billing_effect="unknown",
+    )
+    reused = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        input_tokens=100,
+        output_tokens=20,
+        billing_effect="reused_not_incurred",
+    )
+
+    summary, has_unpriced_incurred_record = (
+        aggregate_usage_records_with_cost_completeness(
+            [priced_unknown, unpriced_unknown, reused]
+        )
+    )
+
+    assert summary["usage_record_count"] == 3
+    assert summary["incurred_usage_record_count"] == 2
+    assert summary["reused_usage_record_count"] == 1
+    assert summary["input_tokens"] == 116
+    assert summary["output_tokens"] == 28
+    assert summary["total_tokens"] == 144
+    assert summary["incurred_input_tokens"] == 16
+    assert summary["incurred_output_tokens"] == 8
+    assert summary["incurred_total_tokens"] == 24
+    assert summary["reused_input_tokens"] == 100
+    assert summary["reused_output_tokens"] == 20
+    assert summary["reused_total_tokens"] == 120
+    assert summary["actual_cost_usd"] == 0.0
+    assert summary["estimated_cost_usd"] == 0.3
+    assert summary["display_cost_usd"] == 0.3
+    assert summary["records_without_cost_count"] == 2
+    assert has_unpriced_incurred_record is True
+
+
+def test_old_usage_cost_policy_is_not_trusted_as_current() -> None:
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        total_tokens=1,
+        actual_cost_usd=0.0,
+    )
+    metadata = execution_metadata_from_records([record])
+
+    assert metadata_has_complete_usage_summary(metadata) is True
+    summary = parse_usage_summary(metadata[LLM_USAGE_SUMMARY_METADATA_KEY])
+    assert summary is not None
+    summary["cost_policy"] = "display cost prefers actual cost, then estimated cost"
+    metadata[LLM_USAGE_SUMMARY_METADATA_KEY] = summary
+
+    assert metadata_has_complete_usage_summary(metadata) is False
 
 
 def test_retry_attempts_with_same_record_id_are_counted_separately() -> None:
@@ -685,6 +831,45 @@ def test_retry_attempts_with_same_record_id_are_counted_separately() -> None:
 
     assert summary["usage_record_count"] == 2
     assert summary["incurred_total_tokens"] == 24
+
+
+def test_usage_record_defaults_only_fill_missing_checkpoint_identity() -> None:
+    missing_identity = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="missing-identity",
+        total_tokens=5,
+    )
+    explicit_identity = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="explicit-identity",
+        checkpoint_id="producer-checkpoint-id",
+        checkpoint_name="producer_checkpoint_name",
+        total_tokens=7,
+    )
+
+    records = usage_records_from_metadata(
+        {
+            LLM_USAGE_METADATA_KEY: {
+                "missing": missing_identity,
+                "explicit": explicit_identity,
+            }
+        },
+        default_checkpoint_id="attempt-1",
+        default_checkpoint_name="model_call",
+    )
+
+    records_by_id = {record["record_id"]: record for record in records}
+    assert records_by_id["missing-identity"]["checkpoint_id"] == "attempt-1"
+    assert records_by_id["missing-identity"]["checkpoint_name"] == "model_call"
+    assert (
+        records_by_id["explicit-identity"]["checkpoint_id"] == "producer-checkpoint-id"
+    )
+    assert (
+        records_by_id["explicit-identity"]["checkpoint_name"]
+        == "producer_checkpoint_name"
+    )
 
 
 def test_duplicate_record_from_same_attempt_is_counted_once() -> None:
@@ -823,6 +1008,7 @@ def test_gemini_token_only_record_aggregates_without_cost() -> None:
     assert summary["estimated_cost_usd"] == 0.0
     assert summary["display_cost_usd"] == 0.0
     assert summary["records_without_cost_count"] == 1
+    assert "non_reused_records_without_cost_count" not in summary
     assert summary["adapters"] == ["gemini_interactions"]
     assert summary["models"] == ["gemini-test"]
 
@@ -844,6 +1030,7 @@ def test_invalid_cost_values_are_omitted(invalid_cost: object) -> None:
     summary = aggregate_usage_records([record])
     assert summary["display_cost_usd"] == 0.0
     assert summary["records_without_cost_count"] == 1
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_zero_cost_values_are_preserved() -> None:
@@ -856,6 +1043,11 @@ def test_zero_cost_values_are_preserved() -> None:
 
     assert record["cost"]["actual_cost_usd"] == 0.0
     assert record["cost"]["estimated_cost_usd"] == 0.0
+
+    summary = aggregate_usage_records([record])
+    assert summary["display_cost_usd"] == 0.0
+    assert summary["records_without_cost_count"] == 0
+    assert "non_reused_records_without_cost_count" not in summary
 
 
 def test_malformed_records_are_ignored_during_parsing() -> None:
@@ -1048,6 +1240,8 @@ def test_cached_checkpoint_attempt_public_records_are_marked_reused() -> None:
     assert records[0]["billing_effect"] == "reused_not_incurred"
     assert records[0]["cache_status"] == "checkpoint_cache_hit"
     assert records[0]["cost"]["actual_cost_usd"] == 1.25
+    assert records[0]["checkpoint_id"] == "attempt-cached"
+    assert records[0]["checkpoint_name"] == "cached_call"
     assert "_source_attempt_id" not in records[0]
 
 
@@ -1085,6 +1279,8 @@ def test_replay_like_mapped_attempt_preserves_persisted_incurred_record() -> Non
     assert len(records) == 1
     assert records[0]["billing_effect"] == "incurred"
     assert records[0]["cache_status"] == "executed"
+    assert records[0]["checkpoint_id"] == "attempt-mapped-tail"
+    assert records[0]["checkpoint_name"] == "write"
 
 
 def test_mapped_execution_uses_replay_skip_metadata_for_public_records(
@@ -1193,6 +1389,7 @@ def test_replay_like_raw_status_preserves_persisted_incurred_record() -> None:
         ended_at=None,
         metadata={LLM_USAGE_METADATA_KEY: {"replay-tail-call": record}},
         failure=None,
+        _checkpoint_name="write",
         _raw_status="replay_reused",
     )
 
@@ -1201,6 +1398,8 @@ def test_replay_like_raw_status_preserves_persisted_incurred_record() -> None:
     assert len(records) == 1
     assert records[0]["billing_effect"] == "incurred"
     assert records[0]["cache_status"] == "executed"
+    assert records[0]["checkpoint_id"] == "attempt-tail"
+    assert records[0]["checkpoint_name"] == "write"
 
 
 def test_replay_skipped_attempt_public_records_are_marked_reused() -> None:
@@ -1219,6 +1418,7 @@ def test_replay_skipped_attempt_public_records_are_marked_reused() -> None:
         ended_at=None,
         metadata={LLM_USAGE_METADATA_KEY: {"replay-upstream-call": record}},
         failure=None,
+        _checkpoint_name="fetch",
         _raw_status="replay_reused",
         _replay_reused=True,
     )
@@ -1228,6 +1428,33 @@ def test_replay_skipped_attempt_public_records_are_marked_reused() -> None:
     assert len(records) == 1
     assert records[0]["billing_effect"] == "reused_not_incurred"
     assert records[0]["cache_status"] == "replay_reused"
+    assert records[0]["checkpoint_id"] == "attempt-upstream"
+    assert records[0]["checkpoint_name"] == "fetch"
+
+
+def test_checkpoint_call_usage_record_fallback_uses_call_identity() -> None:
+    record = build_usage_record(
+        adapter="kitaru.llm",
+        surface="direct_llm",
+        record_id="call-fallback",
+        total_tokens=5,
+    )
+    checkpoint = CheckpointCall(
+        call_id="call-1",
+        name="model_call",
+        status=ExecutionStatus.COMPLETED,
+        started_at=None,
+        ended_at=None,
+        metadata={LLM_USAGE_METADATA_KEY: {"fallback": record}},
+        original_call_id=None,
+        parent_call_ids=[],
+        failure=None,
+        attempts=[],
+        artifacts=[],
+    )
+
+    assert checkpoint.llm_usage_records[0]["checkpoint_id"] == "call-1"
+    assert checkpoint.llm_usage_records[0]["checkpoint_name"] == "model_call"
 
 
 def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
@@ -1245,6 +1472,14 @@ def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
         event_id="run-only-event",
         total_tokens=7,
     )
+    attributed_run_record = build_usage_record(
+        adapter="openai_agents",
+        surface="runner_call",
+        record_id="attributed-run",
+        checkpoint_id="producer-checkpoint-id",
+        checkpoint_name="producer_checkpoint",
+        total_tokens=3,
+    )
     duplicate_run_record = dict(checkpoint_record)
     attempt = CheckpointAttempt(
         attempt_id="attempt-1",
@@ -1253,6 +1488,7 @@ def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
         ended_at=None,
         metadata={LLM_USAGE_METADATA_KEY: {"checkpoint": checkpoint_record}},
         failure=None,
+        _checkpoint_name="model_call",
     )
     checkpoint = CheckpointCall(
         call_id="call-1",
@@ -1279,6 +1515,7 @@ def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
             LLM_USAGE_METADATA_KEY: {
                 "duplicate": duplicate_run_record,
                 "run-only": run_level_record,
+                "attributed-run": attributed_run_record,
             }
         },
         status_reason=None,
@@ -1295,6 +1532,14 @@ def test_execution_llm_usage_records_include_unique_run_level_records() -> None:
 
     assert [record["record_id"] for record in records] == [
         "run-only",
+        "attributed-run",
         "same-record",
     ]
+    records_by_id = {record["record_id"]: record for record in records}
+    assert records_by_id["run-only"]["checkpoint_id"] is None
+    assert records_by_id["run-only"]["checkpoint_name"] is None
+    assert records_by_id["attributed-run"]["checkpoint_id"] == "producer-checkpoint-id"
+    assert records_by_id["attributed-run"]["checkpoint_name"] == "producer_checkpoint"
+    assert records_by_id["same-record"]["checkpoint_id"] == "attempt-1"
+    assert records_by_id["same-record"]["checkpoint_name"] == "model_call"
     assert all("_source_attempt_id" not in record for record in records)

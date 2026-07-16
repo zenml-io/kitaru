@@ -99,6 +99,7 @@ def _persist_terminal_llm_usage_metadata(
             step_records = usage_records_from_metadata(
                 _metadata_mapping(getattr(step, "run_metadata", None)),
                 source_attempt_id=str(step.id),
+                default_checkpoint_id=str(step.id),
                 default_checkpoint_name=_normalize_checkpoint_name(
                     str(getattr(step, "name", ""))
                 ),
